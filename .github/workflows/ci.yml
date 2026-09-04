@@ -25,8 +25,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No package-lock.json in this repo; cache by package.json (best-effort).
-          cache: 'npm'
+          # No lockfile in this repo — can't cache via setup-node.
 
       - name: Install dependencies
         # No lockfile — install without audit/fund to keep CI quiet and fast.
