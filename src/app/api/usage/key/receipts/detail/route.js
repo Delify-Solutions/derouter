@@ -9,6 +9,21 @@ function maskKey(key) {
   return `${key.slice(0, 6)}…****${key.slice(-4)}`;
 }
 
+// Normalize status to an HTTP-style code for display. requestDetails stores
+// "success"/"error" (its own vocabulary) plus provider status strings. Map:
+// success/ok/completed → "200"; a numeric 1xx-5xx → as-is; otherwise leave
+// the raw value (so real upstream errors like "429", "rate_limited" are shown).
+function normalizeStatus(s) {
+  if (s == null || s === "") return "—";
+  const lower = String(s).toLowerCase();
+  if (lower === "ok" || lower === "success" || lower === "completed") return "200";
+  if (lower === "error" || lower === "failed" || lower === "failure") return "500";
+  const n = Number(s);
+  if (!Number.isNaN(n) && n >= 100 && n < 600) return String(Math.trunc(n));
+  if (/^\d{3}$/.test(String(s))) return String(s);
+  return String(s);
+}
+
 /**
  * GET /api/usage/key/receipts/detail?key=<apikey>&id=<connectionId>
  *        &page=1&pageSize=50&startDate=&endDate=&includeRaw=1
@@ -19,7 +34,8 @@ function maskKey(key) {
  *
  * All results are filtered by `apiKey = ?` server-side — a caller can NEVER
  * see another key's details. The `apiKey` field inside each detail record is
- * masked before return.
+ * masked before return. Provider identity is intentionally NOT exposed here
+ * (no resolved names, no raw UUIDs) per the public-usage-page requirement.
  *
  * `id` (optional): if supplied, returns the single matching detail (still
  * scoped to the key). Useful when the history list links to a deep view.
@@ -98,6 +114,7 @@ export async function GET(request) {
 }
 
 // Always mask the apiKey field; strip the raw payloads unless includeRaw.
+// Provider is intentionally omitted from the output (not exposed publicly).
 function scrubDetailForList(d, includeRaw) {
   const req = d.request || {};
   const messages = Array.isArray(req.messages) ? req.messages : [];
@@ -115,9 +132,8 @@ function scrubDetailForList(d, includeRaw) {
   const out = {
     connectionId: d.connectionId || d.id || null,
     timestamp: d.timestamp,
-    provider: d.provider,
     model: d.model,
-    status: d.status,
+    status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
     latency: d.latency || { ttft: 0, total: 0 },
     inputTokens: d.tokens?.prompt_tokens ?? d.tokens?.input_tokens ?? 0,

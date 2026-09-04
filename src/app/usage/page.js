@@ -20,6 +20,16 @@ function maskKeyFull(key) {
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const fmtCost = (n) => (typeof n === "number" && !Number.isNaN(n) ? `$${n.toFixed(4)}` : "$0");
 
+// Status → color class. 2xx green, 4xx amber, 5xx red; unknown stays muted.
+function statusColorClass(status) {
+  const s = String(status || "");
+  if (!s || s === "—") return "text-text-muted";
+  if (s.startsWith("2")) return "text-green-600 dark:text-green-400";
+  if (s.startsWith("4")) return "text-amber-600 dark:text-amber-400";
+  if (s.startsWith("5")) return "text-red-600 dark:text-red-400";
+  return "text-text-muted";
+}
+
 export default function UsagePage() {
   const [keyInput, setKeyInput] = useState("");
   const [data, setData] = useState(null);     // /api/usage/key (budget/limits/baseline)
@@ -27,16 +37,40 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("7d");
-  const [showRaw, setShowRaw] = useState(false);       // opt-in raw payloads in detail drawer
+  const [showRaw, setShowRaw] = useState(false);       // raw payloads loaded for current detail (per-request opt-in)
+  const [rawLoading, setRawLoading] = useState(false);  // loading state for the per-request raw fetch
   const [detail, setDetail] = useState(null);           // selected request detail record
   const [detailLoading, setDetailLoading] = useState(false);
+  const [filterModel, setFilterModel] = useState("");   // Request History model filter
+  const [filterStatus, setFilterStatus] = useState("");// Request History status filter (200/4xx/...)
 
-  // Read key from hash (#/usage or #/usage?key=...) on mount.
+  const STORAGE_KEY = "derouter.usage.key";
+
+  // Read a key from a `?key=...` in the location hash (a deep link). The key is
+  // NOT kept in the URL — on mount we stash it into localStorage and strip it
+  // from the hash so the key doesn't linger in the address bar / history.
   const readHashKey = useCallback(() => {
     if (typeof window === "undefined") return "";
     const hash = window.location.hash || "";
     const m = hash.match(/[?&]key=([^&]+)/);
     return m ? decodeURIComponent(m[1]) : "";
+  }, []);
+
+  // Persist key to localStorage and remove it from the URL hash.
+  const consumeHashKey = useCallback((k) => {
+    if (typeof window === "undefined") return;
+    if (k) {
+      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      // Strip the key from the hash so the address bar shows #/usage only.
+      // location.hash starts with '#'; after stripping the key the remainder
+      // (e.g. '#/usage') is set back as the hash via replaceState.
+      const hash = window.location.hash || "";
+      const cleaned = hash.replace(/([?&])key=[^&]+/, "").replace(/[?&]$/, "");
+      const finalHash = cleaned || "#/usage";
+      if (window.location.hash !== finalHash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${finalHash}`);
+      }
+    }
   }, []);
 
   const lookup = useCallback(async (key, p = "7d") => {
@@ -65,16 +99,35 @@ export default function UsagePage() {
   }, []);
 
   useEffect(() => {
-    const k = readHashKey();
-    if (k) { setKeyInput(k); lookup(k, "7d"); }
-  }, [readHashKey, lookup]);
+    // Priority: a fresh `?key=` deep link in the hash wins (and is then moved
+    // into storage so the URL no longer carries the key). Otherwise fall back
+    // to a previously-stored key in localStorage (e.g. returning visit).
+    const hashKey = readHashKey();
+    if (hashKey) {
+      consumeHashKey(hashKey);
+      setKeyInput(hashKey);
+      lookup(hashKey, "7d");
+      return;
+    }
+    let stored = "";
+    try { stored = localStorage.getItem(STORAGE_KEY) || ""; } catch {}
+    if (stored) {
+      setKeyInput(stored);
+      lookup(stored, "7d");
+    }
+  }, [readHashKey, consumeHashKey, lookup]);
 
   const submitKey = (e) => {
     e?.preventDefault();
     const k = keyInput.trim();
     if (!k) return;
+    // Stash key in storage (not the URL); reload usage for this key.
     if (typeof window !== "undefined") {
-      window.location.hash = `/usage?key=${encodeURIComponent(k)}`;
+      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      const cleanHash = window.location.hash.replace(/([?&])key=[^&]+/, "").replace(/[?&]$/, "") || "#/usage";
+      if (window.location.hash !== cleanHash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${cleanHash}`);
+      }
     }
     lookup(k, period);
   };
@@ -84,7 +137,10 @@ export default function UsagePage() {
     setRec(null);
     setKeyInput("");
     setError("");
-    if (typeof window !== "undefined") window.location.hash = "/usage";
+    if (typeof window !== "undefined") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      window.history.replaceState(null, "", `${window.location.pathname}#/usage`);
+    }
   };
 
   const switchPeriod = (p) => {
@@ -99,12 +155,13 @@ export default function UsagePage() {
   const openDetail = async (row) => {
     setDetailLoading(true);
     setDetail(null);
+    setShowRaw(false);  // raw payloads are NOT loaded by default; opt in per request
     try {
       const { startDate, endDate } = recRange();
       const params = new URLSearchParams({
         key: keyInput.trim(),
         id: row.connectionId || row.timestamp,
-        includeRaw: showRaw ? "1" : "0",
+        includeRaw: "0",
       });
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
@@ -122,13 +179,35 @@ export default function UsagePage() {
     }
   };
 
-  const closeDetail = () => { setDetail(null); setDetailLoading(false); };
+  const closeDetail = () => { setDetail(null); setDetailLoading(false); setShowRaw(false); };
 
-  const toggleRaw = () => {
-    const next = !showRaw;
-    setShowRaw(next);
-    setDetail(null);  // close current detail; reopening re-fetches with new flag
+  // Fetch raw request/response payloads for the CURRENT detail, on demand.
+  // The detail drawer has a "Raw Responses" button that calls this — it does
+  // NOT toggle a global flag; it re-fetches the detail with includeRaw=1.
+  const loadRaw = async () => {
+    if (!detail || rawLoading) return;
+    setRawLoading(true);
+    try {
+      const { startDate, endDate } = recRange();
+      // Find the matching history row to get an id the endpoint can resolve.
+      const row = history.find((h) => h.timestamp === detail.timestamp) || detail;
+      const params = new URLSearchParams({
+        key: keyInput.trim(),
+        id: row.connectionId || row.timestamp,
+        includeRaw: "1",
+      });
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
+      const res = await fetch(`/api/usage/key/receipts/detail?${params.toString()}`);
+      if (res.ok) {
+        const d = await res.json();
+        if (d.detail) { setDetail(d.detail); setShowRaw(true); }
+      }
+    } catch { /* ignore */ }
+    finally { setRawLoading(false); }
   };
+
+  const hideRaw = () => { setShowRaw(false); };
 
   // Convert the current period to a start/end ISO range for the detail endpoint.
   const recRange = () => {
@@ -150,6 +229,19 @@ export default function UsagePage() {
   const items = rec?.summary?.items || [];
   const history = rec?.history || [];
   const peakTpm = rec?.summary?.peakTpm || 0;
+
+  // Request History filters (client-side): model search + status bucket.
+  const filteredHistory = history.filter((r) => {
+    if (filterModel) {
+      const q = filterModel.toLowerCase();
+      if (!String(r.model || "").toLowerCase().includes(q)) return false;
+    }
+    if (filterStatus) {
+      const st = String(r.status || "");
+      if (!st.startsWith(filterStatus)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-bg text-text-main" style={{ maxWidth: 1000, margin: "0 auto", padding: "24px 16px" }}>
@@ -370,20 +462,41 @@ export default function UsagePage() {
             <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">Request History</h3>
-                <span className="text-xs text-text-muted">{history.length} request{history.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs text-text-muted">{filteredHistory.length} request{filteredHistory.length !== 1 ? "s" : ""}</span>
               </div>
-              <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input
-                  type="checkbox"
-                  checked={showRaw}
-                  onChange={toggleRaw}
-                  className="accent-primary"
+                  type="text"
+                  value={filterModel}
+                  onChange={(e) => setFilterModel(e.target.value)}
+                  placeholder="Filter by model…"
+                  className="py-1 px-2 text-xs bg-surface-2 border border-border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-brand-500/30 w-40"
                 />
-                Raw Responses
-              </label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="py-1 px-2 text-xs bg-surface-2 border border-border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                >
+                  <option value="">All statuses</option>
+                  <option value="2">2xx (success)</option>
+                  <option value="4">4xx</option>
+                  <option value="5">5xx</option>
+                </select>
+                {(filterModel || filterStatus) && (
+                  <button
+                    onClick={() => { setFilterModel(""); setFilterStatus(""); }}
+                    className="px-2 py-1 text-xs rounded-[6px] border border-border text-text-muted hover:bg-surface-2"
+                    title="Clear filters"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
-            {history.length === 0 ? (
-              <p className="text-sm text-text-muted px-4 py-6 text-center">No requests in this period.</p>
+            {filteredHistory.length === 0 ? (
+              <p className="text-sm text-text-muted px-4 py-6 text-center">
+                {history.length === 0 ? "No requests in this period." : "No requests match the current filters."}
+              </p>
             ) : (
               <div className="overflow-x-auto" style={{ maxHeight: 480 }}>
                 <table className="w-full text-xs">
@@ -391,7 +504,6 @@ export default function UsagePage() {
                     <tr className="text-text-muted border-b border-border">
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
-                      <th className="text-left font-medium px-3 py-2">Provider</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
                       <th className="text-right font-medium px-3 py-2">Latency</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
@@ -402,8 +514,7 @@ export default function UsagePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((r, i) => {
-                      const ok = String(r.status || "").startsWith("2");
+                    {filteredHistory.map((r, i) => {
                       return (
                         <tr
                           key={i}
@@ -415,9 +526,8 @@ export default function UsagePage() {
                             {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
                           </td>
                           <td className="px-3 py-1.5 font-mono max-w-[160px] truncate" title={r.model}>{r.model || "—"}</td>
-                          <td className="px-3 py-1.5">{r.provider || "—"}</td>
                           <td className="px-3 py-1.5 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ok ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-red-500/10 text-red-600 dark:text-red-400"}`}>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColorClass(r.status)}`}>
                               {r.status || "—"}
                             </span>
                           </td>
@@ -456,7 +566,6 @@ export default function UsagePage() {
                   <thead>
                     <tr className="text-text-muted border-b border-border">
                       <th className="text-left font-medium px-3 py-2">Model</th>
-                      <th className="text-center font-medium px-3 py-2">Kind</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
                       <th className="text-right font-medium px-3 py-2">Cached</th>
@@ -471,7 +580,6 @@ export default function UsagePage() {
                       return (
                         <tr key={m.name} className={`border-b border-border/40 hover:bg-surface-2/40 ${allowed ? "" : "opacity-50"}`}>
                           <td className="px-3 py-2 font-mono">{m.name}</td>
-                          <td className="px-3 py-2 text-center text-text-muted">{m.kind}</td>
                           <td className="px-3 py-2 text-right">${(m.input || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">${(m.output || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">${(m.cached || 0).toFixed(2)}</td>
@@ -531,8 +639,12 @@ export default function UsagePage() {
                     {/* Header summary */}
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                       <div><span className="text-text-muted">Model:</span> <span className="font-mono">{detail.model || "—"}</span></div>
-                      <div><span className="text-text-muted">Provider:</span> <span>{detail.provider || "—"}</span></div>
-                      <div><span className="text-text-muted">Status:</span> <span className={String(detail.status || "").startsWith("2") ? "text-green-600" : "text-red-600"}>{detail.status || "—"}</span></div>
+                      <div>
+                        <span className="text-text-muted">Status:</span>{" "}
+                        <span className={`font-medium ${statusColorClass(detail.status)}`}>
+                          {detail.status || "—"}
+                        </span>
+                      </div>
                       <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</span></div>
                       <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
@@ -591,19 +703,37 @@ export default function UsagePage() {
                       </div>
                     </div>
 
-                    {/* Raw payloads */}
+                    {/* Raw payloads — opt-in via button (not a global toggle) */}
                     {showRaw ? (
                       <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-text-muted">Raw payloads loaded for this request.</span>
+                          <button
+                            onClick={hideRaw}
+                            className="text-xs px-2 py-1 rounded-[6px] border border-border text-text-muted hover:bg-surface-2"
+                          >
+                            Hide
+                          </button>
+                        </div>
                         <RawBlock title="Client Request (Input)" data={detail.request} />
                         {detail.providerRequest && <RawBlock title="Provider Request" data={detail.providerRequest} />}
                         {detail.providerResponse && <RawBlock title="Provider Response" data={detail.providerResponse} />}
                         {detail.response && detail.response !== detail.providerResponse && <RawBlock title="Client Response" data={detail.response} />}
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
-                        <span className="material-symbols-outlined text-[16px]">visibility_off</span>
-                        Request & response payloads are redacted. Enable <span className="font-medium">Raw Responses</span> in the filter bar to view them.
-                      </div>
+                      <button
+                        onClick={loadRaw}
+                        disabled={rawLoading}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-surface-1 p-3 text-xs text-text-main hover:bg-surface-2 transition-colors w-full disabled:opacity-50"
+                      >
+                        {rawLoading ? (
+                          <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                        ) : (
+                          <span className="material-symbols-outlined text-[16px] text-text-muted">visibility</span>
+                        )}
+                        <span className="font-medium">View Raw Responses</span>
+                        <span className="text-text-muted">— client request, provider request/response payloads for this request.</span>
+                      </button>
                     )}
                   </div>
                 )}
