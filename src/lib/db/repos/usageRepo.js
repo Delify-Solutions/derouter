@@ -14,6 +14,18 @@ const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
+// Log retention: prune usageHistory/requestDetails older than N days to bound DB size.
+// Default 60 days. Prune runs probabilistically (~1/N of inserts) to amortize cost.
+const LOG_RETENTION_DAYS = parseInt(process.env.LOG_RETENTION_DAYS || "60", 10);
+const PRUNE_EVERY_N = 100;
+let _pruneCounter = 0;
+
+function pruneOldUsage(db) {
+  const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 86400000).toISOString();
+  db.run(`DELETE FROM usageHistory WHERE timestamp < ?`, [cutoff]);
+  db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [cutoff]);
+}
+
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
 if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
@@ -302,6 +314,12 @@ export async function saveRequestUsage(entry) {
       const next = (cur ? parseInt(cur.value, 10) : 0) + 1;
       db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
       inserted = true;
+
+      // Probabilistic retention prune — amortized across inserts, no per-request cost.
+      if (++_pruneCounter >= PRUNE_EVERY_N) {
+        _pruneCounter = 0;
+        try { pruneOldUsage(db); } catch (e) { console.warn("[usageRepo] prune failed:", e.message); }
+      }
     });
 
     if (inserted) {
