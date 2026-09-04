@@ -4,6 +4,7 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  enforceKeyAccess,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
@@ -33,6 +34,13 @@ async function requireValidApiKey(request) {
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  }
+
+  // Advanced key limits: RPM/TPM/expiry/budget (model allow-list checked later
+  // once the model is parsed from the body).
+  if (apiKey) {
+    const denied = await enforceKeyAccess(apiKey, null);
+    if (denied) return denied;
   }
   return null;
 }
@@ -101,6 +109,13 @@ export async function handleVideoCreate(request, action) {
   const resolved = await resolveVideoProvider(bodyInfo.parsed);
   if (resolved.error) return resolved.error;
   const { provider, model } = resolved;
+
+  // Model allow-list for the key (RPM/TPM/expiry/budget already enforced above).
+  const keyForModel = extractApiKey(request);
+  if (keyForModel && provider && model) {
+    const denied = await enforceKeyAccess(keyForModel, `${provider}/${model}`);
+    if (denied) return denied;
+  }
 
   // Strip the provider prefix (e.g. "xai/grok-imagine-video") before forwarding;
   // otherwise forward the original bytes untouched.

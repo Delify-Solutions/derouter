@@ -362,3 +362,23 @@ export async function isValidApiKey(apiKey) {
   if (!apiKey) return false;
   return await validateApiKey(apiKey);
 }
+
+/**
+ * Enforce advanced key limits (RPM/TPM/expiry/budget + model allow-list).
+ * Returns null when access is allowed, or a NextResponse to send back when denied.
+ * Call right after isValidApiKey() passes, with the requested model id.
+ */
+export async function enforceKeyAccess(apiKey, model) {
+  if (!apiKey) return null;
+  const { enforceKeyLimits, isModelAllowed } = await import("@/lib/auth/keyEnforcement.js");
+  const { NextResponse } = await import("next/server");
+  const limit = await enforceKeyLimits(apiKey);
+  if (!limit.ok) {
+    const headers = limit.retryAfter ? { "Retry-After": String(limit.retryAfter) } : {};
+    return NextResponse.json({ error: limit.error, resetAt: limit.resetAt ?? undefined }, { status: limit.status, headers });
+  }
+  if (model && !isModelAllowed(limit.auth, model)) {
+    return NextResponse.json({ error: "Model not allowed for this key" }, { status: 403 });
+  }
+  return null;
+}

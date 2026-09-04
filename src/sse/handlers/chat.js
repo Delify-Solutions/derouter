@@ -6,6 +6,7 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  enforceKeyAccess,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
@@ -78,6 +79,12 @@ export async function handleChat(request, clientRawRequest = null) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
     }
+  }
+
+  // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
+  if (apiKey) {
+    const denied = await enforceKeyAccess(apiKey, modelStr);
+    if (denied) return denied;
   }
 
   if (!modelStr) {

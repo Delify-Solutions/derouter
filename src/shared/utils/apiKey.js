@@ -96,3 +96,19 @@ export function isNewFormatKey(apiKey) {
   return parsed?.isNewFormat === true;
 }
 
+/**
+ * Mask an API key for read-only display: keep up to the first "-" prefix and the
+ * last 4 chars, hide the middle as ****. Used in usage views where keys must never
+ * be leaked. Returns "****" for very short keys.
+ * @param {string} apiKey
+ * @returns {string}
+ */
+export function maskKeyFull(apiKey) {
+  if (!apiKey || typeof apiKey !== "string") return "";
+  if (apiKey.length <= 12) return "****";
+  const dash = apiKey.indexOf("-");
+  const prefix = dash > 0 ? apiKey.slice(0, dash + 1) : apiKey.slice(0, 3);
+  return `${prefix}…****${apiKey.slice(-4)}`;
+}
+
+

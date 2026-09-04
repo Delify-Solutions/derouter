@@ -27,7 +27,7 @@ export default function Footer() {
           <div className="flex flex-col gap-4">
             <h4 className="font-bold text-white">Product</h4>
             <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="#features">Features</a>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="/dashboard">Dashboard</a>
+            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="/admin/ss">Dashboard</a>
             <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">Changelog</a>
           </div>
           

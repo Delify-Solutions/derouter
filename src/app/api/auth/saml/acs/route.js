@@ -20,7 +20,7 @@ export async function POST(request) {
   if (lock.locked) {
     return NextResponse.redirect(
       new URL(
-        `/login?error=${encodeURIComponent(`Too many failed attempts. Try again in ${lock.retryAfter}s.`)}`,
+        `/admin/ss?error=${encodeURIComponent(`Too many failed attempts. Try again in ${lock.retryAfter}s.`)}`,
         origin
       )
     );
@@ -38,12 +38,12 @@ export async function POST(request) {
 
     if (!SAMLResponse) {
       recordFail(ip);
-      return NextResponse.redirect(new URL("/login?error=saml_missing_response", origin));
+      return NextResponse.redirect(new URL("/admin/ss?error=saml_missing_response", origin));
     }
 
     if (!isSamlConfigured(settings)) {
       recordFail(ip);
-      return NextResponse.redirect(new URL("/login?error=saml_not_configured", origin));
+      return NextResponse.redirect(new URL("/admin/ss?error=saml_not_configured", origin));
     }
 
     const profile = await validateSamlResponse(request, { SAMLResponse }, storedRequestId, settings);
@@ -63,7 +63,7 @@ export async function POST(request) {
   } catch (error) {
     recordFail(ip);
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error.message || "saml_acs_failed")}`, origin)
+      new URL(`/admin/ss?error=${encodeURIComponent(error.message || "saml_acs_failed")}`, origin)
     );
   }
 }

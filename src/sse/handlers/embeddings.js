@@ -4,6 +4,7 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  enforceKeyAccess,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
@@ -63,6 +64,12 @@ export async function handleEmbeddings(request) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
     }
+  }
+
+  // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
+  if (apiKey) {
+    const denied = await enforceKeyAccess(apiKey, modelStr);
+    if (denied) return denied;
   }
 
   if (!modelStr) {
@@ -145,6 +152,9 @@ export async function handleEmbeddings(request) {
           endpoint: url.pathname,
           tokens: usage,
           status: "success",
+          // Original client model (bare combo name when the request was for a combo);
+          // used to resolve a combo-level price override before falling back to per-pool.
+          requestedModel: modelStr && !modelStr.includes("/") ? modelStr : null,
         }).catch(() => {});
       }
       return result.response;

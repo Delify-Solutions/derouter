@@ -41,7 +41,19 @@ async function getInternalHeaders() {
   let apiKey = null;
   try {
     const keys = await getApiKeys();
-    apiKey = keys.find((k) => k.isActive !== false)?.key || null;
+    // Pick a key unlikely to be denied: no per-key allowedModels, no group (groups
+    // can carry their own allowedModels), and not expired. Falls back to the first
+    // active key if nothing unrestricted exists.
+    const active = keys.filter((k) => k.isActive !== false);
+    const notExpired = (k) => {
+      if (!k.expiresAt) return true;
+      try { return new Date(k.expiresAt).getTime() > Date.now(); } catch { return true; }
+    };
+    apiKey = (active.find((k) => notExpired(k) && !k.groupId
+      && (!k.allowedModels || (Array.isArray(k.allowedModels) && k.allowedModels.length === 0)))
+      || active.find((k) => notExpired(k) && (!k.allowedModels || (Array.isArray(k.allowedModels) && k.allowedModels.length === 0)))
+      || active.find(notExpired)
+      || active[0])?.key || null;
   } catch {}
 
   const headers = { "Content-Type": "application/json" };
@@ -53,6 +65,8 @@ async function getInternalHeaders() {
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
   const headers = await getInternalHeaders();
   const start = Date.now();
+  const redactedKey = headers["Authorization"] ? `Bearer ${headers["Authorization"].replace("Bearer ", "").slice(0, 8)}…` : "none";
+  console.log(`[TEST-MODEL] → kind=${kind} model=${model} key=${redactedKey}`);
 
   if (kind === "embedding") {
     const res = await fetch(`${baseUrl}/api/v1/embeddings`, {
@@ -63,6 +77,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     });
     const latencyMs = Date.now() - start;
     const rawText = await res.text().catch(() => "");
+    console.log(`[TEST-MODEL] ← model=${model} status=${res.status} latency=${latencyMs}ms body=${rawText.slice(0, 300)}`);
     let parsed = null;
     try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
 
@@ -130,24 +145,22 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     return { ok: true, latencyMs, error: null, status: res.status };
   }
 
+  const chatBody = JSON.stringify({
+    model,
+    max_tokens: 1024,
+    stream: false,
+    messages: [{ role: "user", content: "hi" }],
+  });
   const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      model,
-      // 1024 tokens: reasoning models (ClinePass/kimi-k3, deepseek-v4-pro, etc.) spend
-      // their budget on chain-of-thought before emitting an answer. A tiny probe like
-      // max_tokens:16 starves the answer and yields a false "no choices" failure.
-      // See issue #3010.
-      max_tokens: 1024,
-      stream: false,
-      messages: [{ role: "user", content: "hi" }],
-    }),
+    body: chatBody,
     signal: AbortSignal.timeout(15000),
   });
   const latencyMs = Date.now() - start;
 
   const rawText = await res.text().catch(() => "");
+  console.log(`[TEST-MODEL] ← model=${model} status=${res.status} latency=${latencyMs}ms body=${rawText.slice(0, 300)}`);
   let parsed = null;
   try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
 
@@ -194,7 +207,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     firstChoice.message?.thinking_content;
   const contentEmpty = !String(firstChoice.message?.content || "").trim();
   if (hasChoices && firstChoice.finish_reason === "length" && contentEmpty && hasReasoning) {
-    return { ok: true, latencyMs, error: null, status: res.status, note: "reasoning-only response (length-limited)" };
+    return { ok: true, latencyMs, error: null, status: res.status, note: "reasoning-only response (length-limited)", content: String(firstChoice.message?.content || "") };
   }
 
   if (!hasChoices) {
@@ -206,5 +219,5 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     };
   }
 
-  return { ok: true, latencyMs, error: null, status: res.status };
+  return { ok: true, latencyMs, error: null, status: res.status, content: String(parsed?.choices?.[0]?.message?.content || "") };
 }

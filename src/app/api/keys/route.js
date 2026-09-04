@@ -15,7 +15,7 @@ export async function GET() {
   }
 }
 
-// POST /api/keys - Create new API key
+// POST /api/keys - Create new API key (optionally with limits/group)
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -27,16 +27,32 @@ export async function POST(request) {
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
-    const apiKey = await createApiKey(name, machineId);
+    const apiKey = await createApiKey(name, machineId, {
+      groupId: body.groupId ?? null,
+      rpm: body.rpm ?? null,
+      tpm: body.tpm ?? null,
+      budgetUsd: body.budgetUsd ?? null,
+      resetWindow: body.resetWindow ?? null,
+      expiresAt: body.expiresAt ?? null,
+      allowedModels: body.allowedModels ?? null,
+    });
 
     return NextResponse.json({
       key: apiKey.key,
       name: apiKey.name,
       id: apiKey.id,
       machineId: apiKey.machineId,
+      groupId: apiKey.groupId,
+      rpm: apiKey.rpm,
+      tpm: apiKey.tpm,
+      budgetUsd: apiKey.budgetUsd,
+      resetWindow: apiKey.resetWindow,
+      expiresAt: apiKey.expiresAt,
+      allowedModels: apiKey.allowedModels,
     }, { status: 201 });
   } catch (error) {
     console.log("Error creating key:", error);
-    return NextResponse.json({ error: "Failed to create key" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to create key" }, { status: 400 });
   }
 }
+
