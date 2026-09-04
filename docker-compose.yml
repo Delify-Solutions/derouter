@@ -1,0 +1,21 @@
+services:
+  derouter:
+    build: .
+    image: derouter:local
+    container_name: derouter
+    restart: always
+    ports:
+      - "20128:20128"
+    volumes:
+      - derouter-data:/app/data
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+
+volumes:
+  derouter-data:
+    name: derouter-data
