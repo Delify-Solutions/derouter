@@ -132,7 +132,11 @@ function scrubDetailForList(d, includeRaw) {
   const out = {
     connectionId: d.connectionId || d.id || null,
     timestamp: d.timestamp,
-    model: d.model,
+    // Show the combo the key holder called (requestedModel) when available; fall back
+    // to the resolved pool/fallback model for older records that predate the field.
+    // `resolvedModel` is kept so the UI can show "via <pool model>" if desired.
+    model: d.requestedModel || d.model,
+    resolvedModel: d.model || null,
     status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
     latency: d.latency || { ttft: 0, total: 0 },

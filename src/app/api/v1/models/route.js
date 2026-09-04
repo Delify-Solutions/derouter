@@ -18,6 +18,10 @@ import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { matchesAllowed } from "@/lib/auth/modelMatching.js";
+import { extractApiKey, isValidApiKey } from "@/sse/services/auth.js";
+import { getApiKeyForAuth } from "@/lib/db/repos/apiKeysRepo.js";
+import { getSettings } from "@/lib/localDb";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -246,6 +250,17 @@ export async function buildModelsList(kindFilter, options = {}) {
   // derouter instance's fetchCompatibleModelIds — skip dynamic fetch to break
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
+  // Optional API-key allow-list (combo names, per AllowedModelsPicker). When
+  // null/empty the list is unrestricted; when an array, each emitted model id
+  // must match an entry via matchesAllowed (provider-stripped, date-stripped,
+  // suffix-at-/). This is the same model-matching the chat auth layer uses, so
+  // /v1/models advertises exactly the models the calling key can send to.
+  const allowedModels = Array.isArray(options.allowedModels) && options.allowedModels.length > 0
+    ? options.allowedModels
+    : null;
+  const isAllowed = allowedModels
+    ? (id) => matchesAllowed(id, allowedModels)
+    : () => true;
   let connections = [];
   try {
     connections = await getProviderConnections();
@@ -534,6 +549,9 @@ export async function buildModelsList(kindFilter, options = {}) {
   const seenModelIds = new Set();
   for (const model of models) {
     if (!model?.id || seenModelIds.has(model.id)) continue;
+    // Key allow-list filter: drop any model whose id isn't permitted for the
+    // calling key. Unrestricted (no allowedModels) → isAllowed always true.
+    if (!isAllowed(model.id)) continue;
     seenModelIds.add(model.id);
     dedupedModels.push(model);
   }
@@ -555,14 +573,76 @@ export async function OPTIONS() {
 }
 
 /**
+ * Resolve the API-key scope for a /v1/models* request.
+ * Returns { allowedModels, skipDynamicFetch } on success, or a Response to send
+ * back directly when auth fails (caller must return it unchanged).
+ *
+ *   allowedModels: string[] | null   — null = unrestricted (open proxy, no key,
+ *                                      or an unlimited key). Non-null = scope the
+ *                                      listing to those combo names.
+ *   skipDynamicFetch: boolean        — true for internal cross-instance discovery.
+ *
+ * Internal discovery fetches (x-dr-internal-models-fetch: 1) bypass auth and
+ * allow-listing — they carry the upstream provider's key, not a derouter key,
+ * and must see the full catalog for compatible-model discovery.
+ */
+export async function resolveKeyScopeForModels(request) {
+  const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
+  if (skipDynamicFetch) {
+    return { allowedModels: null, skipDynamicFetch: true };
+  }
+
+  const apiKey = extractApiKey(request);
+
+  // Enforce requireApiKey (same guard the chat handler uses) for public requests.
+  const settings = await getSettings();
+  if (settings?.requireApiKey) {
+    if (!apiKey) {
+      return {
+        response: Response.json(
+          { error: { message: "Missing API key", type: "invalid_request_error" } },
+          { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
+        ),
+      };
+    }
+    if (!(await isValidApiKey(apiKey))) {
+      return {
+        response: Response.json(
+          { error: { message: "Invalid API key", type: "invalid_request_error" } },
+          { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
+        ),
+      };
+    }
+  }
+
+  // Scope the listing to the key's allow-list when a key resolves. A key with
+  // no group/allow-list → resolved.allowedModels = null → unrestricted.
+  let allowedModels = null;
+  if (apiKey) {
+    const auth = await getApiKeyForAuth(apiKey);
+    if (auth?.resolved?.allowedModels) {
+      allowedModels = auth.resolved.allowedModels;
+    }
+  }
+
+  return { allowedModels, skipDynamicFetch: false };
+}
+
+/**
  * GET /v1/models - OpenAI compatible models list (LLM/chat models only by default).
  * For other capabilities use /v1/models/{kind} (image, tts, stt, embedding, image-to-text, web).
+ *
+ * Auth + key scoping: see resolveKeyScopeForModels.
  */
 export async function GET(request) {
   try {
-    // Detect cross-instance recursive /models fetch (another derouter fetching our /models)
-    const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+    const scope = await resolveKeyScopeForModels(request);
+    if (scope.response) return scope.response;
+
+    const data = await buildModelsList([LLM_KIND], {
+      skipDynamicFetch: scope.skipDynamicFetch,
+      allowedModels: scope.allowedModels,
+    });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

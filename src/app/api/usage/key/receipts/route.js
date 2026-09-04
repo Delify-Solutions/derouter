@@ -73,6 +73,12 @@ export async function GET(request) {
       return NextResponse.json({ error: "Not Found" }, { status: 404 });
     }
 
+    // allowedModels (from the key's own setting or its group) is a list of combo
+    // names (see AllowedModelsPicker). null/empty → unlimited → show all combos.
+    // Non-null → restrict the Available Models table + By-Model usage summary to
+    // only those combos so a key holder never sees models they can't use.
+    const allowedModels = auth.resolved?.allowedModels ?? null;
+
     const { startDate, endDate } = periodToRange(period);
 
     const [summary, rate, historyRaw, combos, comboPricing] = await Promise.all([
@@ -82,6 +88,15 @@ export async function GET(request) {
       getCombos(),
       getComboPricing(),
     ]);
+
+    // Filter combos to the key's allow-list. `allowedModels` entries are combo
+    // names; combos have no kind restriction here beyond the llm default. When
+    // allowed is null/empty we pass everything through (unlimited key).
+    const isAllowedCombo = (comboName) => {
+      if (!Array.isArray(allowedModels) || allowedModels.length === 0) return true;
+      return allowedModels.includes(comboName);
+    };
+    const visibleCombos = combos.filter((c) => isAllowedCombo(c.name));
 
     // Provider is intentionally not exposed on the public usage page (neither
     // resolved names nor raw UUIDs). The history rows below omit it entirely.
@@ -142,7 +157,7 @@ export async function GET(request) {
     };
 
     const availableModels = [];
-    for (const c of combos) {
+    for (const c of visibleCombos) {
       const p = (await resolveComboPricing(c)) || {};
       availableModels.push({
         name: c.name,
@@ -156,9 +171,31 @@ export async function GET(request) {
       });
     }
 
+    // Scope the per-model usage summary to the same allow-list, so the By-Model
+    // table on /usage only lists combos the key can consume. `summary.items` is
+    // keyed by model name (= combo name in this proxy). Recompute totals from
+    // the filtered set so the totals row matches what's shown.
+    const filteredSummary = (() => {
+      if (!Array.isArray(allowedModels) || allowedModels.length === 0) return summary;
+      const items = (summary?.items || []).filter((it) => isAllowedCombo(it.model));
+      const totals = items.reduce(
+        (acc, it) => {
+          acc.input += it.input || 0;
+          acc.output += it.output || 0;
+          acc.cacheRead += it.cacheRead || 0;
+          acc.cacheCreation += it.cacheCreation || 0;
+          acc.requests += it.requests || 0;
+          acc.cost += it.cost || 0;
+          return acc;
+        },
+        { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }
+      );
+      return { ...summary, items, totals };
+    })();
+
     return NextResponse.json({
       period,
-      summary,
+      summary: filteredSummary,
       rate,
       history,
       availableModels,

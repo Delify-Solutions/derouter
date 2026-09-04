@@ -87,8 +87,14 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
   const stallTimeoutMs = PROVIDERS[provider]?.stallTimeoutMs || STREAM_STALL_TIMEOUT_MS;
   const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs);
 
+  // requestedModel = the original client model string (bare combo name when the
+  // request targeted a combo, snapshotted before combo expansion rewrote body.model).
+  // Mirrors the computation in buildOnStreamComplete; both call sites need it.
+  const _reqModelRaw0 = clientRawRequest?.body?.model;
+  const requestedModel0 = _reqModelRaw0 && typeof _reqModelRaw0 === "string" && !_reqModelRaw0.includes("/") ? _reqModelRaw0 : null;
+
   saveRequestDetail(buildRequestDetail({
-    provider, model, connectionId, apiKey,
+    provider, model, requestedModel: requestedModel0, connectionId, apiKey,
     latency: { ttft: 0, total: Date.now() - requestStartTime },
     tokens: { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
@@ -121,8 +127,16 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     const safeContent = contentObj?.content || "[Empty streaming response]";
     const safeThinking = contentObj?.thinking || null;
 
+    // requestedModel = the original client model string. When the client asked for a combo
+    // (bare name, no "/"), combo-level pricing overrides the resolved pool model's price.
+    // `body.model` is the rewritten provider/model here; read the untouched original from
+    // clientRawRequest (snapshotted by handleChat before combo expansion). Computed once
+    // here so both the requestDetail upsert and the usage record carry the combo name.
+    const _reqModelRaw = clientRawRequest?.body?.model;
+    const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
+
     saveRequestDetail(buildRequestDetail({
-      provider, model, connectionId, apiKey,
+      provider, model, requestedModel, connectionId, apiKey,
       latency,
       tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),
@@ -136,12 +150,6 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     });
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
-    // requestedModel = the original client model string. When the client asked for a combo
-    // (bare name, no "/"), combo-level pricing overrides the resolved pool model's price.
-    // `body.model` is the rewritten provider/model here; read the untouched original from
-    // clientRawRequest (snapshotted by handleChat before combo expansion).
-    const _reqModelRaw = clientRawRequest?.body?.model;
-    const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
     saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
   };
