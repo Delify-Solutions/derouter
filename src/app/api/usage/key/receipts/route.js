@@ -6,9 +6,7 @@ import {
   getUsageHistory,
   getCombos,
   getComboPricing,
-  getProviderNodes,
 } from "@/lib/db/index.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers.js";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +48,7 @@ function periodToRange(period) {
  *               totals: {input, output, cacheRead, cacheCreation, requests, cost},
  *               peakTpm },
  *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM)
- *   history:  [{ timestamp, provider, model, status, cost,
+ *   history:  [{ timestamp, model, status, cost,
  *                input, output, cacheRead, cacheCreation }] // recent requests, NO raw payloads
  * }
  *
@@ -76,34 +74,16 @@ export async function GET(request) {
 
     const { startDate, endDate } = periodToRange(period);
 
-    const [summary, rate, historyRaw, combos, comboPricing, providerNodes] = await Promise.all([
+    const [summary, rate, historyRaw, combos, comboPricing] = await Promise.all([
       getKeyUsageSummary(key, { startDate, endDate }),
       getKeyRateUsage(key, 60_000),
       getUsageHistory({ apiKey: key, startDate, endDate }),
       getCombos(),
       getComboPricing(),
-      getProviderNodes().catch(() => []),
     ]);
 
-    // Build a provider-id → friendly-name map. Built-in providers resolve via
-    // AI_PROVIDERS (id → name); user-defined provider nodes (custom OpenAI-
-    // compatible connections stored with a UUID id) resolve to the node's
-    // stored name. Anything that only looks like a raw UUID/unknown id returns
-    // null so the UI hides it (per requirement: no UUID provider strings on
-    // the public usage page).
-    const providerNameMap = {};
-    for (const p of Object.values(AI_PROVIDERS || {})) {
-      if (p.id && (p.name || p.alias)) providerNameMap[p.id] = p.name || p.alias;
-    }
-    for (const n of providerNodes || []) {
-      if (n.id && n.name) providerNameMap[n.id] = n.name;
-    }
-    const resolveProvider = (id) => {
-      if (!id) return null;
-      const name = providerNameMap[id];
-      if (name && name !== id) return name;
-      return null; // unknown / raw UUID → hide
-    };
+    // Provider is intentionally not exposed on the public usage page (neither
+    // resolved names nor raw UUIDs). The history rows below omit it entirely.
 
     // Normalize status to an HTTP-style code for display. The DB stores
     // mixed values ("ok", "200", "429", "200.0", provider error strings).
@@ -127,7 +107,6 @@ export async function GET(request) {
         const t = r.tokens || {};
         return {
           timestamp: r.timestamp,
-          provider: resolveProvider(r.provider),
           model: r.model,
           status: normalizeStatus(r.status),
           cost: r.cost,

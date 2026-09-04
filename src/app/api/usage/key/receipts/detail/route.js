@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getApiKeyForAuth, getRequestDetails, getProviderNodes } from "@/lib/db/index.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers.js";
+import { getApiKeyForAuth, getRequestDetails } from "@/lib/db/index.js";
 
 export const dynamic = "force-dynamic";
 
@@ -25,23 +24,6 @@ function normalizeStatus(s) {
   return String(s);
 }
 
-// Build a provider-id → friendly-name map (built-ins via AI_PROVIDERS; custom
-// OpenAI-compatible nodes via providerNodes). Returns null for unknown/raw
-// UUIDs so the UI hides them.
-async function buildProviderNameMap() {
-  const map = {};
-  for (const p of Object.values(AI_PROVIDERS || {})) {
-    if (p.id && (p.name || p.alias)) map[p.id] = p.name || p.alias;
-  }
-  try {
-    const nodes = await getProviderNodes();
-    for (const n of nodes || []) {
-      if (n.id && n.name) map[n.id] = n.name;
-    }
-  } catch {}
-  return map;
-}
-
 /**
  * GET /api/usage/key/receipts/detail?key=<apikey>&id=<connectionId>
  *        &page=1&pageSize=50&startDate=&endDate=&includeRaw=1
@@ -52,7 +34,8 @@ async function buildProviderNameMap() {
  *
  * All results are filtered by `apiKey = ?` server-side — a caller can NEVER
  * see another key's details. The `apiKey` field inside each detail record is
- * masked before return.
+ * masked before return. Provider identity is intentionally NOT exposed here
+ * (no resolved names, no raw UUIDs) per the public-usage-page requirement.
  *
  * `id` (optional): if supplied, returns the single matching detail (still
  * scoped to the key). Useful when the history list links to a deep view.
@@ -94,10 +77,7 @@ export async function GET(request) {
       // `id` may be a connectionId, a record id, or a usage-history timestamp
       // (the history table has no id); for the timestamp case, match by the
       // nearest detail within 2 minutes so the link from Request History works.
-      const [res, providerMap] = await Promise.all([
-        getRequestDetails({ apiKey: key, pageSize: 100, page: 1, startDate, endDate }),
-        buildProviderNameMap(),
-      ]);
+      const res = await getRequestDetails({ apiKey: key, pageSize: 100, page: 1, startDate, endDate });
       const all = res.details || [];
       let detail = all.find((d) => d.connectionId === id || d.id === id) || null;
       if (!detail) {
@@ -117,15 +97,12 @@ export async function GET(request) {
       if (!detail) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      return NextResponse.json({ detail: scrubDetail(detail, includeRaw, providerMap) });
+      return NextResponse.json({ detail: scrubDetail(detail, includeRaw) });
     }
 
     // List mode: recent details for this key, summary fields + (optionally) raw.
-    const [res, providerMap] = await Promise.all([
-      getRequestDetails({ apiKey: key, page, pageSize, startDate, endDate }),
-      buildProviderNameMap(),
-    ]);
-    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw, providerMap));
+    const res = await getRequestDetails({ apiKey: key, page, pageSize, startDate, endDate });
+    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw));
     return NextResponse.json({
       details,
       pagination: res.pagination,
@@ -136,17 +113,9 @@ export async function GET(request) {
   }
 }
 
-// Resolve a provider id to a friendly name using the prebuilt map; null when
-// unknown/raw-UUID so the UI hides it.
-function resolveProvider(id, map) {
-  if (!id || !map) return null;
-  const name = map[id];
-  if (name && name !== id) return name;
-  return null;
-}
-
 // Always mask the apiKey field; strip the raw payloads unless includeRaw.
-function scrubDetailForList(d, includeRaw, providerMap = {}) {
+// Provider is intentionally omitted from the output (not exposed publicly).
+function scrubDetailForList(d, includeRaw) {
   const req = d.request || {};
   const messages = Array.isArray(req.messages) ? req.messages : [];
   const tools = Array.isArray(req.tools) ? req.tools : null;
@@ -163,7 +132,6 @@ function scrubDetailForList(d, includeRaw, providerMap = {}) {
   const out = {
     connectionId: d.connectionId || d.id || null,
     timestamp: d.timestamp,
-    provider: resolveProvider(d.provider, providerMap),
     model: d.model,
     status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
@@ -188,8 +156,8 @@ function scrubDetailForList(d, includeRaw, providerMap = {}) {
 }
 
 // Single-detail mode: same scrub but always carry the per-request summary.
-function scrubDetail(d, includeRaw, providerMap = {}) {
-  const base = scrubDetailForList(d, includeRaw, providerMap);
+function scrubDetail(d, includeRaw) {
+  const base = scrubDetailForList(d, includeRaw);
   if (includeRaw) {
     return base; // already has payloads
   }

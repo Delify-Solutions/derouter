@@ -504,7 +504,6 @@ export default function UsagePage() {
                     <tr className="text-text-muted border-b border-border">
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
-                      <th className="text-left font-medium px-3 py-2">Provider</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
                       <th className="text-right font-medium px-3 py-2">Latency</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
@@ -527,7 +526,6 @@ export default function UsagePage() {
                             {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
                           </td>
                           <td className="px-3 py-1.5 font-mono max-w-[160px] truncate" title={r.model}>{r.model || "—"}</td>
-                          <td className="px-3 py-1.5">{r.provider ? r.provider : "—"}</td>
                           <td className="px-3 py-1.5 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColorClass(r.status)}`}>
                               {r.status || "—"}
@@ -641,7 +639,6 @@ export default function UsagePage() {
                     {/* Header summary */}
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                       <div><span className="text-text-muted">Model:</span> <span className="font-mono">{detail.model || "—"}</span></div>
-                      {detail.provider && <div><span className="text-text-muted">Provider:</span> <span>{detail.provider}</span></div>}
                       <div>
                         <span className="text-text-muted">Status:</span>{" "}
                         <span className={`font-medium ${statusColorClass(detail.status)}`}>
