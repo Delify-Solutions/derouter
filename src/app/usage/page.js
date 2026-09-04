@@ -27,6 +27,9 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("7d");
+  const [showRaw, setShowRaw] = useState(false);       // opt-in raw payloads in detail drawer
+  const [detail, setDetail] = useState(null);           // selected request detail record
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Read key from hash (#/usage or #/usage?key=...) on mount.
   const readHashKey = useCallback(() => {
@@ -91,6 +94,56 @@ export default function UsagePage() {
 
   const copy = async (text) => {
     try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+  };
+
+  const openDetail = async (row) => {
+    setDetailLoading(true);
+    setDetail(null);
+    try {
+      const { startDate, endDate } = recRange();
+      const params = new URLSearchParams({
+        key: keyInput.trim(),
+        id: row.connectionId || row.timestamp,
+        includeRaw: showRaw ? "1" : "0",
+      });
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
+      const res = await fetch(`/api/usage/key/receipts/detail?${params.toString()}`);
+      if (res.ok) {
+        const d = await res.json();
+        setDetail(d.detail);
+      } else {
+        setDetail(null);
+      }
+    } catch {
+      setDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDetail = () => { setDetail(null); setDetailLoading(false); };
+
+  const toggleRaw = () => {
+    const next = !showRaw;
+    setShowRaw(next);
+    setDetail(null);  // close current detail; reopening re-fetches with new flag
+  };
+
+  // Convert the current period to a start/end ISO range for the detail endpoint.
+  const recRange = () => {
+    const now = new Date();
+    const end = now.toISOString();
+    let start;
+    if (period === "today") {
+      const d = new Date(); d.setHours(0, 0, 0, 0); start = d.toISOString();
+    } else if (period === "all") {
+      start = new Date(0).toISOString();
+    } else {
+      const ms = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 }[period] || 604800000;
+      start = new Date(now.getTime() - ms).toISOString();
+    }
+    return { startDate: start, endDate: end };
   };
 
   const totals = rec?.summary?.totals || { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
@@ -230,12 +283,12 @@ export default function UsagePage() {
               <h3 className="text-sm font-semibold mb-2">Rate (last 60s)</h3>
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-text-muted text-xs">Requests</span>
-                  <span className="font-medium">{rec?.rate?.requests ?? 0}{data.rpm != null ? ` / ${data.rpm} RPM` : " · ∞"}</span>
+                  <span className="text-text-muted text-xs">RPM</span>
+                  <span className="font-medium">{rec?.rate?.requests ?? 0}{data.rpm != null ? ` / ${data.rpm}` : " · ∞"}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-text-muted text-xs">Tokens</span>
-                  <span className="font-medium">{fmt(rec?.rate?.tokens ?? 0)}{data.tpm != null ? ` / ${fmt(data.tpm)} TPM` : " · ∞"}</span>
+                  <span className="text-text-muted text-xs">TPM</span>
+                  <span className="font-medium">{fmt(rec?.rate?.tokens ?? 0)}{data.tpm != null ? ` / ${fmt(data.tpm)}` : " · ∞"}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-text-muted text-xs">Peak TPM</span>
@@ -314,9 +367,20 @@ export default function UsagePage() {
 
           {/* Request history */}
           <div className="rounded-xl border border-border bg-surface-1 overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Request History</h3>
-              <span className="text-xs text-text-muted">{history.length} request{history.length !== 1 ? "s" : ""}</span>
+            <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">Request History</h3>
+                <span className="text-xs text-text-muted">{history.length} request{history.length !== 1 ? "s" : ""}</span>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showRaw}
+                  onChange={toggleRaw}
+                  className="accent-primary"
+                />
+                Raw Responses
+              </label>
             </div>
             {history.length === 0 ? (
               <p className="text-sm text-text-muted px-4 py-6 text-center">No requests in this period.</p>
@@ -329,6 +393,7 @@ export default function UsagePage() {
                       <th className="text-left font-medium px-3 py-2">Model</th>
                       <th className="text-left font-medium px-3 py-2">Provider</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
+                      <th className="text-right font-medium px-3 py-2">Latency</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
                       <th className="text-right font-medium px-3 py-2">Cache R</th>
@@ -340,7 +405,12 @@ export default function UsagePage() {
                     {history.map((r, i) => {
                       const ok = String(r.status || "").startsWith("2");
                       return (
-                        <tr key={i} className="border-b border-border/40 hover:bg-surface-2/40">
+                        <tr
+                          key={i}
+                          className="border-b border-border/40 hover:bg-surface-2/40 cursor-pointer"
+                          onClick={() => openDetail({ connectionId: null, timestamp: r.timestamp, ...r })}
+                          title="Click to view request details"
+                        >
                           <td className="px-3 py-1.5 whitespace-nowrap text-text-muted">
                             {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
                           </td>
@@ -350,6 +420,9 @@ export default function UsagePage() {
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ok ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-red-500/10 text-red-600 dark:text-red-400"}`}>
                               {r.status || "—"}
                             </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-text-muted">
+                            {r.latencyMs != null ? `${r.latencyMs}ms` : "—"}
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
@@ -425,8 +498,149 @@ export default function UsagePage() {
             )}
           </div>
 
+          {/* Request detail drawer */}
+          {(detail || detailLoading) && (
+            <div
+              className="fixed inset-0 z-50 flex justify-end bg-black/40"
+              onClick={closeDetail}
+            >
+              <div
+                className="w-full max-w-2xl h-full bg-bg border-l border-border overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 bg-bg border-b border-border px-4 py-3 flex items-center justify-between z-10">
+                  <h3 className="text-sm font-semibold">Request Detail</h3>
+                  <button
+                    onClick={closeDetail}
+                    className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted"
+                    title="Close"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">close</span>
+                  </button>
+                </div>
+
+                {detailLoading && (
+                  <div className="flex items-center justify-center py-16 text-text-muted">
+                    <span className="material-symbols-outlined animate-spin mr-2">progress_activity</span>
+                    Loading…
+                  </div>
+                )}
+
+                {detail && !detailLoading && (
+                  <div className="p-4 space-y-4">
+                    {/* Header summary */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                      <div><span className="text-text-muted">Model:</span> <span className="font-mono">{detail.model || "—"}</span></div>
+                      <div><span className="text-text-muted">Provider:</span> <span>{detail.provider || "—"}</span></div>
+                      <div><span className="text-text-muted">Status:</span> <span className={String(detail.status || "").startsWith("2") ? "text-green-600" : "text-red-600"}>{detail.status || "—"}</span></div>
+                      <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</span></div>
+                      <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
+                      <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
+                    </div>
+
+                    {/* Token breakdown */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                      <div className="rounded-lg border border-border bg-surface-1 p-2">
+                        <p className="text-text-muted text-[11px]">Input Tokens</p>
+                        <p className="font-mono font-medium">{fmt(detail.inputTokens)}</p>
+                      </div>
+                      <div className="rounded-lg border border-border bg-surface-1 p-2">
+                        <p className="text-text-muted text-[11px]">Output Tokens</p>
+                        <p className="font-mono font-medium">{fmt(detail.outputTokens)}</p>
+                      </div>
+                      {detail.reasoningTokens > 0 && (
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Reasoning Tokens</p>
+                          <p className="font-mono font-medium">{fmt(detail.reasoningTokens)}</p>
+                        </div>
+                      )}
+                      {detail.cachedTokens > 0 && (
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Cached (read)</p>
+                          <p className="font-mono font-medium">{fmt(detail.cachedTokens)}</p>
+                        </div>
+                      )}
+                      {detail.cacheCreationTokens > 0 && (
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Cache Creation</p>
+                          <p className="font-mono font-medium">{fmt(detail.cacheCreationTokens)}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Request parameters */}
+                    <div>
+                      <h4 className="text-xs font-semibold mb-2 text-text-muted uppercase tracking-wide">Request Info</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Messages</p>
+                          <p className="font-mono font-medium">{fmt(detail.messageCount)}</p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">System messages</p>
+                          <p className="font-mono font-medium">{fmt(detail.systemMessageCount)}</p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Tools</p>
+                          <p className="font-mono font-medium">{fmt(detail.toolCount)}</p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-surface-1 p-2">
+                          <p className="text-text-muted text-[11px]">Body size</p>
+                          <p className="font-mono font-medium">{formatBytes(detail.bodyBytes)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Raw payloads */}
+                    {showRaw ? (
+                      <div className="space-y-3">
+                        <RawBlock title="Client Request (Input)" data={detail.request} />
+                        {detail.providerRequest && <RawBlock title="Provider Request" data={detail.providerRequest} />}
+                        {detail.providerResponse && <RawBlock title="Provider Response" data={detail.providerResponse} />}
+                        {detail.response && detail.response !== detail.providerResponse && <RawBlock title="Client Response" data={detail.response} />}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                        <span className="material-symbols-outlined text-[16px]">visibility_off</span>
+                        Request & response payloads are redacted. Enable <span className="font-medium">Raw Responses</span> in the filter bar to view them.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
+      )}
+    </div>
+  );
+}
+
+function formatBytes(n) {
+  if (!n || n < 1) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function RawBlock({ title, data }) {
+  const [open, setOpen] = useState(true);
+  if (!data || (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length === 0)) return null;
+  return (
+    <div className="rounded-lg border border-border bg-surface-1 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium hover:bg-surface-2"
+      >
+        <span>{title}</span>
+        <span className="material-symbols-outlined text-[16px]">{open ? "expand_less" : "expand_more"}</span>
+      </button>
+      {open && (
+        <pre className="max-h-[300px] overflow-auto px-3 py-2 font-mono text-[11px] text-text-main bg-black/[0.03] dark:bg-white/[0.03] border-t border-border">
+          {typeof data === "string" ? data : JSON.stringify(data, null, 2)}
+        </pre>
       )}
     </div>
   );
