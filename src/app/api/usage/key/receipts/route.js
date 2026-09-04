@@ -6,6 +6,7 @@ import {
   getUsageHistory,
   getCombos,
   getComboPricing,
+  getPricingForModel,
 } from "@/lib/db/index.js";
 
 export const dynamic = "force-dynamic";
@@ -118,11 +119,32 @@ export async function GET(request) {
       });
 
     // Build the available-models table (combos + their per-1M-token pricing).
-    // Pricing values are $/1M tokens (mirrors the admin pricing page). A combo
-    // may have no explicit price override — show the default/zero entry then.
-    const availableModels = combos.map((c) => {
-      const p = comboPricing?.[c.name] || {};
-      return {
+    // Pricing values are $/1M tokens (mirrors the admin pricing page). Resolution:
+    //   1. Explicit combo-level override (comboPricing[comboName]) — set on the
+    //      dashboard /combos page when the admin commits a custom price.
+    //   2. Otherwise fall back to the first model's pool/default pricing
+    //      (getPricingForModel: user per-pool override → built-in MODEL_PRICING →
+    //      pattern pricing). Combo model entries are `provider/model` shaped, so we
+    //      split on "/" and resolve by (provider, model). A combo with no resolvable
+    //      model price shows 0 (same as before) rather than misleading the key owner.
+    const resolveComboPricing = async (combo) => {
+      const p = comboPricing?.[combo.name];
+      if (p) return p;
+      const models = Array.isArray(combo.models) ? combo.models : [];
+      for (const m of models) {
+        const slash = m.indexOf("/");
+        const provider = slash >= 0 ? m.slice(0, slash) : null;
+        const model = slash >= 0 ? m.slice(slash + 1) : m;
+        const resolved = await getPricingForModel(provider, model);
+        if (resolved) return resolved;
+      }
+      return null;
+    };
+
+    const availableModels = [];
+    for (const c of combos) {
+      const p = (await resolveComboPricing(c)) || {};
+      availableModels.push({
         name: c.name,
         kind: c.kind || "llm",
         modelsCount: Array.isArray(c.models) ? c.models.length : 0,
@@ -131,8 +153,8 @@ export async function GET(request) {
         cached: p.cached ?? 0,
         reasoning: p.reasoning ?? 0,
         cacheCreation: p.cache_creation ?? 0,
-      };
-    });
+      });
+    }
 
     return NextResponse.json({
       period,
