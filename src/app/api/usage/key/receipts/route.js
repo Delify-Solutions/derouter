@@ -4,6 +4,8 @@ import {
   getKeyRateUsage,
   getKeyUsageSummary,
   getUsageHistory,
+  getCombos,
+  getComboPricing,
 } from "@/lib/db/index.js";
 
 export const dynamic = "force-dynamic";
@@ -72,11 +74,26 @@ export async function GET(request) {
 
     const { startDate, endDate } = periodToRange(period);
 
-    const [summary, rate, historyRaw] = await Promise.all([
+    const [summary, rate, historyRaw, combos, comboPricing] = await Promise.all([
       getKeyUsageSummary(key, { startDate, endDate }),
       getKeyRateUsage(key, 60_000),
       getUsageHistory({ apiKey: key, startDate, endDate }),
+      getCombos(),
+      getComboPricing(),
     ]);
+
+    // Normalize status to an HTTP-style code for display. The DB stores
+    // mixed values ("ok", "200", "429", "200.0", provider error strings).
+    // "ok"/"success" → 200; numeric strings → as-is; everything else → "—".
+    const normalizeStatus = (s) => {
+      if (s == null || s === "") return "—";
+      const lower = String(s).toLowerCase();
+      if (lower === "ok" || lower === "success" || lower === "completed") return "200";
+      const n = Number(s);
+      if (!Number.isNaN(n) && n >= 100 && n < 600) return String(Math.trunc(n));
+      if (/^\d{3}$/.test(String(s))) return String(s);
+      return String(s);
+    };
 
     // Most recent first, capped to limit.
     const history = historyRaw
@@ -89,7 +106,7 @@ export async function GET(request) {
           timestamp: r.timestamp,
           provider: r.provider,
           model: r.model,
-          status: r.status,
+          status: normalizeStatus(r.status),
           cost: r.cost,
           input: r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0,
           output: r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0,
@@ -98,11 +115,29 @@ export async function GET(request) {
         };
       });
 
+    // Build the available-models table (combos + their per-1M-token pricing).
+    // Pricing values are $/1M tokens (mirrors the admin pricing page). A combo
+    // may have no explicit price override — show the default/zero entry then.
+    const availableModels = combos.map((c) => {
+      const p = comboPricing?.[c.name] || {};
+      return {
+        name: c.name,
+        kind: c.kind || "llm",
+        modelsCount: Array.isArray(c.models) ? c.models.length : 0,
+        input: p.input ?? 0,
+        output: p.output ?? 0,
+        cached: p.cached ?? 0,
+        reasoning: p.reasoning ?? 0,
+        cacheCreation: p.cache_creation ?? 0,
+      };
+    });
+
     return NextResponse.json({
       period,
       summary,
       rate,
       history,
+      availableModels,
     });
   } catch (err) {
     console.log("Error fetching key receipts:", err);

@@ -165,7 +165,7 @@ export default function UsagePage() {
             </p>
           </div>
 
-          {/* Base URL + Key */}
+          {/* Base URL + Key (key masked) */}
           <div className="rounded-xl border border-border bg-surface-1 p-3 text-sm">
             <div className="flex items-center gap-2 py-1">
               <span className="text-text-muted" style={{ width: 80, flexShrink: 0 }}>Base URL</span>
@@ -176,8 +176,8 @@ export default function UsagePage() {
             </div>
             <div className="flex items-center gap-2 py-1">
               <span className="text-text-muted" style={{ width: 80, flexShrink: 0 }}>API Key</span>
-              <code className="font-mono text-xs flex-1 truncate">{keyInput || "••••••••"}</code>
-              <button onClick={() => copy(keyInput || "")} className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted" title="Copy">
+              <code className="font-mono text-xs flex-1 truncate">{maskKeyFull(keyInput)}</code>
+              <button onClick={() => copy(keyInput || "")} className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted" title="Copy full key">
                 <span className="material-symbols-outlined text-[14px]">content_copy</span>
               </button>
             </div>
@@ -365,24 +365,63 @@ export default function UsagePage() {
             )}
           </div>
 
-          {/* Allowed models */}
-          <div className="rounded-xl border border-border bg-surface-1 p-4">
-            <h3 className="text-sm font-semibold mb-3">Allowed Models</h3>
-            {data.allowedModels && data.allowedModels.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {data.allowedModels.map((m) => (
-                  <span
-                    key={m}
-                    className="text-xs px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20 cursor-pointer"
-                    title={`Copy ${m}`}
-                    onClick={() => copy(m)}
-                  >
-                    {m}
-                  </span>
-                ))}
-              </div>
+          {/* Available models (combos) with pricing + copy */}
+          <div className="rounded-xl border border-border bg-surface-1 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Available Models</h3>
+              <span className="text-xs text-text-muted">
+                {data.allowedModels && data.allowedModels.length > 0
+                  ? `${data.allowedModels.length} allowed`
+                  : "All models allowed"}
+              </span>
+            </div>
+            {(rec?.availableModels || []).length === 0 ? (
+              <p className="text-sm text-text-muted px-4 py-6 text-center">No models configured.</p>
             ) : (
-              <p className="text-sm text-text-muted">All models allowed</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-text-muted border-b border-border">
+                      <th className="text-left font-medium px-3 py-2">Model</th>
+                      <th className="text-center font-medium px-3 py-2">Kind</th>
+                      <th className="text-right font-medium px-3 py-2">Input</th>
+                      <th className="text-right font-medium px-3 py-2">Output</th>
+                      <th className="text-right font-medium px-3 py-2">Cached</th>
+                      <th className="text-right font-medium px-3 py-2" title="Reasoning tokens ($/1M)">Reasoning</th>
+                      <th className="text-right font-medium px-3 py-2" title="Cache creation ($/1M)">Cache W</th>
+                      <th className="text-center font-medium px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rec.availableModels.map((m) => {
+                      const allowed = !data.allowedModels || data.allowedModels.length === 0 || data.allowedModels.includes(m.name);
+                      return (
+                        <tr key={m.name} className={`border-b border-border/40 hover:bg-surface-2/40 ${allowed ? "" : "opacity-50"}`}>
+                          <td className="px-3 py-2 font-mono">{m.name}</td>
+                          <td className="px-3 py-2 text-center text-text-muted">{m.kind}</td>
+                          <td className="px-3 py-2 text-right">${(m.input || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">${(m.output || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">${(m.cached || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">${(m.reasoning || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">${(m.cacheCreation || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={() => copy(m.name)}
+                              className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted"
+                              title={`Copy ${m.name}`}
+                            >
+                              <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
+                  Prices in $ per 1M tokens. A model's allowed/usable set for this key is shown at full opacity; dimmed rows are not permitted by this key's allow-list.
+                </p>
+              </div>
             )}
           </div>
 
