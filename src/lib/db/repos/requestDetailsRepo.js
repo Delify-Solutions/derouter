@@ -106,6 +106,10 @@ async function flushToDatabase() {
             id: item.id,
             provider: item.provider || null,
             model: item.model || null,
+            // Preserve the original client model string (bare combo name) so the
+            // public /usage detail view can show the combo the key holder called,
+            // not the internal pool/fallback model the proxy resolved to.
+            requestedModel: item.requestedModel || null,
             connectionId: item.connectionId || null,
             apiKey: item.apiKey || null,
             timestamp: item.timestamp,

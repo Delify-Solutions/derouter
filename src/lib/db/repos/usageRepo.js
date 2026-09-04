@@ -313,7 +313,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null }),
         ]
       );
 
@@ -360,13 +360,23 @@ export async function getUsageHistory(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id ASC`, params);
+  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
 
-  return rows.map((r) => ({
-    timestamp: r.timestamp, provider: r.provider, model: r.model,
-    connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
-    cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
-  }));
+  return rows.map((r) => {
+    const meta = parseJson(r.meta, {});
+    // requestedModel = the original client model string (a bare combo name when the
+    // request targeted a combo). When present, the public /usage page shows the combo
+    // the key holder called, not the internal pool/fallback model the proxy resolved to.
+    const requestedModel = meta.requestedModel || null;
+    return {
+      timestamp: r.timestamp, provider: r.provider,
+      model: requestedModel || r.model, // display model: combo name if known, else resolved
+      resolvedModel: r.model,            // internal fallback model (kept for cost/accuracy)
+      requestedModel,
+      connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
+      cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
+    };
+  });
 }
 
 function loadDaysInRange(adapter, maxDays) {
@@ -820,7 +830,7 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   const where = `WHERE ${conds.join(" AND ")}`;
 
   const rows = db.all(
-    `SELECT model, timestamp, promptTokens, completionTokens, cost, tokens FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    `SELECT model, timestamp, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
     params
   );
 
@@ -836,7 +846,13 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     const cacheRead = t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0;
     const cacheCreation = t.cache_creation_input_tokens ?? 0;
 
-    const model = r.model || "unknown";
+    // Group by the combo the caller asked for (requestedModel) when present, so the
+    // By-Model summary on /usage lists combos (mygpt, testcombo) rather than the
+    // internal pool/fallback model the proxy resolved to (glm-5.3:pre). Older rows
+    // without requestedModel fall back to the resolved model — their cost is still
+    // attributed, just under the pool-model label.
+    const meta = parseJson(r.meta, {}) || {};
+    const model = meta.requestedModel || r.model || "unknown";
     if (!byModel[model]) byModel[model] = { model, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
     const m = byModel[model];
     m.input += prompt;

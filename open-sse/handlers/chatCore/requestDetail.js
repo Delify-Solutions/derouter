@@ -68,6 +68,11 @@ export function buildRequestDetail(base, overrides = {}) {
   return {
     provider: base.provider || "unknown",
     model: base.model || "unknown",
+    // Original client model string (a bare combo name when the request targeted a
+    // combo, before combo expansion rewrote body.model to a provider/model). Kept so
+    // the public /usage detail view can show the combo the key holder called instead
+    // of the internal fallback model the proxy resolved to.
+    requestedModel: base.requestedModel || undefined,
     connectionId: base.connectionId || undefined,
     apiKey: base.apiKey || undefined,
     timestamp: new Date().toISOString(),

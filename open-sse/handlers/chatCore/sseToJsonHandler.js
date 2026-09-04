@@ -219,6 +219,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
       saveRequestDetail(buildRequestDetail({
         ...ctx,
+        requestedModel,
         latency: { ttft: totalLatency, total: totalLatency },
         tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
         response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
@@ -306,12 +307,18 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
     const usage = parsed.usage || {};
     appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+    // requestedModel = original client model string (bare combo name when a combo was
+    // called, before combo expansion rewrote body.model). Same derivation as the
+    // Responses branch; `body.model` is the rewritten provider/model here.
+    const _reqModelRaw = clientRawRequest?.body?.model;
+    const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
     const totalLatency = Date.now() - requestStartTime;
     saveRequestDetail(buildRequestDetail({
       ...ctx,
+      requestedModel,
       latency: { ttft: totalLatency, total: totalLatency },
       tokens: usage,
       response: {
