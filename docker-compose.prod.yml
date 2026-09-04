@@ -1,0 +1,34 @@
+# Production compose for VPS deployment — pulls the prebuilt image from GHCR
+# instead of building locally. Use this on the server after the CI workflow
+# (docker-publish.yml) has pushed an image.
+#
+# Usage on VPS:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml pull   # update to latest
+#   docker compose -f docker-compose.prod.yml up -d  # apply update
+#
+# Pin a specific version by editing IMAGE below (e.g. :v1.0.0, :sha-abc1234),
+# or override at runtime:  IMAGE=ghcr.io/delify-solutions/derouter:v1.0.0 \
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  derouter:
+    image: ${IMAGE:-ghcr.io/delify-solutions/derouter:latest}
+    container_name: derouter
+    restart: always
+    pull_policy: always
+    ports:
+      - "20128:20128"
+    volumes:
+      - derouter-data:/app/data
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+
+volumes:
+  derouter-data:
+    name: derouter-data

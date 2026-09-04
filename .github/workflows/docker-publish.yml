@@ -1,0 +1,77 @@
+name: Build & Publish Docker image
+
+on:
+  push:
+    branches: [main]
+    # Rebuild on version tags (v1.0.0, v1.0, etc.) for pinable releases.
+    tags: ["v*.*.*"]
+  workflow_dispatch: {}
+
+# Avoid concurrent image pushes racing on the same ref.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Lowercased github.repository → "delify-solutions/derouter" (GHCR needs lowercase).
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Publishing needs write access to packages. `packages: write` is granted to
+    # the default GITHUB_TOKEN automatically when the job has these permissions.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        id: img
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}
+          # Tags:
+          #   - branch name          (e.g. main, feat/usage-combo-test-ci)
+          #   - semver tags          (v1.2.3 → 1.2.3, 1.2, 1, latest)
+          #   - git sha short        (derouter:sha-abc1234)
+          #   - "latest" on the default branch and version tags
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache across runs for faster rebuilds (free for public-ish GH shared cache).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
