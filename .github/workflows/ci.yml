@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs on the same ref when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # No package-lock.json in this repo; cache by package.json (best-effort).
+          cache: 'npm'
+
+      - name: Install dependencies
+        # No lockfile — install without audit/fund to keep CI quiet and fast.
+        run: npm install --no-audit --no-fund
+
+      - name: Build (Next.js standalone)
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build

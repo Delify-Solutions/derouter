@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCombos, createCombo, getComboByName } from "@/lib/localDb";
+import { updateComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, models, kind } = body;
+    const { name, models, kind, pricing } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -39,6 +40,12 @@ export async function POST(request) {
     }
 
     const combo = await createCombo({ name, models: models || [], kind: kind || null });
+
+    // Optional combo-level pricing (5 fields). Save after the combo exists so the
+    // pricing key (combo name) is valid even if the combo were to fail downstream.
+    if (pricing && typeof pricing === "object" && Object.keys(pricing).length > 0) {
+      await updateComboPricing({ [name]: pricing });
+    }
 
     return NextResponse.json(combo, { status: 201 });
   } catch (error) {

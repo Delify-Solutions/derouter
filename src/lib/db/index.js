@@ -29,8 +29,15 @@ export {
 
 // API keys
 export {
-  getApiKeys, getApiKeyById, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
+  getApiKeys, getApiKeyById, getApiKeyByKey, createApiKey, updateApiKey, deleteApiKey,
+  validateApiKey, getApiKeyForAuth, resetKeyWindow, setKeyWindowCost,
 } from "./repos/apiKeysRepo.js";
+
+// Key groups
+export {
+  getKeyGroups, getKeyGroupById, getKeyGroupByName,
+  createKeyGroup, updateKeyGroup, deleteKeyGroup,
+} from "./repos/keyGroupsRepo.js";
 
 // Combos
 export {
@@ -50,6 +57,11 @@ export {
   getPricing, getPricingForModel, updatePricing, resetPricing, resetAllPricing,
 } from "./repos/pricingRepo.js";
 
+// Combo-level pricing (admin-set price per combo, overrides per-pool for combo requests)
+export {
+  getComboPricing, getPricingForCombo, updateComboPricing, resetComboPricing, resetAllComboPricing,
+} from "./repos/comboPricingRepo.js";
+
 // Disabled models
 export {
   getDisabledModels, getDisabledByProvider, disableModels, enableModels,
@@ -60,6 +72,8 @@ export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
+  getKeyRateUsage, getKeyCostSince, getKeyRequestCountSince,
+  getKeyUsageSummary,
 } from "./repos/usageRepo.js";
 
 // Request details

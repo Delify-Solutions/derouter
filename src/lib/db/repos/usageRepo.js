@@ -143,11 +143,28 @@ async function ensureRingInitialized() {
   } catch {}
 }
 
-async function calculateCost(provider, model, tokens) {
-  if (!tokens || !provider || !model) return 0;
+// Compute the USD cost for one request.
+// `requestedModel` carries the original client model string. When the client asked
+// for a combo (bare name, no "/"), a combo-level price override takes precedence
+// over the per-pool price — so budgets for key-holders (who consume combos) are
+// charged at the combo price the admin set, not the internal pool model's price.
+async function calculateCost(provider, model, tokens, requestedModel) {
+  if (!tokens) return 0;
   try {
-    const { getPricingForModel } = await import("./pricingRepo.js");
-    const pricing = await getPricingForModel(provider, model);
+    let pricing = null;
+
+    // Combo-level override first (only for bare combo names, not raw provider/model).
+    if (requestedModel && !requestedModel.includes("/")) {
+      const { getPricingForCombo } = await import("./comboPricingRepo.js");
+      const comboPricing = await getPricingForCombo(requestedModel);
+      if (comboPricing) pricing = comboPricing;
+    }
+
+    // Fall back to per-pool pricing.
+    if (!pricing && provider && model) {
+      const { getPricingForModel } = await import("./pricingRepo.js");
+      pricing = await getPricingForModel(provider, model);
+    }
     if (!pricing) return 0;
 
     // Delegate the actual math to the single source of truth (avoids the two
@@ -255,7 +272,7 @@ export async function saveRequestUsage(entry) {
     const db = await getAdapter();
 
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
-    entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens);
+    entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens, entry.requestedModel);
 
     const tokens = entry.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
@@ -787,4 +804,101 @@ export async function getRecentLogs(limit = 200) {
     console.error("[usageRepo] getRecentLogs failed:", e.message);
     return [];
   }
+}
+
+// ── Per-key usage summary (viber-router KeyTokenUsage-style) ─────────────────
+// Aggregates usageHistory for one apiKey in [startDate, endDate], grouped by model,
+// plus a peak-TPM figure (max sum of prompt+completion tokens in any 1-minute bucket).
+export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
+  if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0 };
+  const db = await getAdapter();
+  const conds = ["apiKey = ?"];
+  const params = [apiKey];
+  if (startDate) { conds.push("timestamp >= ?"); params.push(new Date(startDate).toISOString()); }
+  if (endDate) { conds.push("timestamp <= ?"); params.push(new Date(endDate).toISOString()); }
+  const where = `WHERE ${conds.join(" AND ")}`;
+
+  const rows = db.all(
+    `SELECT model, timestamp, promptTokens, completionTokens, cost, tokens FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    params
+  );
+
+  const byModel = {};
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
+
+  // Peak TPM: max per-minute sum of (prompt + completion) tokens, like viber-router's compute_peak_tpm.
+  const perMinute = {};
+  for (const r of rows) {
+    const t = parseJson(r.tokens, {}) || {};
+    const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
+    const completion = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
+    const cacheRead = t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0;
+    const cacheCreation = t.cache_creation_input_tokens ?? 0;
+
+    const model = r.model || "unknown";
+    if (!byModel[model]) byModel[model] = { model, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
+    const m = byModel[model];
+    m.input += prompt;
+    m.output += completion;
+    m.cacheRead += cacheRead;
+    m.cacheCreation += cacheCreation;
+    m.requests += 1;
+    m.cost += r.cost || 0;
+
+    totals.input += prompt;
+    totals.output += completion;
+    totals.cacheRead += cacheRead;
+    totals.cacheCreation += cacheCreation;
+    totals.requests += 1;
+    totals.cost += r.cost || 0;
+
+    const minute = (r.timestamp || "").slice(0, 16); // YYYY-MM-DDTHH:MM
+    if (minute) {
+      perMinute[minute] = (perMinute[minute] || 0) + prompt + completion;
+    }
+  }
+  let peakTpm = 0;
+  for (const v of Object.values(perMinute)) if (v > peakTpm) peakTpm = v;
+
+  const items = Object.values(byModel).sort((a, b) => (b.requests || 0) - (a.requests || 0));
+  return { items, totals, peakTpm };
+}
+
+
+// All read from usageHistory with the idx_uh_apikey_ts index.
+
+// Count requests and sum tokens for an apiKey in the last `windowMs` ms.
+// Returns { requests, tokens }.
+export async function getKeyRateUsage(apiKey, windowMs = 60000) {
+  const db = await getAdapter();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const row = db.get(
+    `SELECT COUNT(*) as requests, COALESCE(SUM(COALESCE(promptTokens,0) + COALESCE(completionTokens,0)),0) as tokens
+     FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
+    [apiKey, since],
+  );
+  return {
+    requests: row?.requests ?? 0,
+    tokens: row?.tokens ?? 0,
+  };
+}
+
+// Sum cost for an apiKey since a given ISO timestamp (for budget window).
+export async function getKeyCostSince(apiKey, sinceIso) {
+  const db = await getAdapter();
+  const row = db.get(
+    `SELECT COALESCE(SUM(cost),0) as total FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
+    [apiKey, sinceIso],
+  );
+  return row?.total ?? 0;
+}
+
+// Count requests for an apiKey since a given ISO timestamp (for window request count).
+export async function getKeyRequestCountSince(apiKey, sinceIso) {
+  const db = await getAdapter();
+  const row = db.get(
+    `SELECT COUNT(*) as c FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
+    [apiKey, sinceIso],
+  );
+  return row?.c ?? 0;
 }

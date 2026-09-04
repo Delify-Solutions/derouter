@@ -1059,7 +1059,11 @@ export default function ProviderDetailPage() {
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
+        // Use the display alias (provider-node prefix) for routing — getModelInfo
+        // matches compatible nodes by `node.prefix`, not `node.id`. The storage
+        // alias is the node id (e.g. openai-compatible-chat-<uuid>) which the
+        // router cannot resolve, so the test ping would fail with "no provider".
+        body: JSON.stringify({ model: `${providerDisplayAlias}/${modelId}` }),
       });
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));

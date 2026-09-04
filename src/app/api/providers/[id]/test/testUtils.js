@@ -4,6 +4,7 @@ import { testProxyUrl } from "@/lib/network/proxyTest";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
+import { getCustomModels } from "@/lib/db/repos/aliasRepo.js";
 import {
   refreshProviderCredentials,
   shouldRefreshCredentials,
@@ -475,12 +476,82 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
   if (isOpenAICompatibleProvider(connection.provider)) {
     const modelsBase = connection.providerSpecificData?.baseUrl;
     if (!modelsBase) return { valid: false, error: "Missing base URL" };
+    const base = modelsBase.replace(/\/$/, "");
+    // Send both auth schemes — many OpenAI-compatible upstreams accept Bearer, but some
+    // (e.g. ai.boltz.one) require x-api-key. Including both is harmless when unused.
+    const auth = { "Authorization": `Bearer ${connection.apiKey}`, "x-api-key": connection.apiKey };
+    const redactedAuth = { "Authorization": `Bearer ${connection.apiKey?.slice(0, 8)}…${connection.apiKey?.slice(-4)}`, "x-api-key": `${connection.apiKey?.slice(0, 8)}…` };
     try {
-      const res = await fetchWithConnectionProxy(`${modelsBase.replace(/\/$/, "")}/models`, {
-        headers: { "Authorization": `Bearer ${connection.apiKey}` },
-      }, effectiveProxy);
-      return { valid: res.ok, error: res.ok ? null : "Invalid API key or base URL" };
+      // Many OpenAI-compatible upstreams (and Anthropic-compatible bridges exposed
+      // over an OpenAI schema) don't implement GET /models. A 404 there says nothing
+      // about the key — only 401/403 does. So probe /models first, and on any non-auth
+      // failure fall back to a 1-token /chat/completions probe to confirm the key.
+      console.log(`[TEST] → GET ${base}/models  headers=${JSON.stringify(redactedAuth)}`);
+      let res = await fetchWithConnectionProxy(`${base}/models`, { headers: auth }, effectiveProxy);
+      let bodyText = "";
+      try { bodyText = (await res.clone().text()).slice(0, 500); } catch {}
+      console.log(`[TEST] ← GET ${base}/models  status=${res.status}  body=${bodyText}`);
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, error: "Invalid API key or base URL" };
+      }
+      if (!res.ok) {
+        // /models unavailable (404/405/…) — verify the key against a chat probe.
+        // Build candidate model list: defaultModel, then this provider's pool (custom)
+        // model ids, then gpt-3.5-turbo. A wrong model name yields 404 "not found" on
+        // strict upstreams (e.g. ai.boltz.one), so try each candidate until one is
+        // accepted. If the connection has a configured prefix (e.g. "vin/"), also
+        // try the id with that prefix stripped — upstreams expect the bare id.
+        const prefix = connection.providerSpecificData?.prefix ? `${connection.providerSpecificData.prefix}/` : "";
+        let candidates = [];
+        if (connection.defaultModel && connection.defaultModel !== "1") candidates.push(connection.defaultModel);
+        try {
+          const customs = await getCustomModels();
+          for (const m of customs.filter((m) => m.providerAlias === connection.provider)) {
+            candidates.push(m.id);
+            if (prefix && typeof m.id === "string" && m.id.startsWith(prefix)) {
+              candidates.push(m.id.slice(prefix.length));
+            }
+          }
+        } catch {}
+        candidates.push("gpt-3.5-turbo");
+        // De-dup, preserve order.
+        candidates = [...new Set(candidates)];
+
+        let chatRes = null;
+        let chatModel = null;
+        for (const cand of candidates) {
+          chatModel = cand;
+          const chatBody = JSON.stringify({
+            model: cand,
+            messages: [{ role: "user", content: "test" }],
+            max_tokens: 1,
+          });
+          console.log(`[TEST] → POST ${base}/chat/completions  model=${cand}  body=${chatBody}  headers=${JSON.stringify({ ...redactedAuth, "content-type": "application/json" })}`);
+          chatRes = await fetchWithConnectionProxy(`${base}/chat/completions`, {
+            method: "POST",
+            headers: { ...auth, "content-type": "application/json" },
+            body: chatBody,
+          }, effectiveProxy);
+          let chatBodyText = "";
+          try { chatBodyText = (await chatRes.clone().text()).slice(0, 500); } catch {}
+          console.log(`[TEST] ← POST ${base}/chat/completions  model=${cand}  status=${chatRes.status}  body=${chatBodyText}`);
+          // Auth failure: key is bad — no point trying more models.
+          if (chatRes.status === 401 || chatRes.status === 403) {
+            return { valid: false, error: "Invalid API key or base URL" };
+          }
+          // 404 likely means this model id doesn't exist on the upstream; try next candidate.
+          if (chatRes.status === 404) continue;
+          break;
+        }
+        // 404 on every candidate → base URL path is wrong (no /chat/completions route).
+        if (chatRes?.status === 404) {
+          return { valid: false, error: `Base URL returned 404 for /chat/completions (tried models: ${candidates.join(", ")}) — check the base URL path` };
+        }
+        return { valid: chatRes.status < 500, error: chatRes.status < 500 ? null : `API returned ${chatRes.status}` };
+      }
+      return { valid: true, error: null };
     } catch (err) {
+      console.log(`[TEST] ✗ ${base}  error=${err.message}`);
       return { valid: false, error: err.message };
     }
   }
@@ -493,6 +564,12 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       if (modelsBase.endsWith("/messages")) modelsBase = modelsBase.slice(0, -9);
       const messagesUrl = `${modelsBase}/v1/messages`;
       const model = connection.defaultModel || "claude-3-haiku-20240307";
+      const testBody = JSON.stringify({
+        model,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "test" }],
+      });
+      console.log(`[TEST] → POST ${messagesUrl}  model=${model}  body=${testBody}  headers=${JSON.stringify({ "x-api-key": `${connection.apiKey?.slice(0, 8)}…${connection.apiKey?.slice(-4)}`, "anthropic-version": "2023-06-01" })}`);
       const res = await fetchWithConnectionProxy(messagesUrl, {
         method: "POST",
         headers: {
@@ -501,16 +578,16 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
           "content-type": "application/json",
           "Authorization": `Bearer ${connection.apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          max_tokens: 1,
-          messages: [{ role: "user", content: "test" }],
-        }),
+        body: testBody,
       }, effectiveProxy);
+      let bodyText = "";
+      try { bodyText = (await res.clone().text()).slice(0, 500); } catch {}
+      console.log(`[TEST] ← POST ${messagesUrl}  status=${res.status}  body=${bodyText}`);
       // 400/529 still confirms key accepted; only 401/403 = bad key
       const valid = res.status !== 401 && res.status !== 403;
       return { valid, error: valid ? null : "Invalid API key or base URL" };
     } catch (err) {
+      console.log(`[TEST] ✗ ${modelsBase}  error=${err.message}`);
       return { valid: false, error: err.message };
     }
   }
@@ -829,6 +906,7 @@ case "llm7": {
 export async function testSingleConnection(id) {
   const connection = await getProviderConnectionById(id);
   if (!connection) return { valid: false, error: "Connection not found", latencyMs: 0, testedAt: new Date().toISOString() };
+  console.log(`[TEST] ═══ Testing connection id=${id} provider=${connection.provider} name=${connection.name || "(unnamed)"} authType=${connection.authType} defaultModel=${connection.defaultModel} proxy=${(connection.providerSpecificData?.connectionProxyUrl) || "none"}`);
 
   const effectiveProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
 
@@ -891,5 +969,6 @@ export async function testSingleConnection(id) {
 
   await updateProviderConnection(id, updateData);
 
+  console.log(`[TEST] ═══ Done id=${id} valid=${result.valid} error=${result.error || "null"} latency=${latencyMs}ms status=${result.valid ? "active" : "error"}`);
   return { valid: result.valid, error: result.error, refreshed: !!result.refreshed, latencyMs, testedAt: new Date().toISOString() };
 }

@@ -21,22 +21,30 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { isActive } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
       return NextResponse.json({ error: "Key not found" }, { status: 404 });
     }
 
+    // Allow toggling active state + advanced limit fields.
     const updateData = {};
-    if (isActive !== undefined) updateData.isActive = isActive;
+    if (body.isActive !== undefined) updateData.isActive = body.isActive;
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.groupId !== undefined) updateData.groupId = body.groupId;
+    if (body.rpm !== undefined) updateData.rpm = body.rpm;
+    if (body.tpm !== undefined) updateData.tpm = body.tpm;
+    if (body.budgetUsd !== undefined) updateData.budgetUsd = body.budgetUsd;
+    if (body.resetWindow !== undefined) updateData.resetWindow = body.resetWindow;
+    if (body.expiresAt !== undefined) updateData.expiresAt = body.expiresAt;
+    if (body.allowedModels !== undefined) updateData.allowedModels = body.allowedModels;
 
     const updated = await updateApiKey(id, updateData);
 
     return NextResponse.json({ key: updated });
   } catch (error) {
     console.log("Error updating key:", error);
-    return NextResponse.json({ error: "Failed to update key" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to update key" }, { status: 400 });
   }
 }
 

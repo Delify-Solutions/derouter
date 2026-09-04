@@ -6,6 +6,7 @@ import Button from "@/shared/components/Button";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
+import { maskKeyFull } from "@/shared/utils/apiKey";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 
 let providerNameCache = null;
@@ -111,9 +112,12 @@ export default function RequestDetailsTab() {
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
+  const [keys, setKeys] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
+  const [showRaw, setShowRaw] = useState(false);
   const [filters, setFilters] = useState({
     provider: "",
+    apiKey: "",
     startDate: "",
     endDate: ""
   });
@@ -131,6 +135,18 @@ export default function RequestDetailsTab() {
     }
   }, []);
 
+  const fetchKeys = useCallback(async () => {
+    try {
+      const res = await fetch("/api/keys");
+      const data = await res.json();
+      // API may return { keys: [...] } or an array directly.
+      const list = Array.isArray(data) ? data : (data.keys || data.items || []);
+      setKeys(list);
+    } catch (error) {
+      console.error("Failed to fetch keys:", error);
+    }
+  }, []);
+
   const fetchDetails = useCallback(async () => {
     setLoading(true);
     try {
@@ -139,8 +155,10 @@ export default function RequestDetailsTab() {
         pageSize: pagination.pageSize.toString()
       });
       if (filters.provider) params.append("provider", filters.provider);
+      if (filters.apiKey) params.append("apiKey", filters.apiKey);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
+      if (showRaw) params.append("includeRaw", "1");
 
       const res = await fetch(`/api/usage/request-details?${params}`);
       const data = await res.json();
@@ -152,11 +170,12 @@ export default function RequestDetailsTab() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, filters]);
+  }, [pagination.page, pagination.pageSize, filters, showRaw]);
 
   useEffect(() => {
     fetchProviders();
-  }, [fetchProviders]);
+    fetchKeys();
+  }, [fetchProviders, fetchKeys]);
 
   useEffect(() => {
     fetchDetails();
@@ -176,13 +195,14 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", startDate: "", endDate: "" });
+    setFilters({ provider: "", apiKey: "", startDate: "", endDate: "" });
+    setShowRaw(false);
   };
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
             <select
@@ -204,7 +224,29 @@ export default function RequestDetailsTab() {
               ))}
             </select>
           </div>
-          
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="key-filter" className="text-sm font-medium text-text-main">Key</label>
+            <select
+              id="key-filter"
+              value={filters.apiKey}
+              onChange={(e) => setFilters({ ...filters, apiKey: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Keys</option>
+              {keys.map((k) => (
+                <option key={k.id || k.key} value={k.key}>
+                  {k.name ? `${k.name} — ${maskKeyFull(k.key)}` : maskKeyFull(k.key)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="start-date-filter" className="text-sm font-medium text-text-main">Start Date</label>
             <input
@@ -232,29 +274,59 @@ export default function RequestDetailsTab() {
               )}
             />
           </div>
-          
-          <div className="flex min-w-0 flex-col gap-2 sm:col-span-2 lg:col-span-1">
-            <span className="hidden text-sm font-medium text-text-main opacity-0 lg:block" aria-hidden="true">Clear</span>
-            <Button 
-              variant="ghost" 
-              onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.startDate && !filters.endDate}
-              className="w-full"
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label className="text-sm font-medium text-text-main">Raw Responses</label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showRaw}
+              onClick={() => setShowRaw((v) => !v)}
+              className={cn(
+                "h-9 px-3 rounded-lg border flex items-center justify-between gap-2 text-sm w-full min-w-0 transition-colors",
+                showRaw
+                  ? "border-brand-500/40 bg-brand-500/10 text-brand-600 dark:text-brand-400"
+                  : "border-black/10 dark:border-white/10 bg-surface text-text-muted"
+              )}
             >
-              Clear Filters
-            </Button>
+              <span className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">{showRaw ? "visibility" : "visibility_off"}</span>
+                {showRaw ? "Showing raw" : "Redacted"}
+              </span>
+              <span className={cn(
+                "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
+                showRaw ? "bg-brand-500" : "bg-surface-3"
+              )}>
+                <span className={cn(
+                  "inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform",
+                  showRaw ? "translate-x-3.5" : "translate-x-0.5"
+                )} />
+              </span>
+            </button>
           </div>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <Button
+            variant="ghost"
+            onClick={handleClearFilters}
+            disabled={!filters.provider && !filters.apiKey && !filters.startDate && !filters.endDate && !showRaw}
+            className="w-full sm:w-auto"
+          >
+            Clear Filters
+          </Button>
         </div>
       </Card>
 
       <Card padding="none">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px]">
+          <table className="w-full min-w-[1000px]">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Key</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
@@ -266,7 +338,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="10" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -275,7 +347,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="10" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -296,6 +368,9 @@ export default function RequestDetailsTab() {
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
+                    <td className="max-w-[200px] truncate p-4 text-xs text-text-muted font-mono" title={detail.apiKey || ""}>
+                      {detail.apiKey ? maskKeyFull(detail.apiKey) : "—"}
+                    </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
                     </td>
@@ -364,6 +439,10 @@ export default function RequestDetailsTab() {
                  <span className="text-text-muted">Provider:</span>{" "}
                  <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
                </div>
+              <div>
+                <span className="text-text-muted">Key:</span>{" "}
+                <span className="text-text-main font-mono">{selectedDetail.apiKey ? maskKeyFull(selectedDetail.apiKey) : "—"}</span>
+              </div>
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>
@@ -456,55 +535,96 @@ export default function RequestDetailsTab() {
             )}
 
             <div className="space-y-4">
+              {!showRaw && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                  <span className="material-symbols-outlined text-[16px]">visibility_off</span>
+                  Request & response payloads are redacted. Enable <span className="font-medium">Raw Responses</span> in the filter bar to view them.
+                </div>
+              )}
               <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {JSON.stringify(selectedDetail.request, null, 2)}
-                </pre>
+                {showRaw ? (
+                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    {JSON.stringify(selectedDetail.request, null, 2)}
+                  </pre>
+                ) : (
+                  <RedactedBody value={selectedDetail.request} />
+                )}
               </CollapsibleSection>
 
               {selectedDetail.providerRequest && (
                 <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {JSON.stringify(selectedDetail.providerRequest, null, 2)}
-                  </pre>
+                  {showRaw ? (
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {JSON.stringify(selectedDetail.providerRequest, null, 2)}
+                    </pre>
+                  ) : (
+                    <RedactedBody value={selectedDetail.providerRequest} />
+                  )}
                 </CollapsibleSection>
               )}
 
               {selectedDetail.providerResponse && (
                 <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {typeof selectedDetail.providerResponse === 'object'
-                      ? JSON.stringify(selectedDetail.providerResponse, null, 2)
-                      : selectedDetail.providerResponse
-                    }
-                  </pre>
+                  {showRaw ? (
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {typeof selectedDetail.providerResponse === 'object'
+                        ? JSON.stringify(selectedDetail.providerResponse, null, 2)
+                        : selectedDetail.providerResponse
+                      }
+                    </pre>
+                  ) : (
+                    <RedactedBody value={selectedDetail.providerResponse} />
+                  )}
                 </CollapsibleSection>
               )}
-              
+
               <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
-                {selectedDetail.response?.thinking && (
-                  <div className="mb-4">
-                    <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
-                      <span className="material-symbols-outlined text-[16px]">psychology</span>
-                      Thinking Process
+                {showRaw ? (
+                  <>
+                    {selectedDetail.response?.thinking && (
+                      <div className="mb-4">
+                        <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
+                          <span className="material-symbols-outlined text-[16px]">psychology</span>
+                          Thinking Process
+                        </h4>
+                        <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                          {selectedDetail.response.thinking}
+                        </pre>
+                      </div>
+                    )}
+
+                    <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
+                      Content
                     </h4>
-                    <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
-                      {selectedDetail.response.thinking}
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {selectedDetail.response?.content || "[No content]"}
                     </pre>
-                  </div>
+                  </>
+                ) : (
+                  <RedactedBody value={selectedDetail.response} />
                 )}
-                
-                <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
-                  Content
-                </h4>
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {selectedDetail.response?.content || "[No content]"}
-                </pre>
               </CollapsibleSection>
             </div>
           </div>
         )}
       </Drawer>
+    </div>
+  );
+}
+
+function RedactedBody({ value }) {
+  // The route already returns { redacted: true } for concealed payloads, but a
+  // payload may also be a plain object (when includeRaw was on, then toggled off
+  // mid-session) — normalize both to a clear "(redacted)" notice.
+  const isRedacted =
+    value === null ||
+    value === undefined ||
+    (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) ||
+    (typeof value === "object" && value.redacted === true);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-black/5 bg-black/[0.02] p-3 text-xs text-text-muted dark:border-white/5 dark:bg-white/[0.02]">
+      <span className="material-symbols-outlined text-[16px]">visibility_off</span>
+      {isRedacted ? "Redacted — enable Raw Responses to view." : "(redacted)"}
     </div>
   );
 }

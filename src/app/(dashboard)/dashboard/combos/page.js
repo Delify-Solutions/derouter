@@ -9,6 +9,7 @@ import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModa
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { PRICING_FIELDS, EMPTY_PRICING, pricingToDraft, parsePricingDraft, closestPoolModel } from "@/shared/utils/pricingMatch";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -52,8 +53,11 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
+  const [poolPricing, setPoolPricing] = useState({}); // { provider: { model: {5 fields} } }
+  const [comboPricing, setComboPricing] = useState({}); // { comboName: {5 fields} }
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
+  const [testState, setTestState] = useState(null); // { comboName, loading, result }
   const { copied, copy } = useCopyToClipboard();
 
   useEffect(() => {
@@ -62,17 +66,21 @@ export default function CombosPage() {
 
   const fetchData = async () => {
     try {
-      const [combosRes, providersRes, settingsRes] = await Promise.all([
+      const [combosRes, providersRes, settingsRes, poolPricingRes, comboPricingRes] = await Promise.all([
         fetch("/api/combos"),
         fetch("/api/providers"),
         fetch("/api/settings"),
+        fetch("/api/pricing"),
+        fetch("/api/pricing?combo=1"),
       ]);
       const combosData = await combosRes.json();
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
-      
+
       // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
       if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
+      if (poolPricingRes.ok) setPoolPricing(await poolPricingRes.json().catch(() => ({})));
+      if (comboPricingRes.ok) setComboPricing(await comboPricingRes.json().catch(() => ({})));
       if (providersRes.ok) {
         setActiveProviders(providersData.connections || []);
       }
@@ -159,6 +167,25 @@ export default function CombosPage() {
     });
   };
 
+  // Test a combo by sending a proxied chat completion with model = combo.name.
+  // Reuses the existing /api/models/test endpoint (pingModelByKind), which resolves
+  // an internal unrestricted key and POSTs to /api/v1/chat/completions internally.
+  const handleTestCombo = async (comboName) => {
+    if (testState?.loading) return;
+    setTestState({ comboName, loading: true, result: null });
+    try {
+      const res = await fetch("/api/models/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: comboName, kind: "llm" }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: "Invalid response from test endpoint" }));
+      setTestState({ comboName, loading: false, result: data });
+    } catch (error) {
+      setTestState({ comboName, loading: false, result: { ok: false, error: error.message || "Network error" } });
+    }
+  };
+
   // Merge a per-combo strategy patch into settings.comboStrategies. Passing an empty
   // patch (strategy back to default "fallback") drops the entry entirely.
   const handleSetComboStrategy = async (comboName, patch) => {
@@ -238,6 +265,7 @@ export default function CombosPage() {
               onCopy={copy}
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
+              onTest={() => handleTestCombo(combo.name)}
               strategy={comboStrategies[combo.name] || {}}
               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
             />
@@ -261,6 +289,8 @@ export default function CombosPage() {
           onClose={() => setShowCreateModal(false)}
           onSave={handleCreate}
           activeProviders={activeProviders}
+          poolPricing={poolPricing}
+          comboPricing={comboPricing}
         />
       )}
 
@@ -272,6 +302,8 @@ export default function CombosPage() {
           onClose={() => setEditingCombo(null)}
           onSave={(data) => handleUpdate(editingCombo.id, data)}
           activeProviders={activeProviders}
+          poolPricing={poolPricing}
+          comboPricing={comboPricing}
         />
       )}
 
@@ -284,7 +316,100 @@ export default function CombosPage() {
         message={confirmState?.message}
         variant="danger"
       />
+
+      {/* Combo Test Modal */}
+      <TestComboModal
+        testState={testState}
+        onClose={() => setTestState(null)}
+      />
     </div>
+  );
+}
+
+function TestComboModal({ testState, onClose }) {
+  const isOpen = !!testState;
+  const loading = testState?.loading;
+  const result = testState?.result;
+  const comboName = testState?.comboName;
+  const ok = result?.ok === true;
+  const content = result?.content;
+  const note = result?.note;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={comboName ? `Test: ${comboName}` : "Test Combo"}
+      size="lg"
+    >
+      <div className="flex flex-col gap-4">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-text-muted text-sm">
+            <span className="material-symbols-outlined text-[20px]" style={{ animation: "spin 1s linear infinite" }}>
+              progress_activity
+            </span>
+            Testing combo…
+          </div>
+        ) : result ? (
+          <>
+            {/* Status row */}
+            <div className="flex items-center gap-2 text-sm">
+              <span className="material-symbols-outlined text-[20px]" style={{ color: ok ? "#22c55e" : "#ef4444" }}>
+                {ok ? "check_circle" : "cancel"}
+              </span>
+              <span className={ok ? "text-green-600 dark:text-green-400 font-medium" : "text-red-600 dark:text-red-400 font-medium"}>
+                {ok ? "Success" : "Failed"}
+              </span>
+              {result.latencyMs != null && (
+                <span className="text-text-muted">· {result.latencyMs}ms</span>
+              )}
+              {result.status && (
+                <span className="text-text-muted">· HTTP {result.status}</span>
+              )}
+            </div>
+
+            {/* Error */}
+            {!ok && result.error && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-600 dark:text-red-400 break-words">
+                {String(result.error)}
+              </div>
+            )}
+
+            {/* Reply content */}
+            {ok && content && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-text-muted">reply</span>
+                  <span className="text-xs font-medium text-text-muted uppercase tracking-wide">Assistant Reply</span>
+                </div>
+                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main whitespace-pre-wrap dark:border-white/5 dark:bg-white/5 sm:p-4">
+                  {content}
+                </pre>
+              </div>
+            )}
+
+            {/* Reasoning-only note */}
+            {ok && !content && note && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">info</span>
+                {note}
+              </div>
+            )}
+
+            {/* Empty success with no content/note */}
+            {ok && !content && !note && (
+              <div className="text-sm text-text-muted">
+                Combo responded, but no reply content was returned.
+              </div>
+            )}
+          </>
+        ) : null}
+
+        <div className="flex justify-end pt-1">
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -294,7 +419,7 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onTest, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
@@ -362,7 +487,16 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-1 sm:flex">
+          <div className="grid grid-cols-4 gap-1 sm:flex">
+            <button
+              onClick={(e) => { e.stopPropagation(); onTest?.(combo.name); }}
+              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+              title="Test combo"
+              disabled={combo.models.length === 0}
+            >
+              <span className="material-symbols-outlined text-[18px]">science</span>
+              <span className="text-[10px] leading-tight">Test</span>
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); onCopy(combo.name, `combo-${combo.id}`); }}
               className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
@@ -650,7 +784,7 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null }) {
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, poolPricing = {}, comboPricing = {} }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
   const [models, setModels] = useState(combo?.models || []);
@@ -658,6 +792,13 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState("");
   const [modelAliases, setModelAliases] = useState({});
+
+  // Pricing state (string draft for 5 fields) + touched flag (whether admin edited).
+  // In edit mode, prefill from the combo's existing saved pricing. If a custom price
+  // exists, mark touched so auto-fill doesn't clobber it on model changes.
+  const existingPricing = combo?.name ? comboPricing[combo.name] : null;
+  const [pricing, setPricing] = useState(() => existingPricing ? pricingToDraft(existingPricing) : { ...EMPTY_PRICING });
+  const [pricingTouched, setPricingTouched] = useState(!!existingPricing);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -723,6 +864,38 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     setModels(models.filter((m) => m !== model.value));
   };
 
+  // Auto-fill pricing from the closest pool model when models change, but only if the
+  // admin hasn't manually edited the pricing fields. Picks the last-added model's pool
+  // price (exact (provider, model) match first, fuzzy fallback). Suggestion only.
+  useEffect(() => {
+    if (pricingTouched) return;
+    if (!models.length || !poolPricing || Object.keys(poolPricing).length === 0) return;
+    const last = models[models.length - 1];
+    const slash = last.indexOf("/");
+    const provider = slash > 0 ? last.slice(0, slash) : null;
+    const model = slash > 0 ? last.slice(slash + 1) : last;
+    const match = closestPoolModel(poolPricing, provider, model);
+    setPricing(match ? pricingToDraft(match) : { ...EMPTY_PRICING });
+  }, [models, pricingTouched, poolPricing]);
+
+  const autofillPricing = () => {
+    if (!models.length) return;
+    const first = models[0];
+    const slash = first.indexOf("/");
+    const provider = slash > 0 ? first.slice(0, slash) : null;
+    const model = slash > 0 ? first.slice(slash + 1) : first;
+    const match = closestPoolModel(poolPricing, provider, model);
+    if (match) {
+      setPricing(pricingToDraft(match));
+      setPricingTouched(true);
+    }
+  };
+
+  const handlePricingFieldChange = (key, value) => {
+    setPricing((prev) => ({ ...prev, [key]: value }));
+    setPricingTouched(true);
+  };
+
   const handleRemoveModel = (index) => {
     setModels(models.filter((_, i) => i !== index));
   };
@@ -744,11 +917,25 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   const handleSave = async () => {
     if (!validateName(name)) return;
     setSaving(true);
-    await onSave({ name: name.trim(), models });
+    const payload = { name: name.trim(), models };
+    // Include pricing only if the admin touched the fields (set or edited a custom price).
+    // Untouched auto-fill suggestions are not persisted unless the admin commits to them.
+    if (pricingTouched) {
+      try {
+        payload.pricing = parsePricingDraft(pricing);
+      } catch (e) {
+        setNameError(""); // name error slot reused — or add a separate pricing error
+        setSaving(false);
+        alert(e.message);
+        return;
+      }
+    }
+    await onSave(payload);
     setSaving(false);
   };
 
   const isEdit = !!combo;
+  const hasCustomPrice = pricingTouched && Object.values(pricing).some((v) => v !== "" && v != null);
 
   return (
     <>
@@ -816,6 +1003,49 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               <span className="material-symbols-outlined text-[16px]">add</span>
               Add Model
             </button>
+          </div>
+
+          {/* Pricing — one 5-field price per combo (applied to every request to this
+              combo regardless of which pool model routes). Auto-fills from the closest
+              pool model price as a suggestion; admin can override. */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-sm font-medium">Pricing ($/1M tokens)</label>
+              <button
+                type="button"
+                onClick={autofillPricing}
+                disabled={!models.length}
+                className="text-[11px] text-primary hover:underline disabled:text-text-muted disabled:no-underline flex items-center gap-0.5"
+                title="Fill from the closest pool model price"
+              >
+                <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
+                Auto-fill
+              </button>
+            </div>
+            {hasCustomPrice ? (
+              <p className="text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1 mb-2">
+                <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                Custom price set — overrides pool model defaults.
+              </p>
+            ) : (
+              <p className="text-[11px] text-text-muted flex items-center gap-1 mb-2">
+                <span className="material-symbols-outlined text-[12px]">info</span>
+                {models.length ? "Auto-filled from pool model defaults — edit to set a custom price." : "Add a model to auto-fill from pool prices."}
+              </p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {PRICING_FIELDS.map((f) => (
+                <Input
+                  key={f.key}
+                  label={f.label}
+                  type="number"
+                  step="0.01"
+                  value={pricing[f.key]}
+                  onChange={(e) => handlePricingFieldChange(f.key, e.target.value)}
+                  placeholder="0.00"
+                />
+              ))}
+            </div>
           </div>
 
           {/* Actions */}

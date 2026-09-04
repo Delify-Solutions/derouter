@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Select, Modal, CardSkeleton, Toggle, ConfirmModal, AllowedModelsPicker } from "@/shared/components";
+import Pagination from "@/shared/components/Pagination";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   TUNNEL_BENEFITS,
@@ -76,6 +77,62 @@ export default function APIPageClient({ machineId }) {
 
   // API key visibility toggle state
   const [visibleKeys, setVisibleKeys] = useState(new Set());
+
+  // Advanced key creation fields
+  const [groups, setGroups] = useState([]);
+  const [newKeyGroup, setNewKeyGroup] = useState("");     // "" = custom
+  const [newKeyRpm, setNewKeyRpm] = useState("");
+  const [newKeyTpm, setNewKeyTpm] = useState("");
+  const [newKeyBudget, setNewKeyBudget] = useState("");
+  const [newKeyResetWindow, setNewKeyResetWindow] = useState("");
+  const [newKeyExpiry, setNewKeyExpiry] = useState("");   // "" = never
+  const [newKeyModels, setNewKeyModels] = useState([]);    // string[] (from picker)
+  // Per-field "touched" set: a field is touched once the admin edits it directly. Group-driven
+  // prefill only fills untouched fields, so switching groups never clobbers manual overrides.
+  const [newKeyTouched, setNewKeyTouched] = useState(new Set());
+  const [createError, setCreateError] = useState("");
+
+  // Key search + edit modal
+  const [keySearch, setKeySearch] = useState("");
+  const [keyStatusFilter, setKeyStatusFilter] = useState("all");   // all | active | paused
+  const [keyGroupFilter, setKeyGroupFilter] = useState("all");      // all | <groupId>
+  const [keyPage, setKeyPage] = useState(1);
+  const [keyPageSize, setKeyPageSize] = useState(20);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editGroup, setEditGroup] = useState("");
+  const [editRpm, setEditRpm] = useState("");
+  const [editTpm, setEditTpm] = useState("");
+  const [editBudget, setEditBudget] = useState("");
+  const [editResetWindow, setEditResetWindow] = useState("");
+  const [editExpiry, setEditExpiry] = useState("");
+  const [editModels, setEditModels] = useState([]);
+  const [editTouched, setEditTouched] = useState(new Set());
+  const [editError, setEditError] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  const KEY_PAGE_SIZE = 20;
+
+  // Filtered + paginated API keys.
+  const keyFiltered = useMemo(() => {
+    const q = keySearch.trim().toLowerCase();
+    return keys.filter((key) => {
+      if (q && !(key.name || "").toLowerCase().includes(q)) return false;
+      if (keyStatusFilter === "active" && key.isActive === false) return false;
+      if (keyStatusFilter === "paused" && key.isActive !== false) return false;
+      if (keyGroupFilter === "none" && key.groupId) return false;
+      if (keyGroupFilter !== "all" && keyGroupFilter !== "none" && key.groupId !== keyGroupFilter) return false;
+      return true;
+    });
+  }, [keys, keySearch, keyStatusFilter, keyGroupFilter]);
+
+  const keyTotalPages = Math.max(1, Math.ceil(keyFiltered.length / keyPageSize));
+  const keyCurrentPage = Math.min(keyPage, keyTotalPages);
+  const keyPageRows = keyFiltered.slice((keyCurrentPage - 1) * keyPageSize, keyCurrentPage * keyPageSize);
+
+  // Reset to first page when filters change.
+  useEffect(() => { setKeyPage(1); }, [keySearch, keyStatusFilter, keyGroupFilter, keyPageSize]);
 
   // Client-side local/remote detection (UI hint only, not a security gate)
   const [isRemoteHost, setIsRemoteHost] = useState(false);
@@ -622,25 +679,162 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
+  const loadGroups = useCallback(async () => {
+    try {
+      const res = await fetch("/api/groups");
+      if (!res.ok) return;
+      const data = await res.json();
+      setGroups(data.groups || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Apply group defaults to the limit fields, but ONLY for fields the admin hasn't
+  // directly touched (manual overrides survive a group change). When groupId is "" /
+  // null (Custom), untouched fields are cleared. `setters` maps each field key to its
+  // state setter; `touched` is the Set of already-edited field keys.
+  const applyGroupPrefill = (groupId, touched, setters) => {
+    const group = groupId ? groups.find((g) => g.id === groupId) : null;
+    const fields = [
+      { key: "rpm", value: group ? group.rpm : null, set: setters.setRpm, fmt: (v) => (v != null ? String(v) : "") },
+      { key: "tpm", value: group ? group.tpm : null, set: setters.setTpm, fmt: (v) => (v != null ? String(v) : "") },
+      { key: "budgetUsd", value: group ? group.budgetUsd : null, set: setters.setBudget, fmt: (v) => (v != null ? String(v) : "") },
+      { key: "resetWindow", value: group ? group.resetWindow : null, set: setters.setResetWindow, fmt: (v) => (v || "") },
+      { key: "allowedModels", value: group ? group.allowedModels : null, set: setters.setModels, fmt: (v) => (Array.isArray(v) ? v : []) },
+    ];
+    for (const f of fields) {
+      if (touched.has(f.key)) continue; // don't clobber a manual override
+      f.set(f.fmt(f.value));
+    }
+  };
+
+  const markNewKeyTouched = (key) =>
+    setNewKeyTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  const markEditTouched = (key) =>
+    setEditTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+
+  const resetNewKeyFields = () => {
+    setNewKeyName("");
+    setNewKeyGroup("");
+    setNewKeyRpm("");
+    setNewKeyTpm("");
+    setNewKeyBudget("");
+    setNewKeyResetWindow("");
+    setNewKeyExpiry("");
+    setNewKeyModels([]);
+    setNewKeyTouched(new Set());
+    setCreateError("");
+  };
+
+  const openAddModal = () => {
+    resetNewKeyFields();
+    loadGroups();
+    setShowAddModal(true);
+  };
+
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
+    setCreateError("");
+
+    // Expiry presets → ISO timestamp.
+    const expiryPresetToIso = (preset) => {
+      if (!preset) return null;
+      const now = Date.now();
+      const map = { "5h": 5 * 3600000, day: 86400000, week: 604800000 };
+      if (preset === "unlimited") return null;
+      const ms = map[preset];
+      if (!ms) return preset; // raw ISO fallback
+      return new Date(now + ms).toISOString();
+    };
+
+    const body = {
+      name: newKeyName.trim(),
+      groupId: newKeyGroup || null,
+      rpm: newKeyRpm ? Number(newKeyRpm) : null,
+      tpm: newKeyTpm ? Number(newKeyTpm) : null,
+      budgetUsd: newKeyBudget ? Number(newKeyBudget) : null,
+      resetWindow: newKeyResetWindow || null,
+      expiresAt: expiryPresetToIso(newKeyExpiry),
+      allowedModels: newKeyModels && newKeyModels.length ? newKeyModels : null,
+    };
 
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
 
       if (res.ok) {
         setCreatedKey(data.key);
         await fetchData();
-        setNewKeyName("");
+        resetNewKeyFields();
         setShowAddModal(false);
+      } else {
+        setCreateError(data.error || "Failed to create key");
       }
     } catch (error) {
-      console.log("Error creating key:", error);
+      setCreateError(error.message || "Failed to create key");
+    }
+  };
+
+  const openEditKey = (k) => {
+    setEditingKey(k);
+    setEditName(k.name || "");
+    setEditGroup(k.groupId || "");
+    setEditRpm(k.rpm != null ? String(k.rpm) : "");
+    setEditTpm(k.tpm != null ? String(k.tpm) : "");
+    setEditBudget(k.budgetUsd != null ? String(k.budgetUsd) : "");
+    setEditResetWindow(k.resetWindow || "");
+    // Expiry: include existing ISO expiry as a raw option by leaving blank+showing note;
+    // preset quick-set otherwise.
+    setEditExpiry(k.expiresAt ? "keep" : "");
+    setEditModels(Array.isArray(k.allowedModels) ? k.allowedModels : []);
+    setEditTouched(new Set());
+    setEditError("");
+    loadGroups();
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingKey) return;
+    setEditSaving(true);
+    setEditError("");
+
+    const expiryMap = { "5h": 5 * 3600000, day: 86400000, week: 604800000 };
+    let expiresAt;
+    if (editExpiry === "" || editExpiry === "never") expiresAt = null;
+    else if (editExpiry === "keep") expiresAt = editingKey.expiresAt || null;
+    else if (editExpiry === "unlimited") expiresAt = null;
+    else if (expiryMap[editExpiry]) expiresAt = new Date(Date.now() + expiryMap[editExpiry]).toISOString();
+    else expiresAt = editExpiry;
+
+    const body = {
+      name: editName.trim() || editingKey.name,
+      groupId: editGroup || null,
+      rpm: editRpm ? Number(editRpm) : null,
+      tpm: editTpm ? Number(editTpm) : null,
+      budgetUsd: editBudget ? Number(editBudget) : null,
+      resetWindow: editResetWindow || null,
+      expiresAt,
+      allowedModels: editModels && editModels.length ? editModels : null,
+    };
+
+    try {
+      const res = await fetch(`/api/keys/${editingKey.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { setEditError(data.error || "Failed to save"); return; }
+      await fetchData();
+      setShowEditModal(false);
+      setEditingKey(null);
+    } catch (e) {
+      setEditError(e.message || "Failed to save");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -970,7 +1164,7 @@ export default function APIPageClient({ machineId }) {
             <span className="material-symbols-outlined text-primary">vpn_key</span>
             API Keys
           </h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
+          <Button icon="add" onClick={openAddModal}>
             Create Key
           </Button>
         </div>
@@ -1001,78 +1195,202 @@ export default function APIPageClient({ machineId }) {
             </div>
             <p className="text-text-main font-medium mb-1">No API keys yet</p>
             <p className="text-sm text-text-muted mb-4">Create your first API key to get started</p>
-            <Button icon="add" onClick={() => setShowAddModal(true)}>
+            <Button icon="add" onClick={openAddModal}>
               Create Key
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col">
-            {keys.map((key) => (
-              <div
-                key={key.id}
-                className={`group flex items-center justify-between py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${key.isActive === false ? "opacity-60" : ""}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{key.name}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs text-text-muted font-mono">
-                      {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
-                    </code>
-                    <button
-                      onClick={() => toggleKeyVisibility(key.id)}
-                      className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
-                      title={visibleKeys.has(key.id) ? "Hide key" : "Show key"}
-                    >
-                      <span className="material-symbols-outlined text-[14px]">
-                        {visibleKeys.has(key.id) ? "visibility_off" : "visibility"}
+          <>
+          {/* Key filters */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={keySearch}
+                onChange={(e) => setKeySearch(e.target.value)}
+                placeholder="Search keys by name…"
+                className="w-full py-2 px-3 pr-9 text-sm bg-surface-2 border border-transparent rounded-[10px] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/40"
+              />
+              <span className="material-symbols-outlined text-[18px] absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">search</span>
+            </div>
+            <Select
+              value={keyStatusFilter}
+              onChange={(e) => setKeyStatusFilter(e.target.value)}
+              options={[
+                { value: "all", label: "All statuses" },
+                { value: "active", label: "Active" },
+                { value: "paused", label: "Paused" },
+              ]}
+              className="sm:w-40"
+            />
+            <Select
+              value={keyGroupFilter}
+              onChange={(e) => setKeyGroupFilter(e.target.value)}
+              options={[
+                { value: "all", label: "All groups" },
+                { value: "none", label: "Custom (no group)" },
+                ...groups.map((g) => ({ value: g.id, label: g.name })),
+              ]}
+              className="sm:w-48"
+            />
+          </div>
+
+          <div className="text-xs text-text-muted mb-3">
+            <span className="font-medium text-text-main">{keyFiltered.length}</span> of {keys.length} keys
+          </div>
+
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-text-muted border-b border-border-subtle">
+                  <th className="text-left font-medium px-2 py-2 whitespace-nowrap">Name / Key</th>
+                  <th className="text-left font-medium px-2 py-2 whitespace-nowrap">Group</th>
+                  <th className="text-left font-medium px-2 py-2 whitespace-nowrap">Limits</th>
+                  <th className="text-left font-medium px-2 py-2 whitespace-nowrap">Created</th>
+                  <th className="text-left font-medium px-2 py-2 whitespace-nowrap">Status</th>
+                  <th className="text-right font-medium px-2 py-2 whitespace-nowrap w-20">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keyPageRows
+                  .map((key) => (
+                <tr key={key.id} className={`border-b border-border-subtle/50 hover:bg-surface-2/50 ${key.isActive === false ? "opacity-60" : ""}`}>
+                  <td className="px-2 py-3">
+                    <p className="font-medium">{key.name}</p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <code className="text-xs text-text-muted font-mono">
+                        {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
+                      </code>
+                      <button
+                        onClick={() => toggleKeyVisibility(key.id)}
+                        className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                        title={visibleKeys.has(key.id) ? "Hide key" : "Show key"}
+                      >
+                        <span className="material-symbols-outlined text-[14px]">
+                          {visibleKeys.has(key.id) ? "visibility_off" : "visibility"}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => copy(key.key, key.id)}
+                        className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                        title="Copy key"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">
+                          {copied === key.id ? "check" : "content_copy"}
+                        </span>
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-2 py-3">
+                    {key.groupId ? (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium whitespace-nowrap">
+                        {(groups.find((g) => g.id === key.groupId)?.name) || "Group"}
                       </span>
-                    </button>
-                    <button
-                      onClick={() => copy(key.key, key.id)}
-                      className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">
-                        {copied === key.id ? "check" : "content_copy"}
-                      </span>
-                    </button>
-                  </div>
-                  <p className="text-xs text-text-muted mt-1">
-                    Created {new Date(key.createdAt).toLocaleDateString()}
-                  </p>
-                  {key.isActive === false && (
-                    <p className="text-xs text-orange-500 mt-1">Paused</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Toggle
-                    size="sm"
-                    checked={key.isActive ?? true}
-                    onChange={(checked) => {
-                      if (key.isActive && !checked) {
-                        setConfirmState({
-                          title: "Pause API Key",
-                          message: `Pause API key "${key.name}"?\n\nThis key will stop working immediately but can be resumed later.`,
-                          onConfirm: async () => {
-                            setConfirmState(null);
+                    ) : (
+                      <span className="text-xs text-text-muted">Custom</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-3">
+                    {(key.rpm != null || key.tpm != null || key.budgetUsd != null || key.expiresAt || (key.allowedModels && key.allowedModels.length)) ? (
+                      <div className="flex flex-wrap gap-1">
+                        {key.expiresAt && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium" title={`Expires ${new Date(key.expiresAt).toLocaleString()}`}>
+                            exp {new Date(key.expiresAt).toLocaleDateString()}
+                          </span>
+                        )}
+                        {key.rpm != null && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-medium" title="Requests per minute">
+                            {key.rpm} RPM
+                          </span>
+                        )}
+                        {key.tpm != null && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-medium" title="Tokens per minute">
+                            {key.tpm} TPM
+                          </span>
+                        )}
+                        {key.budgetUsd != null && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 font-medium" title={key.resetWindow ? `Reset ${key.resetWindow}` : "Budget"}>
+                            ${key.budgetUsd}{key.resetWindow ? `/${key.resetWindow}` : ""}
+                          </span>
+                        )}
+                        {key.allowedModels && key.allowedModels.length > 0 && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-medium" title={`Allowed: ${key.allowedModels.join(", ")}`}>
+                            {key.allowedModels.length} model{key.allowedModels.length > 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-text-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-3 text-text-muted whitespace-nowrap">
+                    {new Date(key.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-2 py-3">
+                    <div className="flex items-center gap-2">
+                      <Toggle
+                        size="sm"
+                        checked={key.isActive ?? true}
+                        onChange={(checked) => {
+                          if (key.isActive && !checked) {
+                            setConfirmState({
+                              title: "Pause API Key",
+                              message: `Pause API key "${key.name}"?\n\nThis key will stop working immediately but can be resumed later.`,
+                              onConfirm: async () => {
+                                setConfirmState(null);
+                                handleToggleKey(key.id, checked);
+                              }
+                            });
+                          } else {
                             handleToggleKey(key.id, checked);
                           }
-                        });
-                      } else {
-                        handleToggleKey(key.id, checked);
-                      }
-                    }}
-                    title={key.isActive ? "Pause key" : "Resume key"}
-                  />
-                  <button
-                    onClick={() => handleDeleteKey(key.id)}
-                    className="p-2 hover:bg-red-500/10 rounded text-red-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+                        }}
+                        title={key.isActive ? "Pause key" : "Resume key"}
+                      />
+                      <span className="text-xs text-text-muted">
+                        {key.isActive === false ? "Paused" : "Active"}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-2 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => openEditKey(key)}
+                      className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                      title="Edit key"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">edit</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteKey(key.id)}
+                      className="p-1.5 hover:bg-red-500/10 rounded text-red-500 transition-all ml-1"
+                      title="Delete key"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {keyPageRows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center text-text-muted py-10">
+                    No keys match the current filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            </table>
           </div>
+
+          {keyFiltered.length > keyPageSize && (
+            <Pagination
+              currentPage={keyCurrentPage}
+              pageSize={keyPageSize}
+              totalItems={keyFiltered.length}
+              onPageChange={setKeyPage}
+              onPageSizeChange={(s) => setKeyPageSize(Number(s) || KEY_PAGE_SIZE)}
+            />
+          )}
+          </>
         )}
       </Card>
 
@@ -1082,7 +1400,7 @@ export default function APIPageClient({ machineId }) {
         title="Create API Key"
         onClose={() => {
           setShowAddModal(false);
-          setNewKeyName("");
+          resetNewKeyFields();
         }}
       >
         <div className="flex flex-col gap-4">
@@ -1092,6 +1410,95 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Production Key"
           />
+
+          <Select
+            label="Group"
+            value={newKeyGroup}
+            onChange={(e) => {
+              const v = e.target.value;
+              setNewKeyGroup(v);
+              applyGroupPrefill(v, newKeyTouched, {
+                setRpm: setNewKeyRpm,
+                setTpm: setNewKeyTpm,
+                setBudget: setNewKeyBudget,
+                setResetWindow: setNewKeyResetWindow,
+                setModels: setNewKeyModels,
+              });
+            }}
+            placeholder="Custom (no group)"
+            options={[
+              { value: "", label: "Custom (standalone)" },
+              ...groups.map((g) => ({ value: g.id, label: g.name })),
+            ]}
+            hint={newKeyGroup ? "Inherits group config; fields below can narrow it." : "Set all limits directly on this key."}
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="RPM"
+              type="number"
+              value={newKeyRpm}
+              onChange={(e) => { setNewKeyRpm(e.target.value); markNewKeyTouched("rpm"); }}
+              placeholder="Unlimited"
+            />
+            <Input
+              label="TPM"
+              type="number"
+              value={newKeyTpm}
+              onChange={(e) => { setNewKeyTpm(e.target.value); markNewKeyTouched("tpm"); }}
+              placeholder="Unlimited"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Budget ($)"
+              type="number"
+              step="0.01"
+              value={newKeyBudget}
+              onChange={(e) => { setNewKeyBudget(e.target.value); markNewKeyTouched("budgetUsd"); }}
+              placeholder="Unlimited"
+            />
+            <Select
+              label="Reset window"
+              value={newKeyResetWindow}
+              onChange={(e) => { setNewKeyResetWindow(e.target.value); markNewKeyTouched("resetWindow"); }}
+              placeholder="No reset"
+              options={[
+                { value: "", label: "No reset / unlimited" },
+                { value: "5h", label: "Every 5 hours" },
+                { value: "day", label: "Every day" },
+                { value: "week", label: "Every week" },
+              ]}
+            />
+          </div>
+
+          <Select
+            label="Expires"
+            value={newKeyExpiry}
+            onChange={(e) => setNewKeyExpiry(e.target.value)}
+            placeholder="Never"
+            options={[
+              { value: "", label: "Never" },
+              { value: "5h", label: "In 5 hours" },
+              { value: "day", label: "In 1 day" },
+              { value: "week", label: "In 1 week" },
+              { value: "unlimited", label: "Unlimited" },
+            ]}
+          />
+
+          <AllowedModelsPicker
+            value={newKeyModels}
+            onChange={(v) => { setNewKeyModels(v); markNewKeyTouched("allowedModels"); }}
+          />
+
+          {createError && (
+            <p className="text-sm text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">error</span>
+              {createError}
+            </p>
+          )}
+
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1099,7 +1506,7 @@ export default function APIPageClient({ machineId }) {
             <Button
               onClick={() => {
                 setShowAddModal(false);
-                setNewKeyName("");
+                resetNewKeyFields();
               }}
               variant="ghost"
               fullWidth
@@ -1142,6 +1549,101 @@ export default function APIPageClient({ machineId }) {
           <Button onClick={() => setCreatedKey(null)} fullWidth>
             Done
           </Button>
+        </div>
+      </Modal>
+
+      {/* Edit Key Modal */}
+      <Modal
+        isOpen={showEditModal}
+        title={editingKey ? `Edit "${editingKey.name}"` : "Edit Key"}
+        onClose={() => { setShowEditModal(false); setEditingKey(null); }}
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Key Name"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Production Key"
+          />
+
+          <Select
+            label="Group"
+            value={editGroup}
+            onChange={(e) => {
+              const v = e.target.value;
+              setEditGroup(v);
+              applyGroupPrefill(v, editTouched, {
+                setRpm: setEditRpm,
+                setTpm: setEditTpm,
+                setBudget: setEditBudget,
+                setResetWindow: setEditResetWindow,
+                setModels: setEditModels,
+              });
+            }}
+            placeholder="Custom (no group)"
+            options={[
+              { value: "", label: "Custom (standalone)" },
+              ...groups.map((g) => ({ value: g.id, label: g.name })),
+            ]}
+            hint={editGroup ? "Inherits group config; fields below can narrow it." : "Set all limits directly on this key."}
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="RPM" type="number" value={editRpm} onChange={(e) => { setEditRpm(e.target.value); markEditTouched("rpm"); }} placeholder="Unlimited" />
+            <Input label="TPM" type="number" value={editTpm} onChange={(e) => { setEditTpm(e.target.value); markEditTouched("tpm"); }} placeholder="Unlimited" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Budget ($)" type="number" step="0.01" value={editBudget} onChange={(e) => { setEditBudget(e.target.value); markEditTouched("budgetUsd"); }} placeholder="Unlimited" />
+            <Select
+              label="Reset window"
+              value={editResetWindow}
+              onChange={(e) => { setEditResetWindow(e.target.value); markEditTouched("resetWindow"); }}
+              placeholder="No reset"
+              options={[
+                { value: "", label: "No reset / unlimited" },
+                { value: "5h", label: "Every 5 hours" },
+                { value: "day", label: "Every day" },
+                { value: "week", label: "Every week" },
+              ]}
+            />
+          </div>
+
+          <Select
+            label="Expires"
+            value={editExpiry}
+            onChange={(e) => setEditExpiry(e.target.value)}
+            placeholder="Never"
+            options={[
+              { value: "never", label: "Never" },
+              { value: "keep", label: editingKey?.expiresAt ? `Keep current (${new Date(editingKey.expiresAt).toLocaleDateString()})` : "Keep current (none)" },
+              { value: "5h", label: "In 5 hours" },
+              { value: "day", label: "In 1 day" },
+              { value: "week", label: "In 1 week" },
+              { value: "unlimited", label: "Unlimited" },
+            ]}
+          />
+
+          <AllowedModelsPicker
+            value={editModels}
+            onChange={(v) => { setEditModels(v); markEditTouched("allowedModels"); }}
+          />
+
+          {editError && (
+            <p className="text-sm text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">error</span>
+              {editError}
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <Button onClick={handleSaveEdit} fullWidth disabled={editSaving}>
+              {editSaving ? "Saving..." : "Save"}
+            </Button>
+            <Button onClick={() => { setShowEditModal(false); setEditingKey(null); }} variant="ghost" fullWidth>
+              Cancel
+            </Button>
+          </div>
         </div>
       </Modal>
 

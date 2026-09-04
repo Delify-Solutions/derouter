@@ -31,6 +31,7 @@ const PUBLIC_API_PATHS = [
   "/api/auth/saml",
   "/api/version",
   "/api/settings/require-login",
+  "/api/usage/key",
 ];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
@@ -66,6 +67,7 @@ const PROTECTED_API_PATHS = [
   "/api/mcp",
   "/api/translator",
   "/api/tunnel",
+  "/api/groups",
 ];
 
 // Routes that spawn child processes or read host secrets — restrict to localhost.
@@ -130,6 +132,12 @@ export function isLocalRequest(request) {
     } catch { return false; }
   }
   return true;
+}
+
+// Hide admin UI: unauthenticated access to / or /dashboard returns 404.
+// The login form lives only at the secret path /admin/ss.
+function notFound() {
+  return NextResponse.json({ error: "Not Found" }, { status: 404 });
 }
 
 function isPublicLlmApi(pathname) {
@@ -246,7 +254,7 @@ export async function proxy(request) {
           const tunnelHost = settings.tunnelUrl ? new URL(settings.tunnelUrl).hostname.toLowerCase() : "";
           const tailscaleHost = settings.tailscaleUrl ? new URL(settings.tailscaleUrl).hostname.toLowerCase() : "";
           if ((tunnelHost && host === tunnelHost) || (tailscaleHost && host === tailscaleHost)) {
-            return NextResponse.redirect(new URL("/login", request.url));
+            return notFound();
           }
         }
       }
@@ -263,16 +271,30 @@ export async function proxy(request) {
       if (await verifyDashboardAuthToken(token)) {
         return NextResponse.next();
       } else {
-        return NextResponse.redirect(new URL("/login", request.url));
+        return notFound();
       }
     }
 
-    return NextResponse.redirect(new URL("/login", request.url));
+    return notFound();
   }
 
-  // Redirect / to /dashboard if logged in, or /dashboard if it's the root
+  // Hide admin UI: unauthenticated / returns 404.
+  // Authenticated / falls through to src/app/page.js which redirects to /dashboard.
   if (pathname === "/") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    if (await isAuthenticated(request)) return NextResponse.next();
+    return notFound();
+  }
+
+  // Old login path is removed — return JSON 404 so it doesn't render the
+  // themed not-found page (keeps the admin entry point uniform and hidden).
+  if (pathname === "/login" || pathname.startsWith("/login/")) {
+    return notFound();
+  }
+
+  // Public usage check page (#/usage, hash-routed) — no admin login required.
+  // The page fetches /api/usage/key (public) with the user's key.
+  if (pathname === "/usage") {
+    return NextResponse.next();
   }
 
   return NextResponse.next();

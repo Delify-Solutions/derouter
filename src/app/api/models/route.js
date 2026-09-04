@@ -5,7 +5,9 @@ import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 
-// GET /api/models - Get models with aliases
+// GET /api/models - Get models with aliases (admin catalog; not key-scoped).
+// Key/group allow-lists are managed as combo names via the AllowedModelsPicker,
+// so this endpoint just returns the full pool catalog for admin/combos use.
 export async function GET() {
   try {
     const modelAliases = await getModelAliases();
