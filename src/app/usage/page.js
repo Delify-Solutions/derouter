@@ -43,6 +43,8 @@ export default function UsagePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [filterModel, setFilterModel] = useState("");   // Request History model filter
   const [filterStatus, setFilterStatus] = useState("");// Request History status filter (200/4xx/...)
+  const [clearing, setClearing] = useState(false);       // clear-history DELETE in flight
+  const [confirmClear, setConfirmClear] = useState(false); // confirm popover open
 
   const STORAGE_KEY = "derouter.usage.key";
 
@@ -146,6 +148,31 @@ export default function UsagePage() {
   const switchPeriod = (p) => {
     setPeriod(p);
     if (keyInput.trim()) lookup(keyInput.trim(), p);
+  };
+
+  // Wipe this key's entire request log (usageHistory + requestDetails). Gated by
+  // the key itself on the server (DELETE /api/usage/key/history?key=). A confirm
+  // popover guards the action; after success we reload the receipts so the page
+  // reflects an empty history. Aggregate admin stats (usageDaily, lifetime
+  // counter) are intentionally NOT cleared — those are admin-owned, not the key
+  // holder's to scrub.
+  const clearHistory = async () => {
+    const k = keyInput.trim();
+    if (!k) return;
+    setClearing(true);
+    try {
+      const res = await fetch(`/api/usage/key/history?key=${encodeURIComponent(k)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("clear failed");
+      setConfirmClear(false);
+      setDetail(null);
+      setShowRaw(false);
+      // Reload the active period so history/summary/rate refresh to empty.
+      await lookup(k, period);
+    } catch {
+      setError("Failed to clear history.");
+    } finally {
+      setClearing(false);
+    }
   };
 
   const copy = async (text) => {
@@ -464,6 +491,37 @@ export default function UsagePage() {
                 <h3 className="text-sm font-semibold">Request History</h3>
                 <span className="text-xs text-text-muted">{filteredHistory.length} request{filteredHistory.length !== 1 ? "s" : ""}</span>
               </div>
+              {/* Clear-all-history action. Destructive for this key's log only; admin
+                  aggregate stats (daily rollup, lifetime counter) are NOT cleared. */}
+              {confirmClear ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-muted">Delete all history for this key?</span>
+                  <button
+                    onClick={clearHistory}
+                    disabled={clearing}
+                    className="px-2 py-1 text-xs rounded-[6px] bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {clearing ? "Clearing…" : "Delete"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmClear(false)}
+                    disabled={clearing}
+                    className="px-2 py-1 text-xs rounded-[6px] border border-border text-text-muted hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmClear(true)}
+                  disabled={clearing || history.length === 0}
+                  className="px-2 py-1 text-xs rounded-[6px] border border-border text-text-muted hover:bg-surface-2 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 transition-colors flex items-center gap-1"
+                  title="Clear all request history for this key"
+                >
+                  <span className="material-symbols-outlined text-[14px]">delete_sweep</span>
+                  Clear history
+                </button>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="text"
