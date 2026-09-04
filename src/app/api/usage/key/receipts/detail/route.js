@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getApiKeyForAuth, getRequestDetails } from "@/lib/db/index.js";
+import { getApiKeyForAuth, getRequestDetails, getProviderNodes } from "@/lib/db/index.js";
+import { AI_PROVIDERS } from "@/shared/constants/providers.js";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +8,38 @@ function maskKey(key) {
   if (!key) return null;
   if (key.length <= 10) return "****";
   return `${key.slice(0, 6)}…****${key.slice(-4)}`;
+}
+
+// Normalize status to an HTTP-style code for display. requestDetails stores
+// "success"/"error" (its own vocabulary) plus provider status strings. Map:
+// success/ok/completed → "200"; a numeric 1xx-5xx → as-is; otherwise leave
+// the raw value (so real upstream errors like "429", "rate_limited" are shown).
+function normalizeStatus(s) {
+  if (s == null || s === "") return "—";
+  const lower = String(s).toLowerCase();
+  if (lower === "ok" || lower === "success" || lower === "completed") return "200";
+  if (lower === "error" || lower === "failed" || lower === "failure") return "500";
+  const n = Number(s);
+  if (!Number.isNaN(n) && n >= 100 && n < 600) return String(Math.trunc(n));
+  if (/^\d{3}$/.test(String(s))) return String(s);
+  return String(s);
+}
+
+// Build a provider-id → friendly-name map (built-ins via AI_PROVIDERS; custom
+// OpenAI-compatible nodes via providerNodes). Returns null for unknown/raw
+// UUIDs so the UI hides them.
+async function buildProviderNameMap() {
+  const map = {};
+  for (const p of Object.values(AI_PROVIDERS || {})) {
+    if (p.id && (p.name || p.alias)) map[p.id] = p.name || p.alias;
+  }
+  try {
+    const nodes = await getProviderNodes();
+    for (const n of nodes || []) {
+      if (n.id && n.name) map[n.id] = n.name;
+    }
+  } catch {}
+  return map;
 }
 
 /**
@@ -61,7 +94,10 @@ export async function GET(request) {
       // `id` may be a connectionId, a record id, or a usage-history timestamp
       // (the history table has no id); for the timestamp case, match by the
       // nearest detail within 2 minutes so the link from Request History works.
-      const res = await getRequestDetails({ apiKey: key, pageSize: 100, page: 1, startDate, endDate });
+      const [res, providerMap] = await Promise.all([
+        getRequestDetails({ apiKey: key, pageSize: 100, page: 1, startDate, endDate }),
+        buildProviderNameMap(),
+      ]);
       const all = res.details || [];
       let detail = all.find((d) => d.connectionId === id || d.id === id) || null;
       if (!detail) {
@@ -81,12 +117,15 @@ export async function GET(request) {
       if (!detail) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      return NextResponse.json({ detail: scrubDetail(detail, includeRaw) });
+      return NextResponse.json({ detail: scrubDetail(detail, includeRaw, providerMap) });
     }
 
     // List mode: recent details for this key, summary fields + (optionally) raw.
-    const res = await getRequestDetails({ apiKey: key, page, pageSize, startDate, endDate });
-    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw));
+    const [res, providerMap] = await Promise.all([
+      getRequestDetails({ apiKey: key, page, pageSize, startDate, endDate }),
+      buildProviderNameMap(),
+    ]);
+    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw, providerMap));
     return NextResponse.json({
       details,
       pagination: res.pagination,
@@ -97,8 +136,17 @@ export async function GET(request) {
   }
 }
 
+// Resolve a provider id to a friendly name using the prebuilt map; null when
+// unknown/raw-UUID so the UI hides it.
+function resolveProvider(id, map) {
+  if (!id || !map) return null;
+  const name = map[id];
+  if (name && name !== id) return name;
+  return null;
+}
+
 // Always mask the apiKey field; strip the raw payloads unless includeRaw.
-function scrubDetailForList(d, includeRaw) {
+function scrubDetailForList(d, includeRaw, providerMap = {}) {
   const req = d.request || {};
   const messages = Array.isArray(req.messages) ? req.messages : [];
   const tools = Array.isArray(req.tools) ? req.tools : null;
@@ -115,9 +163,9 @@ function scrubDetailForList(d, includeRaw) {
   const out = {
     connectionId: d.connectionId || d.id || null,
     timestamp: d.timestamp,
-    provider: d.provider,
+    provider: resolveProvider(d.provider, providerMap),
     model: d.model,
-    status: d.status,
+    status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
     latency: d.latency || { ttft: 0, total: 0 },
     inputTokens: d.tokens?.prompt_tokens ?? d.tokens?.input_tokens ?? 0,
@@ -140,8 +188,8 @@ function scrubDetailForList(d, includeRaw) {
 }
 
 // Single-detail mode: same scrub but always carry the per-request summary.
-function scrubDetail(d, includeRaw) {
-  const base = scrubDetailForList(d, includeRaw);
+function scrubDetail(d, includeRaw, providerMap = {}) {
+  const base = scrubDetailForList(d, includeRaw, providerMap);
   if (includeRaw) {
     return base; // already has payloads
   }

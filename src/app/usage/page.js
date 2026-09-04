@@ -20,6 +20,16 @@ function maskKeyFull(key) {
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const fmtCost = (n) => (typeof n === "number" && !Number.isNaN(n) ? `$${n.toFixed(4)}` : "$0");
 
+// Status → color class. 2xx green, 4xx amber, 5xx red; unknown stays muted.
+function statusColorClass(status) {
+  const s = String(status || "");
+  if (!s || s === "—") return "text-text-muted";
+  if (s.startsWith("2")) return "text-green-600 dark:text-green-400";
+  if (s.startsWith("4")) return "text-amber-600 dark:text-amber-400";
+  if (s.startsWith("5")) return "text-red-600 dark:text-red-400";
+  return "text-text-muted";
+}
+
 export default function UsagePage() {
   const [keyInput, setKeyInput] = useState("");
   const [data, setData] = useState(null);     // /api/usage/key (budget/limits/baseline)
@@ -506,7 +516,6 @@ export default function UsagePage() {
                   </thead>
                   <tbody>
                     {filteredHistory.map((r, i) => {
-                      const ok = String(r.status || "").startsWith("2");
                       return (
                         <tr
                           key={i}
@@ -520,7 +529,7 @@ export default function UsagePage() {
                           <td className="px-3 py-1.5 font-mono max-w-[160px] truncate" title={r.model}>{r.model || "—"}</td>
                           <td className="px-3 py-1.5">{r.provider ? r.provider : "—"}</td>
                           <td className="px-3 py-1.5 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ok ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-red-500/10 text-red-600 dark:text-red-400"}`}>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColorClass(r.status)}`}>
                               {r.status || "—"}
                             </span>
                           </td>
@@ -632,8 +641,13 @@ export default function UsagePage() {
                     {/* Header summary */}
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                       <div><span className="text-text-muted">Model:</span> <span className="font-mono">{detail.model || "—"}</span></div>
-                      <div><span className="text-text-muted">Provider:</span> <span>{detail.provider || "—"}</span></div>
-                      <div><span className="text-text-muted">Status:</span> <span className={String(detail.status || "").startsWith("2") ? "text-green-600" : "text-red-600"}>{detail.status || "—"}</span></div>
+                      {detail.provider && <div><span className="text-text-muted">Provider:</span> <span>{detail.provider}</span></div>}
+                      <div>
+                        <span className="text-text-muted">Status:</span>{" "}
+                        <span className={`font-medium ${statusColorClass(detail.status)}`}>
+                          {detail.status || "—"}
+                        </span>
+                      </div>
                       <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</span></div>
                       <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
