@@ -919,3 +919,26 @@ export async function getKeyRequestCountSince(apiKey, sinceIso) {
   );
   return row?.c ?? 0;
 }
+
+// Delete ALL stored history for one apiKey — both the usageHistory rows and the
+// matching requestDetails rows (joined on apiKey). Used by the public /usage
+// page "Clear history" button so a key holder can wipe their own request log.
+// Returns { history, details } = rows removed. This does NOT touch the daily
+// rollup (usageDaily) or lifetime counters — those are aggregate admin stats,
+// not a per-key log, and scrubbing them would desync the dashboard.
+export async function deleteKeyUsageHistory(apiKey) {
+  if (!apiKey) return { history: 0, details: 0 };
+  const db = await getAdapter();
+  let history = 0;
+  let details = 0;
+  db.transaction(() => {
+    const h = db.run(`DELETE FROM usageHistory WHERE apiKey = ?`, [apiKey]);
+    history = h.changes || 0;
+    const d = db.run(`DELETE FROM requestDetails WHERE apiKey = ?`, [apiKey]);
+    details = d.changes || 0;
+    // Invalidate any in-memory stats snapshot so the next read recomputes.
+    scheduleStatsEvent("update", 0);
+  });
+  return { history, details };
+}
+
