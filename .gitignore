@@ -25,6 +25,9 @@ product
 
 # misc
 .DS_Store
+# macOS AppleDouble resource-fork files (._*) — junk, must never commit
+._*
+**/._*
 *.pem
 
 # debug
