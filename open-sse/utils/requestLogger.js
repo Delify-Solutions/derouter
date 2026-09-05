@@ -4,6 +4,14 @@ const isNode = typeof process !== "undefined" && process.versions?.node && typeo
 // Check if logging is enabled via environment variable (default: false)
 const LOGGING_ENABLED = typeof process !== "undefined" && process.env?.ENABLE_REQUEST_LOGS === 'true';
 
+// Retention: purge log-session folders older than this many hours on startup.
+// 0 = disable time-based purge. Default 2h is enough to inspect a recent translation
+// pipeline run while preventing the unbounded growth that filled /app/logs to 43G.
+const RETENTION_HOURS = Math.max(0, parseInt(process.env?.REQUEST_LOG_RETENTION_HOURS ?? "2", 10) || 2);
+// Cap on total session folders regardless of age — oldest purged first.
+// 0 = disable count-based purge. Default keeps a sane debug window.
+const MAX_SESSIONS = Math.max(0, parseInt(process.env?.REQUEST_LOG_MAX_SESSIONS ?? "200", 10) || 200);
+
 let fs = null;
 let path = null;
 let LOGS_DIR = null;
@@ -18,6 +26,60 @@ async function ensureNodeModules() {
   } catch {
     // Running in non-Node environment (Worker, Browser, etc.)
   }
+}
+
+// One-shot prune of stale log-session folders. Runs once on module init (when
+// logging is enabled) to bound disk usage — historically every request created
+// a folder with no eviction, accumulating to 43G on the VM. This is cheap
+// (single readdir + stat) and runs off the request hot path. Swallows errors.
+async function pruneOldSessions() {
+  await ensureNodeModules();
+  if (!fs || !LOGS_DIR) return;
+  try {
+    if (!fs.existsSync(LOGS_DIR)) return;
+    const entries = await fs.promises.readdir(LOGS_DIR, { withFileTypes: true });
+    const dirNames = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    if (dirNames.length === 0) return;
+
+    const now = Date.now();
+    const stats = await Promise.all(dirNames.map(async (name) => {
+      try {
+        const st = await fs.promises.stat(path.join(LOGS_DIR, name));
+        return { name, mtime: st.mtimeMs };
+      } catch { return null; }
+    }));
+
+    let toDelete = [];
+
+    // Age-based purge: folders older than RETENTION_HOURS.
+    if (RETENTION_HOURS > 0) {
+      const cutoff = now - RETENTION_HOURS * 3600_000;
+      for (const s of stats) {
+        if (s && s.mtime < cutoff) toDelete.push(s.name);
+      }
+    }
+
+    // Count-based purge: if still over MAX_SESSIONS, evict oldest by mtime.
+    if (MAX_SESSIONS > 0) {
+      const surviving = stats.filter((s) => s && !toDelete.includes(s.name))
+        .sort((a, b) => a.mtime - b.mtime);
+      const over = surviving.length - MAX_SESSIONS;
+      if (over > 0) {
+        for (let i = 0; i < over; i++) toDelete.push(surviving[i].name);
+      }
+    }
+
+    for (const name of toDelete) {
+      try { await fs.promises.rm(path.join(LOGS_DIR, name), { recursive: true, force: true }); } catch {}
+    }
+  } catch {
+    // purging must never break request logging
+  }
+}
+
+// Kick off the one-shot purge at module init (fire-and-forget).
+if (LOGGING_ENABLED && isNode) {
+  pruneOldSessions().catch(() => {});
 }
 
 // Format timestamp for folder name: 20251228_143045_123

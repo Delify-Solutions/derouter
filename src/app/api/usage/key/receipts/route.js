@@ -62,7 +62,16 @@ export async function GET(request) {
     const key = searchParams.get("key");
     const period = searchParams.get("period") || "7d";
     const limitRaw = parseInt(searchParams.get("limit"), 10);
-    const limit = Number.isNaN(limitRaw) ? 200 : Math.min(500, Math.max(1, limitRaw));
+    const limit = Number.isNaN(limitRaw) ? 500 : Math.min(500, Math.max(1, limitRaw));
+
+    // Pagination — newest-first windowed view of the key holder's history.
+    // page>=1, pageSize 1-100 (default 20). The total is computed over the
+    // ENTIRE period (all rows for this key in [startDate,endDate]), then the
+    // array is sliced to the requested page.
+    const pageRaw = parseInt(searchParams.get("page"), 10);
+    const page = Number.isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const pageSizeRaw = parseInt(searchParams.get("pageSize"), 10);
+    const pageSize = Number.isNaN(pageSizeRaw) ? 20 : Math.min(100, Math.max(1, pageSizeRaw));
 
     if (!key) {
       return NextResponse.json({ error: "Not Found" }, { status: 404 });
@@ -114,8 +123,11 @@ export async function GET(request) {
       return String(s);
     };
 
-    // Most recent first, capped to limit.
-    const history = historyRaw
+    // Newest-first. Paginate: totalItems reflects the whole period, then we
+    // window to [page]. `limit` stays as a safety cap on raw rows pulled from
+    // the DB layer (historyRaw already covers the period), but pagination is
+    // the primary view mechanism now.
+    const allHistory = historyRaw
       .slice()
       .reverse()
       .slice(0, limit)
@@ -132,6 +144,13 @@ export async function GET(request) {
           cacheCreation: t.cache_creation_input_tokens ?? 0,
         };
       });
+
+    const totalItems = allHistory.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const safePage = Math.min(page, totalPages);
+    const startIdx = (safePage - 1) * pageSize;
+    const history = allHistory.slice(startIdx, startIdx + pageSize);
+    const pagination = { page: safePage, pageSize, totalItems, totalPages };
 
     // Build the available-models table (combos + their per-1M-token pricing).
     // Pricing values are $/1M tokens (mirrors the admin pricing page). Resolution:
@@ -198,6 +217,7 @@ export async function GET(request) {
       summary: filteredSummary,
       rate,
       history,
+      pagination,
       availableModels,
     });
   } catch (err) {

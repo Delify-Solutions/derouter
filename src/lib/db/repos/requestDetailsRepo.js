@@ -173,7 +173,14 @@ export async function getRequestDetails(filter = {}) {
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.apiKey) { conds.push("apiKey = ?"); params.push(filter.apiKey); }
-  if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
+  // Status filter: empty/full status value → exact match (e.g. "429"); a single
+  // leading digit ("2","4","5") → prefix match so selecting "4xx" shows every
+  // 4xx row. Non-numeric statuses ("error","ok") fall through to exact match.
+  if (filter.status) {
+    const s = String(filter.status);
+    if (/^\d$/.test(s)) { conds.push("status LIKE ?"); params.push(`${s}%`); }
+    else { conds.push("status = ?"); params.push(s); }
+  }
   if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
@@ -208,6 +215,31 @@ export async function getRequestDetailById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
+}
+
+/**
+ * Clear ALL request-detail log rows (admin "Clear all request logs" button).
+ * Flushes the in-memory write buffer first so pending writes don't re-populate
+ * the table after the truncate. Returns the number of rows deleted.
+ *
+ * `usageHistory` (usage accounting) is intentionally NOT cleared — this is the
+ * request-log table, not the billing/usage ledger.
+ */
+export async function clearAllRequestDetails() {
+  // Drain any buffered writes first; otherwise a pending flush would resurrect
+  // rows right after we delete them.
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (writeBuffer.length > 0) {
+    await flushToDatabase().catch(() => {});
+  }
+  const db = await getAdapter();
+  let deleted = 0;
+  db.transaction(() => {
+    const row = db.get(`SELECT COUNT(*) AS c FROM requestDetails`);
+    deleted = row ? row.c : 0;
+    db.run(`DELETE FROM requestDetails`);
+  });
+  return deleted;
 }
 
 const _shutdownHandler = async () => {

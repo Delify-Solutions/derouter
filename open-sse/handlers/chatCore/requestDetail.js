@@ -84,6 +84,10 @@ export function buildRequestDetail(base, overrides = {}) {
     response: base.response || {},
     pxpipe: base.pxpipe || undefined,
     status: base.status || "success",
+    // "platform" (the proxy's own limit: RPM/TPM/budget/expiry/abort/bad-gateway)
+    // vs "upstream" (the provider API returned the error). Undefined for success
+    // rows. The details tab renders this as a badge; the public /usage page ignores it.
+    errorSource: base.errorSource || undefined,
     ...overrides
   };
 }
@@ -138,5 +142,37 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // Original client model (bare combo name when the request was for a combo);
     // used to resolve a combo-level price override before falling back to per-pool.
     requestedModel: requestedModel || null
+  }).catch(() => {});
+}
+
+/**
+ * Record an error request (no usage tokens) into `usageHistory` so that:
+ *   - the public /usage page shows ALL requests (errors included, per user req),
+ *   - the admin usage views reflect full request counts (a 429 is still a request).
+ *
+ * Unlike saveUsageStats, this DOES write a row when tokens are zero — the whole
+ * point is that error responses (429/5xx) carry no token usage but must still be
+ * visible in usage history. `status` is the HTTP status string ("429", "502").
+ * `errorSource` ("platform" | "upstream") is stored too so admin details can
+ * distinguish who produced the error; it is ignored by the public page.
+ *
+ * cost stays 0 (calculateCost receives zero tokens). The dedup guard in
+ * saveRequestUsage (timestamp + provider + model + connectionId + apiKey + tokens)
+ * still applies — repeated identical errors within the same minute collapse to
+ * one row, same as successful duplicates already do.
+ */
+export function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource }) {
+  if (!status) return;
+  saveRequestUsage({
+    provider: provider || "unknown",
+    model: model || "unknown",
+    tokens: { prompt_tokens: 0, completion_tokens: 0 },
+    timestamp: new Date().toISOString(),
+    connectionId: connectionId || undefined,
+    apiKey: apiKey || undefined,
+    endpoint: endpoint || null,
+    requestedModel: requestedModel || null,
+    status: String(status),
+    errorSource: errorSource || undefined,
   }).catch(() => {});
 }

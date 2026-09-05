@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRequestDetails } from "@/lib/usageDb";
+import { getRequestDetails, clearAllRequestDetails } from "@/lib/usageDb";
 
 /**
  * GET /api/usage/request-details
@@ -75,6 +75,26 @@ export async function GET(request) {
     console.error("[API] Failed to get request details:", error);
     return NextResponse.json(
       { error: "Failed to fetch request details" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/usage/request-details
+ * Admin "Clear all request logs" button. Wipes every row in the request-details
+ * (request log) table. This route is served behind the dashboard auth guard via
+ * Next.js middleware (same as the GET above). usageHistory (usage accounting) is
+ * intentionally NOT cleared — this is the request log, not the billing ledger.
+ */
+export async function DELETE() {
+  try {
+    const deleted = await clearAllRequestDetails();
+    return NextResponse.json({ ok: true, deleted });
+  } catch (error) {
+    console.error("[API] Failed to clear request details:", error);
+    return NextResponse.json(
+      { error: "Failed to clear request details" },
       { status: 500 }
     );
   }

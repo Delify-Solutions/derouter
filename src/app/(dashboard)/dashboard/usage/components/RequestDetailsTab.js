@@ -91,6 +91,37 @@ function getCacheCreationTokens(tokens) {
   return tokens?.cache_creation_input_tokens || 0;
 }
 
+// Status → color class. 2xx green, 4xx amber, 5xx red; "error"/unknown muted.
+// Mirrors the public /usage page's helper so both views color statuses the same.
+function statusColorClass(status) {
+  const s = String(status || "");
+  if (!s || s === "—" || s === "null") return "text-text-muted";
+  if (s === "success") return "text-green-600 dark:text-green-400";
+  if (s === "error") return "text-red-600 dark:text-red-400";
+  if (s.startsWith("2")) return "text-green-600 dark:text-green-400";
+  if (s.startsWith("4")) return "text-amber-600 dark:text-amber-400";
+  if (s.startsWith("5")) return "text-red-600 dark:text-red-400";
+  return "text-text-muted";
+}
+
+// Render an error-source badge. "platform" = the proxy's OWN limit (RPM/TPM/
+// budget/expiry/abort/bad-gateway) rejected the request before (or without)
+// the upstream; "upstream" = the provider API returned the error. Success
+// rows render nothing.
+function ErrorSourceBadge({ source }) {
+  if (!source) return null;
+  const isPlatform = source === "platform";
+  const label = isPlatform ? "Platform" : "Upstream";
+  const cls = isPlatform
+    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`} title={isPlatform ? "Rejected by the proxy's own limit" : "Returned by the upstream API"}>
+      {label}
+    </span>
+  );
+}
+
 function getInputTokens(tokens) {
   const prompt = tokens?.prompt_tokens || tokens?.input_tokens || 0;
   // Canonical storage keeps prompt cache-inclusive. Legacy Claude rows may have
@@ -118,9 +149,12 @@ export default function RequestDetailsTab() {
   const [filters, setFilters] = useState({
     provider: "",
     apiKey: "",
+    status: "",
     startDate: "",
     endDate: ""
   });
+  const [clearing, setClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -156,6 +190,7 @@ export default function RequestDetailsTab() {
       });
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.apiKey) params.append("apiKey", filters.apiKey);
+      if (filters.status) params.append("status", filters.status);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
       if (showRaw) params.append("includeRaw", "1");
@@ -195,14 +230,34 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", apiKey: "", startDate: "", endDate: "" });
+    setFilters({ provider: "", apiKey: "", status: "", startDate: "", endDate: "" });
     setShowRaw(false);
+  };
+
+  // "Clear all request logs" — wipes every row in the requestDetails (log)
+  // table. Destructive across all keys/providers; usageHistory accounting is NOT
+  // affected. After confirm, refetch the current page so the table empties.
+  const handleClearAll = async () => {
+    setClearing(true);
+    try {
+      const res = await fetch("/api/usage/request-details", { method: "DELETE" });
+      if (!res.ok) throw new Error("clear failed");
+      setConfirmClear(false);
+      setSelectedDetail(null);
+      setIsDrawerOpen(false);
+      setPagination(prev => ({ ...prev, page: 1 }));
+      await fetchDetails();
+    } catch (e) {
+      console.error("Failed to clear all logs:", e);
+    } finally {
+      setClearing(false);
+    }
   };
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
             <select
@@ -244,6 +299,27 @@ export default function RequestDetailsTab() {
                   {k.name ? `${k.name} — ${maskKeyFull(k.key)}` : maskKeyFull(k.key)}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="status-filter" className="text-sm font-medium text-text-main">Status</label>
+            <select
+              id="status-filter"
+              value={filters.status}
+              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Statuses</option>
+              <option value="2">2xx (success)</option>
+              <option value="4">4xx (client / rate-limit)</option>
+              <option value="5">5xx (server / upstream)</option>
+              <option value="error">error</option>
             </select>
           </div>
 
@@ -306,11 +382,43 @@ export default function RequestDetailsTab() {
           </div>
         </div>
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex items-center justify-between gap-2 flex-wrap">
+          {/* Clear all request logs — destructive, wipes the whole requestDetails
+              (log) table across all keys/providers. usageHistory is not touched. */}
+          {confirmClear ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-text-muted">Delete ALL request logs?</span>
+              <Button
+                variant="primary"
+                onClick={handleClearAll}
+                disabled={clearing}
+                className="!bg-red-600 hover:!bg-red-700"
+              >
+                {clearing ? "Clearing…" : "Delete all"}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmClear(false)}
+                disabled={clearing}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmClear(true)}
+              disabled={clearing || details.length === 0}
+              className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <span className="material-symbols-outlined text-[18px] mr-1">delete_sweep</span>
+              Clear all logs
+            </Button>
+          )}
           <Button
             variant="ghost"
             onClick={handleClearFilters}
-            disabled={!filters.provider && !filters.apiKey && !filters.startDate && !filters.endDate && !showRaw}
+            disabled={!filters.provider && !filters.apiKey && !filters.status && !filters.startDate && !filters.endDate && !showRaw}
             className="w-full sm:w-auto"
           >
             Clear Filters
@@ -327,6 +435,7 @@ export default function RequestDetailsTab() {
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Key</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Status</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
@@ -338,7 +447,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="10" className="p-8 text-center text-text-muted">
+                  <td colSpan="11" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -347,7 +456,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="10" className="p-8 text-center text-text-muted">
+                  <td colSpan="11" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -370,6 +479,14 @@ export default function RequestDetailsTab() {
                      </td>
                     <td className="max-w-[200px] truncate p-4 text-xs text-text-muted font-mono" title={detail.apiKey || ""}>
                       {detail.apiKey ? maskKeyFull(detail.apiKey) : "—"}
+                    </td>
+                    <td className="p-4 text-sm">
+                      <div className="flex flex-col gap-1">
+                        <span className={`font-medium ${statusColorClass(detail.status)}`}>
+                          {detail.status || "—"}
+                        </span>
+                        <ErrorSourceBadge source={detail.errorSource} />
+                      </div>
                     </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
@@ -449,12 +566,10 @@ export default function RequestDetailsTab() {
               </div>
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
-                <span className={cn(
-                  "font-medium",
-                  selectedDetail.status === "success" ? "text-green-600" : "text-red-600"
-                )}>
+                <span className={cn("font-medium", statusColorClass(selectedDetail.status))}>
                   {selectedDetail.status}
                 </span>
+                <span className="ml-2"><ErrorSourceBadge source={selectedDetail.errorSource} /></span>
               </div>
               <div>
                 <span className="text-text-muted">Latency:</span>{" "}

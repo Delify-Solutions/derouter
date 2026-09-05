@@ -14,7 +14,7 @@ import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { getExecutor } from "../executors/index.js";
 import { supportsGrokCliReasoningEffort } from "../config/grokCli.js";
-import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, saveUsageError } from "./chatCore/requestDetail.js";
 import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
@@ -374,8 +374,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       providerRequest: translatedBody || null,
       response: { error: error.message || String(error), status: error.name === "AbortError" ? 499 : 502, thinking: null },
       pxpipe: pxpipeSummary,
-      status: "error"
+      status: "error",
+      errorSource: "platform"
     })).catch(() => { });
+    // Pre-upstream failure (abort/bad-gateway) — record an error row in
+    // usageHistory so the public /usage page shows it. Source is "platform":
+    // the error did not come back from the upstream API.
+    saveUsageError({
+      provider, model, connectionId, apiKey, requestedModel,
+      status: error.name === "AbortError" ? 499 : 502,
+      errorSource: "platform"
+    }).catch(() => { });
 
     if (error.name === "AbortError") {
       streamController.handleError(error);
@@ -438,8 +447,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       providerRequest: finalBody || translatedBody || null,
       response: { error: message, status: statusCode, thinking: null },
       pxpipe: pxpipeSummary,
-      status: "error"
+      status: "error",
+      errorSource: "upstream"
     })).catch(() => { });
+    // Upstream API returned an error (429/5xx/...) — record it in usageHistory
+    // so the public /usage page shows error rows alongside 200s. errorSource
+    // "upstream" lets the admin details tab distinguish API-returned errors.
+    saveUsageError({
+      provider, model, connectionId, apiKey, requestedModel,
+      status: statusCode,
+      errorSource: "upstream"
+    }).catch(() => { });
 
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
     if (log?.errorLine) {

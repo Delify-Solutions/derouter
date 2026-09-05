@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Pagination from "@/shared/components/Pagination";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -45,6 +46,9 @@ export default function UsagePage() {
   const [filterStatus, setFilterStatus] = useState("");// Request History status filter (200/4xx/...)
   const [clearing, setClearing] = useState(false);       // clear-history DELETE in flight
   const [confirmClear, setConfirmClear] = useState(false); // confirm popover open
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 20, totalItems: 0, totalPages: 0 });
 
   const STORAGE_KEY = "derouter.usage.key";
 
@@ -75,16 +79,31 @@ export default function UsagePage() {
     }
   }, []);
 
-  const lookup = useCallback(async (key, p = "7d") => {
+  const fetchHistoryPage = useCallback(async (key, p, pageNum, pgSize) => {
+    try {
+      const recRes = await fetch(
+        `/api/usage/key/receipts?key=${encodeURIComponent(key)}&period=${p}` +
+        `&page=${pageNum}&pageSize=${pgSize}`
+      );
+      if (recRes.ok) {
+        const r = await recRes.json();
+        setRec(r);
+        if (r.pagination) setPagination(r.pagination);
+      }
+    } catch { /* ignore — keep previous page */ }
+  }, []);
+
+  const lookup = useCallback(async (key, p = "7d", pageNum = 1, pgSize = pageSize) => {
     if (!key) return;
     setLoading(true);
     setError("");
     setData(null);
     setRec(null);
+    setPage(pageNum);
     try {
       const [baseRes, recRes] = await Promise.all([
         fetch(`/api/usage/key?key=${encodeURIComponent(key)}`),
-        fetch(`/api/usage/key/receipts?key=${encodeURIComponent(key)}&period=${p}`),
+        fetch(`/api/usage/key/receipts?key=${encodeURIComponent(key)}&period=${p}&page=${pageNum}&pageSize=${pgSize}`),
       ]);
       if (baseRes.status === 404) { setError("Key not found"); return; }
       if (!baseRes.ok) { setError("Failed to load usage"); return; }
@@ -93,12 +112,14 @@ export default function UsagePage() {
       if (recRes.ok) {
         const r = await recRes.json();
         setRec(r);
+        if (r.pagination) setPagination(r.pagination);
       } else {
         setRec({ summary: { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0 }, rate: { requests: 0, tokens: 0 }, history: [] });
+        setPagination({ page: 1, pageSize: pgSize, totalItems: 0, totalPages: 0 });
       }
     } catch { setError("Failed to load usage"); }
     finally { setLoading(false); }
-  }, []);
+  }, [pageSize]);
 
   useEffect(() => {
     // Priority: a fresh `?key=` deep link in the hash wins (and is then moved
@@ -147,7 +168,20 @@ export default function UsagePage() {
 
   const switchPeriod = (p) => {
     setPeriod(p);
-    if (keyInput.trim()) lookup(keyInput.trim(), p);
+    setPage(1);
+    if (keyInput.trim()) lookup(keyInput.trim(), p, 1);
+  };
+
+  // Pagination — re-fetch only the receipts (history) slice, not the whole
+  // base/rate summary. Keeps page navigation cheap.
+  const handlePageChange = (newPage) => {
+    setPage(newPage);
+    if (keyInput.trim()) fetchHistoryPage(keyInput.trim(), period, newPage, pageSize);
+  };
+  const handlePageSizeChange = ( newSize) => {
+    setPageSize(newSize);
+    setPage(1);
+    if (keyInput.trim()) fetchHistoryPage(keyInput.trim(), period, 1, newSize);
   };
 
   // Wipe this key's entire request log (usageHistory + requestDetails). Gated by
@@ -603,6 +637,15 @@ export default function UsagePage() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {pagination.totalItems > 0 && (
+              <Pagination
+                currentPage={pagination.page}
+                pageSize={pagination.pageSize}
+                totalItems={pagination.totalItems}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
             )}
           </div>
 

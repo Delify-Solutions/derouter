@@ -374,10 +374,58 @@ export async function enforceKeyAccess(apiKey, model) {
   const { NextResponse } = await import("next/server");
   const limit = await enforceKeyLimits(apiKey);
   if (!limit.ok) {
+    // Record a platform-limit denial so the admin details tab can show WHY a
+    // request was rejected (RPM/TPM/budget/expiry) and so the public /usage page
+    // shows the rejected request among the key holder's history. These failures
+    // are produced by the proxy itself, not returned by the upstream API — tag
+    // errorSource "platform". Only valid keys reach here (isValidApiKey already
+    // passed in the caller), so logging is safe — it's the key holder's own limit.
+    try {
+      const { saveRequestDetail } = await import("@/lib/usageDb.js");
+      const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
+      const status = String(limit.status);
+      saveRequestDetail(buildRequestDetail({
+        provider: null,
+        model: model || null,
+        apiKey: apiKey,
+        status,
+        errorSource: "platform",
+        response: { error: limit.error, resetAt: limit.resetAt ?? undefined },
+      }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+      saveUsageError({
+        provider: "platform",
+        model: model || "unknown",
+        apiKey,
+        requestedModel: model || null,
+        status,
+        errorSource: "platform",
+      }).catch(() => {});
+    } catch { /* usage logging must never break the deny path */ }
     const headers = limit.retryAfter ? { "Retry-After": String(limit.retryAfter) } : {};
     return NextResponse.json({ error: limit.error, resetAt: limit.resetAt ?? undefined }, { status: limit.status, headers });
   }
   if (model && !isModelAllowed(limit.auth, model)) {
+    try {
+      const { saveRequestDetail } = await import("@/lib/usageDb.js");
+      const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
+      const status = "403";
+      saveRequestDetail(buildRequestDetail({
+        provider: null,
+        model,
+        apiKey: apiKey,
+        status,
+        errorSource: "platform",
+        response: { error: "Model not allowed for this key" },
+      }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+      saveUsageError({
+        provider: "platform",
+        model,
+        apiKey,
+        requestedModel: model,
+        status,
+        errorSource: "platform",
+      }).catch(() => {});
+    } catch { /* usage logging must never break the deny path */ }
     return NextResponse.json({ error: "Model not allowed for this key" }, { status: 403 });
   }
   return null;
