@@ -15,6 +15,7 @@ export {
   getKeyGroups, getKeyGroupById, getKeyGroupByName, createKeyGroup, updateKeyGroup, deleteKeyGroup,
   getKeyRateUsage, getKeyCostSince, getKeyRequestCountSince,
   getKeyUsageSummary,
+  getProviderUsageSummary,
   getCombos, getComboById, getComboByName,
   createCombo, updateCombo, deleteCombo,
   getModelAliases, setModelAlias, deleteModelAlias,

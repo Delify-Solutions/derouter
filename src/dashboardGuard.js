@@ -239,13 +239,14 @@ export async function proxy(request) {
 
   // Protect all dashboard routes
   if (pathname.startsWith("/dashboard")) {
-    let requireLogin = true;
     let tunnelDashboardAccess = true;
 
     try {
       const settings = await loadSettings();
       if (settings) {
-        requireLogin = settings.requireLogin !== false;
+        // Note: settings.requireLogin is intentionally NOT honored for the
+        // dashboard UI here — it only relaxes /api/* access above. The
+        // admin shell is never served without a valid JWT.
         tunnelDashboardAccess = settings.tunnelDashboardAccess === true;
 
         // Block tunnel/tailscale access if disabled (redirect to login)
@@ -262,10 +263,10 @@ export async function proxy(request) {
       // On error, keep defaults (require login, block tunnel)
     }
 
-    // If login not required, allow through
-    if (!requireLogin) return NextResponse.next();
-
-    // Verify JWT token
+    // Always require a valid JWT for dashboard UI pages, even when
+    // requireLogin=false. The flag only relaxes /api/* access (LLM API
+    // still works without a browser session); the admin UI must never
+    // be served unauthenticated (otherwise the shell/layout leaks).
     const token = request.cookies.get("auth_token")?.value;
     if (token) {
       if (await verifyDashboardAuthToken(token)) {

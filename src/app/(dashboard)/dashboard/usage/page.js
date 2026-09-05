@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { UsageStats, RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import RequestDetailsTab from "./components/RequestDetailsTab";
 import KeyUsageTable from "./components/KeyUsageTable";
+import ProviderUsageTable from "./components/ProviderUsageTable";
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -29,7 +30,7 @@ function UsageContent() {
   const [period, setPeriod] = useState("today");
 
   const tabFromUrl = searchParams.get("tab");
-  const activeTab = tabFromUrl && ["overview", "logs", "details", "keys"].includes(tabFromUrl)
+  const activeTab = tabFromUrl && ["overview", "logs", "details", "keys", "providers"].includes(tabFromUrl)
     ? tabFromUrl
     : "overview";
 
@@ -49,6 +50,7 @@ function UsageContent() {
             { value: "overview", label: "Overview" },
             { value: "keys", label: "Keys" },
             { value: "details", label: "Details" },
+            { value: "providers", label: "Providers" },
           ]}
           value={activeTab}
           onChange={handleTabChange}
@@ -73,6 +75,7 @@ function UsageContent() {
       {activeTab === "logs" && <RequestLogger />}
       {activeTab === "keys" && <KeyUsageTable />}
       {activeTab === "details" && <RequestDetailsTab />}
+      {activeTab === "providers" && <ProviderUsageTable />}
     </div>
   );
 }

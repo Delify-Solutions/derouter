@@ -126,6 +126,8 @@ export async function GET(request) {
           liveRpm: limitCount.requests,
           liveTpm: limitCount.tokens,
           peakTpm: summary.peakTpm,
+          peakRpm: summary.peakRpm,
+          peakTokS: summary.peakTokS,
 
           byModel: summary.items,
           totals: summary.totals,

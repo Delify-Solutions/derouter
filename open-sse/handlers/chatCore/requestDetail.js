@@ -110,7 +110,7 @@ export function formatDoneLine({ usage, latency }) {
   return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, label = "USAGE", silent = false }) {
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, label = "USAGE", silent = false }) {
   if (!tokens || typeof tokens !== "object") return;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -141,7 +141,11 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     endpoint: endpoint || null,
     // Original client model (bare combo name when the request was for a combo);
     // used to resolve a combo-level price override before falling back to per-pool.
-    requestedModel: requestedModel || null
+    requestedModel: requestedModel || null,
+    // Latency in ms (total request wall-time). Persisted into usageHistory.meta
+    // so the public /usage page can compute Tok/s per request without a schema
+    // change. Undefined/0 for callers that don't track timing (e.g. errors).
+    latencyMs: latencyMs ?? null
   }).catch(() => {});
 }
 

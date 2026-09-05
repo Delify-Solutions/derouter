@@ -446,6 +446,14 @@ export default function UsagePage() {
                   <span className="text-text-muted text-xs">Peak TPM</span>
                   <span className="font-medium">{fmt(peakTpm)}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-text-muted text-xs">Peak RPM</span>
+                  <span className="font-medium">{fmt(rec?.summary?.peakRpm || 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-text-muted text-xs">Peak Tok/s</span>
+                  <span className="font-medium">{fmt(rec?.summary?.peakTokS || 0)}</span>
+                </div>
               </div>
             </div>
 
@@ -599,6 +607,7 @@ export default function UsagePage() {
                       <th className="text-right font-medium px-3 py-2">Latency</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
+                      <th className="text-right font-medium px-3 py-2" title="Tokens (input + output)">Tok</th>
                       <th className="text-right font-medium px-3 py-2">Cache R</th>
                       <th className="text-right font-medium px-3 py-2">Cache W</th>
                       <th className="text-right font-medium px-3 py-2">Cost</th>
@@ -627,6 +636,12 @@ export default function UsagePage() {
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <div className="tabular-nums">{fmt(r.tok)}</div>
+                            {r.tokS != null && (
+                              <div className="text-text-muted text-[10px]">{r.tokS} t/s</div>
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
                           <td className="px-3 py-1.5 text-right">{fmtCost(r.cost)}</td>

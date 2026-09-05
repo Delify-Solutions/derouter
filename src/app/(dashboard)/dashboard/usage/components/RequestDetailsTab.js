@@ -440,6 +440,7 @@ export default function RequestDetailsTab() {
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
+                <th className="text-right p-4 text-sm font-semibold text-text-main" title="Tokens (input + output) / Tok/s">Tok</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
                 <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
               </tr>
@@ -447,7 +448,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="11" className="p-8 text-center text-text-muted">
+                  <td colSpan="12" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -456,7 +457,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="11" className="p-8 text-center text-text-muted">
+                  <td colSpan="12" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -500,6 +501,19 @@ export default function RequestDetailsTab() {
                     <td className="p-4 text-sm text-text-main text-right font-mono">
                       {detail.tokens?.completion_tokens?.toLocaleString() || 0}
                     </td>
+                    {(() => {
+                      const tok = getInputTokens(detail.tokens) + (detail.tokens?.completion_tokens || 0);
+                      const latTotal = detail.latency?.total || 0;
+                      const tokS = latTotal > 0 ? Math.round((tok / (latTotal / 1000)) * 10) / 10 : null;
+                      return (
+                        <td className="p-4 text-sm text-text-main text-right font-mono">
+                          <div className="tabular-nums">{tok.toLocaleString()}</div>
+                          {tokS != null && (
+                            <div className="text-text-muted text-[11px]">{tokS} t/s</div>
+                          )}
+                        </td>
+                      );
+                    })()}
                     <td className="p-4 text-sm text-text-muted">
                       <div className="flex flex-col gap-0.5">
                         <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
@@ -658,7 +672,7 @@ export default function RequestDetailsTab() {
               )}
               <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
                 {showRaw ? (
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                  <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                     {JSON.stringify(selectedDetail.request, null, 2)}
                   </pre>
                 ) : (
@@ -669,7 +683,7 @@ export default function RequestDetailsTab() {
               {selectedDetail.providerRequest && (
                 <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
                   {showRaw ? (
-                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                       {JSON.stringify(selectedDetail.providerRequest, null, 2)}
                     </pre>
                   ) : (
@@ -681,7 +695,7 @@ export default function RequestDetailsTab() {
               {selectedDetail.providerResponse && (
                 <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
                   {showRaw ? (
-                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                       {typeof selectedDetail.providerResponse === 'object'
                         ? JSON.stringify(selectedDetail.providerResponse, null, 2)
                         : selectedDetail.providerResponse
@@ -702,7 +716,7 @@ export default function RequestDetailsTab() {
                           <span className="material-symbols-outlined text-[16px]">psychology</span>
                           Thinking Process
                         </h4>
-                        <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                        <pre className="max-h-[200px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
                           {selectedDetail.response.thinking}
                         </pre>
                       </div>
@@ -711,7 +725,7 @@ export default function RequestDetailsTab() {
                     <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
                       Content
                     </h4>
-                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                       {selectedDetail.response?.content || "[No content]"}
                     </pre>
                   </>

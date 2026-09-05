@@ -133,13 +133,23 @@ export async function GET(request) {
       .slice(0, limit)
       .map((r) => {
         const t = r.tokens || {};
+        let meta = {};
+        if (typeof r.meta === "string") { try { meta = JSON.parse(r.meta) || {}; } catch { meta = {}; } }
+        else if (r.meta && typeof r.meta === "object") meta = r.meta;
+        const input = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
+        const output = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
+        const tok = input + output;
+        const latencyMs = meta?.latencyMs ?? null;
+        const tokS = latencyMs && latencyMs > 0 ? Math.round((tok / (latencyMs / 1000)) * 10) / 10 : null;
         return {
           timestamp: r.timestamp,
           model: r.model,
           status: normalizeStatus(r.status),
           cost: r.cost,
-          input: r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0,
-          output: r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0,
+          input,
+          output,
+          tok,
+          tokS,
           cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreation: t.cache_creation_input_tokens ?? 0,
         };

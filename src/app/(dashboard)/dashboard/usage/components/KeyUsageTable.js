@@ -172,7 +172,9 @@ export default function KeyUsageTable() {
                   <th className="text-right font-medium px-3 py-2 whitespace-nowrap">RPM (limit / live)</th>
                   <th className="text-right font-medium px-3 py-2 whitespace-nowrap">TPM (limit / live)</th>
                   <th className="text-left font-medium px-3 py-2 min-w-[160px]">Budget</th>
+                  <th className="text-right font-medium px-3 py-2">Peak RPM</th>
                   <th className="text-right font-medium px-3 py-2">Peak TPM</th>
+                  <th className="text-right font-medium px-3 py-2">Peak Tok/s</th>
                   <th className="text-right font-medium px-3 py-2">Requests</th>
                   <th className="text-right font-medium px-3 py-2">Input</th>
                   <th className="text-right font-medium px-3 py-2">Output</th>
@@ -184,7 +186,7 @@ export default function KeyUsageTable() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={12} className="p-8 text-center text-text-muted">
+                    <td colSpan={14} className="p-8 text-center text-text-muted">
                       <div className="flex items-center justify-center gap-2">
                         <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                         Loading…
@@ -193,7 +195,7 @@ export default function KeyUsageTable() {
                   </tr>
                 ) : pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="p-8 text-center text-text-muted">No keys match the current filters.</td>
+                    <td colSpan={14} className="p-8 text-center text-text-muted">No keys match the current filters.</td>
                   </tr>
                 ) : (
                   pageRows.map((it, idx) => {
@@ -277,7 +279,9 @@ function RowFragment({ it, rowIdx, isOpen, onToggle, budgetPct, models }) {
             </div>
           )}
         </td>
+        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakRpm)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakTpm)}</td>
+        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakTokS)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.totals?.requests)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.totals?.input)}</td>
         <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.totals?.output)}</td>
@@ -313,7 +317,7 @@ function RowFragment({ it, rowIdx, isOpen, onToggle, budgetPct, models }) {
       </tr>
       {isOpen && (
         <tr className="bg-surface-2/30">
-          <td colSpan={12} className="p-4">
+          <td colSpan={14} className="p-4">
             <div className="flex flex-col gap-4">
               {/* Window info */}
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-text-muted">

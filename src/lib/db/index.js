@@ -73,7 +73,7 @@ export {
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
   getKeyRateUsage, getKeyCostSince, getKeyRequestCountSince,
-  getKeyUsageSummary, deleteKeyUsageHistory,
+  getKeyUsageSummary, getProviderUsageSummary, deleteKeyUsageHistory,
 } from "./repos/usageRepo.js";
 
 // Request details

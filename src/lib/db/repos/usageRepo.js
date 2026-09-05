@@ -313,7 +313,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null }),
+          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null }),
         ]
       );
 
@@ -375,6 +375,9 @@ export async function getUsageHistory(filter = {}) {
       requestedModel,
       connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
       cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
+      // Raw meta JSON (carries requestedModel + latencyMs). Exposed so downstream
+      // readers (e.g. /api/usage/key/receipts) can compute Tok/s from latencyMs.
+      meta,
     };
   });
 }
@@ -819,9 +822,13 @@ export async function getRecentLogs(limit = 200) {
 
 // ── Per-key usage summary (viber-router KeyTokenUsage-style) ─────────────────
 // Aggregates usageHistory for one apiKey in [startDate, endDate], grouped by model,
-// plus a peak-TPM figure (max sum of prompt+completion tokens in any 1-minute bucket).
+// plus peak figures:
+//   peakTpm  — max sum of (prompt+completion) tokens in any 1-minute bucket
+//   peakRpm  — max request count in any 1-minute bucket
+//   peakTokS — max sum of (prompt+completion) tokens in any 1-second bucket
+// (LLM generation speed: Tok/s. Thresholds: <10 slow, 20-40 normal, 80+ instant.)
 export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
-  if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0 };
+  if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0, peakRpm: 0, peakTokS: 0 };
   const db = await getAdapter();
   const conds = ["apiKey = ?"];
   const params = [apiKey];
@@ -837,14 +844,17 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   const byModel = {};
   const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
 
-  // Peak TPM: max per-minute sum of (prompt + completion) tokens, like viber-router's compute_peak_tpm.
-  const perMinute = {};
+  // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), per-second tokens (Tok/s).
+  const perMinuteTok = {};
+  const perMinuteReq = {};
+  const perSecondTok = {};
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
     const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
     const completion = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
     const cacheRead = t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0;
     const cacheCreation = t.cache_creation_input_tokens ?? 0;
+    const tokSum = prompt + completion;
 
     // Group by the combo the caller asked for (requestedModel) when present, so the
     // By-Model summary on /usage lists combos (mygpt, testcombo) rather than the
@@ -869,16 +879,94 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     totals.requests += 1;
     totals.cost += r.cost || 0;
 
-    const minute = (r.timestamp || "").slice(0, 16); // YYYY-MM-DDTHH:MM
+    const ts = r.timestamp || "";
+    const minute = ts.slice(0, 16); // YYYY-MM-DDTHH:MM
     if (minute) {
-      perMinute[minute] = (perMinute[minute] || 0) + prompt + completion;
+      perMinuteTok[minute] = (perMinuteTok[minute] || 0) + tokSum;
+      perMinuteReq[minute] = (perMinuteReq[minute] || 0) + 1;
+    }
+    const second = ts.slice(0, 19); // YYYY-MM-DDTHH:MM:SS
+    if (second) {
+      perSecondTok[second] = (perSecondTok[second] || 0) + tokSum;
     }
   }
   let peakTpm = 0;
-  for (const v of Object.values(perMinute)) if (v > peakTpm) peakTpm = v;
+  for (const v of Object.values(perMinuteTok)) if (v > peakTpm) peakTpm = v;
+  let peakRpm = 0;
+  for (const v of Object.values(perMinuteReq)) if (v > peakRpm) peakRpm = v;
+  let peakTokS = 0;
+  for (const v of Object.values(perSecondTok)) if (v > peakTokS) peakTokS = v;
 
   const items = Object.values(byModel).sort((a, b) => (b.requests || 0) - (a.requests || 0));
-  return { items, totals, peakTpm };
+  return { items, totals, peakTpm, peakRpm, peakTokS };
+}
+
+// ── Per-provider usage summary (admin Providers tab) ──────────────────────
+// Aggregates usageHistory in [startDate, endDate] grouped by provider, with the
+// same peak RPM/TPM/Tok-s metrics as getKeyUsageSummary but per-provider instead
+// of per-key. Returns items keyed by provider id.
+export async function getProviderUsageSummary({ startDate, endDate } = {}) {
+  const db = await getAdapter();
+  const conds = [];
+  const params = [];
+  if (startDate) { conds.push("timestamp >= ?"); params.push(new Date(startDate).toISOString()); }
+  if (endDate) { conds.push("timestamp <= ?"); params.push(new Date(endDate).toISOString()); }
+  // "platform" rows are key-holder denials (RPM/TPM/budget) recorded by the proxy —
+  // not real upstream provider usage. Exclude them from the provider table.
+  conds.push("COALESCE(provider, '') != 'platform'");
+  const where = `WHERE ${conds.join(" AND ")}`;
+
+  const rows = db.all(
+    `SELECT provider, timestamp, promptTokens, completionTokens, cost, tokens FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    params
+  );
+
+  const byProvider = {};
+  const totals = { input: 0, output: 0, requests: 0, cost: 0 };
+
+  const perMinuteTok = {};
+  const perMinuteReq = {};
+  const perSecondTok = {};
+
+  for (const r of rows) {
+    const t = parseJson(r.tokens, {}) || {};
+    const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
+    const completion = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
+    const tokSum = prompt + completion;
+    const provider = r.provider || "unknown";
+
+    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, _minTok: {}, _minReq: {}, _secTok: {} };
+    const p = byProvider[provider];
+    p.input += prompt;
+    p.output += completion;
+    p.requests += 1;
+    p.cost += r.cost || 0;
+
+    totals.input += prompt;
+    totals.output += completion;
+    totals.requests += 1;
+    totals.cost += r.cost || 0;
+
+    const ts = r.timestamp || "";
+    const minute = ts.slice(0, 16);
+    if (minute) {
+      p._minTok[minute] = (p._minTok[minute] || 0) + tokSum;
+      p._minReq[minute] = (p._minReq[minute] || 0) + 1;
+    }
+    const second = ts.slice(0, 19);
+    if (second) p._secTok[second] = (p._secTok[second] || 0) + tokSum;
+  }
+
+  const items = Object.values(byProvider).map((p) => {
+    let peakTpm = 0, peakRpm = 0, peakTokS = 0;
+    for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
+    for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
+    for (const v of Object.values(p._secTok)) if (v > peakTokS) peakTokS = v;
+    const { provider, input, output, requests, cost } = p;
+    return { provider, input, output, requests, cost, peakTpm, peakRpm, peakTokS };
+  }).sort((a, b) => (b.requests || 0) - (a.requests || 0));
+
+  return { items, totals };
 }
 
 

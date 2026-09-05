@@ -6,4 +6,5 @@ export {
   saveRequestDetail, getRequestDetails, getRequestDetailById,
   clearAllRequestDetails,
   getKeyUsageSummary,
+  getProviderUsageSummary,
 } from "@/lib/db/index.js";
