@@ -291,8 +291,8 @@ export async function proxy(request) {
     return notFound();
   }
 
-  // Public usage check page (#/usage, hash-routed) — no admin login required.
-  // The page fetches /api/usage/key (public) with the user's key.
+  // Public usage check page (?key= deep link, then stripped) — no admin login
+  // required. The page fetches /api/usage/key (public) with the user's key.
   if (pathname === "/usage") {
     return NextResponse.next();
   }

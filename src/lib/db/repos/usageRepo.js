@@ -900,6 +900,22 @@ export async function getKeyRateUsage(apiKey, windowMs = 60000) {
   };
 }
 
+// Timestamp (ISO) of the oldest usage row in the rolling window for an apiKey.
+// Used by keyEnforcement's TPM wait-loop to compute how long until the oldest
+// token request falls out of the 60s window and frees up room — so a request
+// that's over TPM can sleep until just after that expiry rather than polling
+// blindly. Returns null when there are no rows in the window.
+export async function getKeyOldestTokenAt(apiKey, windowMs = 60000) {
+  const db = await getAdapter();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const row = db.get(
+    `SELECT MIN(timestamp) as oldest
+     FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
+    [apiKey, since],
+  );
+  return row?.oldest ?? null;
+}
+
 // Sum cost for an apiKey since a given ISO timestamp (for budget window).
 export async function getKeyCostSince(apiKey, sinceIso) {
   const db = await getAdapter();

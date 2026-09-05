@@ -52,29 +52,30 @@ export default function UsagePage() {
 
   const STORAGE_KEY = "derouter.usage.key";
 
-  // Read a key from a `?key=...` in the location hash (a deep link). The key is
+  // Read a key from a `?key=...` query param (a deep link). The key is
   // NOT kept in the URL — on mount we stash it into localStorage and strip it
-  // from the hash so the key doesn't linger in the address bar / history.
-  const readHashKey = useCallback(() => {
+  // from the query so the key doesn't linger in the address bar / history.
+  const readQueryKey = useCallback(() => {
     if (typeof window === "undefined") return "";
-    const hash = window.location.hash || "";
-    const m = hash.match(/[?&]key=([^&]+)/);
+    const search = window.location.search || "";
+    const m = search.match(/[?&]key=([^&]+)/);
     return m ? decodeURIComponent(m[1]) : "";
   }, []);
 
-  // Persist key to localStorage and remove it from the URL hash.
-  const consumeHashKey = useCallback((k) => {
+  // Persist key to localStorage and remove it from the URL query string.
+  const consumeQueryKey = useCallback((k) => {
     if (typeof window === "undefined") return;
     if (k) {
       try { localStorage.setItem(STORAGE_KEY, k); } catch {}
-      // Strip the key from the hash so the address bar shows #/usage only.
-      // location.hash starts with '#'; after stripping the key the remainder
-      // (e.g. '#/usage') is set back as the hash via replaceState.
-      const hash = window.location.hash || "";
-      const cleaned = hash.replace(/([?&])key=[^&]+/, "").replace(/[?&]$/, "");
-      const finalHash = cleaned || "#/usage";
-      if (window.location.hash !== finalHash) {
-        window.history.replaceState(null, "", `${window.location.pathname}${finalHash}`);
+      // Strip the key= param so the address bar shows a clean /usage URL.
+      // After removing the param (and any trailing ? or &), replaceState
+      // with just the pathname leaves no hash and no query.
+      const search = window.location.search || "";
+      const cleaned = search.replace(/([?&])key=[^&]+/, "").replace(/[?&]$/, "");
+      const finalSearch = cleaned && cleaned !== "?" ? cleaned : "";
+      const finalUrl = `${window.location.pathname}${finalSearch}`;
+      if (window.location.pathname + window.location.search !== finalUrl) {
+        window.history.replaceState(null, "", finalUrl);
       }
     }
   }, []);
@@ -122,14 +123,14 @@ export default function UsagePage() {
   }, [pageSize]);
 
   useEffect(() => {
-    // Priority: a fresh `?key=` deep link in the hash wins (and is then moved
+    // Priority: a fresh `?key=` deep link in the query wins (and is then moved
     // into storage so the URL no longer carries the key). Otherwise fall back
     // to a previously-stored key in localStorage (e.g. returning visit).
-    const hashKey = readHashKey();
-    if (hashKey) {
-      consumeHashKey(hashKey);
-      setKeyInput(hashKey);
-      lookup(hashKey, "7d");
+    const queryKey = readQueryKey();
+    if (queryKey) {
+      consumeQueryKey(queryKey);
+      setKeyInput(queryKey);
+      lookup(queryKey, "7d");
       return;
     }
     let stored = "";
@@ -138,7 +139,7 @@ export default function UsagePage() {
       setKeyInput(stored);
       lookup(stored, "7d");
     }
-  }, [readHashKey, consumeHashKey, lookup]);
+  }, [readQueryKey, consumeQueryKey, lookup]);
 
   const submitKey = (e) => {
     e?.preventDefault();
@@ -147,10 +148,8 @@ export default function UsagePage() {
     // Stash key in storage (not the URL); reload usage for this key.
     if (typeof window !== "undefined") {
       try { localStorage.setItem(STORAGE_KEY, k); } catch {}
-      const cleanHash = window.location.hash.replace(/([?&])key=[^&]+/, "").replace(/[?&]$/, "") || "#/usage";
-      if (window.location.hash !== cleanHash) {
-        window.history.replaceState(null, "", `${window.location.pathname}${cleanHash}`);
-      }
+      // Drop any lingering ?key= from the address bar — keep a clean /usage URL.
+      window.history.replaceState(null, "", window.location.pathname);
     }
     lookup(k, period);
   };
@@ -162,7 +161,7 @@ export default function UsagePage() {
     setError("");
     if (typeof window !== "undefined") {
       try { localStorage.removeItem(STORAGE_KEY); } catch {}
-      window.history.replaceState(null, "", `${window.location.pathname}#/usage`);
+      window.history.replaceState(null, "", window.location.pathname);
     }
   };
 

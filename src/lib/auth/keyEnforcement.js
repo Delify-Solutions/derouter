@@ -1,6 +1,28 @@
 import { getApiKeyForAuth, resetKeyWindow } from "@/lib/db/repos/apiKeysRepo.js";
-import { getKeyRateUsage, getKeyCostSince } from "@/lib/db/repos/usageRepo.js";
+import { getKeyRateUsage, getKeyOldestTokenAt, getKeyCostSince } from "@/lib/db/repos/usageRepo.js";
 import { matchesAllowed } from "./modelMatching.js";
+
+// Max time (ms) to hold a request waiting for TPM room before returning 429.
+// Default 30s — balances giving the 60s rolling window time to drain vs not
+// holding a client connection open so long it times out. Env-configurable.
+const TPM_MAX_WAIT_MS = Math.max(0, parseInt(process.env?.TPM_MAX_WAIT_MS ?? "30000", 10) || 30000);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Per-key-id serialization queue for the TPM check. Concurrent requests for the
+// same key chain through this promise so they don't all re-check and retry at
+// once (which would re-overshoot TPM immediately). Request A holds the lock,
+// sees room (or waits for it), then releases; request B acquires, re-checks
+// (A's tokens now counted) and waits only if still over. Entries self-clean
+// after the chain settles to avoid unbounded Map growth.
+const tpmQueues = new Map(); // keyId -> Promise
+function withTpmLock(keyId, fn) {
+  const prev = tpmQueues.get(keyId) ?? Promise.resolve();
+  const next = prev.then(fn, fn); // run fn after prev settles, success or fail
+  tpmQueues.set(keyId, next);
+  next.finally(() => { if (tpmQueues.get(keyId) === next) tpmQueues.delete(keyId); });
+  return next;
+}
 
 // Reset window duration in ms.
 const WINDOW_MS = {
@@ -45,12 +67,40 @@ export async function enforceKeyLimits(apiKey) {
     }
   }
 
-  // 3. TPM (tokens/min)
+  // 3. TPM (tokens/min) — wait for room instead of a hard 429, so a key holder
+  // hitting TPM isn't interrupted mid-work. Serialized per key.id so concurrent
+  // requests don't all re-check and retry at once (re-overshooting). Cap the
+  // total wait at TPM_MAX_WAIT_MS (default 30s); if still over, fall back to 429.
   if (resolved.tpm != null) {
-    const { tokens } = await getKeyRateUsage(apiKey, 60000);
-    if (tokens >= resolved.tpm) {
+    const tpmCheck = async () => {
+      if (TPM_MAX_WAIT_MS <= 0) {
+        // Wait disabled — behave like the old hard-429 path.
+        const { tokens } = await getKeyRateUsage(apiKey, 60000);
+        if (tokens >= resolved.tpm) return { ok: false, status: 429, error: "TPM limit exceeded", retryAfter: 60 };
+        return { ok: true };
+      }
+      const deadline = Date.now() + TPM_MAX_WAIT_MS;
+      while (Date.now() < deadline) {
+        const { tokens } = await getKeyRateUsage(apiKey, 60000);
+        if (tokens < resolved.tpm) return { ok: true };
+        // Sleep until the oldest token in the window should fall out (frees
+        // room), capped to a 5s poll interval and the remaining wait budget.
+        const oldestIso = await getKeyOldestTokenAt(apiKey, 60000);
+        let waitMs = 2000; // fallback poll when no oldest timestamp available
+        if (oldestIso) {
+          const oldestAgeMs = Date.now() - new Date(oldestIso).getTime();
+          waitMs = Math.max(0, 60000 - oldestAgeMs) + 50; // +50ms slack
+        }
+        waitMs = Math.min(waitMs, deadline - Date.now(), 5000);
+        if (waitMs <= 0) break;
+        await sleep(waitMs);
+      }
+      // Still over TPM after the max-wait budget — give up with a 429.
       return { ok: false, status: 429, error: "TPM limit exceeded", retryAfter: 60 };
-    }
+    };
+    const result = await withTpmLock(key.id, tpmCheck);
+    if (!result.ok) return result;
+    // ok: fall through to the budget check below
   }
 
   // 4. Budget ($ cost) with optional reset window
