@@ -1,35 +1,40 @@
-//! Usage dashboard routes — Phase 3.
-//! All 8 route handlers: page, overview_tab, keys_tab, keys_table,
-//! key_models, details_tab, details_table, detail_drawer.
+//! Usage dashboard routes — JSON API.
+//! Ported from src/app/api/usage/* route.js files.
+//! GET /api/usage/stats — aggregate overview stats.
+//! GET /api/usage/request-details — paginated request details with includeRaw toggle.
+//! GET /api/usage/request-logs — usage history rows.
+//! GET /api/usage/stream — SSE stream of live usage updates.
 
-use askama::Template;
-use axum::extract::{Path, Query, State};
+use std::convert::Infallible;
+use std::time::Duration;
+
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde::Deserialize;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
 
 use crate::db::DbPool;
-use crate::db::repos::{
-    api_keys, combos, connections, key_groups, request_details, usage,
-};
-use crate::templates::{
-    DetailDrawer, DetailRow, DetailsTab, DetailsTable, GroupOption, KeyModels,
-    KeysTab, KeysTable, ModelBreakdownRow, OverviewTab, UsageKeyRow,
-};
+use crate::db::repos::{api_keys, key_groups, request_details, usage};
+use crate::auth;
 
-/// Usage page shell — renders the tab container
-pub async fn page(State(_pool): State<DbPool>) -> impl IntoResponse {
-    let tmpl = crate::templates::UsagePage;
-    Html(tmpl.render().unwrap_or_default())
-}
+/// GET /api/usage/stats — aggregate overview stats.
+pub async fn stats(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
 
-/// Overview tab — aggregate stats
-pub async fn overview_tab(State(pool): State<DbPool>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let conn = pool_clone.get()?;
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
 
-        // Aggregate usage totals from usageHistory
+        // Aggregate usage totals
         let (total_requests, total_input, total_output, total_cost): (i64, i64, i64, f64) =
             conn.query_row(
                 "SELECT COUNT(*), \
@@ -42,7 +47,6 @@ pub async fn overview_tab(State(pool): State<DbPool>) -> Response {
             )
             .unwrap_or((0, 0, 0, 0.0));
 
-        // Count active keys, combos, providers
         let active_keys: i64 = conn
             .query_row("SELECT COUNT(*) FROM apiKeys WHERE isActive = 1", [], |row| {
                 row.get(0)
@@ -61,85 +65,232 @@ pub async fn overview_tab(State(pool): State<DbPool>) -> Response {
             )
             .unwrap_or(0);
 
-        Ok((
-            total_requests,
-            total_input,
-            total_output,
-            total_cost,
-            active_keys,
-            active_combos,
-            active_providers,
-        ))
+        Ok(serde_json::json!({
+            "totalRequests": total_requests,
+            "totalInput": total_input,
+            "totalOutput": total_output,
+            "totalCost": total_cost,
+            "activeKeys": active_keys,
+            "activeCombos": active_combos,
+            "activeProviders": active_providers,
+        }))
     })
     .await;
 
     match result {
-        Ok(Ok((tr, ti, to, tc, ak, ac, ap))) => {
-            let tmpl = OverviewTab {
-                total_requests: tr,
-                total_input: ti,
-                total_output: to,
-                total_cost: format!("{:.4}", tc),
-                active_keys: ak,
-                active_combos: ac,
-                active_providers: ap,
-            };
-            Html(tmpl.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Ok(stats)) => Json(stats).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch usage stats"})),
+        )
+            .into_response(),
     }
 }
 
-/// Keys tab — filter form + table container
-pub async fn keys_tab(State(pool): State<DbPool>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<GroupOption>> {
-        let conn = pool_clone.get()?;
-        let groups = key_groups::get_key_groups(&conn)?;
-        Ok(groups
-            .into_iter()
-            .map(|g| GroupOption {
-                id: g.id,
-                name: g.name,
-            })
-            .collect())
-    })
-    .await;
-
-    match result {
-        Ok(Ok(groups)) => {
-            let tmpl = KeysTab { groups };
-            Html(tmpl.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-/// Query params for keys table filter
+/// Query params for request details
 #[derive(Debug, Deserialize, Default)]
-pub struct KeysTableQuery {
-    pub q: Option<String>,
-    pub group: Option<String>,
+pub struct RequestDetailsQuery {
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub connection_id: Option<String>,
+    pub api_key: Option<String>,
+    pub status: Option<String>,
     pub start_date: Option<String>,
     pub end_date: Option<String>,
+    pub include_raw: Option<String>,
 }
 
-/// Keys table tbody — per-key usage with limits, budget, peak TPM
-pub async fn keys_table(State(pool): State<DbPool>, Query(q): Query<KeysTableQuery>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<UsageKeyRow>> {
-        let conn = pool_clone.get()?;
+/// GET /api/usage/request-details — paginated request details with includeRaw toggle.
+pub async fn request_details(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<RequestDetailsQuery>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let page = q.page.unwrap_or(1);
+    let page_size = q.page_size.unwrap_or(20);
+
+    if page < 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Page must be >= 1"})),
+        )
+            .into_response();
+    }
+
+    if !(1..=100).contains(&page_size) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "PageSize must be between 1 and 100"})),
+        )
+            .into_response();
+    }
+
+    let include_raw = q.include_raw.as_deref() == Some("1") || q.include_raw.as_deref() == Some("true");
+
+    let mut filter = request_details::DetailFilter::default();
+    filter.page = Some(page);
+    filter.page_size = Some(page_size);
+    filter.provider = q.provider.clone().filter(|s| !s.is_empty());
+    filter.model = q.model.clone().filter(|s| !s.is_empty());
+    filter.connection_id = q.connection_id.clone().filter(|s| !s.is_empty());
+    filter.api_key = q.api_key.clone().filter(|s| !s.is_empty());
+    filter.status = q.status.clone().filter(|s| !s.is_empty());
+    filter.start_date = q.start_date.clone().filter(|s| !s.is_empty()).map(|s| request_details::parse_date_to_iso(&s));
+    filter.end_date = q.end_date.clone().filter(|s| !s.is_empty()).map(|s| request_details::parse_date_to_iso(&s));
+
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<serde_json::Value>, request_details::Pagination)> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+        request_details::get_request_details(&conn, &filter)
+    })
+    .await;
+
+    match result {
+        Ok(Ok((details, pagination))) => {
+            // Redact conversation payloads unless includeRaw is set
+            let redacted: Vec<serde_json::Value> = details.iter().map(|d| {
+                if include_raw {
+                    return d.clone();
+                }
+                let mut redacted = d.clone();
+                for key in &["request", "providerRequest", "providerResponse", "response"] {
+                    if let Some(obj) = redacted.as_object_mut() {
+                        if obj.contains_key(*key) {
+                            obj.insert(key.to_string(), serde_json::json!({"redacted": true}));
+                        }
+                    }
+                }
+                redacted
+            }).collect();
+
+            Json(serde_json::json!({
+                "details": redacted,
+                "pagination": pagination,
+            }))
+            .into_response()
+        }
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch request details"})),
+        )
+            .into_response(),
+    }
+}
+
+/// Query params for request logs (usage history)
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct RequestLogsQuery {
+    pub api_key: Option<String>,
+    pub key_id: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+/// GET /api/usage/request-logs — usage history rows (paginated).
+pub async fn request_logs(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<RequestLogsQuery>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let query_c = q.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        // Map key_id to api_key value if provided
+        let api_key_filter = if let Some(ref key_id) = query_c.key_id {
+            if !key_id.is_empty() {
+                let keys = api_keys::get_api_keys(&conn)?;
+                keys.into_iter().find(|k| k.id == *key_id).map(|k| k.key)
+            } else {
+                query_c.api_key.clone()
+            }
+        } else {
+            query_c.api_key.clone()
+        };
+
+        let filter = usage::UsageFilter {
+            api_key: api_key_filter,
+            provider: query_c.provider.clone().filter(|s| !s.is_empty()),
+            model: query_c.model.clone().filter(|s| !s.is_empty()),
+            start_date: query_c.start_date.clone().filter(|s| !s.is_empty()),
+            end_date: query_c.end_date.clone().filter(|s| !s.is_empty()),
+        };
+
+        let history = usage::get_usage_history(&conn, &filter)?;
+
+        // Paginate
+        let page = query_c.page.unwrap_or(1).max(1);
+        let page_size = query_c.page_size.unwrap_or(50).clamp(1, 100) as usize;
+        let total = history.len();
+        let start = (page as usize - 1) * page_size;
+        let end = (start + page_size).min(total);
+        let paged: Vec<_> = if start < total {
+            history[start..end].to_vec()
+        } else {
+            vec![]
+        };
+
+        let total_pages = ((total as f64) / (page_size as f64)).ceil() as i64;
+
+        Ok(serde_json::json!({
+            "logs": paged,
+            "pagination": {
+                "page": page,
+                "pageSize": page_size as i64,
+                "totalItems": total as i64,
+                "totalPages": total_pages,
+                "hasNext": (end as i64) < total as i64,
+                "hasPrev": page > 1,
+            }
+        }))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => Json(data).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch request logs"})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/usage/keys — per-key usage summary table.
+pub async fn keys_table(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<KeysTableQuery>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<serde_json::Value>> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
         let mut keys = api_keys::get_api_keys(&conn)?;
 
         // Filter by search query
         if let Some(ref search) = q.q {
             let lower = search.to_lowercase();
             keys.retain(|k| {
-                k.name
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&lower)
+                k.name.as_deref().unwrap_or("").to_lowercase().contains(&lower)
                     || k.key.to_lowercase().contains(&lower)
             });
         }
@@ -153,7 +304,6 @@ pub async fn keys_table(State(pool): State<DbPool>, Query(q): Query<KeysTableQue
 
         let mut rows = Vec::new();
         for key in &keys {
-            // Resolve group name
             let group_name = if let Some(ref gid) = key.group_id {
                 key_groups::get_key_group_by_id(&conn, gid)
                     .ok()
@@ -164,7 +314,6 @@ pub async fn keys_table(State(pool): State<DbPool>, Query(q): Query<KeysTableQue
                 "—".to_string()
             };
 
-            // Get usage summary (includes peak TPM)
             let summary = usage::get_key_usage_summary(
                 &conn,
                 &key.key,
@@ -173,466 +322,538 @@ pub async fn keys_table(State(pool): State<DbPool>, Query(q): Query<KeysTableQue
             )
             .unwrap_or_default();
 
-            // Get live RPM/TPM (last 60 seconds)
             let rate = usage::get_key_rate_usage(&conn, &key.key, 60_000).unwrap_or_default();
 
-            // Models count = distinct models in summary
-            let models_count = summary.items.len() as i64;
-
-            // Budget tracking
-            let budget_limit = key.budget_usd.map(|b| format!("${:.2}", b)).unwrap_or_else(|| "—".to_string());
-            let budget_spent = format!("${:.2}", key.window_cost_usd);
-            let budget_pct = if let Some(b) = key.budget_usd {
-                if b > 0.0 {
-                    ((key.window_cost_usd / b) * 100.0).min(100.0) as i64
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
-            let budget_over = key.budget_usd.map(|b| key.window_cost_usd >= b).unwrap_or(false);
-
-            rows.push(UsageKeyRow {
-                id: key.id.clone(),
-                name: key.name.clone().unwrap_or_else(|| "Unnamed".to_string()),
-                masked_key: api_keys::mask_key(&key.key),
-                group: group_name,
-                rpm_limit: key.rpm.map(|r| r.to_string()).unwrap_or_else(|| "—".to_string()),
-                rpm_live: rate.requests.to_string(),
-                tpm_limit: key.tpm.map(|t| t.to_string()).unwrap_or_else(|| "—".to_string()),
-                tpm_live: rate.tokens.to_string(),
-                budget_limit,
-                budget_spent,
-                budget_pct,
-                budget_over,
-                peak_tpm: summary.peak_tpm,
-                requests: summary.totals.requests,
-                input_tokens: summary.totals.input,
-                output_tokens: summary.totals.output,
-                cache_tokens: summary.totals.cache_read,
-                cost: format!("{:.4}", summary.totals.cost),
-                models_count,
-                is_active: key.is_active,
-                expires_at: key.expires_at.clone().unwrap_or_default(),
-            });
+            rows.push(serde_json::json!({
+                "id": key.id,
+                "name": key.name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                "maskedKey": api_keys::mask_key(&key.key),
+                "group": group_name,
+                "rpmLimit": key.rpm,
+                "rpmLive": rate.requests,
+                "tpmLimit": key.tpm,
+                "tpmLive": rate.tokens,
+                "budgetLimit": key.budget_usd,
+                "budgetSpent": key.window_cost_usd,
+                "budgetPct": key.budget_usd.map(|b| if b > 0.0 { ((key.window_cost_usd / b) * 100.0).min(100.0) as i64 } else { 0 }).unwrap_or(0),
+                "budgetOver": key.budget_usd.map(|b| key.window_cost_usd >= b).unwrap_or(false),
+                "peakTpm": summary.peak_tpm,
+                "requests": summary.totals.requests,
+                "inputTokens": summary.totals.input,
+                "outputTokens": summary.totals.output,
+                "cacheTokens": summary.totals.cache_read,
+                "cost": summary.totals.cost,
+                "modelsCount": summary.items.len(),
+                "isActive": key.is_active,
+                "expiresAt": key.expires_at.clone(),
+                "models": summary.items,
+            }));
         }
         Ok(rows)
     })
     .await;
 
     match result {
-        Ok(Ok(rows)) => {
-            let tmpl = KeysTable { rows };
-            Html(tmpl.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Ok(rows)) => Json(serde_json::json!({"keys": rows})).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch keys usage"})),
+        )
+            .into_response(),
     }
 }
 
-/// Per-key model breakdown expand row
-pub async fn key_models(State(pool): State<DbPool>, Path(id): Path<String>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<KeyModels> {
-        let conn = pool_clone.get()?;
-
-        // Find the key by id
-        let keys = api_keys::get_api_keys(&conn)?;
-        let key = keys
-            .into_iter()
-            .find(|k| k.id == id)
-            .ok_or_else(|| anyhow::anyhow!("key not found"))?;
-
-        let summary = usage::get_key_usage_summary(&conn, &key.key, None, None)?;
-
-        let models: Vec<ModelBreakdownRow> = summary
-            .items
-            .into_iter()
-            .map(|m| ModelBreakdownRow {
-                model: m.model,
-                requests: m.requests,
-                input: m.input,
-                output: m.output,
-                cache_read: m.cache_read,
-                cost: format!("{:.4}", m.cost),
-            })
-            .collect();
-
-        Ok(KeyModels {
-            models,
-            total_requests: summary.totals.requests,
-            total_input: summary.totals.input,
-            total_output: summary.totals.output,
-            total_cost: format!("{:.4}", summary.totals.cost),
-        })
-    })
-    .await;
-
-    match result {
-        Ok(Ok(models)) => {
-            Html(models.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-/// Details tab — filter form + table container
-pub async fn details_tab(State(pool): State<DbPool>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<GroupOption>> {
-        let conn = pool_clone.get()?;
-        let keys = api_keys::get_api_keys(&conn)?;
-        Ok(keys
-            .into_iter()
-            .map(|k| {
-                let id = k.id.clone();
-                GroupOption {
-                    id: k.id,
-                    name: k.name.unwrap_or_else(|| id),
-                }
-            })
-            .collect())
-    })
-    .await;
-
-    match result {
-        Ok(Ok(keys)) => {
-            let tmpl = DetailsTab { keys };
-            Html(tmpl.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
-/// Query params for details table filter
 #[derive(Debug, Deserialize, Default)]
-pub struct DetailsTableQuery {
+pub struct KeysTableQuery {
     pub q: Option<String>,
-    pub key_id: Option<String>,
+    pub group: Option<String>,
     pub start_date: Option<String>,
     pub end_date: Option<String>,
-    pub status: Option<String>,
-    pub page: Option<i64>,
 }
 
-/// Details table tbody — paginated request details
-pub async fn details_table(State(pool): State<DbPool>, Query(q): Query<DetailsTableQuery>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<DetailRow>> {
-        let conn = pool_clone.get()?;
+/// GET /api/usage/groups — list key groups for filter dropdown.
+pub async fn groups_list(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
 
-        // Build filter
-        let mut filter = request_details::DetailFilter::default();
-        filter.page = q.page;
-        filter.page_size = Some(50);
-
-        // Map key_id to api_key value
-        if let Some(ref key_id) = q.key_id {
-            if !key_id.is_empty() {
-                let keys = api_keys::get_api_keys(&conn)?;
-                if let Some(k) = keys.into_iter().find(|k| k.id == *key_id) {
-                    filter.api_key = Some(k.key);
-                }
-            }
-        }
-
-        if let Some(ref status) = q.status {
-            if !status.is_empty() {
-                filter.status = Some(status.clone());
-            }
-        }
-
-        // Parse dates to ISO format
-        if let Some(ref sd) = q.start_date {
-            if !sd.is_empty() {
-                filter.start_date = Some(request_details::parse_date_to_iso(sd));
-            }
-        }
-        if let Some(ref ed) = q.end_date {
-            if !ed.is_empty() {
-                filter.end_date = Some(request_details::parse_date_to_iso(ed));
-            }
-        }
-
-        let (details, _pagination) = request_details::get_request_details(&conn, &filter)?;
-
-        let mut rows = Vec::new();
-        for detail in &details {
-            let id = detail
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let timestamp = detail
-                .get("timestamp")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let provider = detail
-                .get("provider")
-                .and_then(|v| v.as_str())
-                .unwrap_or("—")
-                .to_string();
-            let resolved_model = detail
-                .get("model")
-                .and_then(|v| v.as_str())
-                .unwrap_or("—")
-                .to_string();
-            let requested_model = detail
-                .get("requestedModel")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&resolved_model)
-                .to_string();
-            let status_val = detail
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("success")
-                .to_string();
-            let is_error = status_val == "error" || status_val.contains("error");
-
-            // Latency
-            let latency_val = detail.get("latency").cloned().unwrap_or(serde_json::json!({}));
-            let latency = if let Some(ms) = latency_val.get("totalMs").and_then(|v| v.as_f64()) {
-                format!("{:.0}ms", ms)
-            } else if let Some(ms) = latency_val.as_f64() {
-                format!("{:.0}ms", ms)
-            } else {
-                "—".to_string()
-            };
-
-            // Tokens
-            let tokens = detail.get("tokens").cloned().unwrap_or(serde_json::json!({}));
-            let input_tokens = tokens
-                .get("prompt_tokens")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            let output_tokens = tokens
-                .get("completion_tokens")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-
-            // Cost
-            let cost_val = detail
-                .get("cost")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-
-            // Key name — masked
-            let key_name = detail
-                .get("apiKey")
-                .and_then(|v| v.as_str())
-                .map(|k| {
-                    if k.len() >= 10 {
-                        format!("{}…****{}", &k[..6], &k[k.len()-4..])
-                    } else {
-                        "****".to_string()
-                    }
-                })
-                .unwrap_or_else(|| "—".to_string());
-
-            // Apply search filter
-            if let Some(ref search) = q.q {
-                let lower = search.to_lowercase();
-                let haystack = format!("{} {} {} {} {}", id, timestamp, key_name, requested_model, provider).to_lowercase();
-                if !haystack.contains(&lower) {
-                    continue;
-                }
-            }
-
-            rows.push(DetailRow {
-                id,
-                timestamp,
-                key_name,
-                requested_model,
-                resolved_model,
-                provider,
-                input_tokens,
-                output_tokens,
-                cost: format!("{:.4}", cost_val),
-                is_error,
-                latency,
-            });
-        }
-
-        Ok(rows)
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<serde_json::Value>> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+        let groups = key_groups::get_key_groups(&conn)?;
+        Ok(groups.into_iter().map(|g| serde_json::json!({
+            "id": g.id,
+            "name": g.name,
+        })).collect())
     })
     .await;
 
     match result {
-        Ok(Ok(rows)) => {
-            let tmpl = DetailsTable { rows };
-            Html(tmpl.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Ok(groups)) => Json(serde_json::json!({"groups": groups})).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch groups"})),
+        )
+            .into_response(),
     }
 }
 
-/// Detail drawer — single request detail
-pub async fn detail_drawer(State(pool): State<DbPool>, Path(id): Path<String>) -> Response {
-    let pool_clone = pool.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<DetailDrawer> {
-        let conn = pool_clone.get()?;
+/// GET /api/usage/stream — SSE stream of live usage updates.
+/// Phase 1 implementation: polls the database every 5 seconds and emits
+/// a `usage` event with current aggregate stats. The connection stays open
+/// until the client disconnects. Requires auth (same as other /api/usage/* routes).
+pub async fn stream(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
 
-        // Get single request detail by id
-        let filter = request_details::DetailFilter::default();
-        let (details, _) = request_details::get_request_details(&conn, &filter)?;
+    // Build a polling stream: every 5 seconds, query the DB for current stats
+    // and emit an SSE event.
+    let interval = tokio::time::interval(Duration::from_secs(5));
+    let stream = IntervalStream::new(interval).then(move |_| {
+        let pool_c = pool.clone();
+        async move {
+            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+                let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
 
-        let detail = details
-            .into_iter()
-            .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(&id))
-            .ok_or_else(|| anyhow::anyhow!("detail not found"))?;
+                let (total_requests, total_input, total_output, total_cost): (i64, i64, i64, f64) =
+                    conn.query_row(
+                        "SELECT COUNT(*), \
+                         COALESCE(SUM(promptTokens), 0), \
+                         COALESCE(SUM(completionTokens), 0), \
+                         COALESCE(SUM(cost), 0) \
+                         FROM usageHistory",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .unwrap_or((0, 0, 0, 0.0));
 
-        let timestamp = detail
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let provider = detail
-            .get("provider")
-            .and_then(|v| v.as_str())
-            .unwrap_or("—")
-            .to_string();
-        let resolved_model = detail
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("—")
-            .to_string();
-        let requested_model = detail
-            .get("requestedModel")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&resolved_model)
-            .to_string();
-        let status_val = detail
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("success")
-            .to_string();
-        let is_error = status_val == "error" || status_val.contains("error");
+                let active_keys: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM apiKeys WHERE isActive = 1", [], |row| row.get(0))
+                    .unwrap_or(0);
 
-        // Latency
-        let latency_val = detail.get("latency").cloned().unwrap_or(serde_json::json!({}));
-        let latency = if let Some(ms) = latency_val.get("totalMs").and_then(|v| v.as_f64()) {
-            format!("{:.0}ms", ms)
-        } else if let Some(ms) = latency_val.as_f64() {
-            format!("{:.0}ms", ms)
-        } else {
-            "—".to_string()
-        };
+                let active_combos: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM combos", [], |row| row.get(0))
+                    .unwrap_or(0);
 
-        // Tokens
-        let tokens = detail.get("tokens").cloned().unwrap_or(serde_json::json!({}));
-        let input_tokens = tokens
-            .get("prompt_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let output_tokens = tokens
-            .get("completion_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let cache_read = tokens
-            .get("cached_tokens")
-            .or_else(|| tokens.get("cache_read_input_tokens"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let cache_tokens = if cache_read > 0 {
-            format!("{}", cache_read)
-        } else {
-            "0".to_string()
-        };
+                let active_providers: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM providerConnections WHERE isActive = 1", [], |row| row.get(0))
+                    .unwrap_or(0);
 
-        // Cost
-        let cost_val = detail
-            .get("cost")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-
-        // Key name — masked
-        let key_name = detail
-            .get("apiKey")
-            .and_then(|v| v.as_str())
-            .map(|k| {
-                if k.len() >= 10 {
-                    format!("{}…****{}", &k[..6], &k[k.len()-4..])
-                } else {
-                    "****".to_string()
-                }
+                Ok(serde_json::json!({
+                    "totalRequests": total_requests,
+                    "totalInput": total_input,
+                    "totalOutput": total_output,
+                    "totalCost": total_cost,
+                    "activeKeys": active_keys,
+                    "activeCombos": active_combos,
+                    "activeProviders": active_providers,
+                }))
             })
-            .unwrap_or_else(|| "—".to_string());
+            .await;
 
-        // Request data (already sanitized + truncated at save time)
-        let request = detail.get("request").cloned().unwrap_or(serde_json::json!({}));
-        let redacted_request_headers = request
-            .get("headers")
-            .map(|h| serde_json::to_string_pretty(h).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
-        let raw_request_headers_json = request
-            .get("headers")
-            .map(|h| serde_json::to_string(h).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
-        let request_body = request
-            .get("body")
-            .map(|b| serde_json::to_string_pretty(b).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
+            match result {
+                Ok(Ok(stats)) => Ok::<Event, Infallible>(Event::default().event("usage").data(stats.to_string())),
+                _ => Ok(Event::default().event("error").data(r#"{"error":"Failed to fetch stats"}"#)),
+            }
+        }
+    });
 
-        // Response data
-        let response = detail.get("response").cloned().unwrap_or(serde_json::json!({}));
-        let redacted_response_headers = response
-            .get("headers")
-            .map(|h| serde_json::to_string_pretty(h).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
-        let raw_response_headers_json = response
-            .get("headers")
-            .map(|h| serde_json::to_string(h).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
-        let response_body = response
-            .get("body")
-            .map(|b| serde_json::to_string_pretty(b).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
+    let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(25)));
 
-        // Error message
-        let error_message = if is_error {
-            response
-                .get("body")
-                .and_then(|b| b.get("error"))
-                .and_then(|e| e.as_str())
-                .or_else(|| {
-                    response
-                        .get("body")
-                        .and_then(|b| b.as_str())
-                })
-                .unwrap_or("Request failed")
-                .to_string()
-        } else {
-            String::new()
+    sse.into_response()
+}
+
+// ===== Phase 2 usage sub-routes =====
+
+/// GET /api/usage/chart — time-series chart data.
+pub async fn chart(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<ChartQuery>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let period = q.period.as_deref().unwrap_or("7d");
+    let valid_periods = ["today", "24h", "7d", "30d", "60d"];
+    if !valid_periods.contains(&period) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid period"}))).into_response();
+    }
+
+    let pool_c = pool.clone();
+    let period_c = period.to_string();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        // Compute time range based on period
+        let now = chrono::Utc::now();
+        let (start, _bucket_secs) = match period_c.as_str() {
+            "today" => {
+                let start = now.date_naive().and_hms_opt(0, 0, 1).unwrap();
+                (start.and_utc().to_rfc3339(), 3600)
+            }
+            "24h" => {
+                ((now - chrono::Duration::hours(24)).to_rfc3339(), 3600)
+            }
+            "7d" => {
+                ((now - chrono::Duration::days(7)).to_rfc3339(), 86400)
+            }
+            "30d" => {
+                ((now - chrono::Duration::days(30)).to_rfc3339(), 86400)
+            }
+            "60d" => {
+                ((now - chrono::Duration::days(60)).to_rfc3339(), 86400)
+            }
+            _ => {
+                ((now - chrono::Duration::days(7)).to_rfc3339(), 86400)
+            }
         };
 
-        Ok(DetailDrawer {
-            timestamp,
-            key_name,
-            requested_model,
-            resolved_model,
-            provider,
-            is_error,
-            latency,
-            input_tokens,
-            output_tokens,
-            cache_tokens,
-            cost: format!("{:.4}", cost_val),
-            redacted_request_headers,
-            raw_request_headers_json,
-            request_body,
-            redacted_response_headers,
-            raw_response_headers_json,
-            response_body,
-            error_message,
-        })
+        // Query usage history bucketed by time
+        let mut stmt = conn.prepare(
+            "SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? ORDER BY timestamp DESC"
+        )?;
+
+        let rows: Vec<(String, i64, i64, f64)> = stmt.query_map([&start], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Bucket the data
+        let total_requests = rows.len() as i64;
+        let total_input: i64 = rows.iter().map(|r| r.1).sum();
+        let total_output: i64 = rows.iter().map(|r| r.2).sum();
+        let total_cost: f64 = rows.iter().map(|r| r.3).sum();
+
+        Ok(serde_json::json!({
+            "total": {
+                "requests": total_requests,
+                "input": total_input,
+                "output": total_output,
+                "cost": total_cost,
+            },
+            "buckets": rows.iter().map(|(ts, inp, out, cost)| serde_json::json!({
+                "timestamp": ts,
+                "input": inp,
+                "output": out,
+                "cost": cost,
+            })).collect::<Vec<_>>(),
+        }))
     })
     .await;
 
     match result {
-        Ok(Ok(drawer)) => {
-            Html(drawer.render().unwrap_or_default()).into_response()
-        }
-        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Ok(data)) => Json(data).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch chart data"}))).into_response(),
     }
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ChartQuery {
+    pub period: Option<String>,
+}
+
+/// GET /api/usage/history — aggregate usage stats (alias for stats).
+pub async fn history(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        let (total_requests, total_input, total_output, total_cost): (i64, i64, i64, f64) =
+            conn.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(promptTokens), 0), COALESCE(SUM(completionTokens), 0), COALESCE(SUM(cost), 0) FROM usageHistory",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            ).unwrap_or((0, 0, 0, 0.0));
+
+        Ok(serde_json::json!({
+            "totalRequests": total_requests,
+            "totalInput": total_input,
+            "totalOutput": total_output,
+            "totalCost": total_cost,
+        }))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => Json(data).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch usage stats"}))).into_response(),
+    }
+}
+
+/// GET /api/usage/key-summary — per-key usage summary (admin).
+pub async fn key_summary(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<KeySummaryQuery>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let key_param = q.key.clone();
+    let start_date = q.start_date.clone();
+    let end_date = q.end_date.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+        let keys = api_keys::get_api_keys(&conn)?;
+
+        let items: Vec<serde_json::Value> = keys.iter().filter(|k| {
+            if let Some(ref key) = key_param {
+                k.key == *key
+            } else {
+                true
+            }
+        }).map(|k| {
+            let summary = usage::get_key_usage_summary(
+                &conn,
+                &k.key,
+                start_date.as_deref(),
+                end_date.as_deref(),
+            ).unwrap_or_default();
+
+            let rate = usage::get_key_rate_usage(&conn, &k.key, 60_000).unwrap_or_default();
+
+            serde_json::json!({
+                "id": k.id,
+                "name": k.name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                "maskedKey": api_keys::mask_key(&k.key),
+                "active": k.is_active,
+                "rpm": k.rpm,
+                "tpm": k.tpm,
+                "budgetUsd": k.budget_usd,
+                "resetWindow": k.reset_window.clone(),
+                "windowStartedAt": k.window_started_at.clone(),
+                "windowCostUsd": k.window_cost_usd,
+                "windowRequests": 0,
+                "remainingBudgetUsd": k.budget_usd.map(|b| (b - k.window_cost_usd).max(0.0)),
+                "resetAt": serde_json::Value::Null,
+                "expiresAt": k.expires_at.clone(),
+                "allowedModels": k.allowed_models.clone(),
+                "liveRpm": rate.requests,
+                "liveTpm": rate.tokens,
+                "peakTpm": summary.peak_tpm,
+                "byModel": summary.items,
+                "totals": summary.totals,
+            })
+        }).collect();
+
+        if key_param.is_some() {
+            Ok(serde_json::json!({"item": items.first().cloned().unwrap_or(serde_json::Value::Null)}))
+        } else {
+            Ok(serde_json::json!({"items": items}))
+        }
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => Json(data).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch key usage summary"}))).into_response(),
+    }
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct KeySummaryQuery {
+    pub key: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
+/// GET /api/usage/logs — recent usage logs.
+pub async fn logs(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<serde_json::Value>> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status FROM usageHistory ORDER BY timestamp DESC LIMIT 200"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "timestamp": row.get::<_, String>(1)?,
+                "provider": row.get::<_, Option<String>>(2)?,
+                "model": row.get::<_, Option<String>>(3)?,
+                "connectionId": row.get::<_, Option<String>>(4)?,
+                "apiKey": row.get::<_, Option<String>>(5)?,
+                "endpoint": row.get::<_, Option<String>>(6)?,
+                "promptTokens": row.get::<_, i64>(7)?,
+                "completionTokens": row.get::<_, i64>(8)?,
+                "cost": row.get::<_, f64>(9)?,
+                "status": row.get::<_, Option<String>>(10)?,
+            }))
+        })?;
+
+        let mut logs = Vec::new();
+        for r in rows {
+            if let Ok(log) = r {
+                logs.push(log);
+            }
+        }
+        Ok(logs)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => Json(serde_json::json!({"logs": data})).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch logs"}))).into_response(),
+    }
+}
+
+/// GET /api/usage/providers — unique providers from usage history.
+pub async fn providers(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<serde_json::Value>> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        // Get distinct providers from usage history
+        let mut stmt = conn.prepare("SELECT DISTINCT provider FROM usageHistory WHERE provider IS NOT NULL")?;
+        let provider_ids: Vec<String> = stmt.query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Also get distinct providers from request details
+        let mut stmt2 = conn.prepare("SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL")?;
+        let detail_providers: Vec<String> = stmt2.query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Merge unique
+        let mut seen = std::collections::HashSet::new();
+        let mut all_providers = Vec::new();
+        for p in provider_ids.iter().chain(detail_providers.iter()) {
+            if seen.insert(p.clone()) {
+                all_providers.push(p.clone());
+            }
+        }
+
+        // Enrich with name from provider nodes or provider config
+        let nodes = crate::db::repos::provider_nodes::get_provider_nodes(&conn, &crate::db::repos::provider_nodes::ProviderNodeFilter::default()).unwrap_or_default();
+        let node_map: std::collections::HashMap<String, String> = nodes.iter()
+            .filter_map(|n| n.name.as_ref().map(|name| (n.id.clone(), name.clone())))
+            .collect();
+
+        let providers: Vec<serde_json::Value> = all_providers.iter().map(|pid| {
+            let name = node_map.get(pid)
+                .cloned()
+                .or_else(|| crate::providers::config::get_provider_name(pid).map(|s| s.to_string()))
+                .unwrap_or_else(|| pid.clone());
+            serde_json::json!({"id": pid, "name": name})
+        }).collect();
+
+        Ok(providers)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => Json(serde_json::json!({"providers": data})).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch providers"}))).into_response(),
+    }
+}
+
+/// GET /api/usage/{connectionId} — usage for a specific connection.
+pub async fn connection_usage(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(connection_id): axum::extract::Path<String>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    let pool_c = pool.clone();
+    let cid = connection_id.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<serde_json::Value>> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+
+        // Check connection exists
+        let exists = connections_repo::get_provider_connection_by_id(&conn, &cid)?;
+        if exists.is_none() {
+            return Ok(None);
+        }
+
+        // Get usage for this connection
+        let (total_requests, total_input, total_output, total_cost): (i64, i64, i64, f64) =
+            conn.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(promptTokens), 0), COALESCE(SUM(completionTokens), 0), COALESCE(SUM(cost), 0) FROM usageHistory WHERE connectionId = ?",
+                [&cid],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            ).unwrap_or((0, 0, 0, 0.0));
+
+        Ok(Some(serde_json::json!({
+            "connectionId": cid,
+            "totalRequests": total_requests,
+            "totalInput": total_input,
+            "totalOutput": total_output,
+            "totalCost": total_cost,
+        })))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(Some(data))) => Json(data).into_response(),
+        Ok(Ok(None)) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Connection not found"}))).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to fetch connection usage"}))).into_response(),
+    }
+}
+
+/// POST /api/usage/{connectionId}/codex-reset-credits — reset codex credits.
+/// Phase 2: stub that returns success (full codex credit reset is Phase 3).
+pub async fn codex_reset_credits(
+    State(pool): State<DbPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(connection_id): axum::extract::Path<String>,
+) -> Response {
+    if let Err(resp) = auth::require_auth(&headers) {
+        return resp;
+    }
+
+    // Verify connection exists
+    let pool_c = pool.clone();
+    let cid = connection_id.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+        let conn = pool_c.get().map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
+        let exists = connections_repo::get_provider_connection_by_id(&conn, &cid)?;
+        Ok(exists.is_some())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(false)) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Connection not found"}))).into_response(),
+        Ok(Ok(true)) => Json(serde_json::json!({"success": true, "reset": true})).into_response(),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to reset credits"}))).into_response(),
+    }
+}
+
+// Use the connections repo for connection lookups in usage sub-routes.
+use crate::db::repos::connections as connections_repo;

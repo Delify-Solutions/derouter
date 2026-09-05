@@ -3,24 +3,33 @@
 ## Purpose
 Manages API keys (CRUD) and key groups, where each key may carry per-key limits (RPM, TPM, budget, reset window, expiry, allowed models) and inherit defaults from its group.
 ## Requirements
-### Requirement: API key CRUD
+### Requirement: API keys CRUD over JSON
 
-The system SHALL allow an admin to create, read, update, and delete API keys. Each key has a unique `key` string (generate-on-create, `sk-…` style), a display `name`, an `isActive` flag, a `groupId`, and optional per-key limits.
+API key management MUST be served as JSON by the Rust backend, with the same fields and validation as the Node original.
 
-#### Scenario: Create a key
+#### Scenario: list keys
 
-- **WHEN** an admin submits a new key with name "ci" and no custom limits
-- **THEN** the system generates a unique key string, stores the row in `apiKeys`, and the key is immediately usable for `/v1/*` requests
+- **WHEN** `GET /api/keys` is called with a valid auth cookie
+- **THEN** it returns `{"keys":[{id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowCostUsd, ...}]}`
 
-#### Scenario: Deactivate a key
+#### Scenario: create key with limits
 
-- **WHEN** an admin sets `isActive = false` on an existing key
-- **THEN** subsequent requests carrying that key are rejected before any upstream call
+- **WHEN** `POST /api/keys` with body `{"name":"...", "groupId":"...?", "rpm":<n>?, "tpm":<n>?, "budgetUsd":<n>?, "resetWindow":"..."?, "expiresAt":"..."?, "allowedModels":[...]?}`
+- **THEN** a new key is created with a server-generated key string (`sk-...`) and machineId from `getConsistentMachineId`, and the response is 201 with the created key (including the full `key` value once)
+- **WHEN** `name` is missing
+- **THEN** the response is 400 `{"error":"Name is required"}`
 
-#### Scenario: Delete a key
+#### Scenario: update and delete
 
-- **WHEN** an admin deletes a key via the admin UI
-- **THEN** the key row is removed and the key immediately fails authentication
+- **WHEN** `PUT /api/keys/{id}` with partial fields
+- **THEN** the key is updated and the updated row returned
+- **WHEN** `DELETE /api/keys/{id}`
+- **THEN** the key is removed and an empty success response returned
+
+#### Scenario: key access requires auth
+
+- **WHEN** any `/api/keys` route is called without a valid `auth_token`
+- **THEN** the response is 401 JSON `{"error":"Unauthorized"}`
 
 ### Requirement: Per-key limits
 

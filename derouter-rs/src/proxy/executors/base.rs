@@ -2,11 +2,7 @@
 //! trait ProviderExecutor: stream + complete methods.
 //! Executor selection from connection.provider.
 
-use std::collections::HashMap;
-
-use axum::body::Body;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
 use bytes::Bytes;
 use futures::Stream;
 
@@ -57,7 +53,7 @@ pub trait ProviderExecutor: Send + Sync {
 }
 
 /// Select an executor for a given provider type.
-/// Returns a Box<dyn ProviderExecutor> for the 6 supported providers.
+/// Returns a Box<dyn ProviderExecutor> for the supported providers.
 pub fn select_executor(provider: &str) -> Box<dyn ProviderExecutor> {
     match provider.to_lowercase().as_str() {
         "openai" => Box::new(super::openai::OpenAiExecutor),
@@ -65,6 +61,32 @@ pub fn select_executor(provider: &str) -> Box<dyn ProviderExecutor> {
         "google" | "gemini" => Box::new(super::google::GoogleExecutor),
         "azure" | "azure-openai" => Box::new(super::azure::AzureExecutor),
         "ollama" => Box::new(super::ollama::OllamaExecutor),
+        // Group 3 executors
+        "xiaomi-tokenplan" | "xmtp" => Box::new(super::xiaomi_tokenplan::XiaomiTokenplanExecutor),
+        "codebuddy-intl" | "codebuddy" | "cbai" => Box::new(super::codebuddy_intl::CodebuddyIntlExecutor),
+        "codebuddy-cn" | "cbcn" => Box::new(super::codebuddy_cn::CodebuddyCnExecutor),
+        "gemini-cli" | "gc" => Box::new(super::gemini_cli::GeminiCliExecutor),
+        "iflow" | "if" => Box::new(super::iflow::IFlowExecutor),
+        "opencode" | "oc" => Box::new(super::opencode::OpenCodeExecutor),
+        "kimchi" => Box::new(super::kimchi::KimchiExecutor),
+        "mimo-free" | "mmf" => Box::new(super::mimo_free::MimoFreeExecutor),
+        "vertex" | "vx" | "vertex-partner" | "vxp" => Box::new(super::vertex::VertexExecutor),
+        "zed" | "zd" => Box::new(super::zed::ZedExecutor),
+        // Group 3 batch B executors
+        "grok-web" | "gw" => Box::new(super::grok_web::GrokWebExecutor),
+        "github" | "gh" => Box::new(super::github::GithubExecutor),
+        "perplexity-web" | "pw" => Box::new(super::perplexity_web::PerplexityWebExecutor),
+        "grok-cli" | "gcli" | "gb" => Box::new(super::grok_cli::GrokCliExecutor),
+        "qoder" | "qd" => Box::new(super::qoder::QoderExecutor),
+        "windsurf" | "ws" => Box::new(super::windsurf::WindsurfExecutor),
+        "antigravity" | "ag" => Box::new(super::antigravity::AntigravityExecutor),
+        "devin-cli" | "dv" | "devin" => Box::new(super::devin_cli::DevinCliExecutor),
+        // Group 3 batch C executors
+        "cursor" | "cu" => Box::new(super::cursor::CursorExecutor),
+        "kiro" | "ki" => Box::new(super::kiro::KiroExecutor),
+        "codex" | "cd" => Box::new(super::codex::CodexExecutor),
+        // Group 3 batch D executors
+        "commandcode" | "cmc" => Box::new(super::commandcode::CommandCodeExecutor),
         // Anything else is treated as OpenAI-compatible
         _ => Box::new(super::openai_compat::OpenAiCompatExecutor),
     }

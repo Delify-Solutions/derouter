@@ -1,5 +1,3 @@
-//! Web module — Axum router, routes, templates.
+//! Web module — Axum router, routes.
 
-pub mod render;
 pub mod routes;
-pub mod templates;

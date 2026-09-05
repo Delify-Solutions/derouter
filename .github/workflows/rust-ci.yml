@@ -1,0 +1,83 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "derouter-rs/**"
+      - "src/shared/**"
+      - "src/app/**"
+      - "tsconfig.json"
+      - "package.json"
+  pull_request:
+    branches: [main]
+    paths:
+      - "derouter-rs/**"
+      - "src/shared/**"
+      - "src/app/**"
+      - "tsconfig.json"
+      - "package.json"
+
+# Cancel in-progress runs on the same ref when a new commit is pushed.
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-build-clippy:
+    name: Build + Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            derouter-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('derouter-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates
+
+      - name: Cargo build
+        working-directory: derouter-rs
+        run: cargo build --release
+
+      - name: Cargo clippy
+        working-directory: derouter-rs
+        run: cargo clippy -D warnings
+
+  frontend-type-check:
+    name: TypeScript type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check (tsc --noEmit)
+        run: npx tsc --noEmit

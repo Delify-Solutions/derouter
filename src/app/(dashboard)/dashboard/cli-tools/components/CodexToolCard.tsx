@@ -1,0 +1,415 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
+import Image from "next/image";
+import BaseUrlSelect from "./BaseUrlSelect";
+import ApiKeySelect from "./ApiKeySelect";
+import { matchKnownEndpoint } from "./cliEndpointMatch";
+import { rememberEndpoint } from "./cliEndpointPresets";
+import { apiGet, apiPost, apiDelete } from "@/shared/api/client";
+import type { CliTool, CliToolStatus, ToolMessage } from "./cliTools.types";
+import type { ApiKey, ProviderConnection, ModelAliasMap } from "@/shared/types";
+
+interface CodexToolCardProps {
+  tool: CliTool;
+  isExpanded: boolean;
+  onToggle: () => void;
+  baseUrl: string;
+  apiKeys?: ApiKey[];
+  activeProviders?: ProviderConnection[] | null;
+  cloudEnabled?: boolean;
+  initialStatus?: CliToolStatus | null;
+  tunnelEnabled?: boolean;
+  tunnelPublicUrl?: string | null;
+  tailscaleEnabled?: boolean;
+  tailscaleUrl?: string | null;
+}
+
+interface CodexStatus extends CliToolStatus {
+  config?: string;
+}
+
+export default function CodexToolCard({
+  tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl,
+}: CodexToolCardProps) {
+  const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(initialStatus as CodexStatus || null);
+  const [checkingCodex, setCheckingCodex] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [message, setMessage] = useState<ToolMessage | null>(null);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [selectedApiKey, setSelectedApiKey] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [subagentModel, setSubagentModel] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [subagentModalOpen, setSubagentModalOpen] = useState(false);
+  const [modelAliases, setModelAliases] = useState<ModelAliasMap>({});
+  const [showManualConfigModal, setShowManualConfigModal] = useState(false);
+  const [customBaseUrl, setCustomBaseUrl] = useState("");
+
+  useEffect(() => {
+    if (apiKeys && apiKeys.length > 0 && !selectedApiKey) {
+      setSelectedApiKey(apiKeys[0].key);
+    }
+  }, [apiKeys, selectedApiKey]);
+
+  useEffect(() => {
+    if (initialStatus) setCodexStatus(initialStatus as CodexStatus);
+  }, [initialStatus]);
+
+  useEffect(() => {
+    if (isExpanded) {
+      if (!codexStatus) checkCodexStatus();
+      fetchModelAliases();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
+
+  const fetchModelAliases = async () => {
+    try {
+      const data = await apiGet<{ aliases?: ModelAliasMap }>("/api/models/alias");
+      setModelAliases(data.aliases || {});
+    } catch (error) {
+      console.log("Error fetching model aliases:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (codexStatus?.config) {
+      const modelMatch = codexStatus.config.match(/^model\s*=\s*"([^"]+)"/m);
+      if (modelMatch) setSelectedModel(modelMatch[1]);
+
+      const subagentModelMatch = codexStatus.config.match(/^default_subagent_model\s*=\s*"([^"]+)"/m);
+      if (subagentModelMatch) setSubagentModel(subagentModelMatch[1]);
+    }
+  }, [codexStatus]);
+
+  const getCurrentBaseUrl = (): string => {
+    if (!codexStatus?.config) return "";
+    const parsed = codexStatus.config.match(/base_url\s*=\s*"([^"]+)"/);
+    return parsed ? parsed[1] : "";
+  };
+
+  const currentBaseUrl = getCurrentBaseUrl();
+
+  const getConfigStatus = (): "configured" | "not_configured" | "other" | null => {
+    if (!codexStatus?.installed) return null;
+    if (!codexStatus.config) return "not_configured";
+    return matchKnownEndpoint(currentBaseUrl, { tunnelPublicUrl, tailscaleUrl }) ? "configured" : "other";
+  };
+
+  const configStatus = getConfigStatus();
+
+  const getEffectiveBaseUrl = (): string => {
+    const url = customBaseUrl || `${baseUrl}/v1`;
+    return url.endsWith("/v1") ? url : `${url}/v1`;
+  };
+
+  const getDisplayUrl = (): string => customBaseUrl || `${baseUrl}/v1`;
+
+  const checkCodexStatus = async () => {
+    setCheckingCodex(true);
+    try {
+      const data = await apiGet<CodexStatus>("/api/cli-tools/codex");
+      setCodexStatus(data);
+    } catch (error) {
+      setCodexStatus({ installed: false, error: (error as Error).message });
+    } finally {
+      setCheckingCodex(false);
+    }
+  };
+
+  const handleApplySettings = async () => {
+    setApplying(true);
+    setMessage(null);
+    try {
+      const keyToUse = (selectedApiKey && selectedApiKey.trim())
+        ? selectedApiKey
+        : (!cloudEnabled ? "sk_derouter" : selectedApiKey);
+
+      const data = await apiPost<{ error?: string }>("/api/cli-tools/codex", {
+        baseUrl: getEffectiveBaseUrl(),
+        apiKey: keyToUse,
+        model: selectedModel,
+        subagentModel: subagentModel || selectedModel,
+      });
+      if (data.error) {
+        setMessage({ type: "error", text: data.error });
+      } else {
+        rememberEndpoint(getEffectiveBaseUrl(), { tunnelPublicUrl, tailscaleUrl });
+        setMessage({ type: "success", text: "Settings applied successfully!" });
+        checkCodexStatus();
+      }
+    } catch (error) {
+      setMessage({ type: "error", text: (error as Error).message });
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleResetSettings = async () => {
+    setRestoring(true);
+    setMessage(null);
+    try {
+      const data = await apiDelete<{ error?: string }>("/api/cli-tools/codex");
+      if (data.error) {
+        setMessage({ type: "error", text: data.error });
+      } else {
+        setMessage({ type: "success", text: "Settings reset successfully!" });
+        setSelectedModel("");
+        setSubagentModel("");
+        checkCodexStatus();
+      }
+    } catch (error) {
+      setMessage({ type: "error", text: (error as Error).message });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handleModelSelect = (model: { value: string }) => {
+    setSelectedModel(model.value);
+    if (!subagentModel) {
+      setSubagentModel(model.value);
+    }
+    setModalOpen(false);
+  };
+
+  const getManualConfigs = () => {
+    const keyToUse = (selectedApiKey && selectedApiKey.trim())
+      ? selectedApiKey
+      : (!cloudEnabled ? "sk_derouter" : "<API_KEY_FROM_DASHBOARD>");
+
+    const effectiveSubagentModel = subagentModel || selectedModel;
+
+    const configContent = `# derouter Configuration for Codex CLI
+model = "${selectedModel}"
+model_provider = "derouter"
+
+[model_providers.derouter]
+name = "derouter"
+base_url = "${getEffectiveBaseUrl()}"
+wire_api = "responses"
+
+[model_providers.derouter.http_headers]
+Authorization = "Bearer ${keyToUse}"
+
+[agents]
+default_subagent_model = "${effectiveSubagentModel}"
+`;
+
+    return [
+      {
+        filename: "~/.codex/config.toml",
+        content: configContent,
+      },
+    ];
+  };
+
+  return (
+    <Card padding="xs" className="overflow-hidden">
+      <div className="flex items-start justify-between gap-3 hover:cursor-pointer sm:items-center" onClick={onToggle}>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="size-8 flex items-center justify-center shrink-0">
+            <Image src="/providers/codex.png" alt={tool.name} width={32} height={32} className="size-8 object-contain rounded-lg" sizes="32px" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} loading="lazy" decoding="async" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h3 className="font-medium text-sm">{tool.name}</h3>
+              {configStatus === "configured" && <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 rounded-full">Connected</span>}
+              {configStatus === "not_configured" && <span className="px-1.5 py-0.5 text-[10px] font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded-full">Not configured</span>}
+              {configStatus === "other" && <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-full">Other</span>}
+            </div>
+            <p className="text-xs text-text-muted truncate">{tool.description}</p>
+          </div>
+        </div>
+        <span className={`material-symbols-outlined text-text-muted text-[20px] transition-transform ${isExpanded ? "rotate-180" : ""}`}>expand_more</span>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-4 pt-4 border-t border-border flex flex-col gap-4">
+          {checkingCodex && (
+            <div className="flex items-center gap-2 text-text-muted">
+              <span className="material-symbols-outlined animate-spin">progress_activity</span>
+              <span>Checking Codex CLI...</span>
+            </div>
+          )}
+
+          {!checkingCodex && codexStatus && !codexStatus.installed && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-yellow-500">warning</span>
+                  <div className="flex-1">
+                    <p className="font-medium text-yellow-600 dark:text-yellow-400">Codex CLI not detected locally</p>
+                    <p className="text-sm text-text-muted">Manual configuration is still available if derouter is deployed on a remote server.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pl-9">
+                  <Button variant="secondary" size="sm" onClick={() => setShowManualConfigModal(true)} className="!bg-yellow-500/20 !border-yellow-500/40 !text-yellow-700 dark:!text-yellow-300 hover:!bg-yellow-500/30">
+                    <span className="material-symbols-outlined text-[18px] mr-1">content_copy</span>
+                    Manual Config
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowInstallGuide(!showInstallGuide)}>
+                    <span className="material-symbols-outlined text-[18px] mr-1">{showInstallGuide ? "expand_less" : "help"}</span>
+                    {showInstallGuide ? "Hide" : "How to Install"}
+                  </Button>
+                </div>
+              </div>
+              {showInstallGuide && (
+                <div className="p-4 bg-surface border border-border rounded-lg">
+                  <h4 className="font-medium mb-3">Installation Guide</h4>
+                  <div className="space-y-3 text-sm">
+                    <div>
+                      <p className="text-text-muted mb-1">macOS / Linux / Windows:</p>
+                      <code className="block px-3 py-2 bg-black/5 dark:bg-white/5 rounded font-mono text-xs">npm install -g @openai/codex</code>
+                    </div>
+                    <p className="text-text-muted">After installation, run <code className="px-1 bg-black/5 dark:bg-white/5 rounded">codex</code> to verify.</p>
+                    <div className="pt-2 border-t border-border">
+                      <p className="text-text-muted text-xs">
+                        Codex reads custom providers from <code className="px-1 bg-black/5 dark:bg-white/5 rounded">~/.codex/config.toml</code>.
+                        Click "Apply" to auto-configure.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!checkingCodex && codexStatus?.installed && (
+            <>
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr] sm:items-center sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Select Endpoint</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                  <BaseUrlSelect
+                    value={customBaseUrl || getDisplayUrl()}
+                    onChange={setCustomBaseUrl}
+                    requiresExternalUrl={tool.requiresExternalUrl}
+                    tunnelEnabled={tunnelEnabled}
+                    tunnelPublicUrl={tunnelPublicUrl}
+                    tailscaleEnabled={tailscaleEnabled}
+                    tailscaleUrl={tailscaleUrl}
+                    currentUrl={currentBaseUrl}
+                  />
+                </div>
+
+                {codexStatus?.config && (() => {
+                  return currentBaseUrl ? (
+                    <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                      <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Current</span>
+                      <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                      <span className="min-w-0 truncate rounded bg-surface/40 px-2 py-2 text-xs text-text-muted sm:py-1.5">
+                        {currentBaseUrl}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">API Key</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                  <ApiKeySelect value={selectedApiKey} onChange={setSelectedApiKey} apiKeys={apiKeys} cloudEnabled={cloudEnabled} />
+                </div>
+
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Model</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                  <div className="relative w-full min-w-0">
+                    <input type="text" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} placeholder="provider/model-id" className="w-full min-w-0 pl-2 pr-7 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5" />
+                    {selectedModel && <button onClick={() => setSelectedModel("")} className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-red-500 rounded transition-colors" title="Clear"><span className="material-symbols-outlined text-[14px]">close</span></button>}
+                  </div>
+                  <button onClick={() => setModalOpen(true)} disabled={!activeProviders?.length} className={`w-full sm:w-auto rounded border px-2 py-2 text-xs transition-colors sm:py-1.5 whitespace-nowrap sm:shrink-0 ${activeProviders?.length ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Select Model</button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Subagent Model</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                  <div className="relative w-full min-w-0">
+                    <input
+                      type="text"
+                      value={subagentModel}
+                      onChange={(e) => setSubagentModel(e.target.value)}
+                      placeholder={selectedModel || "provider/model-id (defaults to main model)"}
+                      className="w-full min-w-0 pl-2 pr-7 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
+                    />
+                    {subagentModel && (
+                      <button
+                        onClick={() => setSubagentModel("")}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-red-500 rounded transition-colors"
+                        title="Clear (will use main model)"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">close</span>
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSubagentModalOpen(true)}
+                    disabled={!activeProviders?.length}
+                    className={`w-full sm:w-auto rounded border px-2 py-2 text-xs transition-colors sm:py-1.5 whitespace-nowrap sm:shrink-0 ${activeProviders?.length ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}
+                  >
+                    Select Model
+                  </button>
+                </div>
+              </div>
+
+              {message && (
+                <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${message.type === "success" ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"}`}>
+                  <span className="material-symbols-outlined text-[14px]">{message.type === "success" ? "check_circle" : "error"}</span>
+                  <span>{message.text}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
+                <Button variant="primary" size="sm" onClick={handleApplySettings} disabled={(!selectedApiKey && (cloudEnabled && (apiKeys?.length ?? 0) > 0)) || !selectedModel} loading={applying}>
+                  <span className="material-symbols-outlined text-[14px] mr-1">save</span>Apply
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleResetSettings} disabled={restoring} loading={restoring}>
+                  <span className="material-symbols-outlined text-[14px] mr-1">restore</span>Reset
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setShowManualConfigModal(true)}>
+                  <span className="material-symbols-outlined text-[14px] mr-1">content_copy</span>Manual Config
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {modalOpen && (
+        <ModelSelectModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onSelect={handleModelSelect}
+          selectedModel={selectedModel}
+          activeProviders={activeProviders as never}
+          modelAliases={modelAliases as never}
+          title="Select Model for Codex"
+          onDeselect={undefined as never}
+        />
+      )}
+
+      {subagentModalOpen && (
+        <ModelSelectModal
+          isOpen={subagentModalOpen}
+          onClose={() => setSubagentModalOpen(false)}
+          onSelect={(model: { value: string }) => { setSubagentModel(model.value); setSubagentModalOpen(false); }}
+          selectedModel={subagentModel}
+          activeProviders={activeProviders as never}
+          modelAliases={modelAliases as never}
+          title="Select Subagent Model for Codex"
+          onDeselect={undefined as never}
+        />
+      )}
+
+      <ManualConfigModal
+        isOpen={showManualConfigModal}
+        onClose={() => setShowManualConfigModal(false)}
+        title="Codex CLI - Manual Configuration"
+        configs={getManualConfigs() as never}
+      />
+    </Card>
+  );
+}

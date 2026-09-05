@@ -11,4 +11,5 @@ pub mod video;
 pub mod responses;
 pub mod search;
 pub mod models;
+pub mod translator;
 pub mod executors;

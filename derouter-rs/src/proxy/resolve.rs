@@ -1,13 +1,19 @@
-//! Proxy resolve — combo resolution. Phase 1.
-//! Port of combo.js getComboModelsFromData.
+//! Proxy resolve — combo resolution.
+//! Port of combo.js getComboModelsFromData + getComboModels.
 //!
 //! getComboModels(model_str): if the string has no `/` and matches a combo name,
 //! return that combo's models list; else treat as a single direct `[model_str]` candidate.
 //! isModelAllowed(key, model_str) checks against allowedModels.
+//!
+//! Phase 3: provider resolution uses the registry (registry::by_id_or_alias) as the
+//! source of truth. Combo member model strings are validated against registry entries.
+//! AI_MODELS remains as a supplemental catalog for passthrough/compatible providers.
 
 use rusqlite::Connection;
 
 use super::super::db::repos::combos;
+use crate::providers::registry;
+use crate::providers::capabilities::AI_MODELS;
 
 /// Resolve a model string into a list of model candidates.
 /// If `model_str` has no `/` and matches a combo name, return the combo's models.
@@ -100,4 +106,37 @@ pub fn is_model_allowed_with_combos(
             false
         }
     }
+}
+
+/// Validate that a (provider, model) pair exists in the registry or AI_MODELS catalog.
+/// Uses registry::by_id_or_alias for provider lookup.
+/// Returns true if the provider is known and the model is in its transport.models list,
+/// or if the pair appears in AI_MODELS (for passthrough/compatible providers).
+pub fn is_valid_provider_model(provider: &str, model: &str) -> bool {
+    // Check registry first
+    if let Some(entry) = registry::by_id_or_alias(provider) {
+        for pm in entry.models {
+            if pm.id == model {
+                return true;
+            }
+        }
+    }
+
+    // Fall back to AI_MODELS catalog
+    for (p, m, _) in AI_MODELS.iter() {
+        if (*p == provider || *p == registry::id_to_alias(provider).unwrap_or(provider))
+            && *m == model
+        {
+            return true;
+        }
+    }
+
+    // Passthrough/compatible providers accept any model
+    if registry::is_openai_compatible_provider(provider)
+        || registry::is_anthropic_compatible_provider(provider)
+    {
+        return true;
+    }
+
+    false
 }

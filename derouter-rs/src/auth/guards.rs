@@ -5,6 +5,7 @@
 //! Password from settings.password (bcrypt or argon2) or INITIAL_PASSWORD env (default "123456").
 
 use std::path::PathBuf;
+use std::os::unix::fs::OpenOptionsExt;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -50,7 +51,18 @@ fn get_jwt_secret() -> Vec<u8> {
     let _ = std::fs::create_dir_all(&data_dir);
     let secret = uuid::Uuid::new_v4().simple().to_string()
         + &uuid::Uuid::new_v4().simple().to_string();
-    let _ = std::fs::write(&secret_file, &secret);
+    // Write the secret file with mode 0600 (owner read/write only) to prevent
+    // other users from reading the JWT secret and forging tokens.
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&secret_file)
+    {
+        use std::io::Write;
+        let _ = file.write_all(secret.as_bytes());
+    }
     secret.into_bytes()
 }
 
@@ -145,6 +157,17 @@ impl<S: Send + Sync> FromRequestParts<S> for RequireAdmin {
 }
 
 fn redirect_to_login(parts: &Parts) -> Response {
+    let path = parts.uri.path();
+
+    // All /api/* routes return 401 JSON (no redirect, no HTML)
+    if path.starts_with("/api/") {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "Unauthorized"})),
+        )
+            .into_response();
+    }
+
     let is_htmx = parts
         .headers
         .get("hx-request")
@@ -169,10 +192,32 @@ fn redirect_to_login(parts: &Parts) -> Response {
     } else {
         (
             StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({
-                "error": { "message": "Unauthorized", "type": "authentication_error" }
-            })),
+            axum::Json(serde_json::json!({"error": "Unauthorized"})),
         )
             .into_response()
     }
+}
+
+/// Helper for admin API routes: check auth from Cookie header.
+/// Returns Ok(()) if authenticated, Err(401 JSON response) otherwise.
+pub fn require_auth(headers: &axum::http::HeaderMap) -> Result<(), Response> {
+    if let Some(cookie_header) = headers.get(axum::http::header::COOKIE) {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if let Some(value) = cookie.strip_prefix(&format!("{}=", ADMIN_COOKIE_NAME)) {
+                    if let Some(claims) = verify_token(value) {
+                        if claims.authenticated {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err((
+        StatusCode::UNAUTHORIZED,
+        axum::Json(serde_json::json!({"error": "Unauthorized"})),
+    )
+        .into_response())
 }
