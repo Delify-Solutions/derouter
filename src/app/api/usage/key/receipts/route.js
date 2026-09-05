@@ -140,7 +140,10 @@ export async function GET(request) {
         const output = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
         const tok = input + output;
         const latencyMs = meta?.latencyMs ?? null;
-        const tokS = latencyMs && latencyMs > 0 ? Math.round((tok / (latencyMs / 1000)) * 10) / 10 : null;
+        // Tok/s = generation speed = output tokens / total time. Only tokens
+        // the model PRODUCED count — input tokens are the prompt sent in, not
+        // generated, so they'd inflate the rate for prompt-heavy requests.
+        const tokS = latencyMs && latencyMs > 0 ? Math.round((output / (latencyMs / 1000)) * 10) / 10 : null;
         return {
           timestamp: r.timestamp,
           model: r.model,

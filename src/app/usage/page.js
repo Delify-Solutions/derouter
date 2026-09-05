@@ -607,7 +607,7 @@ export default function UsagePage() {
                       <th className="text-right font-medium px-3 py-2">Latency</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
-                      <th className="text-right font-medium px-3 py-2" title="Tokens (input + output)">Tok</th>
+                      <th className="text-right font-medium px-3 py-2" title="Tokens (input + output); Tok/s = output / total time">Tok</th>
                       <th className="text-right font-medium px-3 py-2">Cache R</th>
                       <th className="text-right font-medium px-3 py-2">Cache W</th>
                       <th className="text-right font-medium px-3 py-2">Cost</th>

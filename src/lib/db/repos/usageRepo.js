@@ -825,8 +825,10 @@ export async function getRecentLogs(limit = 200) {
 // plus peak figures:
 //   peakTpm  — max sum of (prompt+completion) tokens in any 1-minute bucket
 //   peakRpm  — max request count in any 1-minute bucket
-//   peakTokS — max sum of (prompt+completion) tokens in any 1-second bucket
-// (LLM generation speed: Tok/s. Thresholds: <10 slow, 20-40 normal, 80+ instant.)
+//   peakTokS — max sum of COMPLETION (output) tokens in any 1-second bucket
+// (Tok/s = LLM generation speed = output tokens/sec. Input tokens are the
+//  prompt sent in, not generated, so they're excluded. Thresholds: <10 slow,
+//  20-40 normal, 80+ instant.)
 export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0, peakRpm: 0, peakTokS: 0 };
   const db = await getAdapter();
@@ -844,7 +846,7 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   const byModel = {};
   const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
 
-  // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), per-second tokens (Tok/s).
+  // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), per-second output tokens (Tok/s).
   const perMinuteTok = {};
   const perMinuteReq = {};
   const perSecondTok = {};
@@ -887,7 +889,10 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     }
     const second = ts.slice(0, 19); // YYYY-MM-DDTHH:MM:SS
     if (second) {
-      perSecondTok[second] = (perSecondTok[second] || 0) + tokSum;
+      // Tok/s peak = OUTPUT tokens per second (generation throughput), not
+      // prompt+completion. Input tokens are the prompt sent in, not generated
+      // — counting them would inflate peak Tok/s for prompt-heavy traffic.
+      perSecondTok[second] = (perSecondTok[second] || 0) + completion;
     }
   }
   let peakTpm = 0;
@@ -954,7 +959,8 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
       p._minReq[minute] = (p._minReq[minute] || 0) + 1;
     }
     const second = ts.slice(0, 19);
-    if (second) p._secTok[second] = (p._secTok[second] || 0) + tokSum;
+    // Tok/s peak = OUTPUT tokens per second (generation throughput only).
+    if (second) p._secTok[second] = (p._secTok[second] || 0) + completion;
   }
 
   const items = Object.values(byProvider).map((p) => {

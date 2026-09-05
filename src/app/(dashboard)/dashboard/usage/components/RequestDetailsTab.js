@@ -440,7 +440,7 @@ export default function RequestDetailsTab() {
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main" title="Tokens (input + output) / Tok/s">Tok</th>
+                <th className="text-right p-4 text-sm font-semibold text-text-main" title="Tokens (input + output); Tok/s = output tokens / total time">Tok</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
                 <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
               </tr>
@@ -504,7 +504,12 @@ export default function RequestDetailsTab() {
                     {(() => {
                       const tok = getInputTokens(detail.tokens) + (detail.tokens?.completion_tokens || 0);
                       const latTotal = detail.latency?.total || 0;
-                      const tokS = latTotal > 0 ? Math.round((tok / (latTotal / 1000)) * 10) / 10 : null;
+                      // Tok/s = output tokens / generation time — measures LLM
+                      // generation speed (only tokens the model PRODUCED, not the
+                      // prompt it consumed). input+output over total time would
+                      // inflate the rate for prompt-heavy requests.
+                      const output = detail.tokens?.completion_tokens || 0;
+                      const tokS = latTotal > 0 ? Math.round((output / (latTotal / 1000)) * 10) / 10 : null;
                       return (
                         <td className="p-4 text-sm text-text-main text-right font-mono">
                           <div className="tabular-nums">{tok.toLocaleString()}</div>
