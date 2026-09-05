@@ -1,0 +1,75 @@
+<div x-data="{ open: true }" x-show="open" class="fixed inset-0 z-50 flex items-center justify-center">
+    <div x-show="open" @click="open = false" class="absolute inset-0 bg-black opacity-40"></div>
+    <div x-show="open" class="relative bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between p-4 border-b">
+            <h2 class="text-lg font-bold">{{ is_edit }} Provider Connection</h2>
+            <button @click="open = false"
+                    class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <form {% if is_edit == "Edit" %}
+                hx-put="/dashboard/providers/{{ connection_id }}"
+              {% else %}
+                hx-post="/dashboard/providers"
+              {% endif %}
+                hx-target="#modal-container"
+                class="p-4 space-y-4">
+            <div>
+                <label class="block text-sm font-medium mb-1">Provider *</label>
+                <select name="provider" required
+                        class="w-full border border-gray-300 rounded px-3 py-2">
+                    <option value="openai" {% if provider == "openai" %}selected{% endif %}>OpenAI</option>
+                    <option value="anthropic" {% if provider == "anthropic" %}selected{% endif %}>Anthropic</option>
+                    <option value="openai-compatible" {% if provider == "openai-compatible" %}selected{% endif %}>OpenAI Compatible</option>
+                    <option value="google" {% if provider == "google" %}selected{% endif %}>Google</option>
+                    <option value="azure" {% if provider == "azure" %}selected{% endif %}>Azure</option>
+                    <option value="ollama" {% if provider == "ollama" %}selected{% endif %}>Ollama</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Name</label>
+                <input type="text" name="name" value="{{ connection_name }}"
+                       class="w-full border border-gray-300 rounded px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Auth Type</label>
+                <select name="authType"
+                        class="w-full border border-gray-300 rounded px-3 py-2">
+                    <option value="api-key" {% if auth_type == "api-key" %}selected{% endif %}>API Key</option>
+                    <option value="oauth" {% if auth_type == "oauth" %}selected{% endif %}>OAuth</option>
+                    <option value="none" {% if auth_type == "none" %}selected{% endif %}>None</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">API Key / Token</label>
+                <input type="password" name="apiKey" placeholder="Enter API key"
+                       class="w-full border border-gray-300 rounded px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Base URL (optional, for openai-compatible)</label>
+                <input type="text" name="baseUrl" value="{{ base_url }}"
+                       placeholder="https://api.example.com"
+                       class="w-full border border-gray-300 rounded px-3 py-2">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Priority</label>
+                    <input type="number" name="priority" value="{{ priority }}"
+                           class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Active</label>
+                    <select name="isActive" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="true" {% if is_active %}selected{% endif %}>Yes</option>
+                        <option value="false" {% if !is_active %}selected{% endif %}>No</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-2 pt-4">
+                <button type="button" @click="open = false"
+                        class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">{{ is_edit }}</button>
+            </div>
+        </form>
+    </div>
+</div>

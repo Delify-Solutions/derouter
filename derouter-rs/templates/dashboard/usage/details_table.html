@@ -1,0 +1,27 @@
+{% for row in rows %}
+<tr class="border-b hover:bg-gray-50 cursor-pointer"
+    hx-get="/dashboard/usage/details/{{ row.id }}"
+    hx-target="#drawer"
+    hx-swap="innerHTML"
+    @click="$store.usage.openDrawer()"
+    >
+    <td class="px-3 py-2 text-sm whitespace-nowrap">{{ row.timestamp }}</td>
+    <td class="px-3 py-2 text-sm font-mono text-xs">{{ row.key_name }}</td>
+    <td class="px-3 py-2 text-sm font-mono text-xs">{{ row.requested_model }}</td>
+    <td class="px-3 py-2 text-sm font-mono text-xs">{{ row.resolved_model }}</td>
+    <td class="px-3 py-2 text-sm">{{ row.provider }}</td>
+    <td class="px-3 py-2 text-sm text-right text-xs">{{ row.input_tokens }} / {{ row.output_tokens }}</td>
+    <td class="px-3 py-2 text-sm text-right">{{ row.cost }}</td>
+    <td class="px-3 py-2 text-sm">
+        {% if row.is_error %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Error</span>
+        {% else %}
+        <span class="inline-flex items-conscious px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">OK</span>
+        {% endif %}
+    </td>
+    <td class="px-3 py-2 text-sm">{{ row.latency }}</td>
+</tr>
+{% endfor %}
+{% if rows.is_empty() %}
+<tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No requests found</td></tr>
+{% endif %}

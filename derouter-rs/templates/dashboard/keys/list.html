@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+{% block title %}API Keys — derouter{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">API Keys</h1>
+    <button hx-get="/dashboard/keys/new"
+            hx-target="#modal-container"
+            class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        + Add Key
+    </button>
+</div>
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full">
+        <thead class="bg-gray-100 border-b">
+            <tr>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Name</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Key</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Group</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">RPM</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">TPM</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Budget</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="keys-table-body">
+            {% for item in items %}
+            <tr id="key-row-{{ item.id }}" class="border-b hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm font-medium">{{ item.name }}</td>
+                <td class="px-4 py-3 text-sm font-mono text-xs">{{ item.masked_key }}</td>
+                <td class="px-4 py-3 text-sm">{{ item.group }}</td>
+                <td class="px-4 py-3 text-sm">{{ item.rpm }}</td>
+                <td class="px-4 py-3 text-sm">{{ item.tpm }}</td>
+                <td class="px-4 py-3 text-sm">{{ item.budget }}</td>
+                <td class="px-4 py-3 text-sm">
+                    {% if item.is_active %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Active</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Disabled</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-3 text-sm">
+                    <button hx-get="/dashboard/keys/{{ item.id }}"
+                            hx-target="#modal-container"
+                            class="text-blue-600 hover:underline mr-2">Edit</button>
+                    <button hx-delete="/dashboard/keys/{{ item.id }}"
+                            hx-target="#key-row-{{ item.id }}"
+                            hx-swap="outerHTML"
+                            hx-confirm="Delete this API key?"
+                            class="text-red-600 hover:underline">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div id="modal-container"></div>
+{% endblock %}

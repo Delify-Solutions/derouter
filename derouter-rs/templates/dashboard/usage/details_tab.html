@@ -1,0 +1,69 @@
+<div>
+    <!-- Filter form -->
+    <form class="mb-4 flex flex-wrap gap-2 items-center"
+          hx-get="/dashboard/usage/details/table"
+          hx-target="#usage-details-table"
+          hx-trigger="change"
+          hx-include="this form">
+        <input type="text" name="q" placeholder="Search..."
+               class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48">
+        <select name="keyId" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+            <option value="">All keys</option>
+            {% for k in keys %}
+            <option value="{{ k.id }}">{{ k.name }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="startDate" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+        <input type="date" name="endDate" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+        <select name="status" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+            <option value="">All statuses</option>
+            <option value="success">Success</option>
+            <option value="error">Error</option>
+        </select>
+    </form>
+
+    <!-- Details table -->
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+        <table class="min-w-full">
+            <thead class="bg-gray-100 border-b">
+                <tr>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Time</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Key</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Requested Model</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Resolved Model</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Provider</th>
+                    <th class="px-3 py-2 text-right text-xs font-medium text-gray-600">Tokens (In/Out)</th>
+                    <th class="px-3 py-2 text-right text-xs font-medium text-gray-600">Cost</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Status</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-600">Latency</th>
+                </tr>
+            </thead>
+            <tbody id="usage-details-table">
+                <!-- Filled by HTMX -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="mt-4 flex justify-between items-center">
+        <div id="details-page-info" class="text-sm text-gray-500"></div>
+        <div class="flex gap-2">
+            <button id="details-prev"
+                    hx-get="/dashboard/usage/details/table"
+                    hx-target="#usage-details-table"
+                    hx-include="this form"
+                    class="px-3 py-1.5 border rounded text-sm disabled:opacity-50"
+                    disabled>
+                Previous
+            </button>
+            <button id="details-next"
+                    hx-get="/dashboard/usage/details/table"
+                    hx-target="#usage-details-table"
+                    hx-include="this form"
+                    class="px-3 py-1.5 border rounded text-sm disabled:opacity-50"
+                    disabled>
+                Next
+            </button>
+        </div>
+    </div>
+</div>

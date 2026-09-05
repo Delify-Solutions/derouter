@@ -1,0 +1,78 @@
+<div class="fixed inset-0 z-50 flex justify-end bg-black/40" x-data="{ show: true }" x-show="show" @click.self="show = false">
+    <div class="w-full max-w-2xl h-full bg-white border-l border-gray-200 overflow-y-auto"
+         @click.stop>
+        <div class="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
+            <h3 class="text-sm font-semibold">Request Detail</h3>
+            <button @click="show = false" class="p-1.5 hover:bg-gray-100 rounded text-gray-400" title="Close">
+                <span class="text-xl">&times;</span>
+            </button>
+        </div>
+
+        <div class="p-4 space-y-4">
+            <!-- Summary -->
+            <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <div><span class="text-gray-500">Model:</span> <span class="font-mono">{{ requested_model }}</span></div>
+                <div>
+                    <span class="text-gray-500">Status:</span>
+                    {% if is_error %}
+                    <span class="font-medium text-red-600">{{ status }}</span>
+                    {% else %}
+                    <span class="font-medium text-green-600">{{ status }}</span>
+                    {% endif %}
+                </div>
+                <div><span class="text-gray-500">Time:</span> <span class="text-gray-500">{{ timestamp }}</span></div>
+                <div><span class="text-gray-500">Latency:</span> <span class="font-mono">{{ latency }}</span></div>
+            </div>
+
+            <!-- Token breakdown -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                    <p class="text-gray-500 text-[11px]">Input Tokens</p>
+                    <p class="font-mono font-medium">{{ input_tokens }}</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                    <p class="text-gray-500 text-[11px]">Output Tokens</p>
+                    <p class="font-mono font-medium">{{ output_tokens }}</p>
+                </div>
+                {% if cache_tokens > 0 %}
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                    <p class="text-gray-500 text-[11px]">Cached (read)</p>
+                    <p class="font-mono font-medium">{{ cache_tokens }}</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Raw payloads -->
+            <div x-data="{ open: false }">
+                <button @click="open = !open"
+                        class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs hover:bg-gray-100 transition-colors w-full">
+                    <span class="font-medium">View Raw Responses</span>
+                </button>
+                <div x-show="open" x-transition class="space-y-3 mt-3">
+                    <div class="rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 text-xs font-medium border-b border-gray-200 bg-gray-50">Client Request (Input)</div>
+                        <pre class="max-h-[300px] overflow-auto px-3 py-2 font-mono text-[11px] bg-gray-50 border-t border-gray-200">{{ request_json }}</pre>
+                    </div>
+                    {% if !provider_request_json.is_empty() %}
+                    <div class="rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 text-xs font-medium border-b border-gray-200 bg-gray-50">Provider Request</div>
+                        <pre class="max-h-[300px] overflow-auto px-3 py-2 font-mono text-[11px] bg-gray-50 border-t border-gray-200">{{ provider_request_json }}</pre>
+                    </div>
+                    {% endif %}
+                    {% if !provider_response_json.is_empty() %}
+                    <div class="rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 text-xs font-medium border-b border-gray-200 bg-gray-50">Provider Response</div>
+                        <pre class="max-h-[300px] overflow-auto px-3 py-2 font-mono text-[11px] bg-gray-50 border-t border-gray-200">{{ provider_response_json }}</pre>
+                    </div>
+                    {% endif %}
+                    {% if !response_json.is_empty() %}
+                    <div class="rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 text-xs font-medium border-b border-gray-200 bg-gray-50">Client Response</div>
+                        <pre class="max-h-[300px] overflow-auto px-3 py-2 font-mono text-[11px] bg-gray-50 border-t border-gray-200">{{ response_json }}</pre>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

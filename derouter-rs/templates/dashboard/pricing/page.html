@@ -1,0 +1,72 @@
+{% extends "layout.html" %}
+{% block title %}Pricing — derouter{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold">Pricing</h1>
+</div>
+
+<div class="mb-6">
+    <h2 class="text-lg font-semibold mb-3">Per-Model Pricing ($/1M tokens)</h2>
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+        <table class="min-w-full">
+            <thead class="bg-gray-100 border-b">
+                <tr>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Provider</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Model</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Input</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Output</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Cached</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Reasoning</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Cache Write</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pool_pricing %}
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm">{{ row.provider }}</td>
+                    <td class="px-4 py-3 text-sm font-mono">{{ row.model }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.input }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.output }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.cached }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.reasoning }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.cache_creation }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="mb-6">
+    <h2 class="text-lg font-semibold mb-3">Per-Combo Pricing Overrides ($/1M tokens)</h2>
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+        <table class="min-w-full">
+            <thead class="bg-gray-100 border-b">
+                <tr>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Combo Name</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Input</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Output</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Cached</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Reasoning</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">Cache Write</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in combo_pricing %}
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm font-medium">{{ row.name }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.input }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.output }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.cached }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.reasoning }}</td>
+                    <td class="px-4 py-3 text-sm">${{ row.cache_creation }}</td>
+                </tr>
+                {% endfor %}
+                {% if combo_pricing.is_empty() %}
+                <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No combo pricing overrides set</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

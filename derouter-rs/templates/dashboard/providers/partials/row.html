@@ -1,0 +1,23 @@
+<tr id="provider-row-{{ item.id }}" class="border-b hover:bg-gray-50">
+    <td class="px-4 py-3 text-sm">{{ item.provider }}</td>
+    <td class="px-4 py-3 text-sm">{{ item.name }}</td>
+    <td class="px-4 py-3 text-sm">{{ item.auth_type }}</td>
+    <td class="px-4 py-3 text-sm">{{ item.priority }}</td>
+    <td class="px-4 py-3 text-sm">
+        {% if item.is_active %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Active</span>
+        {% else %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Inactive</span>
+        {% endif %}
+    </td>
+    <td class="px-4 py-3 text-sm">
+        <button hx-get="/dashboard/providers/{{ item.id }}"
+                hx-target="#modal-container"
+                class="text-blue-600 hover:underline mr-2">Edit</button>
+        <button hx-delete="/dashboard/providers/{{ item.id }}"
+                hx-target="#provider-row-{{ item.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete this provider connection?"
+                class="text-red-600 hover:underline">Delete</button>
+    </td>
+</tr>

@@ -1,0 +1,190 @@
+<div class="flex flex-col gap-4">
+    <!-- Header -->
+    <div>
+        <h2 class="text-lg font-semibold">{{ name }}</h2>
+        <p class="text-xs text-gray-500 mt-0.5">
+            <span class="font-mono">{{ masked_key }}</span>
+            {% if !group_name.is_empty() %}
+            <span class="ml-2">Group: {{ group_name }}</span>
+            {% else %}
+            <span class="ml-2">Custom key</span>
+            {% endif %}
+            {% if !is_active %}
+            <span class="ml-2 text-orange-500">Paused</span>
+            {% endif %}
+            {% if !expires_at.is_empty() %}
+            <span class="ml-2 text-amber-600">Expires {{ expires_at }}</span>
+            {% endif %}
+        </p>
+    </div>
+
+    <!-- Rate / Budget / Period summary -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <!-- Budget -->
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <h3 class="text-sm font-semibold mb-2">Budget</h3>
+            {% if budget_unlimited %}
+            <p class="text-sm text-gray-500">Unlimited</p>
+            {% else %}
+            <p class="text-lg font-semibold">
+                ${{ budget_spent }}
+                <span class="text-gray-500 text-sm"> / ${{ budget_limit }}</span>
+            </p>
+            <div class="h-1.5 rounded-full bg-gray-200 overflow-hidden mt-2">
+                <div class="h-full bg-blue-500" style="width: {{ budget_pct }}%"></div>
+            </div>
+            {% if !reset_window.is_empty() %}
+            <p class="text-xs text-gray-500 mt-1.5">Resets {{ reset_window }}</p>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        <!-- Rate (last 60s) -->
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <h3 class="text-sm font-semibold mb-2">Rate (last 60s)</h3>
+            <div class="space-y-1.5 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">RPM</span>
+                    <span class="font-medium">{{ rpm_live }}{% if !rpm_limit.is_empty() %} / {{ rpm_limit }}{% endif %}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">TPM</span>
+                    <span class="font-medium">{{ tpm_live }}{% if !tpm_limit.is_empty() %} / {{ tpm_limit }}{% endif %}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">Peak TPM</span>
+                    <span class="font-medium">{{ peak_tpm }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Period totals -->
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <h3 class="text-sm font-semibold mb-2">This Period</h3>
+            <div class="space-y-1.5 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">Requests</span>
+                    <span class="font-medium">{{ total_requests }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">Cost</span>
+                    <span class="font-medium">${{ total_cost }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-500 text-xs">Tokens</span>
+                    <span class="font-medium">{{ total_tokens }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Period presets -->
+    <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs text-gray-500">Period:</span>
+        {% for p in periods %}
+        <button hx-get="/usage/key/receipts"
+                hx-target="#usage-content"
+                hx-swap="innerHTML"
+                hx-vals='{"key": "{{ key }}", "period": "{{ p.id }}"}'
+                class="px-3 py-1 rounded-full text-xs font-medium border {% if p.active %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-500 border-gray-300 hover:bg-gray-50{% endif %}">
+            {{ p.label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    <!-- Per-model summary -->
+    <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+            <h3 class="text-sm font-semibold">By Model</h3>
+        </div>
+        {% if !has_data %}
+        <p class="text-sm text-gray-500 px-4 py-6 text-center">No usage in this period.</p>
+        {% else %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="text-gray-500 border-b border-gray-200">
+                        <th class="text-left font-medium px-4 py-2">Model</th>
+                        <th class="text-right font-medium px-4 py-2">Requests</th>
+                        <th class="text-right font-medium px-4 py-2">Input</th>
+                        <th class="text-right font-medium px-4 py-2">Output</th>
+                        <th class="text-right font-medium px-4 py-2">Cache R</th>
+                        <th class="text-right font-medium px-4 py-2">Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in models %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="px-4 py-2 font-mono">{{ m.model }}</td>
+                        <td class="px-4 py-2 text-right">{{ m.requests }}</td>
+                        <td class="px-4 py-2 text-right">{{ m.input }}</td>
+                        <td class="px-4 py-2 text-right">{{ m.output }}</td>
+                        <td class="px-4 py-2 text-right">{{ m.cache_read }}</td>
+                        <td class="px-4 py-2 text-right">${{ m.cost }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Request history -->
+    <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+            <h3 class="text-sm font-semibold">Request History</h3>
+            <button hx-delete="/usage/key/history"
+                    hx-target="#usage-content"
+                    hx-vals='{"key": "{{ key }}", "period": "{{ period }}"}'
+                    hx-confirm="Delete all request history for this key?"
+                    class="px-2 py-1 text-xs rounded border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-red-600">
+                Clear history
+            </button>
+        </div>
+        {% if !has_data %}
+        <p class="text-sm text-gray-500 px-4 py-6 text-center">No requests in this period.</p>
+        {% else %}
+        <div class="overflow-x-auto" style="max-height: 480px;">
+            <table class="w-full text-xs">
+                <thead class="sticky top-0 bg-gray-50 z-10">
+                    <tr class="text-gray-500 border-b border-gray-200">
+                        <th class="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
+                        <th class="text-left font-medium px-3 py-2">Model</th>
+                        <th class="text-center font-medium px-3 py-2">Status</th>
+                        <th class="text-right font-medium px-3 py-2">Latency</th>
+                        <th class="text-right font-medium px-3 py-2">Input</th>
+                        <th class="text-right font-medium px-3 py-2">Output</th>
+                        <th class="text-right font-medium px-3 py-2">Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                        hx-get="/usage/key/receipts/detail"
+                        hx-target="#usage-detail"
+                        hx-swap="innerHTML"
+                        hx-vals='{"key": "{{ key }}", "id": "{{ row.id }}"}'>
+                        <td class="px-3 py-1.5 whitespace-nowrap text-gray-500">{{ row.timestamp }}</td>
+                        <td class="px-3 py-1.5 font-mono">{{ row.requested_model }}</td>
+                        <td class="px-3 py-1.5 text-center">
+                            {% if row.is_error %}
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-600">{{ row.status }}</span>
+                            {% else %}
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-600">{{ row.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-1.5 text-right text-gray-500">{{ row.latency }}</td>
+                        <td class="px-3 py-1.5 text-right">{{ row.input_tokens }}</td>
+                        <td class="px-3 py-1.5 text-right">{{ row.output_tokens }}</td>
+                        <td class="px-3 py-1.5 text-right">${{ row.cost }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Detail drawer target -->
+    <div id="usage-detail"></div>
+</div>

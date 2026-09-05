@@ -1,0 +1,97 @@
+<div class="space-y-4">
+    <div class="flex justify-between items-center">
+        <h3 class="text-lg font-bold">Request Detail</h3>
+        <button @click="$store.usage.closeDrawer()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+    </div>
+
+    <!-- Metadata -->
+    <dl class="space-y-2 text-sm">
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Time</dt>
+            <dd class="font-medium">{{ timestamp }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Key</dt>
+            <dd class="font-mono text-xs">{{ key_name }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Requested Model</dt>
+            <dd class="font-mono text-xs">{{ requested_model }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Resolved Model</dt>
+            <dd class="font-mono text-xs">{{ resolved_model }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Provider</dt>
+            <dd class="font-medium">{{ provider }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Status</dt>
+            <dd>
+                {% if is_error %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Error</span>
+                {% else %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">OK</span>
+                {% endif %}
+            </dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Latency</dt>
+            <dd class="font-medium">{{ latency }}</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Tokens</dt>
+            <dd class="font-medium">{{ input_tokens }} in / {{ output_tokens }} out / {{ cache_tokens }} cache</dd>
+        </div>
+        <div class="flex justify-between">
+            <dt class="text-gray-500">Cost</dt>
+            <dd class="font-medium">{{ cost }}</dd>
+        </div>
+    </dl>
+
+    <!-- Raw / Redacted toggle -->
+    <div class="flex items-center space-x-2">
+        <span class="text-sm text-gray-500">Show raw headers</span>
+        <button @click="showRaw = !showRaw"
+                :class="showRaw ? 'bg-blue-600' : 'bg-gray-300'"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors">
+            <span :class="showRaw ? 'translate-x-5' : 'translate-x-1'"
+                  class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+        </button>
+    </div>
+
+    <!-- Request headers -->
+    <div>
+        <h4 class="text-sm font-semibold mb-1">Request Headers</h4>
+        <pre x-show="!showRaw" class="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{{ redacted_request_headers }}</pre>
+        <pre x-show="showRaw" class="bg-gray-50 rounded p-3 text-xs overflow-x-auto" x-text="{{ raw_request_headers_json }}"></pre>
+    </div>
+
+    <!-- Request body -->
+    <div>
+        <h4 class="text-sm font-semibold mb-1">Request Body</h4>
+        <pre class="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{{ request_body }}</pre>
+    </div>
+
+    <!-- Response headers -->
+    <div>
+        <h4 class="text-sm font-semibold mb-1">Response Headers</h4>
+        <pre x-show="!showRaw" class="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{{ redacted_response_headers }}</pre>
+        <pre x-show="showRaw" class="bg-gray-50 rounded p-3 text-xs overflow-x-auto" x-text="{{ raw_response_headers_json }}"></pre>
+    </div>
+
+    <!-- Response body -->
+    <div>
+        <h4 class="text-sm font-semibold mb-1">Response Body</h4>
+        <pre class="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{{ response_body }}</pre>
+    </div>
+
+    <!-- Error -->
+    {% if !error_message.is_empty() %}
+    <div>
+        <h4 class="text-sm font-semibold mb-1 text-red-600">Error</h4>
+        <pre class="bg-red-50 rounded p-3 text-xs overflow-x-auto text-red-700">{{ error_message }}</pre>
+    </div>
+    {% endif %}
+</div>
