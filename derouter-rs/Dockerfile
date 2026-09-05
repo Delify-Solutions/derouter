@@ -1,5 +1,5 @@
 # --- Stage 1: Build ---
-FROM rust:1.82-slim AS builder
+FROM rust:1.88-slim AS builder
 
 WORKDIR /app
 
@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy manifests first for better layer caching
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 COPY src/ src/
 COPY templates/ templates/
 COPY static/ static/
