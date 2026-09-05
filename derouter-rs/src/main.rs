@@ -124,9 +124,18 @@ fn build_router(pool: db::DbPool) -> axum::Router {
         .route("/dashboard/usage/details/{id}", get(web::routes::usage::detail_drawer))
         // Auth guard — only applies to /dashboard/* paths
         .layer(axum::middleware::from_fn(admin_guard))
-        // Static files
-        .fallback_service(ServeDir::new("static"))
+        // Static files, with JSON 404 fallback for unmatched routes
+        .fallback_service(ServeDir::new("static").fallback(axum::routing::any(json_not_found)))
         .with_state(pool)
+}
+
+/// JSON 404 for unmatched routes (API-style error, not empty/HTML).
+async fn json_not_found() -> impl axum::response::IntoResponse {
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        r#"{"error":{"message":"Not Found","type":"invalid_request_error"}}"#,
+    )
 }
 
 /// Dashboard overview page
