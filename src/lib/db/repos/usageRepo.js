@@ -1003,6 +1003,32 @@ export async function getKeyRateUsage(apiKey, windowMs = 60000) {
   };
 }
 
+// Live per-provider request count + token sum over the last `windowMs` ms
+// (rolling window, default 60s → live RPM/TPM). Mirrors getKeyRateUsage but
+// grouped by provider, and excludes 'platform' denials (not real upstream use).
+// Returns a Map<provider, { requests, tokens }>.
+export async function getProviderRateUsage(windowMs = 60000) {
+  const db = await getAdapter();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const rows = db.all(
+    `SELECT provider,
+            COUNT(*) as requests,
+            COALESCE(SUM(COALESCE(promptTokens,0) + COALESCE(completionTokens,0)),0) as tokens
+     FROM usageHistory
+     WHERE timestamp >= ? AND COALESCE(provider, '') != 'platform'
+     GROUP BY provider`,
+    [since],
+  );
+  const out = {};
+  for (const r of rows) {
+    out[r.provider || "unknown"] = {
+      requests: r.requests ?? 0,
+      tokens: r.tokens ?? 0,
+    };
+  }
+  return out;
+}
+
 // Timestamp (ISO) of the oldest usage row in the rolling window for an apiKey.
 // Used by keyEnforcement's TPM wait-loop to compute how long until the oldest
 // token request falls out of the 60s window and frees up room — so a request

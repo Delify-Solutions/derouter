@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getProviderUsageSummary } from "@/lib/localDb";
+import { getProviderUsageSummary, getProviderRateUsage, getProviderNodes } from "@/lib/localDb";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
-import { getProviderNodes } from "@/lib/localDb";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +25,8 @@ function periodToRange(period) {
  * GET /api/usage/provider-summary?period=today|24h|7d|30d|60d
  * Admin-only per-provider usage summary for the Providers tab.
  *
- * Returns { items: [{ provider, name, requests, input, output, cost, peakRpm, peakTpm, peakTokS }] }
+ * Returns { items: [{ provider, name, requests, input, output, cost,
+ *          liveRpm, liveTpm, peakRpm, peakTpm, peakTokS }] }
  */
 export async function GET(request) {
   try {
@@ -34,8 +34,9 @@ export async function GET(request) {
     const period = searchParams.get("period") || "30d";
     const { startDate, endDate } = periodToRange(period);
 
-    const [{ items }, providerNodes] = await Promise.all([
+    const [{ items }, liveMap, providerNodes] = await Promise.all([
       getProviderUsageSummary({ startDate, endDate }),
+      getProviderRateUsage(60_000),
       getProviderNodes(),
     ]);
 
@@ -49,7 +50,8 @@ export async function GET(request) {
         const cfg = getProviderByAlias(it.provider) || AI_PROVIDERS[it.provider];
         if (cfg?.name) name = cfg.name;
       }
-      return { ...it, name };
+      const live = liveMap[it.provider] || {};
+      return { ...it, name, liveRpm: live.requests ?? 0, liveTpm: live.tokens ?? 0 };
     });
 
     return NextResponse.json({ items: resolved });
