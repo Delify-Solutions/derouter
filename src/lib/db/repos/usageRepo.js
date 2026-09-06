@@ -846,10 +846,11 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   const byModel = {};
   const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
 
-  // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), per-second output tokens (Tok/s).
+  // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), and the
+  // per-request generation-speed peak (Tok/s = output / generation_seconds).
   const perMinuteTok = {};
   const perMinuteReq = {};
-  const perSecondTok = {};
+  let peakTokS = 0;
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
     const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
@@ -887,20 +888,26 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
       perMinuteTok[minute] = (perMinuteTok[minute] || 0) + tokSum;
       perMinuteReq[minute] = (perMinuteReq[minute] || 0) + 1;
     }
-    const second = ts.slice(0, 19); // YYYY-MM-DDTHH:MM:SS
-    if (second) {
-      // Tok/s peak = OUTPUT tokens per second (generation throughput), not
-      // prompt+completion. Input tokens are the prompt sent in, not generated
-      // — counting them would inflate peak Tok/s for prompt-heavy traffic.
-      perSecondTok[second] = (perSecondTok[second] || 0) + completion;
+
+    // Peak Tok/s = the FASTEST single request's generation speed
+    // (output / generation_seconds), matching the Tok/s column on /usage.
+    // Previously this was a per-second AGGREGATE (sum of output tokens across
+    // concurrent requests in the same wall-clock second) — a throughput bucket,
+    // not a speed — which returned values like 5,970 that didn't match any
+    // single request in the column (column max ~143). Admins expect Peak Tok/s
+    // to be the highest per-request generation speed.
+    const latencyMs = meta?.latencyMs;
+    if (latencyMs && latencyMs > 0 && completion > 0) {
+      const tokS = completion / (latencyMs / 1000);
+      if (tokS > peakTokS) peakTokS = tokS;
     }
   }
+  // Round to 1 decimal to match /usage history column Tok/s formatting.
+  peakTokS = Math.round(peakTokS * 10) / 10;
   let peakTpm = 0;
   for (const v of Object.values(perMinuteTok)) if (v > peakTpm) peakTpm = v;
   let peakRpm = 0;
   for (const v of Object.values(perMinuteReq)) if (v > peakRpm) peakRpm = v;
-  let peakTokS = 0;
-  for (const v of Object.values(perSecondTok)) if (v > peakTokS) peakTokS = v;
 
   const items = Object.values(byModel).sort((a, b) => (b.requests || 0) - (a.requests || 0));
   return { items, totals, peakTpm, peakRpm, peakTokS };
@@ -922,16 +929,12 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
   const where = `WHERE ${conds.join(" AND ")}`;
 
   const rows = db.all(
-    `SELECT provider, timestamp, promptTokens, completionTokens, cost, tokens FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    `SELECT provider, timestamp, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
     params
   );
 
   const byProvider = {};
   const totals = { input: 0, output: 0, requests: 0, cost: 0 };
-
-  const perMinuteTok = {};
-  const perMinuteReq = {};
-  const perSecondTok = {};
 
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
@@ -940,7 +943,7 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
     const tokSum = prompt + completion;
     const provider = r.provider || "unknown";
 
-    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, _minTok: {}, _minReq: {}, _secTok: {} };
+    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, _minTok: {}, _minReq: {}, _peakTokS: 0 };
     const p = byProvider[provider];
     p.input += prompt;
     p.output += completion;
@@ -958,16 +961,22 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
       p._minTok[minute] = (p._minTok[minute] || 0) + tokSum;
       p._minReq[minute] = (p._minReq[minute] || 0) + 1;
     }
-    const second = ts.slice(0, 19);
-    // Tok/s peak = OUTPUT tokens per second (generation throughput only).
-    if (second) p._secTok[second] = (p._secTok[second] || 0) + completion;
+
+    // Peak Tok/s = fastest single request's generation speed (output/generation_s).
+    // See getKeyUsageSummary above for the rationale (matches /usage column).
+    const meta = parseJson(r.meta, {}) || {};
+    const latencyMs = meta?.latencyMs;
+    if (latencyMs && latencyMs > 0 && completion > 0) {
+      const tokS = completion / (latencyMs / 1000);
+      if (tokS > p._peakTokS) p._peakTokS = tokS;
+    }
   }
 
   const items = Object.values(byProvider).map((p) => {
     let peakTpm = 0, peakRpm = 0, peakTokS = 0;
     for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
     for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
-    for (const v of Object.values(p._secTok)) if (v > peakTokS) peakTokS = v;
+    peakTokS = Math.round((p._peakTokS || 0) * 10) / 10;
     const { provider, input, output, requests, cost } = p;
     return { provider, input, output, requests, cost, peakTpm, peakRpm, peakTokS };
   }).sort((a, b) => (b.requests || 0) - (a.requests || 0));
