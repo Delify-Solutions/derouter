@@ -86,6 +86,8 @@ export default function APIPageClient({ machineId }) {
   const [newKeyBudget, setNewKeyBudget] = useState("");
   const [newKeyResetWindow, setNewKeyResetWindow] = useState("");
   const [newKeyExpiry, setNewKeyExpiry] = useState("");   // "" = never
+  const [newKeyExpiryCustomValue, setNewKeyExpiryCustomValue] = useState("");
+  const [newKeyExpiryCustomUnit, setNewKeyExpiryCustomUnit] = useState("days");
   const [newKeyModels, setNewKeyModels] = useState([]);    // string[] (from picker)
   // Per-field "touched" set: a field is touched once the admin edits it directly. Group-driven
   // prefill only fills untouched fields, so switching groups never clobbers manual overrides.
@@ -107,6 +109,8 @@ export default function APIPageClient({ machineId }) {
   const [editBudget, setEditBudget] = useState("");
   const [editResetWindow, setEditResetWindow] = useState("");
   const [editExpiry, setEditExpiry] = useState("");
+  const [editExpiryCustomValue, setEditExpiryCustomValue] = useState("");
+  const [editExpiryCustomUnit, setEditExpiryCustomUnit] = useState("days");
   const [editModels, setEditModels] = useState([]);
   const [editTouched, setEditTouched] = useState(new Set());
   const [editError, setEditError] = useState("");
@@ -720,6 +724,8 @@ export default function APIPageClient({ machineId }) {
     setNewKeyBudget("");
     setNewKeyResetWindow("");
     setNewKeyExpiry("");
+    setNewKeyExpiryCustomValue("");
+    setNewKeyExpiryCustomUnit("days");
     setNewKeyModels([]);
     setNewKeyTouched(new Set());
     setCreateError("");
@@ -739,8 +745,14 @@ export default function APIPageClient({ machineId }) {
     const expiryPresetToIso = (preset) => {
       if (!preset) return null;
       const now = Date.now();
-      const map = { "5h": 5 * 3600000, day: 86400000, week: 604800000 };
+      const map = { "5h": 5 * 3600000, day: 86400000, "3day": 3 * 86400000, week: 604800000, month: 30 * 86400000 };
       if (preset === "unlimited") return null;
+      if (preset === "custom") {
+        const n = Number(newKeyExpiryCustomValue);
+        if (!n || n <= 0) return null;
+        const unitMs = { hours: 3600000, days: 86400000, weeks: 604800000, months: 30 * 86400000 }[newKeyExpiryCustomUnit] || 86400000;
+        return new Date(now + n * unitMs).toISOString();
+      }
       const ms = map[preset];
       if (!ms) return preset; // raw ISO fallback
       return new Date(now + ms).toISOString();
@@ -789,6 +801,8 @@ export default function APIPageClient({ machineId }) {
     // Expiry: include existing ISO expiry as a raw option by leaving blank+showing note;
     // preset quick-set otherwise.
     setEditExpiry(k.expiresAt ? "keep" : "");
+    setEditExpiryCustomValue("");
+    setEditExpiryCustomUnit("days");
     setEditModels(Array.isArray(k.allowedModels) ? k.allowedModels : []);
     setEditTouched(new Set());
     setEditError("");
@@ -801,11 +815,19 @@ export default function APIPageClient({ machineId }) {
     setEditSaving(true);
     setEditError("");
 
-    const expiryMap = { "5h": 5 * 3600000, day: 86400000, week: 604800000 };
+    const expiryMap = { "5h": 5 * 3600000, day: 86400000, "3day": 3 * 86400000, week: 604800000, month: 30 * 86400000 };
     let expiresAt;
     if (editExpiry === "" || editExpiry === "never") expiresAt = null;
     else if (editExpiry === "keep") expiresAt = editingKey.expiresAt || null;
     else if (editExpiry === "unlimited") expiresAt = null;
+    else if (editExpiry === "custom") {
+      const n = Number(editExpiryCustomValue);
+      if (!n || n <= 0) expiresAt = null;
+      else {
+        const unitMs = { hours: 3600000, days: 86400000, weeks: 604800000, months: 30 * 86400000 }[editExpiryCustomUnit] || 86400000;
+        expiresAt = new Date(Date.now() + n * unitMs).toISOString();
+      }
+    }
     else if (expiryMap[editExpiry]) expiresAt = new Date(Date.now() + expiryMap[editExpiry]).toISOString();
     else expiresAt = editExpiry;
 
@@ -1480,12 +1502,38 @@ export default function APIPageClient({ machineId }) {
             placeholder="Never"
             options={[
               { value: "", label: "Never" },
-              { value: "5h", label: "In 5 hours" },
               { value: "day", label: "In 1 day" },
+              { value: "3day", label: "In 3 days" },
               { value: "week", label: "In 1 week" },
+              { value: "month", label: "In 1 month" },
               { value: "unlimited", label: "Unlimited" },
+              { value: "custom", label: "Custom…" },
             ]}
           />
+
+          {newKeyExpiry === "custom" && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Custom expiry"
+                type="number"
+                min="1"
+                value={newKeyExpiryCustomValue}
+                onChange={(e) => setNewKeyExpiryCustomValue(e.target.value)}
+                placeholder="Amount"
+              />
+              <Select
+                label="Unit"
+                value={newKeyExpiryCustomUnit}
+                onChange={(e) => setNewKeyExpiryCustomUnit(e.target.value)}
+                options={[
+                  { value: "hours", label: "Hours" },
+                  { value: "days", label: "Days" },
+                  { value: "weeks", label: "Weeks" },
+                  { value: "months", label: "Months" },
+                ]}
+              />
+            </div>
+          )}
 
           <AllowedModelsPicker
             value={newKeyModels}
@@ -1617,12 +1665,38 @@ export default function APIPageClient({ machineId }) {
             options={[
               { value: "never", label: "Never" },
               { value: "keep", label: editingKey?.expiresAt ? `Keep current (${new Date(editingKey.expiresAt).toLocaleDateString()})` : "Keep current (none)" },
-              { value: "5h", label: "In 5 hours" },
               { value: "day", label: "In 1 day" },
+              { value: "3day", label: "In 3 days" },
               { value: "week", label: "In 1 week" },
+              { value: "month", label: "In 1 month" },
               { value: "unlimited", label: "Unlimited" },
+              { value: "custom", label: "Custom…" },
             ]}
           />
+
+          {editExpiry === "custom" && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Custom expiry"
+                type="number"
+                min="1"
+                value={editExpiryCustomValue}
+                onChange={(e) => setEditExpiryCustomValue(e.target.value)}
+                placeholder="Amount"
+              />
+              <Select
+                label="Unit"
+                value={editExpiryCustomUnit}
+                onChange={(e) => setEditExpiryCustomUnit(e.target.value)}
+                options={[
+                  { value: "hours", label: "Hours" },
+                  { value: "days", label: "Days" },
+                  { value: "weeks", label: "Weeks" },
+                  { value: "months", label: "Months" },
+                ]}
+              />
+            </div>
+          )}
 
           <AllowedModelsPicker
             value={editModels}

@@ -22,7 +22,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, models, kind, pricing } = body;
+    const { name, models, kind, pricing, capabilities } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -39,7 +39,10 @@ export async function POST(request) {
       return NextResponse.json({ error: "Combo name already exists" }, { status: 400 });
     }
 
-    const combo = await createCombo({ name, models: models || [], kind: kind || null });
+    // Capabilities live in the combo's JSON `meta` blob (no schema change).
+    // Null/undefined → no entry → /v1/models auto-resolves from the first model.
+    const meta = capabilities ? { capabilities } : {};
+    const combo = await createCombo({ name, models: models || [], kind: kind || null, meta });
 
     // Optional combo-level pricing (5 fields). Save after the combo exists so the
     // pricing key (combo name) is valid even if the combo were to fail downstream.

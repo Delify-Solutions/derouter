@@ -10,6 +10,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { PRICING_FIELDS, EMPTY_PRICING, pricingToDraft, parsePricingDraft, closestPoolModel } from "@/shared/utils/pricingMatch";
+import { DEFAULT_CAPABILITIES, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -800,6 +801,13 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   const [pricing, setPricing] = useState(() => existingPricing ? pricingToDraft(existingPricing) : { ...EMPTY_PRICING });
   const [pricingTouched, setPricingTouched] = useState(!!existingPricing);
 
+  // Capabilities state (14 OpenRouter-style fields). Auto-filled from the combo's
+  // first model via getCapabilitiesForModel when the admin hasn't customized them.
+  // Mirrors the pricing touched/auto-fill pattern below.
+  const existingCaps = combo?.meta?.capabilities || null;
+  const [caps, setCaps] = useState(() => existingCaps ? { ...DEFAULT_CAPABILITIES, ...existingCaps } : { ...DEFAULT_CAPABILITIES });
+  const [capsTouched, setCapsTouched] = useState(!!existingCaps);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -891,6 +899,36 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     }
   };
 
+  // Auto-fill capabilities from the combo's first model when models change, but
+  // only if the admin hasn't customized them. Picks the first model's resolved
+  // capabilities (pattern table → DEFAULT_CAPABILITIES fallback).
+  useEffect(() => {
+    if (capsTouched) return;
+    if (!models.length) return;
+    const first = models[0];
+    const slash = first.indexOf("/");
+    const provider = slash > 0 ? first.slice(0, slash) : null;
+    const model = slash > 0 ? first.slice(slash + 1) : first;
+    if (!model) return;
+    setCaps({ ...DEFAULT_CAPABILITIES, ...getCapabilitiesForModel(provider, model) });
+  }, [models, capsTouched]);
+
+  const autofillCaps = () => {
+    if (!models.length) return;
+    const first = models[0];
+    const slash = first.indexOf("/");
+    const provider = slash > 0 ? first.slice(0, slash) : null;
+    const model = slash > 0 ? first.slice(slash + 1) : first;
+    if (!model) return;
+    setCaps({ ...DEFAULT_CAPABILITIES, ...getCapabilitiesForModel(provider, model) });
+    setCapsTouched(true);
+  };
+
+  const handleCapChange = (key, value) => {
+    setCaps((prev) => ({ ...prev, [key]: value }));
+    setCapsTouched(true);
+  };
+
   const handlePricingFieldChange = (key, value) => {
     setPricing((prev) => ({ ...prev, [key]: value }));
     setPricingTouched(true);
@@ -929,6 +967,12 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
         alert(e.message);
         return;
       }
+    }
+    // Include capabilities only if the admin customized them (touched). Untouched
+    // auto-fill suggestions are not persisted → /v1/models auto-resolves from the
+    // first model at request time. Sending null explicitly clears stored caps.
+    if (capsTouched) {
+      payload.capabilities = caps;
     }
     await onSave(payload);
     setSaving(false);
@@ -1048,6 +1092,18 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
             </div>
           </div>
 
+          {/* Capabilities — 14 OpenRouter-style fields advertised by /v1/models
+              for this combo. Auto-fills from the combo's first model so the
+              advertised context window / reasoning / vision flags stay accurate
+              without manual entry. Admin can override any field. */}
+          <CapabilitiesSection
+            caps={caps}
+            touched={capsTouched}
+            hasModels={models.length > 0}
+            onChange={handleCapChange}
+            onAutofill={autofillCaps}
+          />
+
           {/* Actions */}
           <div className="flex flex-col gap-2 pt-1 sm:flex-row">
             <Button onClick={onClose} variant="ghost" fullWidth size="sm">
@@ -1081,5 +1137,134 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
         />
       )}
     </>
+  );
+}
+
+// ── Capabilities form section ──────────────────────────────────────────────
+// 14 OpenRouter-style capability fields. Toggles for booleans, a Select for
+// thinkingFormat, number inputs for contextWindow/maxOutput, and a min/max pair
+// for thinkingRange. Auto-fill resolves the whole object from the combo's first
+// model so the admin rarely needs to touch it.
+
+const CAP_TOGGLES = [
+  { key: "vision", label: "Vision", desc: "Image input" },
+  { key: "pdf", label: "PDF", desc: "PDF / document input" },
+  { key: "audioInput", label: "Audio in", desc: "Audio input" },
+  { key: "videoInput", label: "Video in", desc: "Video input" },
+  { key: "imageOutput", label: "Image out", desc: "Generate images" },
+  { key: "audioOutput", label: "Audio out", desc: "Generate audio" },
+  { key: "search", label: "Search", desc: "Web search / grounding" },
+  { key: "tools", label: "Tools", desc: "Function / tool calling" },
+  { key: "reasoning", label: "Reasoning", desc: "Thinking / reasoning" },
+  { key: "thinkingCanDisable", label: "Thinking disablable", desc: "Can turn thinking off" },
+  { key: "thinkingEffortSupported", label: "Effort levels", desc: "Accepts reasoning_effort" },
+];
+
+const THINKING_FORMATS = [
+  { value: "__auto__", label: "Auto (derive)" },
+  { value: "openai", label: "openai" },
+  { value: "claude-adaptive", label: "claude-adaptive" },
+  { value: "claude-budget", label: "claude-budget" },
+  { value: "gemini-level", label: "gemini-level" },
+  { value: "gemini-budget", label: "gemini-budget" },
+  { value: "zai", label: "zai" },
+  { value: "qwen", label: "qwen" },
+  { value: "deepseek", label: "deepseek" },
+  { value: "kimi", label: "kimi" },
+  { value: "minimax", label: "minimax" },
+  { value: "hunyuan", label: "hunyuan" },
+  { value: "step", label: "step" },
+];
+
+function CapabilitiesSection({ caps, touched, hasModels, onChange, onAutofill }) {
+  const hasCustomCaps = touched;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-sm font-medium">Capabilities</label>
+        <button
+          type="button"
+          onClick={onAutofill}
+          disabled={!hasModels}
+          className="text-[11px] text-primary hover:underline disabled:text-text-muted disabled:no-underline flex items-center gap-0.5"
+          title="Fill from the combo's first model"
+        >
+          <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
+          Auto-fill
+        </button>
+      </div>
+      <p className="text-[11px] text-text-muted flex items-center gap-1 mb-2">
+        <span className="material-symbols-outlined text-[12px]">info</span>
+        {hasCustomCaps
+          ? "Custom capabilities set — overrides the first-model defaults."
+          : hasModels
+          ? "Auto-filled from the first model — edit to customize."
+          : "Add a model to auto-fill capabilities."}
+      </p>
+
+      {/* Toggle grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {CAP_TOGGLES.map((c) => (
+          <label
+            key={c.key}
+            className="flex items-center gap-2 rounded-lg border border-black/5 dark:border-white/5 px-2.5 py-1.5 cursor-pointer select-none hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+          >
+            <Toggle
+              checked={!!caps[c.key]}
+              onChange={(v) => onChange(c.key, v)}
+              aria-label={c.label}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium leading-tight">{c.label}</div>
+              <div className="text-[10px] text-text-muted leading-tight">{c.desc}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {/* thinkingFormat + numeric limits */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+        <Select
+          label="Thinking format"
+          value={caps.thinkingFormat ?? "__auto__"}
+          onChange={(e) => onChange("thinkingFormat", e.target.value === "__auto__" ? null : e.target.value)}
+          options={THINKING_FORMATS}
+          placeholder="Auto"
+        />
+        <Input
+          label="Context window (tokens)"
+          type="number"
+          value={caps.contextWindow ?? ""}
+          onChange={(e) => onChange("contextWindow", e.target.value === "" ? null : Number(e.target.value))}
+          placeholder="200000"
+        />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+        <Input
+          label="Max output (tokens)"
+          type="number"
+          value={caps.maxOutput ?? ""}
+          onChange={(e) => onChange("maxOutput", e.target.value === "" ? null : Number(e.target.value))}
+          placeholder="64000"
+        />
+        <div>
+          <label className="text-xs font-medium mb-1 block">Thinking range (min / max)</label>
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              type="number"
+              value={caps.thinkingRange?.min ?? ""}
+              onChange={(e) => onChange("thinkingRange", { ...(caps.thinkingRange || {}), min: e.target.value === "" ? null : Number(e.target.value) })}
+              placeholder="min"
+            />
+            <Input
+              type="number"
+              value={caps.thinkingRange?.max ?? ""}
+              onChange={(e) => onChange("thinkingRange", { ...(caps.thinkingRange || {}), max: e.target.value === "" ? null : Number(e.target.value) })}
+              placeholder="max"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

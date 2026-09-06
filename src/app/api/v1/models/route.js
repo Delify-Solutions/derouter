@@ -307,21 +307,51 @@ export async function buildModelsList(kindFilter, options = {}) {
 
   const models = [];
 
-  // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
+  // Combos first (filtered by kind). Public /v1/models returns ONLY combos — the
+  // pool models below are emitted exclusively for internal cross-instance
+  // discovery (skipDynamicFetch, x-dr-internal-models-fetch: 1), which needs the
+  // full provider catalog. This avoids leaking pool models (e.g. `vin/GLM-5.2`)
+  // to key holders whose allowedModels are combo names: matchesAllowed() suffix-
+  // matches a combo name against a `provider/model` pool id (e.g. "glm-5.2" is a
+  // "/"-boundary suffix of "vin/glm-5.2"), so pool rows leak past the filter.
   for (const combo of combos) {
     if (!comboMatchesKinds(combo, kindFilter)) continue;
     const entry = {
       id: combo.name,
       object: "model",
-      owned_by: "combo",
+      owned_by: "delify",
     };
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
     }
+
+    // Capabilities: prefer the combo's stored override (meta.capabilities);
+    // otherwise resolve from the combo's first model via the same pattern table
+    // the dashboard uses, so /v1/models advertises accurate vision/reasoning/
+    // context limits even when the admin never set them.
+    let caps = combo.meta?.capabilities || null;
+    if (!caps && Array.isArray(combo.models) && combo.models.length > 0) {
+      const first = combo.models[0];
+      const slash = first.indexOf("/");
+      const provider = slash > 0 ? first.slice(0, slash) : null;
+      const model = slash > 0 ? first.slice(slash + 1) : first;
+      if (model) caps = getCapabilitiesForModel(provider, model);
+    }
+    if (caps) {
+      entry.capabilities = caps;
+      const contextWindow = caps.contextWindow;
+      const maxOutput = caps.maxOutput;
+      if (Number.isFinite(contextWindow)) entry.context_length = contextWindow;
+      if (Number.isFinite(maxOutput)) entry.max_completion_tokens = maxOutput;
+    }
     models.push(entry);
   }
 
-  if (connections.length === 0) {
+  // Pool models: ONLY for internal cross-instance discovery. Public /v1/models
+  // returns combos-only (see the combo block above).
+  if (!skipDynamicFetch) {
+    // Public path — skip the pool emission entirely.
+  } else if (connections.length === 0) {
     // DB unavailable -> return static models, filtered by per-model kind
     const aliasToProviderId = Object.fromEntries(
       Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])

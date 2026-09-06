@@ -28,7 +28,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { pricing } = body;
+    const { pricing, capabilities } = body;
 
     // Validate name format if provided
     if (body.name) {
@@ -45,7 +45,16 @@ export async function PUT(request, { params }) {
 
     // Capture previous name to invalidate rotation state on rename
     const prev = await getComboById(id);
-    const combo = await updateCombo(id, body);
+
+    // Merge capabilities into the combo's JSON meta blob. `capabilities: null`
+    // explicitly clears stored capabilities (so /v1/models falls back to the
+    // first-model auto-resolve); omitting the key leaves the existing value.
+    let metaPatch = undefined;
+    if (capabilities !== undefined) {
+      const curMeta = prev?.meta && typeof prev.meta === "object" ? prev.meta : {};
+      metaPatch = { ...curMeta, capabilities: capabilities || null };
+    }
+    const combo = await updateCombo(id, metaPatch ? { ...body, meta: metaPatch } : body);
 
     if (!combo) {
       return NextResponse.json({ error: "Combo not found" }, { status: 404 });
