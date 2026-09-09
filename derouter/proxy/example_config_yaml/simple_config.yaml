@@ -1,0 +1,4 @@
+model_list:
+  - model_name: gpt-5-mini
+    derouter_params:
+      model: gpt-5-mini

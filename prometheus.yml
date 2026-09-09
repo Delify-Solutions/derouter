@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'derouter'
+    static_configs:
+      - targets: ['derouter:4000']  # Assuming Litellm exposes metrics at port 4000

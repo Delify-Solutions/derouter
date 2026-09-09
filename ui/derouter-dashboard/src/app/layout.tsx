@@ -1,0 +1,44 @@
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+
+import { NuqsAdapter } from "nuqs/adapters/next/app";
+import { ThemeProvider } from "next-themes";
+
+import { AuthProvider } from "@/contexts/AuthContext";
+import ReactQueryProvider from "@/contexts/ReactQueryProvider";
+import { Toaster } from "@/components/ui/sonner";
+import { I18nProvider } from "@/i18n";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "DeRouter Dashboard",
+  description: "DeRouter Proxy Admin UI",
+  icons: { icon: "/get_favicon" },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    // next-themes stamps the theme class on <html> before paint, which the exported markup
+    // cannot predict; suppressHydrationWarning confines that mismatch to this element.
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+          <NuqsAdapter>
+            <ReactQueryProvider>
+              <I18nProvider>
+                <AuthProvider>{children}</AuthProvider>
+                <Toaster />
+              </I18nProvider>
+            </ReactQueryProvider>
+          </NuqsAdapter>
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}

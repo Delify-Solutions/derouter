@@ -1,0 +1,42 @@
+import pytest
+
+import derouter
+
+
+def test_completion_openrouter_reasoning_content():
+    derouter._turn_on_debug()
+    resp = derouter.completion(
+        model="openrouter/anthropic/claude-sonnet-4",
+        messages=[{"role": "user", "content": "Hello world"}],
+        reasoning={"effort": "high"},
+    )
+    print(resp)
+    assert resp.choices[0].message.reasoning_content is not None
+
+
+def test_completion_openrouter_image_generation():
+    derouter._turn_on_debug()
+    resp = derouter.completion(
+        model="openrouter/google/gemini-2.5-flash-image",
+        messages=[{"role": "user", "content": "Generate an image of a cat"}],
+        modalities=["image", "text"],
+    )
+    print(resp)
+    assert (
+        resp.choices[0].message.images[0]["image_url"]["url"].startswith("data:image/")
+    )
+
+
+def test_openrouter_embedding():
+    """Test OpenRouter embeddings support."""
+    derouter._turn_on_debug()
+    resp = derouter.embedding(
+        model="openrouter/openai/text-embedding-3-small",
+        input=["Hello world", "How are you?"],
+    )
+    print(resp)
+    assert resp is not None
+    assert len(resp.data) == 2
+    assert resp.data[0]["embedding"] is not None
+    assert isinstance(resp.data[0]["embedding"], list)
+    assert len(resp.data[0]["embedding"]) > 0

@@ -1,0 +1,33 @@
+[project]
+name = "derouter-enterprise"
+version = "0.1.66"
+description = "Package for DeRouter Enterprise features"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE.md"]
+authors = [
+    { name = "Delify" },
+]
+
+[project.urls]
+Homepage = "https://router.delify.vn"
+Repository = "https://github.com/Delify-Solutions/derouter"
+Documentation = "https://router.delify.vn"
+
+[build-system]
+requires = ["uv_build==0.11.8"]
+build-backend = "uv_build"
+
+[tool.uv]
+required-version = ">=0.10.9"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.commitizen]
+version = "0.1.66"
+version_files = [
+    "pyproject.toml:^version",
+    "../pyproject.toml:derouter-enterprise==",
+]

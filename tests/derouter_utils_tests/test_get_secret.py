@@ -1,0 +1,25 @@
+import json
+from datetime import datetime
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+import derouter
+from derouter.proxy._types import KeyManagementSystem
+from derouter.secret_managers.main import get_secret
+
+
+class MockSecretClient:
+    def get_secret(self, secret_name):
+        return Mock(value="mocked_secret_value")
+
+
+@pytest.mark.asyncio
+async def test_azure_kms():
+    """
+    Basic asserts that the value from get secret is from Azure Key Vault when Key Management System is Azure Key Vault
+    """
+    with patch("derouter.secret_manager_client", new=MockSecretClient()):
+        derouter._key_management_system = KeyManagementSystem.AZURE_KEY_VAULT
+        secret = get_secret(secret_name="ishaan-test-key")
+        assert secret == "mocked_secret_value"

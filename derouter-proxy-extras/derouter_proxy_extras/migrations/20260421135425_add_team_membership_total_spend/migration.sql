@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "DeRouter_TeamMembership" ADD COLUMN IF NOT EXISTS "total_spend" DOUBLE PRECISION NOT NULL DEFAULT 0.0;
+

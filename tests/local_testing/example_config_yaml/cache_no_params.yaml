@@ -1,0 +1,7 @@
+model_list: 
+  - model_name: "openai-model"
+    derouter_params: 
+      model: "gpt-3.5-turbo"
+
+derouter_settings:
+  cache: True

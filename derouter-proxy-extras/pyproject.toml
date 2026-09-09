@@ -1,0 +1,33 @@
+[project]
+name = "derouter-proxy-extras"
+version = "0.4.95"
+description = "Additional files for the DeRouter Proxy. Reduces the size of the main derouter package."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Delify" },
+]
+
+[project.urls]
+Homepage = "https://router.delify.vn"
+Repository = "https://github.com/Delify-Solutions/derouter"
+Documentation = "https://router.delify.vn"
+
+[build-system]
+requires = ["uv_build==0.11.8"]
+build-backend = "uv_build"
+
+[tool.uv]
+required-version = ">=0.10.9"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.commitizen]
+version = "0.4.95"
+version_files = [
+    "pyproject.toml:^version",
+    "../pyproject.toml:derouter-proxy-extras==",
+]
