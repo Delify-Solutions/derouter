@@ -20,7 +20,7 @@ and meters the request against the caller's credit balance.
 npm ci
 cp .env.example .env.local        # if the file is present; otherwise set the vars below
 npm run build
-npm start                         # serves on port 20127
+npm start                         # serves on port 20127 (PORT=xxxx to override)
 ```
 
 Environment:
@@ -28,7 +28,7 @@ Environment:
 | Variable | Purpose |
 | --- | --- |
 | `DATA_DIR` | Directory holding the SQLite database, JWT secrets and logs. Defaults to `~/.derouter`. Set it to isolate an instance. |
-| `PORT` | Listen port. `npm start` passes `--port 20127`, which takes precedence; `next dev` and the standalone server fall back to `PORT`. |
+| `PORT` | Listen port. `npm start` runs the standalone server, which reads `PORT` from the environment only (it ignores `--port`); it defaults to 20127. `start:source` runs the repo entry with `--port 20127`. |
 | `JWT_SECRET` | Signing key for admin dashboard sessions. Generated and stored in `DATA_DIR` when unset. |
 | `USER_JWT_SECRET` | Signing key for customer sessions. Generated and stored in `DATA_DIR` when unset. |
 | `INITIAL_PASSWORD` | Admin password used until one is stored in the database. Defaults to `123456`; a remote first login with the default is refused. |

@@ -17,6 +17,10 @@ docker rm -f "$NAME" 2>/dev/null || true
 docker run -d --name "$NAME" \
   -p 20128:20128 \
   --env-file .env \
+  -e PORT=20128 \
+  -e HOSTNAME=0.0.0.0 \
+  -e NODE_ENV=production \
+  -e DATA_DIR=/app/data \
   -v derouter-data:/app/data \
   --restart always \
   "$IMAGE"
