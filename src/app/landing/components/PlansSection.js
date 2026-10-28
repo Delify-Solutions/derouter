@@ -1,21 +1,23 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 import Badge from "@/shared/components/Badge";
-import { PLANS, USAGE_WINDOWS, fmtUsd, monthlyLimitFor, windowLimitFor } from "./salesData";
+import { PLANS, USAGE_WINDOWS, fmtUsd, monthlyLimitFor, windowLimitFor, interpolate } from "./salesData";
 
 const CHECKOUT_URL = "/register?next=/account/plans";
 
-export default function PlansSection({ models, sampleModel }) {
+export default function PlansSection({ models, sampleModel, copy }) {
   return (
     <section id="plans" className="border-b border-border">
       <div className="shell py-20">
-        <p className="meta text-text-muted">Hai gói</p>
+        <p className="meta text-text-muted">{copy.plansEyebrow}</p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          Cùng danh mục model, khác hạn mức
+          {copy.plansTitle}
         </h2>
         <p className="mt-3 max-w-2xl text-text-muted">
-          Cả hai gói đều mở toàn bộ {models.length} model bên dưới. Go Plus không mở thêm model
-          nào — nó chỉ nâng hạn mức mỗi model lên gấp {PLANS[1].limitMultiplier} lần.
+          {interpolate(copy.plansSubtitle, {
+            count: models.length,
+            multiplier: PLANS[1].limitMultiplier,
+          })}
         </p>
 
         <div className="mt-10 grid grid-cols-1 gap-px border border-border bg-border md:grid-cols-2">
@@ -82,8 +84,7 @@ export default function PlansSection({ models, sampleModel }) {
         </div>
 
         <p className="mt-4 max-w-3xl font-mono text-[11px] text-text-subtle">
-          Hạn mức tính bằng USD tiêu thụ theo bảng giá token bên dưới, không phải số request. Một
-          request dài tốn nhiều hạn mức hơn một request ngắn.
+          {copy.plansFootnote}
         </p>
       </div>
     </section>
@@ -93,4 +94,5 @@ export default function PlansSection({ models, sampleModel }) {
 PlansSection.propTypes = {
   models: PropTypes.array.isRequired,
   sampleModel: PropTypes.object.isRequired,
+  copy: PropTypes.object.isRequired,
 };

@@ -110,3 +110,21 @@ export function fmtUsd(usd) {
   if (value === 0) return "$0";
   return `$${Number.isInteger(value) ? value : value.toFixed(2)}`;
 }
+
+/**
+ * Fill `{name}` placeholders in operator-authored copy.
+ *
+ * The admin writes prose, and some sentences must state a fact that lives in
+ * code (the model count, the Go Plus multiplier). Hard-coding the number in the
+ * default text would make it wrong the moment the catalogue changes, so the text
+ * carries a placeholder and the value is substituted at render.
+ *
+ * Unknown placeholders are left untouched — better a visible `{foo}` than a
+ * silently mangled sentence.
+ */
+export function interpolate(template, values = {}) {
+  if (typeof template !== "string") return "";
+  return template.replace(/\{(\w+)\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match
+  );
+}

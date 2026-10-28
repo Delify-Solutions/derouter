@@ -31,6 +31,7 @@ const navItems = [
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
   { href: "/dashboard/gift-codes", label: "Gift codes", icon: "redeem" },
+  { href: "/dashboard/content", label: "Nội dung", icon: "article" },
 ];
 
 const debugItems = [

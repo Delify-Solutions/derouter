@@ -8,7 +8,7 @@ import { PLANS, fmtUsd } from "./salesData";
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
 const CHECKOUT_URL = "/register?next=/account/plans";
 
-export default function GetStarted({ models }) {
+export default function GetStarted({ models, text }) {
   const { copied, copy } = useCopyToClipboard();
   const exampleModel = models[0];
 
@@ -54,14 +54,13 @@ export default function GetStarted({ models }) {
   return (
     <section id="get-started" className="border-b border-border bg-bg-alt">
       <div className="shell py-20">
-        <p className="meta text-text-muted">Cách dùng</p>
+        <p className="meta text-text-muted">{text.getStartedEyebrow}</p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          Một endpoint, một API Key
+          {text.getStartedTitle}
         </h2>
-        <p className="mt-3 max-w-2xl text-text-muted">
-          Không cài gì thêm. Client nào nói được wire format OpenAI — Claude Code, Codex, Cline,
-          Cursor — đều dùng được ngay sau khi đổi base URL và key.
-        </p>
+        {text.getStartedSubtitle ? (
+          <p className="mt-3 max-w-2xl text-text-muted">{text.getStartedSubtitle}</p>
+        ) : null}
 
         <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
           <ol className="flex flex-col border border-border bg-surface">
@@ -135,4 +134,5 @@ export default function GetStarted({ models }) {
 
 GetStarted.propTypes = {
   models: PropTypes.array.isRequired,
+  text: PropTypes.object.isRequired,
 };

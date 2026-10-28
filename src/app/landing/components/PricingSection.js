@@ -6,7 +6,7 @@ import { PLANS, USAGE_WINDOWS, fmtRate, fmtUsd, windowLimitFor } from "./salesDa
 
 // Bảng giá chi tiết: desktop là bảng, dưới md là card. Cả hai đọc cùng một
 // nguồn (models từ registry + gói đang chọn), nên hai bố cục không thể lệch số.
-export default function PricingSection({ models }) {
+export default function PricingSection({ models, copy }) {
   const [planId, setPlanId] = useState(PLANS[0].id);
   const plan = PLANS.find((item) => item.id === planId) || PLANS[0];
 
@@ -21,10 +21,13 @@ export default function PricingSection({ models }) {
   return (
     <section id="pricing" className="border-b border-border">
       <div className="shell py-20">
-        <p className="meta text-text-muted">Bảng giá chi tiết</p>
+        <p className="meta text-text-muted">{copy.pricingEyebrow}</p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          Giá token và hạn mức từng model
+          {copy.pricingTitle}
         </h2>
+        {copy.pricingSubtitle ? (
+          <p className="mt-3 max-w-2xl text-text-muted">{copy.pricingSubtitle}</p>
+        ) : null}
         <p className="mt-3 max-w-2xl text-text-muted">
           Giá token tính bằng USD cho 1 triệu token và giống nhau ở cả hai gói. Cột hạn mức thay
           đổi theo gói bạn chọn.
@@ -143,4 +146,5 @@ export default function PricingSection({ models }) {
 
 PricingSection.propTypes = {
   models: PropTypes.array.isRequired,
+  copy: PropTypes.object.isRequired,
 };

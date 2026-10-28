@@ -607,3 +607,110 @@ button:disabled,
   border-top: 1px solid var(--color-border);
   margin: 1.5rem 0;
 }
+
+/* ── Operator-authored docs (/docs/<slug>) ────────────────────────────────
+   The body is Markdown written in the admin area and rendered with marked +
+   sanitisation, so it arrives as bare HTML with no classes. These rules give it
+   the same rhythm as the rest of the site instead of shipping a prose plugin.
+   Kept separate from .changelog-body: that one is a dense modal, this one is a
+   documentation page and needs roomier type and real code blocks. */
+.docs-body { line-height: 1.7; }
+.docs-body > :first-child { margin-top: 0; }
+
+.docs-body h1 {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 2rem 0 0.75rem;
+  letter-spacing: -0.01em;
+}
+.docs-body h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 2rem 0 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.docs-body h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.4rem 0 0.4rem;
+}
+.docs-body h4 {
+  font-size: 0.925rem;
+  font-weight: 600;
+  margin: 1.2rem 0 0.3rem;
+  color: var(--color-text-muted, inherit);
+}
+
+.docs-body p { margin: 0.75rem 0; }
+.docs-body strong { font-weight: 600; }
+
+.docs-body ul, .docs-body ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+.docs-body ul { list-style: disc; }
+.docs-body ol { list-style: decimal; }
+.docs-body li { margin: 0.3rem 0; }
+.docs-body li > ul, .docs-body li > ol { margin: 0.25rem 0; }
+
+.docs-body a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.docs-body code {
+  background: var(--color-bg-alt);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: ui-monospace, monospace;
+}
+/* A fenced block: marked emits <pre><code>, so the padding and scroll belong to
+   the pre and the background must come off the inner code to avoid a double box. */
+.docs-body pre {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  padding: 0.9rem 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  border-radius: 4px;
+  line-height: 1.55;
+}
+.docs-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.8125rem;
+  white-space: pre;
+}
+
+.docs-body blockquote {
+  margin: 1rem 0;
+  padding: 0.35rem 0 0.35rem 1rem;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted, inherit);
+}
+
+.docs-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+.docs-body th, .docs-body td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+}
+.docs-body th {
+  background: var(--color-bg-alt);
+  font-weight: 600;
+}
+
+.docs-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 2rem 0;
+}
+.docs-body img { max-width: 100%; height: auto; }

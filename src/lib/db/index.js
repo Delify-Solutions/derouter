@@ -8,6 +8,13 @@ export {
   getSettings, updateSettings, isCloudEnabled, getCloudUrl, exportSettings,
 } from "./repos/settingsRepo.js";
 
+// Operator-authored content (docs pages + landing copy)
+export {
+  listPublishedDocs, listAllDocs, getDocBySlug, getDocById,
+  createDoc, updateDoc, deleteDoc, validateSlug,
+  LANDING_COPY_DEFAULTS, mergeLandingCopy,
+} from "./repos/contentRepo.js";
+
 // Provider connections
 export {
   getProviderConnections, getProviderConnectionById,

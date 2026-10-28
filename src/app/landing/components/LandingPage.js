@@ -1,4 +1,5 @@
 import Navigation from "./Navigation";
+import AnnouncementBanner from "./AnnouncementBanner";
 import HeroSection from "./HeroSection";
 import PlansSection from "./PlansSection";
 import ModelsSection from "./ModelsSection";
@@ -12,24 +13,29 @@ import { MODELS, SAMPLE_MODEL } from "./modelCatalog";
 // src/app/page.js (server component) để root kịp chuyển phiên đang đăng nhập
 // sang /dashboard hoặc /account trước khi markup này được tạo.
 //
-// Component này là server component: danh mục model và giá token được dựng một
-// lần ở đây (modelCatalog.js đọc registry của router), rồi truyền xuống các
-// section. Chỉ những section có tương tác mới là client component.
+// Mọi câu chữ đến từ `copy` (admin sửa trong /dashboard/content); mọi con số đến
+// từ salesData.js và registry của router. Nhờ vậy đổi lời không phải sửa JSX, và
+// đổi giá không phải sửa lời.
 //
-// Thứ tự section là hợp đồng: hero → so sánh gói → danh mục model → bảng giá
-// chi tiết → cách dùng → FAQ → footer.
-export default function LandingPage() {
+// Thứ tự section là hợp đồng: banner → hero → so sánh gói → danh mục model →
+// bảng giá chi tiết → cách dùng → FAQ → footer.
+export default function LandingPage({ copy }) {
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
       <Navigation />
 
       <main>
-        <HeroSection models={MODELS} />
-        <PlansSection models={MODELS} sampleModel={SAMPLE_MODEL} />
-        <ModelsSection models={MODELS} />
-        <PricingSection models={MODELS} />
-        <GetStarted models={MODELS} />
-        <FaqSection models={MODELS} />
+        <AnnouncementBanner
+          text={copy.bannerText}
+          href={copy.bannerHref}
+          enabled={copy.bannerEnabled}
+        />
+        <HeroSection models={MODELS} copy={copy} />
+        <PlansSection models={MODELS} sampleModel={SAMPLE_MODEL} copy={copy} />
+        <ModelsSection models={MODELS} copy={copy} />
+        <PricingSection models={MODELS} copy={copy} />
+        <GetStarted models={MODELS} text={copy} />
+        <FaqSection models={MODELS} copy={copy} />
       </main>
 
       <Footer modelCount={MODELS.length} />

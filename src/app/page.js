@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 import { verifyUserToken } from "@/lib/auth/userSession";
 import LandingPage from "./landing/components/LandingPage";
+import { getSettings } from "@/lib/db/repos/settingsRepo.js";
+import { mergeLandingCopy } from "@/lib/db/repos/contentRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -18,5 +20,9 @@ export default async function RootPage() {
   const userToken = cookieStore.get("user_token")?.value;
   if (userToken && (await verifyUserToken(userToken))) redirect("/account");
 
-  return <LandingPage />;
+  // Copy is operator-editable, so it is read per request rather than baked into
+  // the build. `dynamic` is already forced above, which is what keeps a saved
+  // edit visible on the next load instead of after a redeploy.
+  const settings = await getSettings();
+  return <LandingPage copy={mergeLandingCopy(settings.landingCopy)} />;
 }

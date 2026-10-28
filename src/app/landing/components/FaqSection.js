@@ -3,7 +3,7 @@ import { PLANS, USAGE_WINDOWS, fmtUsd } from "./salesData";
 
 // FAQ ngắn: chỉ trả lời những câu mà cơ chế trong repo thực sự quyết định, để
 // trang không hứa điều hệ thống không làm.
-export default function FaqSection({ models }) {
+export default function FaqSection({ models, copy }) {
   const questions = [
     {
       q: "Hạn mức tính theo số request hay theo token?",
@@ -38,13 +38,13 @@ export default function FaqSection({ models }) {
   return (
     <section id="faq" className="border-b border-border">
       <div className="shell py-20">
-        <p className="meta text-text-muted">Câu hỏi thường gặp</p>
+        <p className="meta text-text-muted">{copy.faqEyebrow}</p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          Sáu câu hỏi trước khi mua
+          {copy.faqTitle}
         </h2>
-        <p className="mt-3 max-w-2xl text-text-muted">
-          Giá gói tính bằng USD mỗi tháng. Hạn mức dừng khi gói hết hạn.
-        </p>
+        {copy.faqSubtitle ? (
+          <p className="mt-3 max-w-2xl text-text-muted">{copy.faqSubtitle}</p>
+        ) : null}
 
         <dl className="mt-10 grid grid-cols-1 gap-px border border-border bg-border lg:grid-cols-2">
           {questions.map((item) => (
@@ -65,4 +65,5 @@ export default function FaqSection({ models }) {
 
 FaqSection.propTypes = {
   models: PropTypes.array.isRequired,
+  copy: PropTypes.object.isRequired,
 };

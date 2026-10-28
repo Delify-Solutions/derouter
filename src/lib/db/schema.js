@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -268,6 +268,32 @@ export const TABLES = {
     },
     // code is UNIQUE inline (auto-indexed) — that covers lookup by code.
     indexes: [],
+  },
+  // Operator-authored documentation served at /docs/<slug>.
+  //
+  // A table rather than keys inside `settings`: these are rows (slug, title,
+  // ordering) that need to be listed and queried one at a time, while settings
+  // is a single JSON blob where every write rewrites the whole document.
+  docsPages: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // The URL segment. Lowercase and dash-separated so it is stable in links;
+      // validated in contentRepo, not constrained here, because the reserved-word
+      // list is an application rule that may grow.
+      slug: "TEXT UNIQUE NOT NULL",
+      title: "TEXT NOT NULL",
+      summary: "TEXT",
+      // Markdown. Rendered through the sanitising pipeline in
+      // shared/utils/markdown.js — never injected raw.
+      body: "TEXT NOT NULL",
+      isPublished: "INTEGER DEFAULT 0",
+      sortOrder: "INTEGER DEFAULT 0",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_docs_published ON docsPages(isPublished, sortOrder)",
+    ],
   },
   // Per-model allowance for a subscription plan, modelled on how OpenCode Go
   // meters its plans: a monthly dollar ceiling PER MODEL, drawn down by that

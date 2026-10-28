@@ -43,7 +43,9 @@ const PUBLIC_API_PATHS = [
 
 // Public pages for customer accounts. The admin entry point stays hidden at
 // /admin/ss, so these render the tenant-facing forms only.
-const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email"];
+// Public pages. `/docs` is operator-written documentation for customers and must
+// be readable without a session — it is the page the landing CTA points at.
+const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email", "/docs"];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.

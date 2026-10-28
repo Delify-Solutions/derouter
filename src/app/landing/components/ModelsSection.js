@@ -1,14 +1,17 @@
 import PropTypes from "prop-types";
-import { FORMAT_LABELS, USAGE_WINDOWS } from "./salesData";
+import { FORMAT_LABELS, USAGE_WINDOWS, interpolate } from "./salesData";
 
-export default function ModelsSection({ models }) {
+export default function ModelsSection({ models, copy }) {
   return (
     <section id="models" className="border-b border-border bg-bg-alt">
       <div className="shell py-20">
-        <p className="meta text-text-muted">Danh mục</p>
+        <p className="meta text-text-muted">{copy.modelsEyebrow}</p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          {models.length} model được hỗ trợ
+          {interpolate(copy.modelsTitle, { count: models.length })}
         </h2>
+        {copy.modelsSubtitle ? (
+          <p className="mt-3 max-w-2xl text-text-muted">{copy.modelsSubtitle}</p>
+        ) : null}
         <p className="mt-3 max-w-2xl text-text-muted">
           Danh sách này đọc thẳng từ registry của router, nên model nào hiện ở đây là model gọi
           được ngay. Nhãn bên dưới cho biết wire format mà model đó nhận.
@@ -45,4 +48,5 @@ export default function ModelsSection({ models }) {
 
 ModelsSection.propTypes = {
   models: PropTypes.array.isRequired,
+  copy: PropTypes.object.isRequired,
 };
