@@ -243,7 +243,6 @@ async function pingConnection(conn, provider, providerConfig, handler, deps, sta
     lastPingAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  console.log(`[AutoPing] ${provider}:${connection.id}: ping sent (reset ${resetAt})`);
 }
 
 function createDefaultDeps() {
@@ -291,7 +290,6 @@ export async function runQuotaAutoPingTick(deps = createDefaultDeps(), state = g
 
 export function startQuotaAutoPing() {
   if (g.interval) return;
-  console.log("[AutoPing] scheduler started");
   runQuotaAutoPingTick().catch(() => {});
   g.interval = setInterval(() => { runQuotaAutoPingTick().catch(() => {}); }, C.tickIntervalMs);
   if (g.interval.unref) g.interval.unref();
@@ -301,7 +299,6 @@ export function stopQuotaAutoPing() {
   if (!g.interval) return;
   clearInterval(g.interval);
   g.interval = null;
-  console.log("[AutoPing] scheduler stopped");
 }
 
 export function configureQuotaAutoPing(settings) {

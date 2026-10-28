@@ -1,4 +1,4 @@
-export default {
+const clinepassProvider = {
   id: "clinepass",
   priority: 85,
   alias: "clinepass",
@@ -55,3 +55,4 @@ export default {
     defaultMode: "auto",
   },
 };
+export default clinepassProvider;

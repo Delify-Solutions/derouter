@@ -9,8 +9,7 @@ export async function GET() {
   try {
     const keys = await getApiKeys();
     return NextResponse.json({ keys });
-  } catch (error) {
-    console.log("Error fetching keys:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
   }
 }
@@ -51,7 +50,6 @@ export async function POST(request) {
       allowedModels: apiKey.allowedModels,
     }, { status: 201 });
   } catch (error) {
-    console.log("Error creating key:", error);
     return NextResponse.json({ error: error.message || "Failed to create key" }, { status: 400 });
   }
 }

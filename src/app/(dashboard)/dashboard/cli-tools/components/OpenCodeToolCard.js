@@ -46,7 +46,9 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
       if (!status) checkStatus();
       fetchModelAliases();
     }
-  }, [isExpanded]);
+    // `status` is a one-shot guard: listing it as a dependency would refetch the
+    // alias map every time the status changes, so it is deliberately omitted.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync models from existing config
   useEffect(() => {
@@ -63,13 +65,13 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
     }
   }, [status]);
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
@@ -91,7 +93,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
         }),
       });
     } catch (error) {
-      console.log("Error saving models:", error);
+      console.error("Error saving models:", error);
     }
   };
 
@@ -114,7 +116,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
 
   const getDisplayUrl = () => customBaseUrl || `${baseUrl}/v1`;
 
-  const checkStatus = async () => {
+  async function checkStatus() {
     setChecking(true);
     try {
       const res = await fetch("/api/cli-tools/opencode-settings");
@@ -349,7 +351,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                                     checkStatus();
                                   }
                                 } catch (error) {
-                                  console.log("Error clearing active model:", error);
+                                  console.error("Error clearing active model:", error);
                                 }
                               } else {
                                 setActiveModel(model);
@@ -378,7 +380,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                                     checkStatus();
                                   }
                                 } catch (error) {
-                                  console.log("Error removing model:", error);
+                                  console.error("Error removing model:", error);
                                 }
                               }}
                               className="ml-0.5 hover:text-red-500"

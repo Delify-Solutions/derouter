@@ -9,8 +9,7 @@ export async function GET(request, { params }) {
     const { id } = await params;
     const redemptions = await listRedemptions(id);
     return NextResponse.json({ redemptions });
-  } catch (error) {
-    console.log("Error listing gift redemptions:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch redemptions" }, { status: 500 });
   }
 }

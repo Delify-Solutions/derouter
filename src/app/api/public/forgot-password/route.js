@@ -45,7 +45,7 @@ export async function POST(request) {
       await sendResetEmail({ user, request, settings });
     }
   } catch (error) {
-    console.log("[public/forgot-password] failed:", error?.message || error);
+    console.error("[public/forgot-password] failed:", error?.message || error);
   }
 
   return NextResponse.json(OK, { headers: NO_STORE });

@@ -101,7 +101,7 @@ export async function POST(request) {
       token,
     });
   } catch (error) {
-    console.log("[public/login] session persist failed:", error?.message || error);
+    console.error("[public/login] session persist failed:", error?.message || error);
   }
 
   await touchLastLogin(user.id);

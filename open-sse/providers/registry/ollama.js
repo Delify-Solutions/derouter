@@ -1,4 +1,4 @@
-export default {
+const ollamaProvider = {
   id: "ollama",
   priority: 30,
   hasFree: true,
@@ -46,3 +46,4 @@ export default {
     usageApikey: true,
   },
 };
+export default ollamaProvider;

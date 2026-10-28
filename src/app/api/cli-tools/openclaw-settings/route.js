@@ -51,7 +51,7 @@ const readSettings = async () => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -108,8 +108,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(settings),
       settingsPath: getOpenClawSettingsPath(),
     });
-  } catch (error) {
-    console.log("Error checking openclaw settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check openclaw settings" }, { status: 500 });
   }
 }
@@ -228,8 +227,7 @@ export async function POST(request) {
       message: "Open Claw settings applied successfully!",
       settingsPath,
     });
-  } catch (error) {
-    console.log("Error updating openclaw settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update openclaw settings" }, { status: 500 });
   }
 }
@@ -287,8 +285,7 @@ export async function DELETE() {
       success: true,
       message: "derouter settings removed successfully",
     });
-  } catch (error) {
-    console.log("Error resetting openclaw settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset openclaw settings" }, { status: 500 });
   }
 }

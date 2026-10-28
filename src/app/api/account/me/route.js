@@ -29,7 +29,7 @@ async function readWallet(userId) {
       }
     }
   } catch (error) {
-    console.log("[account/me] wallet summary unavailable:", error?.message || error);
+    console.error("[account/me] wallet summary unavailable:", error?.message || error);
   }
   return { availableNanoUsd: 0, overdraftNanoUsd: 0, totalGrantedNanoUsd: 0, plans: [] };
 }

@@ -27,7 +27,7 @@ const COLUMNS = [
 
 const COLUMN_LIST = COLUMNS.join(", ");
 
-export default {
+const nullableUserplanPlanidMigration = {
   version: 3,
   name: "nullable-userplan-planid",
   up(db) {
@@ -67,3 +67,4 @@ export default {
     db.exec(`UPDATE userPlans SET planId = NULL WHERE planId = ''`);
   },
 };
+export default nullableUserplanPlanidMigration;

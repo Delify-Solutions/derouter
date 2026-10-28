@@ -1,4 +1,4 @@
-export default {
+const jinaAiProvider = {
   id: "jina-ai",
   alias: "jina",
   display: {
@@ -40,3 +40,4 @@ export default {
     ]
   }
 };
+export default jinaAiProvider;

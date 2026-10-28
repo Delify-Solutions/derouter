@@ -18,7 +18,7 @@ function ensureColumn(db, table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
-export default {
+const moneyAndTenantsMigration = {
   version: 2,
   name: "money-and-tenants",
   up(db) {
@@ -42,3 +42,4 @@ export default {
     `);
   },
 };
+export default moneyAndTenantsMigration;

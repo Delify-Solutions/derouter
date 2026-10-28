@@ -8,8 +8,7 @@ export async function GET() {
   try {
     const aliases = await getModelAliases();
     return NextResponse.json({ aliases });
-  } catch (error) {
-    console.log("Error fetching aliases:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch aliases" }, { status: 500 });
   }
 }
@@ -27,8 +26,7 @@ export async function PUT(request) {
     await setModelAlias(alias, model);
 
     return NextResponse.json({ success: true, model, alias });
-  } catch (error) {
-    console.log("Error updating alias:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update alias" }, { status: 500 });
   }
 }
@@ -46,8 +44,7 @@ export async function DELETE(request) {
     await deleteModelAlias(alias);
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.log("Error deleting alias:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to delete alias" }, { status: 500 });
   }
 }

@@ -17,6 +17,8 @@ import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/prov
 // Force-stop FE animation if a provider stays active longer than this
 const FE_ACTIVE_TIMEOUT_MS = 60000;
 const FE_ACTIVE_TICK_MS = 1000;
+// Stable fit options: ReactFlow compares these by reference on every render.
+const FIT_OPTS = { padding: 0.2, duration: 200 };
 
 // Kame + electric particles along active edges
 const KAME_PARTICLE_COUNT = 6;
@@ -369,7 +371,9 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
 
   // Track firstSeen per active provider; drop provider if running too long (BE stuck)
   const firstSeenRef = useRef({});
-  const [tick, setTick] = useState(0);
+  // Wall-clock timestamp used to age out stuck providers. Updated by the tick
+  // below so render never has to call Date.now() itself.
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const seen = firstSeenRef.current;
@@ -384,19 +388,18 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
 
   useEffect(() => {
     if (rawActiveSet.size === 0) return;
-    const id = setInterval(() => setTick((t) => t + 1), FE_ACTIVE_TICK_MS);
+    const id = setInterval(() => setNow(Date.now()), FE_ACTIVE_TICK_MS);
     return () => clearInterval(id);
   }, [rawActiveSet]);
 
   const activeSet = useMemo(() => {
-    const now = Date.now();
     const filtered = new Set();
     for (const p of rawActiveSet) {
       const ts = firstSeenRef.current[p];
       if (!ts || now - ts < FE_ACTIVE_TIMEOUT_MS) filtered.add(p);
     }
     return filtered;
-  }, [rawActiveSet, tick]);
+  }, [rawActiveSet, now]);
 
   const { nodes, edges } = useMemo(
     () => buildLayout(providers, activeSet, lastSet, errorSet),
@@ -411,10 +414,9 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
 
   const rfInstance = useRef(null);
   const containerRef = useRef(null);
-  const fitOpts = { padding: 0.2, duration: 200 };
   const onInit = useCallback((instance) => {
     rfInstance.current = instance;
-    setTimeout(() => instance.fitView(fitOpts), 50);
+    setTimeout(() => instance.fitView(FIT_OPTS), 50);
   }, []);
 
   // Re-fit on container resize
@@ -422,7 +424,7 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      if (rfInstance.current) rfInstance.current.fitView(fitOpts);
+      if (rfInstance.current) rfInstance.current.fitView(FIT_OPTS);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -431,7 +433,7 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
   // Re-fit when node count/layout changes
   useEffect(() => {
     if (rfInstance.current) {
-      const id = setTimeout(() => rfInstance.current.fitView(fitOpts), 50);
+      const id = setTimeout(() => rfInstance.current.fitView(FIT_OPTS), 50);
       return () => clearTimeout(id);
     }
   }, [nodes.length]);
@@ -450,7 +452,7 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          fitViewOptions={fitOpts}
+          fitViewOptions={FIT_OPTS}
           minZoom={0.1}
           maxZoom={2}
           onInit={onInit}

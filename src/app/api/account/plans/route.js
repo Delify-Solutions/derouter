@@ -39,8 +39,7 @@ export async function GET(request) {
       },
       { headers: NO_STORE }
     );
-  } catch (error) {
-    console.log("[account/plans] read failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load plans" }, { status: 500, headers: NO_STORE });
   }
 }

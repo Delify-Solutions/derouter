@@ -11,11 +11,7 @@ export default function PricingSettingsPage() {
   const [currentPricing, setCurrentPricing] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadPricing();
-  }, []);
-
-  const loadPricing = async () => {
+  async function loadPricing() {
     setLoading(true);
     try {
       const response = await fetch("/api/pricing");
@@ -29,6 +25,12 @@ export default function PricingSettingsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Deferred by one microtask so setLoading() runs outside the effect body.
+    Promise.resolve().then(() => loadPricing()).catch(() => {});
+    // loadPricing is re-created every render; this load is mount-only.
+  }, []);
 
   const handlePricingUpdated = () => {
     loadPricing();

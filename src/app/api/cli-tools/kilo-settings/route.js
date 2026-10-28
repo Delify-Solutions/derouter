@@ -39,7 +39,7 @@ const readJson = async (filePath) => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -65,8 +65,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(auth),
       authPath: getAuthPath(),
     });
-  } catch (error) {
-    console.log("Error checking kilo settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check kilo settings" }, { status: 500 });
   }
 }
@@ -100,8 +99,7 @@ export async function POST(request) {
     } catch { /* VS Code settings not writable */ }
 
     return NextResponse.json({ success: true, message: "Kilo Code settings applied successfully!", authPath: getAuthPath() });
-  } catch (error) {
-    console.log("Error updating kilo settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update kilo settings" }, { status: 500 });
   }
 }
@@ -126,8 +124,7 @@ export async function DELETE() {
     } catch { /* ignore */ }
 
     return NextResponse.json({ success: true, message: "derouter settings removed from Kilo Code" });
-  } catch (error) {
-    console.log("Error resetting kilo settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset kilo settings" }, { status: 500 });
   }
 }

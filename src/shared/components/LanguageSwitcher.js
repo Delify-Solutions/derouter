@@ -87,6 +87,9 @@ export default function LanguageSwitcher({ className = "", isOpen: controlledOpe
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
+    // setIsOpen is a closure re-created on every render; listing it would tear
+    // down and re-add the listener on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const handleSetLocale = async (nextLocale) => {

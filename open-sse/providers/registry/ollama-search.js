@@ -1,4 +1,4 @@
-export default {
+const ollamaSearchProvider = {
   id: "ollama-search",
   alias: "ollama-search",
   display: {
@@ -33,3 +33,4 @@ export default {
     cacheTTLMs: 300000,
   },
 };
+export default ollamaSearchProvider;

@@ -61,7 +61,6 @@ export async function POST(request) {
       },
     });
   } catch (error) {
-    console.log("Kiro social exchange error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

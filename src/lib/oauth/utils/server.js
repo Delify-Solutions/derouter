@@ -675,7 +675,6 @@ export function startZedProxy(preferredPort = 0) {
       for (const k of ["access_token", "user_id", "code_verifier", "state"]) {
         if (redacted[k]) redacted[k] = "<redacted>";
       }
-      console.log("[Zed proxy]", req.method, url.pathname, JSON.stringify(redacted));
       if (url.pathname !== "/" && url.pathname !== "/callback") {
         res.writeHead(404);
         res.end("Not found");
@@ -725,31 +724,26 @@ export function startZedProxy(preferredPort = 0) {
     server.on("error", (err) => {
       // If the preferred port (e.g. 58443) is busy, fall back to a random port.
       if (err.code === "EADDRINUSE" && tryPort !== 0) {
-        console.log(`[Zed proxy] port ${tryPort} busy, falling back to random`);
         server.listen(0, "127.0.0.1", () => {
           zedProxyServer = server;
           zedProxyPort = server.address().port;
           zedProxyTimeout = setTimeout(() => stopZedProxy(), ZED_HOSTED_CONFIG.oauthTimeoutMs);
-          console.log(`[Zed proxy] listening on random port ${zedProxyPort}`);
           resolve({ success: true, port: zedProxyPort, callbackUrl: `http://127.0.0.1:${zedProxyPort}/` });
         });
       } else {
-        console.log(`[Zed proxy] listen error: ${err.message}`);
         resolve({ success: false, reason: err.message });
       }
     });
     server.listen(tryPort, "127.0.0.1", () => {
       zedProxyServer = server;
       zedProxyPort = server.address().port;
-      zedProxyTimeout = setTimeout(() => { console.log("[Zed proxy] timeout, stopping"); stopZedProxy(); }, ZED_HOSTED_CONFIG.oauthTimeoutMs);
-      console.log(`[Zed proxy] listening on port ${zedProxyPort}`);
+      zedProxyTimeout = setTimeout(() => { stopZedProxy(); }, ZED_HOSTED_CONFIG.oauthTimeoutMs);
       resolve({ success: true, port: zedProxyPort, callbackUrl: `http://127.0.0.1:${zedProxyPort}/` });
     });
   });
 }
 
 export function stopZedProxy() {
-  console.log(`[Zed proxy] stopping (port ${zedProxyPort || "-"})`);
   if (zedProxyTimeout) { clearTimeout(zedProxyTimeout); zedProxyTimeout = null; }
   if (zedProxyServer) { zedProxyServer.close(); zedProxyServer = null; }
   zedProxyPort = null;

@@ -90,8 +90,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(settings),
       configPath: getGrokConfigPath(),
     });
-  } catch (error) {
-    console.log("Error checking grok-build settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check grok-build settings" }, { status: 500 });
   }
 }
@@ -121,8 +120,7 @@ export async function POST(request) {
       configPath: getGrokConfigPath(),
       modelSlot: "derouter",
     });
-  } catch (error) {
-    console.log("Error updating grok-build settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update grok-build settings" }, { status: 500 });
   }
 }
@@ -145,8 +143,7 @@ export async function DELETE() {
       success: true,
       message: "derouter model slots removed from Grok Build",
     });
-  } catch (error) {
-    console.log("Error resetting grok-build settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset grok-build settings" }, { status: 500 });
   }
 }

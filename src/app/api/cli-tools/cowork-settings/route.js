@@ -122,7 +122,7 @@ const read1pConfig = async () => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped) || {};
-  } catch (error) {
+  } catch {
     return {};
   }
 };
@@ -203,7 +203,7 @@ const readJson = async (filePath) => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -302,8 +302,7 @@ export async function GET() {
       defaultPlugins: DEFAULT_PLUGINS,
       localStdioPlugins: LOCAL_STDIO_PLUGINS,
     });
-  } catch (error) {
-    console.log("Error reading cowork settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to read cowork settings" }, { status: 500 });
   }
 }
@@ -362,8 +361,7 @@ export async function POST(request) {
       skipApprovals: skipResult,
       localMcp: localMcpResult,
     });
-  } catch (error) {
-    console.log("Error applying cowork settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to apply cowork settings" }, { status: 500 });
   }
 }
@@ -380,8 +378,7 @@ export async function DELETE() {
     try { await writeSkipApprovals([]); } catch { /* ignore */ }
     try { await cleanup1pLegacy(); } catch { /* ignore */ }
     return NextResponse.json({ success: true, message: "Cowork config reset" });
-  } catch (error) {
-    console.log("Error resetting cowork settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset cowork settings" }, { status: 500 });
   }
 }

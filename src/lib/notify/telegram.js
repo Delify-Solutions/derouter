@@ -42,12 +42,12 @@ export async function notifyAdmin(text) {
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      console.log(`[notify] telegram responded ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+      console.error(`[notify] telegram responded ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
       return { ok: false, reason: "telegram_error" };
     }
     return { ok: true };
   } catch (error) {
-    console.log(`[notify] telegram request failed: ${error?.message || "unknown error"}`);
+    console.error(`[notify] telegram request failed: ${error?.message || "unknown error"}`);
     return { ok: false, reason: "network_error" };
   }
 }

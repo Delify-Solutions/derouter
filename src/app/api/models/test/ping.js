@@ -65,8 +65,6 @@ async function getInternalHeaders() {
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
   const headers = await getInternalHeaders();
   const start = Date.now();
-  const redactedKey = headers["Authorization"] ? `Bearer ${headers["Authorization"].replace("Bearer ", "").slice(0, 8)}…` : "none";
-  console.log(`[TEST-MODEL] → kind=${kind} model=${model} key=${redactedKey}`);
 
   if (kind === "embedding") {
     const res = await fetch(`${baseUrl}/api/v1/embeddings`, {
@@ -77,7 +75,6 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     });
     const latencyMs = Date.now() - start;
     const rawText = await res.text().catch(() => "");
-    console.log(`[TEST-MODEL] ← model=${model} status=${res.status} latency=${latencyMs}ms body=${rawText.slice(0, 300)}`);
     let parsed = null;
     try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
 
@@ -160,7 +157,6 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
   const latencyMs = Date.now() - start;
 
   const rawText = await res.text().catch(() => "");
-  console.log(`[TEST-MODEL] ← model=${model} status=${res.status} latency=${latencyMs}ms body=${rawText.slice(0, 300)}`);
   let parsed = null;
   try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
 

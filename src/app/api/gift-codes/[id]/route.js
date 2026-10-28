@@ -10,8 +10,7 @@ export async function GET(request, { params }) {
     const code = await getGiftCodeById(id);
     if (!code) return NextResponse.json({ error: "Gift code not found" }, { status: 404 });
     return NextResponse.json({ code });
-  } catch (error) {
-    console.log("Error reading gift code:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch gift code" }, { status: 500 });
   }
 }
@@ -55,7 +54,6 @@ export async function PATCH(request, { params }) {
     if (!code) return NextResponse.json({ error: "Gift code not found" }, { status: 404 });
     return NextResponse.json({ code });
   } catch (error) {
-    console.log("Error updating gift code:", error);
     return NextResponse.json({ error: error.message || "Failed to update gift code" }, { status: 400 });
   }
 }
@@ -67,8 +65,7 @@ export async function DELETE(request, { params }) {
     const ok = await deleteGiftCode(id);
     if (!ok) return NextResponse.json({ error: "Gift code not found" }, { status: 404 });
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.log("Error disabling gift code:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to disable gift code" }, { status: 500 });
   }
 }

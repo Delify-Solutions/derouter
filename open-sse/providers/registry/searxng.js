@@ -1,6 +1,6 @@
 import { SEARXNG_URL } from "../../config/runtimeConfig.js";
 
-export default {
+const searxngProvider = {
   id: "searxng",
   alias: "searxng",
   display: {
@@ -33,3 +33,4 @@ export default {
     cacheTTLMs: 180000
   }
 };
+export default searxngProvider;

@@ -42,9 +42,11 @@ export default function AntigravityToolCard({
     if (!status) fetchStatus();
     loadSavedMappings();
     fetchModelAliases();
-  }, [isExpanded]);
+    // `status` is a one-shot guard: listing it as a dependency would refetch
+    // the mappings and alias map every time the status changes.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadSavedMappings = async () => {
+  async function loadSavedMappings() {
     try {
       const res = await fetch("/api/cli-tools/antigravity-mitm/alias?tool=antigravity");
       if (res.ok) {
@@ -56,21 +58,21 @@ export default function AntigravityToolCard({
         }
       }
     } catch (error) {
-      console.log("Error loading saved mappings:", error);
+      console.error("Error loading saved mappings:", error);
     }
   };
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
-  const fetchStatus = async () => {
+  async function fetchStatus() {
     try {
       const res = await fetch("/api/cli-tools/antigravity-mitm");
       if (res.ok) {
@@ -78,7 +80,7 @@ export default function AntigravityToolCard({
         setStatus(data);
       }
     } catch (error) {
-      console.log("Error fetching status:", error);
+      console.error("Error fetching status:", error);
       setStatus({ running: false });
     }
   };

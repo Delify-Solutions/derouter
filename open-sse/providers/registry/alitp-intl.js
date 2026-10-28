@@ -4,7 +4,7 @@
 // Singapore is the only region that serves the plan; eu-central-1 answers
 // IllegalEndpoint. The Anthropic surface (/apps/anthropic/v1/messages) is not
 // authorized for this plan, so OpenAI-compatible mode is the only transport.
-export default {
+const alitpIntlProvider = {
   id: "alitp-intl",
   priority: 11,
   alias: "alitp-intl",
@@ -33,3 +33,4 @@ export default {
     { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   ],
 };
+export default alitpIntlProvider;

@@ -155,7 +155,6 @@ async function _ensureCloudflared() {
 
   if (fs.existsSync(BIN_PATH)) {
     if (!isValidBinary(BIN_PATH)) {
-      console.log("[cloudflared] Invalid binary detected, re-downloading...");
       fs.unlinkSync(BIN_PATH);
     } else {
       if (!IS_WINDOWS) fs.chmodSync(BIN_PATH, "755");
@@ -286,7 +285,7 @@ export async function spawnQuickTunnel(localPort, onUrlUpdate) {
     isCleaned = true;
     try {
       fs.rmSync(configDir, { recursive: true, force: true });
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   };
 
   const requestedProtocol = String(process.env.TUNNEL_TRANSPORT_PROTOCOL || process.env.CLOUDFLARED_PROTOCOL || DEFAULT_QUICK_TUNNEL_PROTOCOL).trim().toLowerCase();
@@ -347,14 +346,12 @@ export async function spawnQuickTunnel(localPort, onUrlUpdate) {
         lastUrl = tunnelUrl;
         clearTimeout(timeout);
         cleanup();
-        console.log(`[Tunnel] cloudflared URL: ${tunnelUrl}`);
         resolve({ child, tunnelUrl });
         return;
       }
 
       // URL changed after initial connect — notify caller to re-register
       if (tunnelUrl !== lastUrl) {
-        console.log(`[Tunnel] cloudflared URL changed: ${tunnelUrl}`);
         lastUrl = tunnelUrl;
         if (onUrlUpdate) onUrlUpdate(tunnelUrl);
       }
@@ -382,7 +379,6 @@ export async function spawnQuickTunnel(localPort, onUrlUpdate) {
         if (!resolved) { resolved = true; reject(new Error("cloudflared killed")); }
         return;
       }
-      console.log(`[Tunnel] cloudflared exit code=${code} signal=${signal}`);
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -414,7 +410,7 @@ function killCloudflaredByPort(port) {
     } else {
       execSync(`pkill -f "cloudflared.*:${port}([^0-9]|$)" 2>/dev/null || true`, { stdio: "ignore", windowsHide: true });
     }
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
 }
 
 export function killCloudflared(localPort) {
@@ -422,7 +418,7 @@ export function killCloudflared(localPort) {
   if (cloudflaredProcess) {
     try {
       cloudflaredProcess.kill();
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     cloudflaredProcess = null;
   }
 
@@ -430,7 +426,7 @@ export function killCloudflared(localPort) {
   if (pid) {
     try {
       process.kill(pid);
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     clearPid();
   }
 
@@ -443,7 +439,7 @@ export function isCloudflaredRunning() {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }

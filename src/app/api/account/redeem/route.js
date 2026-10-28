@@ -30,8 +30,7 @@ export async function GET(request) {
 
     const redemptions = await listUserRedemptions(session.userId);
     return NextResponse.json({ redemptions });
-  } catch (error) {
-    console.log("Error listing redemptions:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch redemptions" }, { status: 500 });
   }
 }
@@ -73,8 +72,7 @@ export async function POST(request) {
       planName: result.planName ?? null,
       expiresAt: result.userPlan?.expiresAt ?? null,
     });
-  } catch (error) {
-    console.log("Error redeeming gift code:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to redeem code" }, { status: 500 });
   }
 }

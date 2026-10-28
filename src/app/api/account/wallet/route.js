@@ -45,8 +45,7 @@ export async function GET(request) {
       },
       { headers: NO_STORE }
     );
-  } catch (error) {
-    console.log("[account/wallet] read failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load wallet" }, { status: 500, headers: NO_STORE });
   }
 }

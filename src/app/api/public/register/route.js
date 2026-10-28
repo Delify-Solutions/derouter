@@ -64,7 +64,7 @@ export async function POST(request) {
     if (/unique|constraint/i.test(message)) {
       return fail(GENERIC_DUPLICATE, 409);
     }
-    console.log("[public/register] create failed:", message);
+    console.error("[public/register] create failed:", message);
     return fail("Could not create the account", 500);
   }
 

@@ -72,8 +72,7 @@ export async function GET(request) {
     );
 
     return NextResponse.json({ users: enriched }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[users] list failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load users" }, { status: 500, headers: NO_STORE });
   }
 }

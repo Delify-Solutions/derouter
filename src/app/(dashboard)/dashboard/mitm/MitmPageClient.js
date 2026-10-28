@@ -14,13 +14,6 @@ export default function MitmPageClient() {
   const [expandedTool, setExpandedTool] = useState(null);
   const [mitmStatus, setMitmStatus] = useState({ running: false, certExists: false, dnsStatus: {}, hasCachedPassword: false });
 
-  useEffect(() => {
-    fetchConnections();
-    fetchApiKeys();
-    fetchAliases();
-    fetchCloudSettings();
-  }, []);
-
   const fetchConnections = async () => {
     try {
       const res = await fetch("/api/providers");
@@ -60,6 +53,18 @@ export default function MitmPageClient() {
       }
     } catch { /* ignore */ }
   };
+
+  useEffect(() => {
+    // Deferred by one microtask so the loaders are invoked outside the effect
+    // body: they still run together, but none of their state updates can land
+    // synchronously inside the effect.
+    Promise.resolve().then(() => {
+      fetchConnections();
+      fetchApiKeys();
+      fetchAliases();
+      fetchCloudSettings();
+    }).catch(() => {});
+  }, []);
 
   const getActiveProviders = () => connections.filter(c => c.isActive !== false);
 

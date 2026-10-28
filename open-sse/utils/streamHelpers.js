@@ -10,7 +10,7 @@ export function parseSSELine(line, format = null) {
     if (trimmed.startsWith("{")) {
       try {
         return JSON.parse(trimmed);
-      } catch (error) {
+      } catch {
         return null;
       }
     }
@@ -25,9 +25,9 @@ export function parseSSELine(line, format = null) {
 
   try {
     return JSON.parse(data);
-  } catch (error) {
+  } catch {
     if (data.length > 0 && data.length < 1000) {
-      console.log(`[WARN] Failed to parse SSE line (${data.length} chars): ${data.substring(0, 100)}...`);
+      console.warn(`[WARN] Failed to parse SSE line (${data.length} chars): ${data.substring(0, 100)}...`);
     }
     return null;
   }

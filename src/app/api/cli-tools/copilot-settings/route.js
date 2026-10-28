@@ -25,7 +25,7 @@ const readConfig = async () => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -54,8 +54,7 @@ export async function GET() {
       currentModel: entry?.models?.[0]?.id || null,
       currentUrl: entry?.models?.[0]?.url || null,
     });
-  } catch (error) {
-    console.log("Error checking copilot settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check copilot settings" }, { status: 500 });
   }
 }
@@ -113,8 +112,7 @@ export async function POST(request) {
       message: "Copilot settings applied! Reload VS Code to take effect.",
       configPath,
     });
-  } catch (error) {
-    console.log("Error updating copilot settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update copilot settings" }, { status: 500 });
   }
 }
@@ -143,8 +141,7 @@ export async function DELETE() {
       success: true,
       message: "derouter removed from Copilot config",
     });
-  } catch (error) {
-    console.log("Error resetting copilot settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset copilot settings" }, { status: 500 });
   }
 }

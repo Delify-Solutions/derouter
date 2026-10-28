@@ -65,7 +65,7 @@ export async function sendVerificationEmail({ user, request, settings, replace =
   if (!result.ok) {
     // The transcript on disk holds the link; log only the reason, never the token,
     // so a log reader cannot take over the account.
-    console.log(`[register] verification mail not delivered (${result.reason}) for user ${user.id}`);
+    console.error(`[register] verification mail not delivered (${result.reason}) for user ${user.id}`);
   }
   return token;
 }
@@ -82,7 +82,7 @@ export async function sendResetEmail({ user, request, settings }) {
   const message = buildResetEmail({ email: user.email, link, siteName });
   const result = await sendMail({ to: user.email, ...message });
   if (!result.ok) {
-    console.log(`[register] reset mail not delivered (${result.reason}) for user ${user.id}`);
+    console.error(`[register] reset mail not delivered (${result.reason}) for user ${user.id}`);
   }
   return token;
 }

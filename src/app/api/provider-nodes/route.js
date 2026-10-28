@@ -22,8 +22,7 @@ export async function GET() {
   try {
     const nodes = await getProviderNodes();
     return NextResponse.json({ nodes });
-  } catch (error) {
-    console.log("Error fetching provider nodes:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch provider nodes" }, { status: 500 });
   }
 }
@@ -97,8 +96,7 @@ export async function POST(request) {
     }
 
     return NextResponse.json({ error: "Invalid provider node type" }, { status: 400 });
-  } catch (error) {
-    console.log("Error creating provider node:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to create provider node" }, { status: 500 });
   }
 }

@@ -11,8 +11,7 @@ export async function GET(request) {
     const all = await getDisabledModels();
     if (providerAlias) return NextResponse.json({ ids: all[providerAlias] || [] });
     return NextResponse.json({ disabled: all });
-  } catch (error) {
-    console.log("Error fetching disabled models:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch disabled models" }, { status: 500 });
   }
 }
@@ -26,8 +25,7 @@ export async function POST(request) {
     }
     await disableModels(providerAlias, ids);
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.log("Error disabling models:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to disable models" }, { status: 500 });
   }
 }
@@ -43,8 +41,7 @@ export async function DELETE(request) {
     }
     await enableModels(providerAlias, id ? [id] : []);
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.log("Error enabling models:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to enable models" }, { status: 500 });
   }
 }

@@ -103,7 +103,11 @@ export default function PlansPageClient() {
   };
 
   const activePlans = wallet.plans.filter(
-    (plan) => plan.status === "active" && (!plan.expiresAt || Date.parse(plan.expiresAt) > Date.now())
+    (plan) => plan.status === "active" && (!plan.expiresAt ||
+      // Wall clock is intentional here: a plan that lapses while the page is
+      // open must drop out of the count on the next render.
+      // eslint-disable-next-line react-hooks/purity
+      Date.parse(plan.expiresAt) > Date.now())
   );
 
   return (

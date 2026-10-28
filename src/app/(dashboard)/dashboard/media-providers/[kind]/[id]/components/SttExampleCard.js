@@ -75,6 +75,8 @@ export function SttExampleCard({ providerId }) {
     setRunning(true);
     setError("");
     setResult(null);
+    // Runs inside the async click handler, never during render.
+    // eslint-disable-next-line react-hooks/purity
     const start = Date.now();
     try {
       const fd = new FormData();
@@ -88,6 +90,8 @@ export function SttExampleCard({ providerId }) {
       const headers = {};
       if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
       const res = await fetch("/api/v1/audio/transcriptions", { method: "POST", headers, body: fd });
+      // Runs inside the async click handler, never during render.
+      // eslint-disable-next-line react-hooks/purity
       setLatency(Date.now() - start);
       const ct = res.headers.get("content-type") || "";
       const data = ct.includes("application/json") ? await res.json() : await res.text();

@@ -31,6 +31,17 @@ const eslintConfig = defineConfig([
       ...(tsPlugin ? { "@typescript-eslint/no-require-imports": "warn" } : {}),
     },
   },
+  // These entry points are CommonJS on purpose: the standalone server and the published CLI
+  // both ship as CJS (package.json has no "type": "module"), so `require()` is the correct
+  // primitive there. Converting them to ESM would break the packaged layout — the CLI is
+  // executed straight from the published tree and custom-server.js is started by `node` with
+  // no build step. Keep the rule on everywhere else, where a `require()` is a real defect.
+  {
+    files: ["custom-server.js", "src/mitm/**/*.js", "cli/**/*.js", "scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   // Server/worker code logs to stdout by design; only flag accidental raw console.log.
   {
     files: ["src/**/*.js", "open-sse/**/*.js"],

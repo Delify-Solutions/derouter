@@ -1,4 +1,4 @@
-export default {
+const perplexityWebProvider = {
   id: "perplexity-web",
   priority: 220,
   alias: "perplexity-web",
@@ -31,3 +31,4 @@ export default {
     { id: "pplx-nemotron", name: "Nemotron 3 Super (via Perplexity)" },
   ],
 };
+export default perplexityWebProvider;

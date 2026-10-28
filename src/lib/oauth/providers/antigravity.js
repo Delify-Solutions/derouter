@@ -78,7 +78,7 @@ const antigravity = {
         }
       }
     } catch (e) {
-      console.log("Failed to load code assist:", e);
+      console.error("Failed to load code assist:", e);
     }
 
     // Fire-and-forget onboarding — does not block DB save
@@ -95,7 +95,7 @@ const antigravity = {
               const result = await onboardRes.json();
               if (result.done === true) break;
             }
-          } catch (e) {
+          } catch {
             break;
           }
           await new Promise(resolve => setTimeout(resolve, 5000));

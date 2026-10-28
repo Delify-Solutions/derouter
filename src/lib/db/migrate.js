@@ -70,7 +70,6 @@ function runVersionedMigrations(adapter) {
       setMetaSync(adapter, "schemaVersion", m.version);
     });
     lastApplied = m.version;
-    console.log(`[DB][migrate] applied #${m.version} ${m.name}`);
   }
   return { applied: pending.length, from: current, to: lastApplied };
 }
@@ -94,7 +93,6 @@ function syncSchemaFromTables(adapter) {
           .trim();
         try {
           adapter.exec(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${safeDef}`);
-          console.log(`[DB][sync] +column ${tableName}.${colName}`);
         } catch (e) {
           console.warn(`[DB][sync] add column ${tableName}.${colName} failed: ${e.message}`);
         }
@@ -237,7 +235,6 @@ export async function runMigrationOnce(adapter) {
       const backupDir = makeBackupDir(`schema-${storedSchemaVer}-to-${SCHEMA_VERSION}`);
       backupDbLite(adapter, backupDir);
       pruneOldBackups();
-      console.log(`[DB][migrate] pre-schema backup ${storedSchemaVer} → ${SCHEMA_VERSION}: ${backupDir}`);
     } catch (e) {
       console.warn(`[DB][migrate] pre-schema backup failed (continuing): ${e.message}`);
     }
@@ -261,7 +258,6 @@ export async function runMigrationOnce(adapter) {
   const hasLegacy = !!(legacyMain || legacyUsage || legacyDisabled || legacyDetails);
 
   if (fresh && hasLegacy && !alreadyImported) {
-    const t0 = Date.now();
     const backupDir = makeBackupDir("migrate-from-json");
     for (const f of Object.values(LEGACY_FILES)) backupFile(f, backupDir);
 
@@ -285,7 +281,6 @@ export async function runMigrationOnce(adapter) {
 
     try { fs.writeFileSync(MIGRATED_MARKER, new Date().toISOString()); } catch {}
     pruneOldBackups();
-    console.log(`[DB][migrate] JSON → SQLite in ${Date.now() - t0}ms | legacy JSON kept at DATA_DIR | backup: ${backupDir}`);
     return;
   }
 

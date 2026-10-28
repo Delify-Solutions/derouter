@@ -124,8 +124,7 @@ export async function POST(request) {
         failed: results.filter((r) => !r.valid).length,
       },
     });
-  } catch (error) {
-    console.log("Error in batch test:", error);
+  } catch {
     return NextResponse.json({ error: "Batch test failed" }, { status: 500 });
   }
 }

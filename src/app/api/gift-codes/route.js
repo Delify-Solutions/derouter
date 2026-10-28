@@ -8,8 +8,7 @@ export async function GET() {
   try {
     const [codes, plans] = await Promise.all([listGiftCodes(), listGiftPlans()]);
     return NextResponse.json({ codes, plans });
-  } catch (error) {
-    console.log("Error listing gift codes:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch gift codes" }, { status: 500 });
   }
 }
@@ -76,7 +75,6 @@ export async function POST(request) {
 
     return NextResponse.json({ code }, { status: 201 });
   } catch (error) {
-    console.log("Error creating gift code:", error);
     return NextResponse.json({ error: error.message || "Failed to create gift code" }, { status: 400 });
   }
 }

@@ -24,8 +24,7 @@ export async function GET(request, { params }) {
     const order = await getOrderById(id);
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404, headers: NO_STORE });
     return NextResponse.json({ order }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[orders/:id] read failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load order" }, { status: 500, headers: NO_STORE });
   }
 }

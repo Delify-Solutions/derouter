@@ -34,7 +34,7 @@ function hasColumn(db, table, column) {
   return db.all(`PRAGMA table_info(${table})`).some((c) => c.name === column);
 }
 
-export default {
+const usageApikeyIdMigration = {
   version: 5,
   name: "usage-apikey-id",
   up(db) {
@@ -73,3 +73,4 @@ export default {
     }
   },
 };
+export default usageApikeyIdMigration;

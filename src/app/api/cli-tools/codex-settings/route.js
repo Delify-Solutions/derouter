@@ -100,8 +100,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(config),
       configPath: getCodexConfigPath(),
     });
-  } catch (error) {
-    console.log("Error checking codex settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check codex settings" }, { status: 500 });
   }
 }
@@ -156,8 +155,7 @@ export async function POST(request) {
       message: "Codex settings applied successfully!",
       configPath,
     });
-  } catch (error) {
-    console.log("Error updating codex settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update codex settings" }, { status: 500 });
   }
 }
@@ -219,8 +217,7 @@ export async function DELETE() {
       success: true,
       message: "derouter settings removed successfully",
     });
-  } catch (error) {
-    console.log("Error resetting codex settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset codex settings" }, { status: 500 });
   }
 }

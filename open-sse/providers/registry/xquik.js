@@ -1,4 +1,4 @@
-export default {
+const xquikProvider = {
   id: "xquik",
   alias: "xquik",
   display: {
@@ -33,3 +33,4 @@ export default {
     creditsPerResult: 1
   }
 };
+export default xquikProvider;

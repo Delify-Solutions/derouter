@@ -61,9 +61,11 @@ export default function CoworkToolCard({
     if (initialStatus) setStatus(initialStatus);
   }, [initialStatus]);
 
+  // Guarded on `status`: no-ops as soon as it is set, so listing it as a
+  // dependency cannot re-trigger the fetch loop.
   useEffect(() => {
     if (isExpanded && !status) checkStatus();
-  }, [isExpanded]);
+  }, [isExpanded, status]);
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -94,9 +96,12 @@ export default function CoworkToolCard({
     if (Array.isArray(status?.cowork?.customPlugins) && status.cowork.customPlugins.length > 0) {
       setCustomPlugins(status.cowork.customPlugins);
     }
+    // customBaseUrl/plugins.length are deliberately excluded: adding them would
+    // re-run this whole block on every keystroke and reset the user's edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  const checkStatus = async () => {
+  async function checkStatus() {
     setChecking(true);
     try {
       const res = await fetch(ENDPOINT);

@@ -81,8 +81,7 @@ export async function GET() {
           baseURL: providerConfig?.options?.baseURL || null,
         },
     });
-  } catch (error) {
-    console.log("Error checking opencode settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check opencode settings" }, { status: 500 });
   }
 }
@@ -166,8 +165,7 @@ export async function POST(request) {
       message: "OpenCode settings applied successfully!",
       configPath,
     });
-  } catch (error) {
-    console.log("Error applying opencode settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to apply settings" }, { status: 500 });
   }
 }
@@ -202,8 +200,7 @@ export async function PATCH(request) {
       success: true,
       message: "Settings updated",
     });
-  } catch (error) {
-    console.log("Error patching opencode settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to patch settings" }, { status: 500 });
   }
 }
@@ -258,8 +255,7 @@ export async function DELETE(request) {
       success: true,
       message: modelToRemove ? `Model "${modelToRemove}" removed` : "derouter settings removed from OpenCode",
     });
-  } catch (error) {
-    console.log("Error resetting opencode settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset opencode settings" }, { status: 500 });
   }
 }

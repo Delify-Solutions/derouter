@@ -35,19 +35,21 @@ export default function ClineToolCard({ tool, isExpanded, onToggle, baseUrl, api
       if (!status) checkStatus();
       fetchModelAliases();
     }
-  }, [isExpanded]);
+    // `status` is a one-shot guard: listing it as a dependency would refetch the
+    // alias map every time the status changes, so it is deliberately omitted.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (status?.settings?.openAiModelId) setSelectedModel(status.settings.openAiModelId);
   }, [status]);
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
@@ -69,7 +71,7 @@ export default function ClineToolCard({ tool, isExpanded, onToggle, baseUrl, api
 
   const getDisplayUrl = () => customBaseUrl || `${baseUrl}/v1`;
 
-  const checkStatus = async () => {
+  async function checkStatus() {
     setChecking(true);
     try {
       const res = await fetch("/api/cli-tools/cline-settings");

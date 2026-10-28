@@ -64,15 +64,17 @@ export default function OpenClawToolCard({
       if (!openclawStatus) checkOpenclawStatus();
       fetchModelAliases();
     }
-  }, [isExpanded]);
+    // `openclawStatus` is a one-shot guard: listing it as a dependency would refetch the
+    // alias map every time the status changes, so it is deliberately omitted.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
@@ -97,7 +99,7 @@ export default function OpenClawToolCard({
     }
   }, [openclawStatus, apiKeys]);
 
-  const checkOpenclawStatus = async () => {
+  async function checkOpenclawStatus() {
     setCheckingOpenclaw(true);
     try {
       const res = await fetch("/api/cli-tools/openclaw-settings");

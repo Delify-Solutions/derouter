@@ -67,8 +67,7 @@ export async function GET() {
     }
 
     return NextResponse.json({ models });
-  } catch (error) {
-    console.log("Error fetching models:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch models" }, { status: 500 });
   }
 }
@@ -98,8 +97,7 @@ export async function PUT(request) {
     await setModelAlias(model, alias);
 
     return NextResponse.json({ success: true, model, alias });
-  } catch (error) {
-    console.log("Error updating alias:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update alias" }, { status: 500 });
   }
 }

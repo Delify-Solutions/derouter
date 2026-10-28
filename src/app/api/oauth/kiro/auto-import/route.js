@@ -16,7 +16,7 @@ export async function GET() {
     let files;
     try {
       files = await readdir(cachePath);
-    } catch (error) {
+    } catch {
       return NextResponse.json({
         found: false,
         error: "AWS SSO cache not found. Please login to Kiro IDE first.",
@@ -38,7 +38,7 @@ export async function GET() {
           foundFile = kiroTokenFile;
           tokenData = data;
         }
-      } catch (error) {
+      } catch {
         // Continue to search other files
       }
     }
@@ -56,7 +56,7 @@ export async function GET() {
             tokenData = data;
             break;
           }
-        } catch (error) {
+        } catch {
           continue;
         }
       }
@@ -85,7 +85,7 @@ export async function GET() {
           clientId = clientData.clientId;
           clientSecret = clientData.clientSecret;
         }
-      } catch (error) {
+      } catch {
         // Client registration file not found - continue without it
       }
     }
@@ -107,7 +107,7 @@ export async function GET() {
           profileArn = profileData.arn.replace(/arn:aws:codewhisperer:[^:]+:/, "arn:aws:codewhisperer:us-east-1:");
           break;
         }
-      } catch (error) {
+      } catch {
         continue;
       }
     }
@@ -123,7 +123,6 @@ export async function GET() {
       profileArn,
     });
   } catch (error) {
-    console.log("Kiro auto-import error:", error);
     return NextResponse.json(
       { found: false, error: error.message },
       { status: 500 }

@@ -1,4 +1,4 @@
-export default {
+const inworldProvider = {
   id: "inworld",
   alias: "inworld",
   display: {
@@ -34,3 +34,4 @@ export default {
     ]
   }
 };
+export default inworldProvider;

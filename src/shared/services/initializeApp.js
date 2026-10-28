@@ -86,15 +86,13 @@ async function runHeavyStartup() {
   // Auto-resume tunnel (once per process)
   if (settings.tunnelEnabled && !g.tunnelAutoResumed) {
     g.tunnelAutoResumed = true;
-    console.log("[InitApp] Tunnel was enabled, auto-resuming...");
-    safeRestartTunnel("startup").catch((e) => console.log("[InitApp] Tunnel resume failed:", e.message));
+    safeRestartTunnel("startup").catch((e) => console.error("[InitApp] Tunnel resume failed:", e.message));
   }
 
   // Auto-resume tailscale (once per process)
   if (settings.tailscaleEnabled && !g.tailscaleAutoResumed) {
     g.tailscaleAutoResumed = true;
-    console.log("[InitApp] Tailscale was enabled, auto-resuming...");
-    safeRestartTailscale("startup").catch((e) => console.log("[InitApp] Tailscale resume failed:", e.message));
+    safeRestartTailscale("startup").catch((e) => console.error("[InitApp] Tailscale resume failed:", e.message));
   }
 
   if (settings.tunnelEnabled) ensureCloudflared().catch(() => {});
@@ -110,20 +108,20 @@ async function runHeavyStartup() {
   if (hasQuotaAutoPingEnabled(settings)) {
     import("@/shared/services/quotaAutoPing")
       .then(({ startQuotaAutoPing }) => startQuotaAutoPing())
-      .catch((e) => console.log("[AutoPing] scheduler start failed:", e.message));
+      .catch((e) => console.error("[AutoPing] scheduler start failed:", e.message));
   }
 
   // Proactive OAuth token refresh (e.g. grok-cli ~6h TTL). Module is idempotent
   // and also started from custom-server.js when that entry is used.
   import("@/sse/services/backgroundTokenRefresh.js")
     .then(({ startBackgroundTokenRefresh }) => startBackgroundTokenRefresh())
-    .catch((e) => console.log("[BackgroundTokenRefresh] scheduler start failed:", e.message));
+    .catch((e) => console.error("[BackgroundTokenRefresh] scheduler start failed:", e.message));
 
   // Billing janitor: expires stale plans and forfeits their credit. Started
   // lazily like its neighbours; startBillingJanitor is idempotent.
   import("@/lib/billing/expiry.js")
     .then(({ startBillingJanitor }) => startBillingJanitor())
-    .catch((e) => console.log("[BillingJanitor] start failed:", e.message));
+    .catch((e) => console.error("[BillingJanitor] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {
@@ -141,24 +139,20 @@ async function autoStartMitm(settings) {
 
     const password = await loadEncryptedPassword();
     if (!password && process.platform !== "win32") {
-      console.log("[InitApp] MITM was enabled but no saved password found, skipping auto-start");
       return;
     }
 
     const keys = await getApiKeys();
     const activeKey = keys.find(k => k.isActive !== false);
 
-    console.log("[InitApp] MITM was enabled, auto-starting...");
     await startMitm(activeKey?.key || "sk_derouter", password);
-    console.log("[InitApp] MITM auto-started");
     try {
       await restoreToolDNS(password);
-      console.log("[InitApp] DNS restored from saved state");
     } catch (e) {
-      console.log("[InitApp] DNS restore failed:", e.message);
+      console.error("[InitApp] DNS restore failed:", e.message);
     }
   } catch (err) {
-    console.log("[InitApp] MITM auto-start failed:", err.message);
+    console.error("[InitApp] MITM auto-start failed:", err.message);
   } finally {
     g.mitmStartInProgress = false;
   }
@@ -184,19 +178,16 @@ async function safeRestartTunnel(reason) {
   if (isCloudflaredRunning()) return;
 
   if (!force && Date.now() - svc.lastRestartAt < RESTART_COOLDOWN_MS) {
-    console.log(`[Tunnel] degraded but cooldown active, skip (${reason})`);
     return;
   }
   if (!await checkInternet()) return;
 
-  console.log(`[Tunnel] safeRestart (${reason}) — tunnel unreachable${force ? " [force]" : ""}`);
   try {
     await enableTunnel();
     svc.lastRestartAt = Date.now();
-    console.log("[Tunnel] restart success");
   } catch (err) {
     if (!/cloudflared killed|tunnel cancelled/.test(err.message)) {
-      console.log("[Tunnel] restart failed:", err.message);
+      console.error("[Tunnel] restart failed:", err.message);
     }
   }
 }
@@ -218,27 +209,23 @@ async function safeRestartTailscale(reason) {
     try {
       await startFunnel(svc.activeLocalPort);
       svc.lastRestartAt = Date.now();
-      console.log("[Tailscale] funnel re-established (daemon alive)");
     } catch (err) {
-      console.log("[Tailscale] funnel recovery failed:", err.message);
+      console.error("[Tailscale] funnel recovery failed:", err.message);
     }
     return;
   }
 
   const force = FORCE_RESTART_REASONS.test(reason);
   if (!force && Date.now() - svc.lastRestartAt < RESTART_COOLDOWN_MS) {
-    console.log(`[Tailscale] degraded but cooldown active, skip (${reason})`);
     return;
   }
   if (!await checkInternet()) return;
 
-  console.log(`[Tailscale] safeRestart (${reason}) — daemon not running${force ? " [force]" : ""}`);
   try {
     await enableTailscale();
     svc.lastRestartAt = Date.now();
-    console.log("[Tailscale] restart success");
   } catch (err) {
-    console.log("[Tailscale] restart failed:", err.message);
+    console.error("[Tailscale] restart failed:", err.message);
   }
 }
 
@@ -313,7 +300,7 @@ function startNetworkMonitor() {
       safeRestartTunnel(reason).catch(() => {});
       safeRestartTailscale(reason).catch(() => {});
     } catch (err) {
-      console.log("[NetworkMonitor] error:", err.message);
+      console.error("[NetworkMonitor] error:", err.message);
     }
   }, NETWORK_CHECK_INTERVAL_MS);
 

@@ -84,7 +84,6 @@ export async function GET(request, { params }) {
 
     return json(matchedModel);
   } catch (error) {
-    console.log("Error fetching model:", error);
     return json(
       { error: { message: error.message, type: "server_error" } },
       { status: 500 },

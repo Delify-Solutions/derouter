@@ -113,8 +113,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(model),
       configPath: getHermesConfigPath(),
     });
-  } catch (error) {
-    console.log("Error checking hermes settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check hermes settings" }, { status: 500 });
   }
 }
@@ -148,8 +147,7 @@ export async function POST(request) {
       message: "Hermes settings applied successfully!",
       configPath: getHermesConfigPath(),
     });
-  } catch (error) {
-    console.log("Error updating hermes settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update hermes settings" }, { status: 500 });
   }
 }
@@ -169,8 +167,7 @@ export async function DELETE() {
     const newYaml = removeModelBlock(yaml);
     await fs.writeFile(configPath, newYaml);
     return NextResponse.json({ success: true, message: `${PROVIDER_NAME} model block removed` });
-  } catch (error) {
-    console.log("Error resetting hermes settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset hermes settings" }, { status: 500 });
   }
 }

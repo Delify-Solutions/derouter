@@ -38,8 +38,7 @@ export async function GET(request) {
   try {
     const { orders, total } = await listOrders({ userId: session.userId });
     return NextResponse.json({ orders: orders.map(decorate), total }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[account/orders] list failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load orders" }, { status: 500, headers: NO_STORE });
   }
 }

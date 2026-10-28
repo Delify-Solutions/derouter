@@ -13,7 +13,7 @@ export async function POST(request) {
     try {
       await revokeSession(token);
     } catch (error) {
-      console.log("[public/logout] revoke failed:", error?.message || error);
+      console.error("[public/logout] revoke failed:", error?.message || error);
     }
   }
   const cookieStore = await cookies();

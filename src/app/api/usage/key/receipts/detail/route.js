@@ -107,8 +107,7 @@ export async function GET(request) {
       details,
       pagination: res.pagination,
     });
-  } catch (err) {
-    console.log("Error fetching key detail:", err);
+  } catch {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 }

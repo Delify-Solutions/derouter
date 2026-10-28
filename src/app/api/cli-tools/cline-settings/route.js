@@ -39,7 +39,7 @@ const readJson = async (filePath) => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -70,8 +70,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(globalState),
       globalStatePath: getGlobalStatePath(),
     });
-  } catch (error) {
-    console.log("Error checking cline settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check cline settings" }, { status: 500 });
   }
 }
@@ -101,8 +100,7 @@ export async function POST(request) {
     await fs.writeFile(getSecretsPath(), JSON.stringify(secrets, null, 2));
 
     return NextResponse.json({ success: true, message: "Cline settings applied successfully!", globalStatePath: getGlobalStatePath() });
-  } catch (error) {
-    console.log("Error updating cline settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update cline settings" }, { status: 500 });
   }
 }
@@ -128,8 +126,7 @@ export async function DELETE() {
     await fs.writeFile(getSecretsPath(), JSON.stringify(secrets, null, 2));
 
     return NextResponse.json({ success: true, message: "derouter settings removed from Cline" });
-  } catch (error) {
-    console.log("Error resetting cline settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset cline settings" }, { status: 500 });
   }
 }

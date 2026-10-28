@@ -27,7 +27,7 @@ export default function MediaProviderDetailPage() {
       const res = await fetch(`/api/provider-nodes/${id}`, { method: "DELETE" });
       if (res.ok) router.push(`/dashboard/media-providers/${kind}`);
     } catch (error) {
-      console.log("Error deleting custom embedding node:", error);
+      console.error("Error deleting custom embedding node:", error);
     }
   };
 

@@ -32,7 +32,6 @@ function throwIfCancelled(token) {
 }
 
 export async function enableTunnel(localPort = 20128) {
-  console.log(`[Tunnel] enable start (port=${localPort})`);
   svc.cancelToken = { cancelled: false };
   svc.activeLocalPort = localPort;
   svc.spawnInProgress = true;
@@ -49,15 +48,12 @@ export async function enableTunnel(localPort = 20128) {
           probeUrlAlive(publicUrl),
         ]);
         if (directOk && publicOk) {
-          console.log(`[Tunnel] already running, reuse: ${existing.tunnelUrl}`);
           return { success: true, tunnelUrl: existing.tunnelUrl, shortId: existing.shortId, publicUrl, alreadyRunning: true };
         }
-        console.log(`[Tunnel] stale (direct=${directOk} public=${publicOk}), respawn`);
       }
     }
 
     killCloudflared(localPort);
-    console.log("[Tunnel] killed existing cloudflared");
     throwIfCancelled(token);
 
     const existing = loadState();
@@ -65,7 +61,6 @@ export async function enableTunnel(localPort = 20128) {
 
     const onUrlUpdate = async (url) => {
       if (token.cancelled) return;
-      console.log(`[Tunnel] url updated: ${url}`);
       await registerTunnelUrl(shortId, url);
       saveState({ shortId, tunnelUrl: url });
       await updateSettings({ tunnelEnabled: true, tunnelUrl: url });
@@ -78,26 +73,21 @@ export async function enableTunnel(localPort = 20128) {
     });
 
     const { tunnelUrl } = await spawnQuickTunnel(localPort, onUrlUpdate);
-    console.log(`[Tunnel] spawned: ${tunnelUrl}`);
     throwIfCancelled(token);
 
     const publicUrl = `https://r${shortId}.abc-tunnel.us`;
     await registerTunnelUrl(shortId, tunnelUrl);
     saveState({ shortId, tunnelUrl });
     await updateSettings({ tunnelEnabled: true, tunnelUrl });
-    console.log(`[Tunnel] registered shortId=${shortId} publicUrl=${publicUrl}`);
 
     // Verify publicUrl first (worker route is reliable; direct *.trycloudflare.com DNS may lag)
     await waitForHealth(publicUrl, token);
-    console.log("[Tunnel] public URL healthy");
     // Direct tunnel probe is best-effort: DNS for *.trycloudflare.com can be slow/blocked
     if (!(await probeUrlAlive(tunnelUrl))) {
       console.warn("[Tunnel] direct URL not reachable yet, continuing via publicUrl");
     } else {
-      console.log("[Tunnel] direct URL healthy");
     }
 
-    console.log("[Tunnel] enable success");
     return { success: true, tunnelUrl, shortId, publicUrl };
   } catch (e) {
     // Suppress noise when spawn was deliberately killed (restart/disable superseded it)
@@ -111,7 +101,6 @@ export async function enableTunnel(localPort = 20128) {
 }
 
 export async function disableTunnel() {
-  console.log("[Tunnel] disable");
   // Abort any in-flight enable so it cannot resurrect state after we clear it
   svc.cancelToken.cancelled = true;
   setUnexpectedExitHandler(null);

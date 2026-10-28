@@ -53,7 +53,6 @@ async function initAdapter() {
   if (!adapter) throw new Error("[DB] No SQLite driver available (bun:sqlite / better-sqlite3 / node:sqlite)");
 
   if (!state.logged) {
-    console.log(`[DB] Driver: ${adapter.driver} | file: ${DATA_FILE}`);
     state.logged = true;
   }
 

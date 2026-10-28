@@ -29,7 +29,9 @@ export default function McpMarketplaceModal({ isOpen, onClose, onAdd, addedNames
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [isOpen]);
+    // `servers.length` is a guard: once a non-empty list is loaded this effect
+    // returns immediately, so adding it cannot cause a fetch loop.
+  }, [isOpen, servers.length]);
 
   const addedSet = useMemo(() => new Set(addedNames), [addedNames]);
 

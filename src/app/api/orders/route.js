@@ -20,8 +20,7 @@ export async function GET(request) {
   try {
     const { orders, total } = await listOrders({ status: status || null, userId: userId || null });
     return NextResponse.json({ orders, total }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[orders] list failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load orders" }, { status: 500, headers: NO_STORE });
   }
 }

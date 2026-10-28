@@ -60,7 +60,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         else onCreated?.(data.node);
       }
     } catch (error) {
-      console.log("Error saving custom embedding node:", error);
+      console.error("Error saving custom embedding node:", error);
     } finally {
       setSubmitting(false);
     }

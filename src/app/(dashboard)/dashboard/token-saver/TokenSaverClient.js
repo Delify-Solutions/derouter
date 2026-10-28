@@ -80,7 +80,7 @@ export default function TokenSaverClient() {
     }
   }, [isWenyanLocale, cavemanLevel]);
 
-  const patchSetting = async (patch) => {
+  async function patchSetting(patch) {
     try {
       await fetch("/api/settings", {
         method: "PATCH",
@@ -88,7 +88,7 @@ export default function TokenSaverClient() {
         body: JSON.stringify(patch),
       });
     } catch (error) {
-      console.log("Error updating setting:", error);
+      console.error("Error updating setting:", error);
     }
   };
 
@@ -101,7 +101,7 @@ export default function TokenSaverClient() {
       });
       if (res.ok) setRtkEnabledState(value);
     } catch (error) {
-      console.log("Error updating rtkEnabled:", error);
+      console.error("Error updating rtkEnabled:", error);
     }
   };
 

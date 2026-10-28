@@ -1,4 +1,4 @@
-export default {
+const codebuddyCnProvider = {
   id: "codebuddy-cn",
   // Short model prefix (cbcn/glm-5.2). "cbcn" = CodeBuddy CN; reserve "cbai"
   // for a future codebuddy-ai (intl) provider. The full id still resolves.
@@ -83,3 +83,4 @@ export default {
     usageApikey: true,
   },
 };
+export default codebuddyCnProvider;

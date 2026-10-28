@@ -10,8 +10,7 @@ export async function GET(request) {
     const onlyActive = request.nextUrl.searchParams.get("active") === "1";
     const plans = await listPlans({ onlyActive });
     return NextResponse.json({ plans }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[plans] list failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load plans" }, { status: 500, headers: NO_STORE });
   }
 }

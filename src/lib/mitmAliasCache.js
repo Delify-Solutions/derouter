@@ -27,7 +27,7 @@ export async function syncToJson() {
     const all = await getMitmAlias();
     writeAtomic(all || {});
   } catch (e) {
-    console.log("[mitmAliasCache] sync failed:", e.message);
+    console.error("[mitmAliasCache] sync failed:", e.message);
   }
 }
 
@@ -41,6 +41,6 @@ export function writeAliasForTool(tool, mappings) {
     current[tool] = mappings || {};
     writeAtomic(current);
   } catch (e) {
-    console.log("[mitmAliasCache] write failed:", e.message);
+    console.error("[mitmAliasCache] write failed:", e.message);
   }
 }

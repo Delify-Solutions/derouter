@@ -19,7 +19,7 @@ export async function ensureOutboundProxyInitialized() {
 
 // Defer init so HTTP server accepts connections first
 setImmediate(() => {
-  ensureOutboundProxyInitialized().catch(console.log);
+  ensureOutboundProxyInitialized().catch(console.error);
 });
 
 export default ensureOutboundProxyInitialized;

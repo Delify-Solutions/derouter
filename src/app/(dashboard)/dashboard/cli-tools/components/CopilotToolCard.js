@@ -41,7 +41,9 @@ export default function CopilotToolCard({ tool, isExpanded, onToggle, baseUrl, a
       if (!status) checkStatus();
       fetchModelAliases();
     }
-  }, [isExpanded]);
+    // `status` is a one-shot guard: listing it as a dependency would refetch the
+    // alias map every time the status changes, so it is deliberately omitted.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill from existing config
   useEffect(() => {
@@ -51,15 +53,16 @@ export default function CopilotToolCard({ tool, isExpanded, onToggle, baseUrl, a
         setSelectedModels(entry.models.map((m) => m.id));
       }
     }
-  }, [status]);
+    // `selectedModels.length` is a guard: once non-empty the body is a no-op.
+  }, [status, selectedModels.length]);
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
@@ -74,7 +77,7 @@ export default function CopilotToolCard({ tool, isExpanded, onToggle, baseUrl, a
         body: JSON.stringify({ baseUrl: getEffectiveBaseUrl(), apiKey: keyToUse, models }),
       });
     } catch (error) {
-      console.log("Error saving models:", error);
+      console.error("Error saving models:", error);
     }
   };
 
@@ -98,7 +101,7 @@ export default function CopilotToolCard({ tool, isExpanded, onToggle, baseUrl, a
 
   const removeModel = (id) => setSelectedModels((prev) => prev.filter((m) => m !== id));
 
-  const checkStatus = async () => {
+  async function checkStatus() {
     setChecking(true);
     try {
       const res = await fetch("/api/cli-tools/copilot-settings");

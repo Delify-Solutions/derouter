@@ -45,7 +45,7 @@ export function cleanupNow() {
             continue;
         }
         if (now - item.startedAt > PENDING_TTL_MS) {
-            try { item.controller.abort(); } catch (_) { /* ignore */ }
+            try { item.controller.abort(); } catch { /* ignore */ }
             pendingFetches.delete(id);
         }
     }
@@ -140,7 +140,7 @@ export function removeConnection(connectionId) {
     projectIdCache.delete(connectionId);
     const pending = pendingFetches.get(connectionId);
     if (pending) {
-        try { pending.controller.abort(); } catch (_) { /* ignore */ }
+        try { pending.controller.abort(); } catch { /* ignore */ }
         pendingFetches.delete(connectionId);
     }
 }
@@ -199,7 +199,6 @@ async function fetchProjectId(accessToken, signal, provider) {
  * @returns {Promise<string|null>}
  */
 async function onboardUser(accessToken, tierID, externalSignal, endpoints, provider) {
-    console.log(`[ProjectId] Onboarding user with tier: ${tierID}`);
 
     const reqBody = { tierId: tierID, metadata: LOAD_CODE_ASSIST_METADATA };
     const headers = provider === "antigravity" ? ANTIGRAVITY_LOAD_CODE_ASSIST_HEADERS : LOAD_CODE_ASSIST_HEADERS;
@@ -235,14 +234,12 @@ async function onboardUser(accessToken, tierID, externalSignal, endpoints, provi
             if (data.done === true) {
                 const projectId = extractProjectIdFromOnboard(data);
                 if (projectId) {
-                    console.log(`[ProjectId] Successfully onboarded, project ID: ${projectId}`);
                     return projectId;
                 }
                 throw new Error("onboardUser done but no project_id in response");
             }
 
             // Server not done yet – wait and retry
-            console.log(`[ProjectId] Onboard attempt ${attempt}/${MAX_ATTEMPTS}: not done yet, waiting...`);
             await new Promise(resolve => setTimeout(resolve, 2000));
 
         } catch (error) {

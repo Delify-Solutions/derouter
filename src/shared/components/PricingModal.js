@@ -8,13 +8,7 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadPricing();
-    }
-  }, [isOpen]);
-
-  const loadPricing = async () => {
+  async function loadPricing() {
     setLoading(true);
     try {
       const response = await fetch("/api/pricing");
@@ -34,6 +28,13 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    // Deferred by one microtask so setLoading() runs outside the effect body.
+    Promise.resolve().then(() => loadPricing()).catch(() => {});
+    // loadPricing is re-created every render; it only needs to re-run on open.
+  }, [isOpen]);
 
   const handlePricingChange = (provider, model, field, value) => {
     const numValue = parseFloat(value);

@@ -82,7 +82,7 @@ const readSettings = async () => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -111,8 +111,7 @@ export async function GET() {
       exaMcpEnabled: !!claudeJson?.mcpServers?.exa,
       settingsPath: getClaudeSettingsPath(),
     });
-  } catch (error) {
-    console.log("Error checking claude settings:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to check claude settings" },
       { status: 500 }
@@ -186,8 +185,7 @@ export async function POST(request) {
       success: true,
       message: "Settings updated successfully",
     });
-  } catch (error) {
-    console.log("Error updating claude settings:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to update claude settings" },
       { status: 500 }
@@ -248,8 +246,7 @@ export async function DELETE() {
       success: true,
       message: "Settings reset successfully",
     });
-  } catch (error) {
-    console.log("Error resetting claude settings:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to reset claude settings" },
       { status: 500 }

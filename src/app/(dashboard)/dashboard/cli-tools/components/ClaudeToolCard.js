@@ -84,11 +84,41 @@ export default function ClaudeToolCard({
     setMaxContextTokens(v || "");
   }, [claudeStatus?.settings?.env?.CLAUDE_CODE_MAX_CONTEXT_TOKENS]);
 
+  async function checkClaudeStatus() {
+    setCheckingClaude(true);
+    try {
+      const res = await fetch("/api/cli-tools/claude-settings");
+      const data = await res.json();
+      setClaudeStatus(data);
+      setExaMcpEnabled(!!data.exaMcpEnabled);
+    } catch (error) {
+      setClaudeStatus({ installed: false, error: error.message });
+    } finally {
+      setCheckingClaude(false);
+    }
+  };
+
+  async function fetchModelAliases() {
+    try {
+      const res = await fetch("/api/models/alias");
+      const data = await res.json();
+      if (res.ok) setModelAliases(data.aliases || {});
+    } catch (error) {
+      console.error("Error fetching model aliases:", error);
+    }
+  };
+
   useEffect(() => {
-    if (isExpanded) {
+    if (!isExpanded) return;
+    // Deferred by one microtask so both fetches run outside the effect body;
+    // they still fire together, as before.
+    Promise.resolve().then(() => {
       if (!claudeStatus) checkClaudeStatus();
       fetchModelAliases();
-    }
+    }).catch(() => {});
+    // `claudeStatus` is a one-shot guard: listing it as a dependency would
+    // refetch the alias map every time the status changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExpanded]);
 
   useEffect(() => {
@@ -105,16 +135,6 @@ export default function ClaudeToolCard({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ccFilterNaming: value }),
     }).catch(() => {});
-  };
-
-  const fetchModelAliases = async () => {
-    try {
-      const res = await fetch("/api/models/alias");
-      const data = await res.json();
-      if (res.ok) setModelAliases(data.aliases || {});
-    } catch (error) {
-      console.log("Error fetching model aliases:", error);
-    }
   };
 
   useEffect(() => {
@@ -138,20 +158,6 @@ export default function ClaudeToolCard({
       }
     }
   }, [claudeStatus, apiKeys, tool.defaultModels, onModelMappingChange]);
-
-  const checkClaudeStatus = async () => {
-    setCheckingClaude(true);
-    try {
-      const res = await fetch("/api/cli-tools/claude-settings");
-      const data = await res.json();
-      setClaudeStatus(data);
-      setExaMcpEnabled(!!data.exaMcpEnabled);
-    } catch (error) {
-      setClaudeStatus({ installed: false, error: error.message });
-    } finally {
-      setCheckingClaude(false);
-    }
-  };
 
   const getEffectiveBaseUrl = () => {
     const url = customBaseUrl || baseUrl;

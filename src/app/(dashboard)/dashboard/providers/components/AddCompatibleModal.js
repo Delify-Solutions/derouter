@@ -51,6 +51,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const [validationResult, setValidationResult] = useState(null);
 
   // openai: reset baseUrl when apiType changes; anthropic: reset checks when opened
+  const resetKey = config.hasApiType ? formData.apiType : isOpen;
   useEffect(() => {
     if (config.hasApiType) {
       setFormData((prev) => ({ ...prev, baseUrl: config.defaultBaseUrl }));
@@ -59,7 +60,11 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
       setCheckKey("");
       setCheckModelId("");
     }
-  }, [config.hasApiType ? formData.apiType : isOpen]);
+    // resetKey below already encodes the branch input (apiType for variants with
+    // an api type, isOpen otherwise); listing isOpen too would reset the openai
+    // baseUrl whenever the modal reopens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
 
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
@@ -84,7 +89,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
         setValidationResult(null);
       }
     } catch (error) {
-      console.log(`Error creating ${config.errorLabel} node:`, error);
+      console.error(`Error creating ${config.errorLabel} node:`, error);
     } finally {
       setSubmitting(false);
     }

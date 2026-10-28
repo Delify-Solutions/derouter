@@ -28,7 +28,7 @@ function hasLegacyUnique(db) {
   return /\bUNIQUE\b/i.test(row.sql);
 }
 
-export default {
+const giftRedemptionRepeatMigration = {
   version: 4,
   name: "gift-redemption-repeat",
   up(db) {
@@ -57,3 +57,4 @@ export default {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_gr_user ON ${TABLE}(userId)`);
   },
 };
+export default giftRedemptionRepeatMigration;

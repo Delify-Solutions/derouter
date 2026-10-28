@@ -168,6 +168,9 @@ export default function APIPageClient({ machineId }) {
   useEffect(() => {
     fetchData();
     loadSettings();
+    // Mount-only bootstrap: fetchData/loadSettings are re-created every render, so
+    // adding them as dependencies would re-run this effect (and its setState) forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Status poll: only while degraded (not yet reachable). Stop once healthy to avoid spam.
@@ -186,6 +189,9 @@ export default function APIPageClient({ machineId }) {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
+    // syncTunnelStatus is re-created every render; adding it would restart the poll
+    // timer on each render instead of only when the reachability flags change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tunnelEnabled, tsEnabled, tunnelReachable, tsReachable]);
 
   // Browser-side periodic ping: probes tunnel/tailscale URLs directly so UI stays
@@ -239,7 +245,7 @@ export default function APIPageClient({ machineId }) {
   }, []);
 
   // Trust user intent (settingsEnabled): UI stays "enabled" while watchdog restarts process
-  const syncTunnelStatus = async () => {
+  async function syncTunnelStatus() {
     try {
       const statusRes = await fetch("/api/tunnel/status", { cache: "no-store" });
       if (!statusRes.ok) return;
@@ -259,7 +265,7 @@ export default function APIPageClient({ machineId }) {
     } catch { /* ignore poll errors */ }
   };
 
-  const loadSettings = async () => {
+  async function loadSettings() {
     setTunnelChecking(true);
     try {
       const [settingsRes, statusRes] = await Promise.all([
@@ -292,7 +298,7 @@ export default function APIPageClient({ machineId }) {
         updateReachable(null, tsClientReachableRef, tsMissRef, setTsReachable, tsEverReachableRef, setTsEverReachable);
       }
     } catch (error) {
-      console.log("Error loading settings:", error);
+      console.error("Error loading settings:", error);
     } finally {
       setTunnelChecking(false);
     }
@@ -307,7 +313,7 @@ export default function APIPageClient({ machineId }) {
       });
       if (res.ok) setTunnelDashboardAccess(value);
     } catch (error) {
-      console.log("Error updating tunnelDashboardAccess:", error);
+      console.error("Error updating tunnelDashboardAccess:", error);
     }
   };
 
@@ -320,11 +326,11 @@ export default function APIPageClient({ machineId }) {
       });
       if (res.ok) setRequireApiKey(value);
     } catch (error) {
-      console.log("Error updating requireApiKey:", error);
+      console.error("Error updating requireApiKey:", error);
     }
   };
 
-  const fetchData = async () => {
+  async function fetchData() {
     try {
       const fetchKeys = async () => {
         const res = await fetch("/api/keys");
@@ -347,7 +353,7 @@ export default function APIPageClient({ machineId }) {
       }
       setKeys(existing);
     } catch (error) {
-      console.log("Error fetching data:", error);
+      console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
@@ -887,7 +893,7 @@ export default function APIPageClient({ machineId }) {
             });
           }
         } catch (error) {
-          console.log("Error deleting key:", error);
+          console.error("Error deleting key:", error);
         }
       }
     });
@@ -904,7 +910,7 @@ export default function APIPageClient({ machineId }) {
         setKeys(prev => prev.map(k => k.id === id ? { ...k, isActive } : k));
       }
     } catch (error) {
-      console.log("Error toggling key:", error);
+      console.error("Error toggling key:", error);
     }
   };
 

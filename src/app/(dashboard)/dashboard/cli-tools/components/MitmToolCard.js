@@ -40,11 +40,7 @@ export default function MitmToolCard({
   const mitmHosts = TOOL_HOSTS[tool.id] ?? [];
   const canRunWithoutPassword = isWin || hasCachedPassword || needsSudoPassword === false;
 
-  useEffect(() => {
-    if (isExpanded) loadSavedMappings();
-  }, [isExpanded]);
-
-  const loadSavedMappings = async () => {
+  async function loadSavedMappings() {
     try {
       const res = await fetch(`/api/cli-tools/antigravity-mitm/alias?tool=${tool.id}`);
       if (res.ok) {
@@ -53,6 +49,15 @@ export default function MitmToolCard({
       }
     } catch { /* ignore */ }
   };
+
+  useEffect(() => {
+    if (!isExpanded) return;
+    // Deferred by one microtask so the fetch runs outside the effect body.
+    Promise.resolve().then(() => loadSavedMappings()).catch(() => {});
+    // loadSavedMappings is re-created every render, so adding it as a dependency
+    // would re-run this effect (and its setState) on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
 
   const saveMappings = useCallback(async (mappings) => {
     try {

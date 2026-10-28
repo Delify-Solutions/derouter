@@ -44,11 +44,6 @@ export async function runBillingJanitorTick() {
     g.lastRunAt = now;
     g.lastResult = result;
     g.lastError = null;
-    if (result.expired > 0) {
-      console.log(
-        `[BillingJanitor] expired ${result.expired} plan(s), forfeited ${result.forfeitedNanoUsd} nanoUSD`
-      );
-    }
     return result;
   } catch (err) {
     g.lastError = err?.message || String(err);

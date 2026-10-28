@@ -544,7 +544,7 @@ export function createSSEStream(options = {}) {
 
         finalizeStream();
       } catch (error) {
-        console.log("Error in flush:", error);
+        console.error("Error in flush:", error);
         finalizeStream();
       }
     }

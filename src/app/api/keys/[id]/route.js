@@ -10,8 +10,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Key not found" }, { status: 404 });
     }
     return NextResponse.json({ key });
-  } catch (error) {
-    console.log("Error fetching key:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch key" }, { status: 500 });
   }
 }
@@ -43,7 +42,6 @@ export async function PUT(request, { params }) {
 
     return NextResponse.json({ key: updated });
   } catch (error) {
-    console.log("Error updating key:", error);
     return NextResponse.json({ error: error.message || "Failed to update key" }, { status: 400 });
   }
 }
@@ -59,8 +57,7 @@ export async function DELETE(request, { params }) {
     }
 
     return NextResponse.json({ message: "Key deleted successfully" });
-  } catch (error) {
-    console.log("Error deleting key:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to delete key" }, { status: 500 });
   }
 }

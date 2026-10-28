@@ -28,7 +28,7 @@ export async function GET() {
     );
     return NextResponse.json({ plans: rows.map(rowToPlan) }, { headers: NO_STORE });
   } catch (error) {
-    console.log("[public/plans] failed:", error?.message || error);
+    console.error("[public/plans] failed:", error?.message || error);
     return NextResponse.json({ plans: [] }, { headers: NO_STORE });
   }
 }

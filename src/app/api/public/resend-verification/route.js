@@ -46,7 +46,7 @@ export async function POST(request) {
       await sendVerificationEmail({ user, request, settings, replace: true });
     }
   } catch (error) {
-    console.log("[public/resend-verification] failed:", error?.message || error);
+    console.error("[public/resend-verification] failed:", error?.message || error);
   }
 
   return NextResponse.json(OK, { headers: NO_STORE });

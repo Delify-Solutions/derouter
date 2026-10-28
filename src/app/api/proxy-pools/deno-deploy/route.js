@@ -156,7 +156,6 @@ export async function POST(request) {
 
     const orgSlug = orgDomain.split(".")[0];
     const deployUrl = `https://${projectName}.${orgSlug}.deno.net`;
-    console.log("Deno deployUrl:", deployUrl);
 
     const proxyPool = await createProxyPool({
       name: projectName,
@@ -169,7 +168,6 @@ export async function POST(request) {
 
     return NextResponse.json({ proxyPool, deployUrl }, { status: 201 });
   } catch (error) {
-    console.log("Error deploying Deno Deploy relay:", error);
     return NextResponse.json({ error: error.message || "Deploy failed" }, { status: 500 });
   }
 }

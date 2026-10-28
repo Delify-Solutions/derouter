@@ -131,8 +131,7 @@ export async function GET(request) {
         tokens: limitCount.tokens,
       },
     });
-  } catch (err) {
-    console.log("Error fetching key usage:", err);
+  } catch {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 }

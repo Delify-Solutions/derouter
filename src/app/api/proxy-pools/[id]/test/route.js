@@ -63,8 +63,7 @@ export async function POST(request, { params }) {
       elapsedMs: result.elapsedMs || 0,
       testedAt: now,
     });
-  } catch (error) {
-    console.log("Error testing proxy pool:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to test proxy pool" }, { status: 500 });
   }
 }

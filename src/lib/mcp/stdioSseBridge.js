@@ -133,9 +133,8 @@ function getOrSpawn(name) {
     }
   });
 
-  proc.stderr.on("data", (d) => console.log(`[mcp:${name}]`, d.toString().trim()));
+  proc.stderr.on("data", (d) => console.error(`[mcp:${name}]`, d.toString().trim()));
   proc.on("exit", (code) => {
-    console.log(`[mcp:${name}] exited`, code);
     store.delete(name);
   });
 

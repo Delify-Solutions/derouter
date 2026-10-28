@@ -116,11 +116,9 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
     } else {
       const errorText = await response.text();
       warning = `${errorLabel}: ${response.status} ${errorText}`;
-      console.log(`${errorLabel} (falling back to static):`, errorText);
     }
   } catch (error) {
     warning = `${errorLabel}: ${error.message}`;
-    console.log(`${errorLabel} (falling back to static):`, error.message);
   }
   return { models: [], warning };
 };
@@ -327,7 +325,6 @@ const PROVIDER_MODELS_CONFIG = {
         warning = "Kiro returned no models; falling back to static catalog.";
       } catch (error) {
         warning = `Failed to fetch Kiro models: ${error.message}`;
-        console.log("Failed to fetch Kiro models dynamically, falling back to static:", error.message);
       }
       return { models: [], warning };
     }
@@ -363,7 +360,6 @@ const PROVIDER_MODELS_CONFIG = {
         warning = "Qoder returned no models; falling back to static catalog.";
       } catch (error) {
         warning = `Failed to fetch Qoder models: ${error.message}`;
-        console.log("Failed to fetch Qoder models dynamically, falling back to static:", error.message);
       }
       return { models: [], warning };
     },
@@ -426,8 +422,6 @@ const PROVIDER_MODELS_CONFIG = {
         headers: { "Content-Type": "application/json" }
       });
       if (!response.ok) {
-        const errorText = await response.text();
-        console.log("Error fetching models from ollama-local:", errorText);
         return { error: `Failed to fetch models: ${response.status}`, status: response.status };
       }
       const data = await response.json();
@@ -463,8 +457,6 @@ export async function GET(request, { params }) {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.log(`Error fetching models from ${connection.provider}:`, errorText);
         return NextResponse.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
@@ -504,8 +496,6 @@ export async function GET(request, { params }) {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.log(`Error fetching models from ${connection.provider}:`, errorText);
         return NextResponse.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
@@ -575,8 +565,6 @@ export async function GET(request, { params }) {
     const response = await fetch(url, fetchOptions);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.log(`Error fetching models from ${connection.provider}:`, errorText);
       return NextResponse.json(
         { error: `Failed to fetch models: ${response.status}` },
         { status: response.status }
@@ -591,8 +579,7 @@ export async function GET(request, { params }) {
       connectionId: connection.id,
       models
     });
-  } catch (error) {
-    console.log("Error fetching provider models:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch models" }, { status: 500 });
   }
 }

@@ -35,15 +35,17 @@ export default function KiloToolCard({ tool, isExpanded, onToggle, baseUrl, apiK
       if (!status) checkStatus();
       fetchModelAliases();
     }
-  }, [isExpanded]);
+    // `status` is a one-shot guard: listing it as a dependency would refetch the
+    // alias map every time the status changes, so it is deliberately omitted.
+  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchModelAliases = async () => {
+  async function fetchModelAliases() {
     try {
       const res = await fetch("/api/models/alias");
       const data = await res.json();
       if (res.ok) setModelAliases(data.aliases || {});
     } catch (error) {
-      console.log("Error fetching model aliases:", error);
+      console.error("Error fetching model aliases:", error);
     }
   };
 
@@ -61,7 +63,7 @@ export default function KiloToolCard({ tool, isExpanded, onToggle, baseUrl, apiK
 
   const getDisplayUrl = () => customBaseUrl || `${baseUrl}/v1`;
 
-  const checkStatus = async () => {
+  async function checkStatus() {
     setChecking(true);
     try {
       const res = await fetch("/api/cli-tools/kilo-settings");

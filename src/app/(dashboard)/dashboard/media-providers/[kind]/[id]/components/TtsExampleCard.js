@@ -109,7 +109,9 @@ export function TtsExampleCard({ providerId }) {
     // api-language (edge-tts, local-device, elevenlabs): NO default load, wait for user to pick language
     // config (nvidia, hyperbolic, deepgram, huggingface, cartesia, playht, coqui, tortoise, inworld, qwen):
     // use ttsConfig.models for model selector; voice is empty by default (backend uses provider default)
-  }, [providerId]);
+    // `config` is a module-level constant looked up by providerId, so its identity
+    // only changes when providerId does — listing it adds no extra runs.
+  }, [providerId, config]);
 
   // Update voices when model changes (voicesPerModel providers)
   useEffect(() => {
@@ -124,6 +126,10 @@ export function TtsExampleCard({ providerId }) {
       setSelectedVoice("");
       setSelectedVoiceName("");
     }
+    // Only the model drives this: providerId/config are fixed for the life of
+    // the card, and re-running on them would override the provider-default
+    // voice chosen by the effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedModel]);
 
   // Open modal — load language list

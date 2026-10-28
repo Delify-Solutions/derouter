@@ -11,7 +11,7 @@ function modelToEndpoint(model) {
   return "core";
 }
 
-export default {
+const stabilityAiImageAdapter = {
   buildUrl: (model) => `${BASE_URL}/${modelToEndpoint(model)}`,
   buildHeaders: (creds) => {
     const key = creds?.apiKey || creds?.accessToken;
@@ -33,3 +33,4 @@ export default {
     return { created: nowSec(), data: [] };
   },
 };
+export default stabilityAiImageAdapter;

@@ -115,7 +115,6 @@ export async function POST(request, { params }) {
       return await convertOpenAIResponseToGemini(response, model);
     }
   } catch (error) {
-    console.log("Error handling Gemini request:", error);
     return Response.json(
       { error: { message: error.message, code: 500 } },
       { status: 500 }
@@ -211,14 +210,6 @@ function corsHeadersFrom(response) {
   return headers;
 }
 
-function getSafeGeminiConnectionLabel(credentials) {
-  const connectionId = String(credentials?.connectionId || "unknown");
-  const shortId = connectionId.slice(0, 8);
-  const connectionName = String(credentials?.connectionName || "");
-  if (!connectionName || connectionName.includes("@")) return shortId;
-  return `${connectionName}:${shortId}`;
-}
-
 function getGeminiNativeErrorCode(error) {
   return error?.cause?.code || error?.code || error?.cause?.name || error?.name || "UNKNOWN";
 }
@@ -251,7 +242,6 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   while (true) {
     const credentials = await getProviderCredentials("gemini", excludeConnectionIds, modelId);
     if (!credentials || credentials.allRateLimited) {
-      console.log(`[GEMINI_NATIVE] exhausted model=${modelId} status=${lastStatus || Number(credentials?.lastErrorCode) || 503} error=${lastError || credentials?.lastError || "No active credentials for provider: gemini"}`);
       return Response.json(
         { error: { message: lastError || credentials?.lastError || "No active credentials for provider: gemini" } },
         { status: lastStatus || Number(credentials?.lastErrorCode) || 503 }
@@ -266,8 +256,6 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
       );
     }
 
-    const safeConnection = getSafeGeminiConnectionLabel(credentials);
-    const startedAt = Date.now();
     const upstreamUrl = buildGeminiNativeUrl(request.url, modelId, action);
     const attemptController = new AbortController();
     let timedOut = false;
@@ -278,12 +266,10 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
     const abortAttempt = () => attemptController.abort();
 
     if (request.signal?.aborted) {
-      console.log(`[GEMINI_NATIVE] client aborted model=${modelId} ms=0 conn=${safeConnection}`);
       return Response.json({ error: { message: "Client closed request" } }, { status: 499 });
     }
 
     request.signal?.addEventListener("abort", abortAttempt, { once: true });
-    console.log(`[GEMINI_NATIVE] start model=${modelId} action=${action} conn=${safeConnection} body=${Buffer.byteLength(bodyText)}B timeout=${GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS}`);
 
     let upstreamResponse;
     try {
@@ -297,15 +283,12 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
         signal: attemptController.signal,
       });
     } catch (error) {
-      const durationMs = Date.now() - startedAt;
       if (request.signal?.aborted && !timedOut) {
-        console.log(`[GEMINI_NATIVE] client aborted model=${modelId} ms=${durationMs} conn=${safeConnection}`);
         return Response.json({ error: { message: "Client closed request" } }, { status: 499 });
       }
 
       const status = isGeminiNativeTimeoutError(error, timedOut) ? 504 : 502;
       const errorText = getSafeGeminiNativeErrorText(error);
-      console.log(`[GEMINI_NATIVE] fetch failed model=${modelId} status=${status} ms=${durationMs} conn=${safeConnection} error=${errorText}`);
 
       const { shouldFallback } = await markAccountUnavailable(
         credentials.connectionId,
@@ -319,7 +302,6 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
         excludeConnectionIds.add(credentials.connectionId);
         lastError = errorText;
         lastStatus = status;
-        console.log(`[GEMINI_NATIVE] fallback model=${modelId} status=${status} conn=${safeConnection} exclude=${excludeConnectionIds.size}`);
         continue;
       }
 
@@ -329,7 +311,6 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
       request.signal?.removeEventListener("abort", abortAttempt);
     }
 
-    console.log(`[GEMINI_NATIVE] upstream model=${modelId} status=${upstreamResponse.status} ms=${Date.now() - startedAt} conn=${safeConnection} ct=${upstreamResponse.headers.get("content-type") || "?"} cl=${upstreamResponse.headers.get("content-length") || "?"}`);
 
     if (upstreamResponse.ok) {
       await clearAccountError(credentials.connectionId, credentials, modelId);

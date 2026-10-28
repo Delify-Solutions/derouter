@@ -63,9 +63,9 @@ export default function CombosPage() {
 
   useEffect(() => {
     fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  const fetchData = async () => {
+  async function fetchData() {
     try {
       const [combosRes, providersRes, settingsRes, poolPricingRes, comboPricingRes] = await Promise.all([
         fetch("/api/combos"),
@@ -93,7 +93,7 @@ export default function CombosPage() {
       }
       setCapacityAdapter(normalized);
     } catch (error) {
-      console.log("Error fetching data:", error);
+      console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
@@ -108,7 +108,7 @@ export default function CombosPage() {
         body: JSON.stringify({ capacityAdapter: next }),
       });
     } catch (error) {
-      console.log("Error updating capacity adapter:", error);
+      console.error("Error updating capacity adapter:", error);
     }
   };
 
@@ -127,7 +127,7 @@ export default function CombosPage() {
         alert(err.error || "Failed to create combo");
       }
     } catch (error) {
-      console.log("Error creating combo:", error);
+      console.error("Error creating combo:", error);
     }
   };
 
@@ -146,7 +146,7 @@ export default function CombosPage() {
         alert(err.error || "Failed to update combo");
       }
     } catch (error) {
-      console.log("Error updating combo:", error);
+      console.error("Error updating combo:", error);
     }
   };
 
@@ -162,7 +162,7 @@ export default function CombosPage() {
             setCombos(combos.filter(c => c.id !== id));
           }
         } catch (error) {
-          console.log("Error deleting combo:", error);
+          console.error("Error deleting combo:", error);
         }
       }
     });
@@ -208,7 +208,7 @@ export default function CombosPage() {
 
       setComboStrategies(updated);
     } catch (error) {
-      console.log("Error updating combo strategy:", error);
+      console.error("Error updating combo strategy:", error);
     }
   };
 

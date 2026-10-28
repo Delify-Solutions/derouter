@@ -160,11 +160,18 @@ function formatConfig(cfg) {
   return `{\n${lines.join(",\n")},\n  }`;
 }
 
+// Provider id → identifier for the exported const ("black-forest-labs" → blackForestLabsProvider)
+function constNameFor(id) {
+  const camel = String(id).replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase()).replace(/[^A-Za-z0-9]/g, "");
+  return `${camel}Provider`;
+}
+
 // Top-level registry entry formatter
 function formatEntry(entry, imports = "") {
   const lines = [];
   if (imports) lines.push(imports, "");
-  lines.push("export default {");
+  const name = constNameFor(entry.id);
+  lines.push(`const ${name} = {`);
 
   const TOP_ORDER = [
     "id", "alias", "aliases", "uiAlias", "display", "category",
@@ -232,6 +239,7 @@ function formatEntry(entry, imports = "") {
   for (const k of Object.keys(entry)) emitKey(k);
 
   lines.push("};");
+  lines.push(`export default ${name};`);
   return lines.join("\n") + "\n";
 }
 

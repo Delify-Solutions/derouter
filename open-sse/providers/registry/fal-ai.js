@@ -1,4 +1,4 @@
-export default {
+const falAiProvider = {
   id: "fal-ai",
   priority: 90,
   hasFree: true,
@@ -32,3 +32,4 @@ export default {
   serviceKinds: ["image"],
   imageConfig: { baseUrl: "https://queue.fal.run" },
 };
+export default falAiProvider;

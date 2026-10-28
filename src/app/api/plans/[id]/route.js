@@ -10,8 +10,7 @@ export async function GET(request, { params }) {
     const plan = await getPlanById(id);
     if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
     return NextResponse.json({ plan }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[plans/:id] read failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to load plan" }, { status: 500, headers: NO_STORE });
   }
 }
@@ -43,8 +42,7 @@ export async function DELETE(request, { params }) {
     const ok = await deletePlan(id);
     if (!ok) return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
     return NextResponse.json({ success: true }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("[plans/:id] delete failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to delete plan" }, { status: 500, headers: NO_STORE });
   }
 }

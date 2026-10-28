@@ -24,8 +24,7 @@ export async function DELETE(request, { params }) {
       { error: "Only pending orders can be cancelled" },
       { status: 409, headers: NO_STORE }
     );
-  } catch (error) {
-    console.log("[account/orders/:id] cancel failed:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to cancel order" }, { status: 500, headers: NO_STORE });
   }
 }

@@ -1,4 +1,4 @@
-export default {
+const googlePseProvider = {
   id: "google-pse",
   alias: "gpse",
   display: {
@@ -33,3 +33,4 @@ export default {
     cacheTTLMs: 300000
   }
 };
+export default googlePseProvider;

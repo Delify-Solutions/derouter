@@ -41,7 +41,7 @@ const readSettings = async () => {
     // rather than throwing a 500 that the UI misreads as "tool not installed".
     const stripped = content.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -73,8 +73,7 @@ export async function GET() {
       hasderouter: hasderouterConfig(settings),
       settingsPath: getDroidSettingsPath(),
     });
-  } catch (error) {
-    console.log("Error checking droid settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to check droid settings" }, { status: 500 });
   }
 }
@@ -165,8 +164,7 @@ export async function POST(request) {
       message: "Factory Droid settings applied successfully!",
       settingsPath,
     });
-  } catch (error) {
-    console.log("Error updating droid settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update droid settings" }, { status: 500 });
   }
 }
@@ -208,8 +206,7 @@ export async function DELETE() {
       success: true,
       message: "derouter settings removed successfully",
     });
-  } catch (error) {
-    console.log("Error resetting droid settings:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to reset droid settings" }, { status: 500 });
   }
 }

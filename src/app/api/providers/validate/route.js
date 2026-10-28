@@ -679,8 +679,7 @@ export async function POST(request) {
       valid: isValid,
       error: isValid ? null : (error || "Invalid API key"),
     });
-  } catch (error) {
-    console.log("Error validating API key:", error);
+  } catch {
     return NextResponse.json({ error: "Validation failed" }, { status: 500 });
   }
 }

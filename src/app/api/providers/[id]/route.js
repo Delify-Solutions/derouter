@@ -77,8 +77,7 @@ export async function GET(request, { params }) {
     delete result.idToken;
 
     return NextResponse.json({ connection: result });
-  } catch (error) {
-    console.log("Error fetching connection:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch connection" }, { status: 500 });
   }
 }
@@ -165,8 +164,7 @@ export async function PUT(request, { params }) {
     delete result.idToken;
 
     return NextResponse.json({ connection: result });
-  } catch (error) {
-    console.log("Error updating connection:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
   }
 }
@@ -182,8 +180,7 @@ export async function DELETE(request, { params }) {
     }
 
     return NextResponse.json({ message: "Connection deleted successfully" });
-  } catch (error) {
-    console.log("Error deleting connection:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to delete connection" }, { status: 500 });
   }
 }

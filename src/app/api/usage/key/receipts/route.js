@@ -233,8 +233,7 @@ export async function GET(request) {
       pagination,
       availableModels,
     });
-  } catch (err) {
-    console.log("Error fetching key receipts:", err);
+  } catch {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 }

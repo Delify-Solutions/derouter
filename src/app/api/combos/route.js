@@ -12,8 +12,7 @@ export async function GET() {
   try {
     const combos = await getCombos();
     return NextResponse.json({ combos });
-  } catch (error) {
-    console.log("Error fetching combos:", error);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch combos" }, { status: 500 });
   }
 }
@@ -52,7 +51,6 @@ export async function POST(request) {
 
     return NextResponse.json(combo, { status: 201 });
   } catch (error) {
-    console.log("Error creating combo:", error);
     // Repo-layer member validation ("Combo members must be provider/model") is a
     // user input problem → 400 with the exact message, not a generic 500.
     if (error?.message === "Combo members must be provider/model") {

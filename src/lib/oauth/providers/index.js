@@ -234,6 +234,6 @@ export async function backfillCodexEmails() {
     }
   } catch (err) {
     codexBackfillDone = false;
-    console.log("backfillCodexEmails failed:", err?.message || err);
+    console.error("backfillCodexEmails failed:", err?.message || err);
   }
 }

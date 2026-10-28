@@ -32,8 +32,7 @@ export async function DELETE(request) {
 
     const result = await deleteKeyUsageHistory(key);
     return NextResponse.json({ ok: true, ...result });
-  } catch (err) {
-    console.log("Error clearing key history:", err);
+  } catch {
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 }
