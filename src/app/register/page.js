@@ -1,13 +1,9 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { getAccountSession } from "@/lib/auth/userSession";
 import RegisterForm from "./components/RegisterForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function RegisterPage() {
-  const cookieStore = await cookies();
-  const session = await getAccountSession(cookieStore);
-  if (session) redirect("/account");
+  // Reachable while signed in: signing up for a second account is a legitimate
+  // action and does not require logging out first.
   return <RegisterForm />;
 }

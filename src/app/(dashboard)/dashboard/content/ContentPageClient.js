@@ -315,10 +315,8 @@ export default function ContentPageClient() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <Button onClick={saveCopy} loading={copySaving}>Lưu nội dung</Button>
-                {/* ?preview=1 bỏ qua redirect /dashboard — nếu không, admin
-                    không bao giờ xem được trang mình đang sửa. */}
                 <a
-                  href="/?preview=1"
+                  href="/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-9 items-center gap-1.5 border border-border px-4 font-mono text-[11px] uppercase tracking-[0.08em] text-text-main transition-colors hover:bg-surface-2"

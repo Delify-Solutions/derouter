@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Navigation from "./Navigation";
 import AnnouncementBanner from "./AnnouncementBanner";
 import HeroSection from "./HeroSection";
@@ -8,31 +9,41 @@ import GetStarted from "./GetStarted";
 import FaqSection from "./FaqSection";
 import Footer from "./Footer";
 import { MODELS, SAMPLE_MODEL } from "./modelCatalog";
+import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
+import { verifyUserToken } from "@/lib/auth/userSession";
+import { USER_COOKIE } from "@/lib/auth/userSession";
 
-// Trang bán hàng của hai gói thuê bao Go / Go Plus. Được render từ
-// src/app/page.js (server component) để root kịp chuyển phiên đang đăng nhập
-// sang /dashboard hoặc /account trước khi markup này được tạo.
-//
-// Mọi câu chữ đến từ `copy` (admin sửa trong /dashboard/content); mọi con số đến
-// từ salesData.js và registry của router. Nhờ vậy đổi lời không phải sửa JSX, và
-// đổi giá không phải sửa lời.
-//
-// Thứ tự section là hợp đồng: banner → hero → so sánh gói → danh mục model →
-// bảng giá chi tiết → cách dùng → FAQ → footer.
-//
-// `preview` bật một dải nhắc ở đầu trang khi admin đang xem bằng ?preview=1,
-// để không nhầm đây là trang thật của khách.
-export default function LandingPage({ copy, preview = false }) {
+/**
+ * The landing page renders for everyone — the root route no longer redirects a
+ * signed-in visitor onward. That makes the nav the single way into the app, so
+ * the session is resolved here (server-side, where the cookies are) and passed
+ * down as one of three states: null, "admin", "customer".
+ *
+ * Admin is checked first: an operator holding both cookies should land in the
+ * shell, which is where their work is.
+ *
+ * Everything else — copy, prices, the model catalogue — is unchanged: copy comes
+ * from settings.landingCopy (admin-editable), numbers from salesData.js and the
+ * provider registry.
+ *
+ * Section order is a contract: banner → hero → plans → models → pricing →
+ * get started → FAQ → footer.
+ */
+export default async function LandingPage({ copy }) {
+  const cookieStore = await cookies();
+
+  const adminSession = await getDashboardAuthSession(cookieStore.get("auth_token")?.value);
+  let session = null;
+  if (adminSession) {
+    session = "admin";
+  } else {
+    const token = cookieStore.get(USER_COOKIE)?.value;
+    if (token && (await verifyUserToken(token))) session = "customer";
+  }
+
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
-      {preview ? (
-        <div className="border-b border-border bg-brand-500/10 px-4 py-2 text-center font-mono text-[11px] text-brand-700 dark:text-brand-400">
-          Đang xem trước với tư cách admin ·{" "}
-          <a href="/dashboard" className="underline">về bảng điều khiển</a>
-        </div>
-      ) : null}
-
-      <Navigation />
+      <Navigation session={session} />
 
       <main>
         <AnnouncementBanner

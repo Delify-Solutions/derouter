@@ -11,10 +11,20 @@ const PRODUCT_LINKS = [
   { href: "#faq", label: "Hỏi đáp" },
 ];
 
-const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
+const DOCS_URL = "/docs";
 const SIGNUP_URL = "/register?next=/account/plans";
 
-export default function Navigation() {
+/**
+ * `session` is resolved on the server and passed in: the nav is now the only way
+ * into the app (this page used to redirect signed-in visitors, which the root
+ * page no longer does), so it must show the right door instead of always
+ * offering "Đăng nhập".
+ *
+ *   null            → anonymous: Log in + Buy
+ *   "admin"         → bảng điều khiển
+ *   "customer"      → tài khoản của tôi
+ */
+export default function Navigation({ session = null }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -48,18 +58,36 @@ export default function Navigation() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link
-            href="/login"
-            className="hidden h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main sm:inline-flex"
-          >
-            Đăng nhập
-          </Link>
-          <Link
-            href={SIGNUP_URL}
-            className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
-          >
-            Mua gói
-          </Link>
+          {session === "admin" ? (
+            <Link
+              href="/dashboard"
+              className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
+            >
+              Bảng điều khiển
+            </Link>
+          ) : session === "customer" ? (
+            <Link
+              href="/account"
+              className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
+            >
+              Tài khoản của tôi
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="hidden h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main sm:inline-flex"
+              >
+                Đăng nhập
+              </Link>
+              <Link
+                href={SIGNUP_URL}
+                className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
+              >
+                Mua gói
+              </Link>
+            </>
+          )}
           <button
             type="button"
             className="flex size-8 items-center justify-center border border-border text-text-main md:hidden"
@@ -97,20 +125,40 @@ export default function Navigation() {
               Tài liệu
             </a>
             <div className="mb-3 mt-2 flex flex-col gap-2">
-              <Link
-                href="/login"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex h-10 items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
-              >
-                Đăng nhập
-              </Link>
-              <Link
-                href={SIGNUP_URL}
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
-              >
-                Mua gói
-              </Link>
+              {session === "admin" ? (
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                >
+                  Bảng điều khiển
+                </Link>
+              ) : session === "customer" ? (
+                <Link
+                  href="/account"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                >
+                  Tài khoản của tôi
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex h-10 items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
+                  >
+                    Đăng nhập
+                  </Link>
+                  <Link
+                    href={SIGNUP_URL}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                  >
+                    Mua gói
+                  </Link>
+                </>
+              )}
             </div>
           </nav>
         </div>
