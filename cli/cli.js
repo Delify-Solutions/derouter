@@ -80,9 +80,9 @@ if (args[0] === "xai" && args[1] === "video") {
   return;
 }
 
-// Self-heal SQLite runtime deps (sql.js + better-sqlite3) into ~/.derouter/runtime
-// so the server can resolve them via NODE_PATH. Best-effort — sql.js is required,
-// better-sqlite3 is optional. Logs to stderr only on failure.
+// Self-heal SQLite runtime deps (better-sqlite3) into ~/.derouter/runtime
+// so the server can resolve them via NODE_PATH. Best-effort — better-sqlite3 is
+// optional, node:sqlite / bun:sqlite are built in. Logs to stderr only on failure.
 try { ensureSqliteRuntime({ silent: true }); } catch {}
 
 // Self-heal tray runtime (systray for macOS/Linux only). Windows skipped.

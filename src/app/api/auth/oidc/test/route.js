@@ -4,10 +4,10 @@ import { getSettings } from "@/lib/localDb";
 import { fetchOidcDiscovery, getPublicOrigin, probeOidcClientSecret } from "@/lib/auth/oidc";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 
+// Probe routes reuse stored SSO credentials and hit the IdP, so they require a
+// dashboard session. `settings.requireLogin === false` deliberately does not
+// bypass this — that flag only relaxes the LLM API surface.
 async function canAccessTestRoute() {
-  const settings = await getSettings();
-  if (settings.requireLogin === false) return true;
-
   const cookieStore = await cookies();
   const token = cookieStore.get("auth_token")?.value;
   return await verifyDashboardAuthToken(token);

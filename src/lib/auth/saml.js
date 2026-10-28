@@ -1,5 +1,6 @@
-import { SAML } from "@node-saml/node-saml";
+import { SAML, InMemoryCacheProvider } from "@node-saml/node-saml";
 import { getSettings } from "../db/repos/settingsRepo.js";
+import { safeEqual } from "./internalHeaders.js";
 
 /**
  * Formats a raw Base64 string or unformatted X.509 certificate into standard PEM format.
@@ -48,6 +49,24 @@ export async function getSamlRuntimeConfig() {
  */
 const DUMMY_FALLBACK_CERT =
   "-----BEGIN CERTIFICATE-----\nMIIC...DUMMY...\n-----END CERTIFICATE-----";
+
+// Issued-request IDs live in a cacheProvider. The SAML instance is rebuilt on every
+// request (settings can change between the login redirect and the ACS POST), so a
+// per-instance provider would forget the ID written by /start and every login would
+// fail InResponseTo validation. Share one provider per IdP instead, so an assertion
+// signed by IdP A still cannot answer a request issued for IdP B.
+const REQUEST_ID_TTL_MS = 10 * 60 * 1000;
+const cacheProviders = new Map();
+
+function getRequestCacheProvider(settings) {
+  const key = `${settings?.samlEntryPoint || ""}|${settings?.samlIssuer || ""}`;
+  let provider = cacheProviders.get(key);
+  if (!provider) {
+    provider = new InMemoryCacheProvider({ keyExpirationPeriodMs: REQUEST_ID_TTL_MS });
+    cacheProviders.set(key, provider);
+  }
+  return provider;
+}
 
 function trimTrailingSlashes(str) {
   return (str || "").replace(/\/+$/, "");
@@ -98,8 +117,15 @@ export function createSamlInstance(settings, origin) {
     callbackUrl: callbackUrl,
     acceptedClockSkewMs: 60000,
     wantAssertionsSigned: true,
-    validateInResponseTo: "never",
-    requestIdExpirationMs: 28800000, // 8 hours
+    // "always" makes the library reject an assertion whose InResponseTo does not
+    // match a request THIS process issued and has not yet consumed. "never" (the
+    // old value) meant any captured assertion could be replayed until it expired.
+    validateInResponseTo: "always",
+    // Same window as the saml_state cookie set by /api/auth/saml/start.
+    requestIdExpirationPeriodMs: REQUEST_ID_TTL_MS,
+    cacheProvider: getRequestCacheProvider(settings),
+    // Reject an assertion that arrives a second time even if it still parses.
+    rejectReplayedAssertions: true,
   });
 }
 
@@ -145,14 +171,18 @@ export async function validateSamlResponse(request, body, expectedRequestId, set
     throw new Error("Missing SAMLResponse parameter in assertion POST body");
   }
 
-  // Parse response XML to inspect InResponseTo for replay protection
+  // Parse response XML to inspect InResponseTo for replay protection. The library
+  // enforces this too (validateInResponseTo: "always"), but checking here lets the
+  // caller fail with a precise message and never reaches signature verification
+  // with an unrelated assertion. The comparison is constant-time because the
+  // request ID doubles as an unguessable nonce.
   if (expectedRequestId) {
     const xml = Buffer.from(rawSamlResponse, "base64").toString("utf8");
     const match = xml.match(/InResponseTo=["']([^"']+)["']/i);
     const inResponseTo = match ? match[1] : null;
 
-    if (!inResponseTo || inResponseTo !== expectedRequestId) {
-      throw new Error(`InResponseTo mismatch: expected ${expectedRequestId}, received ${inResponseTo || "none"}`);
+    if (!inResponseTo || !safeEqual(inResponseTo, expectedRequestId)) {
+      throw new Error("InResponseTo does not match the request this SP issued");
     }
   }
 

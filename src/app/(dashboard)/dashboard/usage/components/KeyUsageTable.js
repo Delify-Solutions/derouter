@@ -8,6 +8,7 @@ import Select from "@/shared/components/Select";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { maskKeyFull } from "@/shared/utils/apiKey";
+import { fmtUsd } from "@/shared/utils/money";
 
 const PAGE_SIZE = 20;
 
@@ -40,9 +41,11 @@ function fmtCompact(v) {
   if (v == null) return "—";
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 }).format(v);
 }
+// Costs from /api/usage/key-summary are legacy USD floats; fmtUsd applies the
+// shared adaptive precision so every money string in the app matches.
 function fmtCost(v) {
   if (v == null) return "—";
-  return `$${Number(v).toFixed(4)}`;
+  return fmtUsd(Number(v));
 }
 function fmtPct(used, total) {
   if (total == null || total === 0) return null;
@@ -268,7 +271,7 @@ function RowFragment({ it, rowIdx, isOpen, onToggle, budgetPct, models }) {
           ) : (
             <div className="flex flex-col gap-1 min-w-[140px]">
               <span className="text-xs tabular-nums">
-                ${Number(it.windowCostUsd || 0).toFixed(4)} / ${Number(it.budgetUsd).toFixed(2)}
+                {fmtUsd(Number(it.windowCostUsd || 0))} / {fmtUsd(Number(it.budgetUsd))}
               </span>
               <div className="h-1.5 rounded-full bg-surface-3 overflow-hidden">
                 <div
@@ -324,7 +327,7 @@ function RowFragment({ it, rowIdx, isOpen, onToggle, budgetPct, models }) {
                 <span>Window: <span className="font-medium text-text-main">{it.resetWindow || "—"}</span></span>
                 <span>Started: <span className="font-medium text-text-main">{it.windowStartedAt ? new Date(it.windowStartedAt).toLocaleString() : "—"}</span></span>
                 <span>Reset at: <span className="font-medium text-text-main">{it.resetAt ? new Date(it.resetAt).toLocaleString() : "—"}</span></span>
-                <span>Remaining: <span className="font-medium text-text-main">{it.remainingBudgetUsd == null ? "∞" : `$${Number(it.remainingBudgetUsd).toFixed(4)}`}</span></span>
+                <span>Remaining: <span className="font-medium text-text-main">{it.remainingBudgetUsd == null ? "∞" : fmtUsd(Number(it.remainingBudgetUsd))}</span></span>
                 {it.allowedModels && (
                   <span>Allowed models: <span className="font-medium text-text-main">{Array.isArray(it.allowedModels) ? it.allowedModels.join(", ") : "—"}</span></span>
                 )}

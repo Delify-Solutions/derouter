@@ -62,6 +62,21 @@ const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
+
+  // ── Tenant accounts (public signup / mail / admin notifications) ──────────
+  // Signup is on out of the box; email verification is on and there is no mail
+  // transport until an operator sets `smtpRelayUrl` — in that state the
+  // verification link is recoverable from DATA_DIR/logs/mail/.
+  publicSignupEnabled: true,
+  requireEmailVerification: true,
+  defaultUserGroupId: "",
+  siteName: "derouter",
+  publicBaseUrl: "",
+  smtpRelayUrl: "",
+  smtpRelayToken: "",
+  smtpFrom: "no-reply@localhost",
+  telegramBotToken: "",
+  telegramChatId: "",
 };
 
 async function readRaw() {

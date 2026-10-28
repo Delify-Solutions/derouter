@@ -4,9 +4,10 @@ import { makeKv } from "../helpers/kvStore.js";
 // keyed by combo name, value = { input, output, cached, reasoning, cache_creation } ($/1M tokens).
 // Mirrors pricingRepo.js but flat (combo name -> pricing) instead of provider -> model -> pricing.
 //
-// Cost resolution order (see usageRepo.calculateCost):
+// Cost resolution order (see usageRepo.calculateCostNano → pricingRepo.resolvePrice):
 //   1. If the request was for a combo name and a combo price is set here → use it.
-//   2. Otherwise fall back to per-pool pricing (pricingRepo.getPricingForModel).
+//   2. Otherwise fall through the per-pool chain (user override → built-in
+//      provider → canonical model → pattern).
 
 const comboKv = makeKv("comboPricing");
 const CACHE_TTL_MS = 5000;

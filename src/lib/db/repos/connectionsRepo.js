@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { decryptSecret, encryptSecret } from "../../crypto/secrets.js";
 
 const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
@@ -10,25 +11,57 @@ const OPTIONAL_FIELDS = [
   "consecutiveUseCount", "idToken", "lastRefreshAt",
 ];
 
+// Credentials that must never sit in the SQLite file as plaintext. The DB is a
+// portable artifact (export/import, backups), so a copy of the file used to leak
+// every upstream OAuth grant and API key it referenced.
+const ENCRYPTED_FIELDS = ["accessToken", "refreshToken", "idToken", "apiKey"];
+const ENCRYPTED_PROVIDER_SPECIFIC_FIELDS = ["copilotToken", "cookie"];
+
+function mapSecrets(conn, transform) {
+  if (!conn || typeof conn !== "object") return conn;
+  const out = { ...conn };
+  for (const field of ENCRYPTED_FIELDS) {
+    if (typeof out[field] === "string" && out[field]) out[field] = transform(out[field]);
+  }
+  const psd = out.providerSpecificData;
+  if (psd && typeof psd === "object") {
+    // Copy instead of mutating: callers keep a reference to the connection they
+    // just persisted and would otherwise hold ciphertext afterwards.
+    const copy = { ...psd };
+    for (const field of ENCRYPTED_PROVIDER_SPECIFIC_FIELDS) {
+      if (typeof copy[field] === "string" && copy[field]) copy[field] = transform(copy[field]);
+    }
+    out.providerSpecificData = copy;
+  }
+  return out;
+}
+
 function rowToConn(row) {
   if (!row) return null;
   const extra = parseJson(row.data, {});
-  return {
-    ...extra,
-    id: row.id,
-    provider: row.provider,
-    authType: row.authType,
-    name: row.name,
-    email: row.email,
-    priority: row.priority,
-    isActive: row.isActive === 1 || row.isActive === true,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
+  // Dual-read: decryptSecret passes plaintext through, so rows written before
+  // encryption existed keep working until the next write re-encrypts them.
+  const conn = mapSecrets(
+    {
+      ...extra,
+      id: row.id,
+      provider: row.provider,
+      authType: row.authType,
+      name: row.name,
+      email: row.email,
+      priority: row.priority,
+      isActive: row.isActive === 1 || row.isActive === true,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    },
+    decryptSecret
+  );
+  return conn;
 }
 
 function connToRow(c) {
   const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
+  const data = mapSecrets(rest, encryptSecret);
   return {
     id,
     provider,
@@ -37,7 +70,7 @@ function connToRow(c) {
     email: email ?? null,
     priority: priority ?? null,
     isActive: isActive === false ? 0 : 1,
-    data: stringifyJson(rest),
+    data: stringifyJson(data),
     createdAt,
     updatedAt,
   };

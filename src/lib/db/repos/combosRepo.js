@@ -35,7 +35,24 @@ export async function getComboByName(name) {
   return rowToCombo(row);
 }
 
+// Combo members must be "provider/model" strings. Bare names are how a combo
+// ends up referencing another combo (or itself), which is what the runtime cycle
+// guard has to clean up after — reject it at the data layer instead.
+export function isComboMemberModel(entry) {
+  return typeof entry === "string" && entry.length > 0 && entry.includes("/");
+}
+
+function assertValidComboModels(models) {
+  if (!Array.isArray(models)) {
+    throw new Error("Combo members must be provider/model");
+  }
+  if (!models.every(isComboMemberModel)) {
+    throw new Error("Combo members must be provider/model");
+  }
+}
+
 export async function createCombo(data) {
+  if (data.models !== undefined) assertValidComboModels(data.models);
   const db = await getAdapter();
   const now = new Date().toISOString();
   const combo = {
@@ -55,6 +72,7 @@ export async function createCombo(data) {
 }
 
 export async function updateCombo(id, data) {
+  if (data.models !== undefined) assertValidComboModels(data.models);
   const db = await getAdapter();
   let result = null;
   db.transaction(() => {

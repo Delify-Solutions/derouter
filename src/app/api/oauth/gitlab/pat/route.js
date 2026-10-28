@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
+import { fetchPublic } from "@/shared/utils/ssrfGuard";
 
 const GITLAB_DEFAULT_BASE = "https://gitlab.com";
 
@@ -24,7 +25,7 @@ export async function POST(request) {
     const base = (baseUrl?.trim() || GITLAB_DEFAULT_BASE).replace(/\/$/, "");
 
     // Verify token by fetching current user
-    const userRes = await fetch(`${base}/api/v4/user`, {
+    const userRes = await fetchPublic(`${base}/api/v4/user`, {
       headers: { "Private-Token": token.trim(), Accept: "application/json" },
     });
 
@@ -56,6 +57,10 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    // fetchPublic rejects private/internal targets; that's bad user input, not a 500.
+    if (typeof error?.message === "string" && error.message.startsWith("Blocked URL:")) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("GitLab PAT auth error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

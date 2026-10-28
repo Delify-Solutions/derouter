@@ -1,5 +1,7 @@
 import { getApiKeyForAuth, resetKeyWindow } from "@/lib/db/repos/apiKeysRepo.js";
-import { getKeyRateUsage, getKeyOldestTokenAt, getKeyCostSince } from "@/lib/db/repos/usageRepo.js";
+import { getKeyRateUsage, getKeyOldestTokenAt, getKeyCostSinceNano } from "@/lib/db/repos/usageRepo.js";
+import { getAvailableNanoUsd } from "@/lib/db/repos/billingRepo.js";
+import { usdToNano } from "@/shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
 
 // Max time (ms) to hold a request waiting for TPM room before returning 429.
@@ -128,10 +130,19 @@ export async function enforceKeyLimits(apiKey) {
       resetAt = null; // never resets
     }
 
-    const costSince = (await getKeyCostSince(apiKey, new Date(windowStart).toISOString())) || 0;
-    if (costSince >= resolved.budgetUsd) {
+    // Integer nanoUSD on both sides — float sums of many small requests drift,
+    // and a drifting total either blocks a key early or lets it overspend.
+    const costNano = (await getKeyCostSinceNano(apiKey, new Date(windowStart).toISOString())) || 0;
+    if (costNano >= usdToNano(resolved.budgetUsd)) {
       return { ok: false, status: 402, error: "Budget exhausted", resetAt };
     }
+  }
+
+  // 5. Tenant wallet. Checked after the per-key budget so an exhausted wallet
+  // names itself rather than masquerading as a key budget failure.
+  if (auth?.key?.userId) {
+    const avail = await getAvailableNanoUsd(auth.key.userId);
+    if (avail <= 0) return { ok: false, status: 402, error: "Budget exhausted", resetAt: null, wallet: true };
   }
 
   return { ok: true, auth };

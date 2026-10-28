@@ -1,7 +1,22 @@
+import crypto from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { stringifyJson, parseJson } from "../helpers/jsonCol.js";
 import { getKeyGroupById } from "./keyGroupsRepo.js";
+
+// sha256 hex of a raw api key. Keys are high-entropy random strings, so a plain
+// unsalted hash cannot be reversed by guessing — no salt/KDF needed here (unlike
+// passwords).
+export function hashApiKey(key) {
+  if (!key || typeof key !== "string") return null;
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
+
+// First 8 chars of a key, for display/listing without leaking the secret.
+function keyPrefixOf(key) {
+  if (!key || typeof key !== "string") return null;
+  return key.slice(0, 8);
+}
 
 function rowToKey(row) {
   if (!row) return null;
@@ -23,6 +38,9 @@ function rowToKey(row) {
     windowStartedAt: row.windowStartedAt ?? null,
     windowCostUsd: row.windowCostUsd ?? 0,
     updatedAt: row.updatedAt ?? null,
+    // Tenant ownership + hash-based lookup metadata.
+    userId: row.userId ?? null,
+    keyPrefix: row.keyPrefix ?? keyPrefixOf(row.key),
   };
 }
 
@@ -39,9 +57,16 @@ export async function getApiKeyById(id) {
 }
 
 // Look up an api key by its key string (raw row, includes groupId).
+// Dual-read: rows created before the hash migration only have `key`; rows created
+// after write both. Try the plaintext column first (indexed), then the hash.
 export async function getApiKeyByKey(key) {
+  if (!key) return null;
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM apiKeys WHERE key = ?`, [key]);
+  let row = db.get(`SELECT * FROM apiKeys WHERE key = ?`, [key]);
+  if (!row) {
+    const hash = hashApiKey(key);
+    if (hash) row = db.get(`SELECT * FROM apiKeys WHERE keyHash = ?`, [hash]);
+  }
   return rowToKey(row);
 }
 
@@ -101,14 +126,18 @@ export async function createApiKey(name, machineId, options = {}) {
     windowStartedAt: null,
     windowCostUsd: 0,
     updatedAt: now,
+    userId: options.userId ?? null,
+    keyPrefix: keyPrefixOf(result.key),
+    keyHash: hashApiKey(result.key),
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt,
       apiKey.groupId, apiKey.rpm, apiKey.tpm, apiKey.budgetUsd, apiKey.resetWindow,
       apiKey.expiresAt, stringifyJson(apiKey.allowedModels),
       apiKey.windowStartedAt, apiKey.windowCostUsd, apiKey.updatedAt,
+      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix,
     ]
   );
   return apiKey;
@@ -134,13 +163,17 @@ export async function updateApiKey(id, data) {
     allowedModels: data.allowedModels !== undefined ? data.allowedModels : current.allowedModels,
     updatedAt: new Date().toISOString(),
   };
+  // Keep the hash/prefix derived columns in lockstep with the plaintext key.
+  const keyHash = hashApiKey(merged.key);
+  const keyPrefix = keyPrefixOf(merged.key);
   db.run(
-    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ?, keyHash = COALESCE(?, keyHash), keyPrefix = COALESCE(?, keyPrefix) WHERE id = ?`,
     [
       merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0,
       merged.groupId, merged.rpm, merged.tpm, merged.budgetUsd, merged.resetWindow,
       merged.expiresAt, stringifyJson(merged.allowedModels),
-      merged.windowStartedAt, merged.windowCostUsd ?? 0, merged.updatedAt, id,
+      merged.windowStartedAt, merged.windowCostUsd ?? 0, merged.updatedAt,
+      keyHash, keyPrefix, id,
     ]
   );
   return merged;
@@ -153,8 +186,14 @@ export async function deleteApiKey(id) {
 }
 
 export async function validateApiKey(key) {
+  if (!key) return false;
   const db = await getAdapter();
-  const row = db.get(`SELECT isActive FROM apiKeys WHERE key = ?`, [key]);
+  // Dual-read: plaintext first, then sha256 (see getApiKeyByKey).
+  let row = db.get(`SELECT isActive FROM apiKeys WHERE key = ?`, [key]);
+  if (!row) {
+    const hash = hashApiKey(key);
+    if (hash) row = db.get(`SELECT isActive FROM apiKeys WHERE keyHash = ?`, [hash]);
+  }
   if (!row) return false;
   if (row.isActive !== 1 && row.isActive !== true) return false;
   // Expiry is enforced by the key-enforcement layer (keyEnforcement.js -> 403),

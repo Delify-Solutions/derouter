@@ -118,6 +118,12 @@ async function runHeavyStartup() {
   import("@/sse/services/backgroundTokenRefresh.js")
     .then(({ startBackgroundTokenRefresh }) => startBackgroundTokenRefresh())
     .catch((e) => console.log("[BackgroundTokenRefresh] scheduler start failed:", e.message));
+
+  // Billing janitor: expires stale plans and forfeits their credit. Started
+  // lazily like its neighbours; startBillingJanitor is idempotent.
+  import("@/lib/billing/expiry.js")
+    .then(({ startBillingJanitor }) => startBillingJanitor())
+    .catch((e) => console.log("[BillingJanitor] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

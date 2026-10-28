@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
+import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -57,10 +58,15 @@ export async function PATCH(request) {
           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
         }
       } else {
-        // First time setting password, no current password needed
-        // Allow empty currentPassword or default "123456"
-        if (body.currentPassword && body.currentPassword !== "123456") {
-           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
+        // First password ever set. Loopback is mandatory (the guard already requires
+        // it when no hash exists); the CLI token is accepted as an equivalent proof
+        // for headless installs. A remote caller can never reach this branch.
+        const localOk = isLocalRequest(request) || await hasValidCliToken(request);
+        if (!localOk) {
+          return NextResponse.json(
+            { error: "Local access required to set the initial password" },
+            { status: 403 }
+          );
         }
       }
 

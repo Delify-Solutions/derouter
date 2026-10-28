@@ -1,72 +1,131 @@
 "use client";
+
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+
+const PRODUCT_LINKS = [
+  { href: "#product", label: "Product" },
+  { href: "#how-it-works", label: "How it works" },
+  { href: "#features", label: "Features" },
+  { href: "#get-started", label: "Get started" },
+];
+
+const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const router = useRouter();
 
   return (
-    <nav className="fixed top-0 z-50 w-full bg-[#181411]/80 backdrop-blur-md border-b border-[#3a2f27]">
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        {/* Logo */}
-        <button
-          type="button"
-          className="flex items-center gap-3 cursor-pointer bg-transparent border-none p-0"
-          onClick={() => router.push("/")}
-          aria-label="Navigate to home"
-        >
-          <div className="size-8 rounded bg-linear-to-br from-[#f97815] to-orange-700 flex items-center justify-center text-white">
-            <span className="material-symbols-outlined text-[20px]">hub</span>
-          </div>
-          <h2 className="text-white text-xl font-bold tracking-tight">derouter</h2>
-        </button>
+    <header className="sticky top-0 z-50 border-b border-border bg-bg/90 backdrop-blur-sm">
+      <div className="shell h-16 flex items-center justify-between gap-4">
+        <Link href="/" className="flex items-center gap-3">
+          <span className="flex size-8 items-center justify-center border border-border text-text-main">
+            <span className="material-symbols-outlined text-[18px]">hub</span>
+          </span>
+          <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
+        </Link>
 
-        {/* Desktop menu */}
-        <div className="hidden md:flex items-center gap-8">
-          <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="#features">Features</a>
-          <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="#how-it-works">How it Works</a>
-          <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="https://github.com/Delify-Solutions/derouter#readme" target="_blank" rel="noopener noreferrer">Docs</a>
-          <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors flex items-center gap-1" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">
-            GitHub <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+        <nav aria-label="Primary" className="hidden md:flex items-center gap-6">
+          {PRODUCT_LINKS.map((item) => (
+            <a
+              key={item.href}
+              href={item.href}
+              className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+            >
+              {item.label}
+            </a>
+          ))}
+          <Link
+            href="/register?next=/account/plans"
+            className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+          >
+            Pricing
+          </Link>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+          >
+            Docs
           </a>
-        </div>
+        </nav>
 
-        {/* CTA + Mobile menu */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Link
+            href="/login"
+            className="hidden sm:inline-flex h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/register"
+            className="hidden sm:inline-flex h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600"
+          >
+            Create account
+          </Link>
           <button
-            onClick={() => router.push("/admin/ss")}
-            className="hidden sm:flex h-9 items-center justify-center rounded-lg px-4 bg-[#f97815] hover:bg-[#e0650a] transition-all text-[#181411] text-sm font-bold shadow-[0_0_15px_rgba(249,120,21,0.4)] hover:shadow-[0_0_20px_rgba(249,120,21,0.6)]"
+            type="button"
+            className="md:hidden flex size-8 items-center justify-center border border-border text-text-main"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            aria-expanded={mobileMenuOpen}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
           >
-            Get Started
-          </button>
-          <button 
-            className="md:hidden text-white"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          >
-            <span className="material-symbols-outlined">{mobileMenuOpen ? "close" : "menu"}</span>
+            <span className="material-symbols-outlined text-[18px]">
+              {mobileMenuOpen ? "close" : "menu"}
+            </span>
           </button>
         </div>
       </div>
 
-      {/* Mobile menu dropdown */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-[#3a2f27] bg-[#181411]/95 backdrop-blur-md">
-          <div className="flex flex-col gap-4 p-6">
-            <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="#features" onClick={() => setMobileMenuOpen(false)}>Features</a>
-            <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="#how-it-works" onClick={() => setMobileMenuOpen(false)}>How it Works</a>
-            <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="https://github.com/Delify-Solutions/derouter#readme" target="_blank" rel="noopener noreferrer">Docs</a>
-            <a className="text-gray-300 hover:text-white text-sm font-medium transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">GitHub</a>
-            <button
-              onClick={() => router.push("/admin/ss")}
-              className="h-9 rounded-lg bg-[#f97815] hover:bg-[#e0650a] text-[#181411] text-sm font-bold"
+        <div className="md:hidden border-t border-border bg-bg">
+          <nav aria-label="Mobile" className="shell flex flex-col py-2">
+            {PRODUCT_LINKS.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+              >
+                {item.label}
+              </a>
+            ))}
+            <Link
+              href="/register?next=/account/plans"
+              onClick={() => setMobileMenuOpen(false)}
+              className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
             >
-              Get Started
-            </button>
-          </div>
+              Pricing
+            </Link>
+            <a
+              href={DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+              className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+            >
+              Docs
+            </a>
+            <div className="mt-2 mb-3 flex flex-col gap-2">
+              <Link
+                href="/login"
+                onClick={() => setMobileMenuOpen(false)}
+                className="h-10 flex items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/register"
+                onClick={() => setMobileMenuOpen(false)}
+                className="h-10 flex items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+              >
+                Create account
+              </Link>
+            </div>
+          </nav>
         </div>
       )}
-    </nav>
+    </header>
   );
 }
-

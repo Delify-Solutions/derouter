@@ -58,7 +58,15 @@ export function getClientIp(request) {
     const xff = request.headers.get("x-forwarded-for");
     if (xff) return xff.split(",")[0].trim();
   }
-  // Direct exposure without custom-server: single bucket so spoofed XFF
-  // rotation cannot escape the limiter.
-  return "unknown";
+  // Direct exposure without custom-server: no trustworthy client address is
+  // available. Collapsing everyone into one literal "unknown" bucket would let one
+  // attacker lock out every login, so key on the best stable per-connection value
+  // present. Unverified headers are only used as a bucketing input — never for
+  // authorization — and rotating them costs the attacker a fresh bucket each time,
+  // which is exactly what a per-client bucket is meant to isolate.
+  return (
+    request.headers.get("x-dr-real-ip") ||
+    request.headers.get("host") ||
+    "unknown"
+  );
 }

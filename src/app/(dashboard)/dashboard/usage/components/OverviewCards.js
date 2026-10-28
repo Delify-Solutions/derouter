@@ -2,9 +2,12 @@
 
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
+import { fmtUsd } from "@/shared/utils/money";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
-const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+// Costs arrive from /api/usage/stats as legacy USD floats; fmtUsd applies the
+// shared adaptive precision (2dp >= $1, 4dp >= $0.01, else 6dp).
+const fmtCost = (n) => fmtUsd(n || 0);
 
 export default function OverviewCards({ stats }) {
   return (

@@ -26,7 +26,11 @@ export default function APIPageClient({ machineId }) {
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
 
-  const [requireApiKey, setRequireApiKey] = useState(false);
+  // Fail closed: until /api/settings answers, the endpoint is treated as
+  // key-protected so a failed fetch can neither advertise "exposed without a
+  // key" nor let an operator save the flag as off by accident.
+  const [requireApiKey, setRequireApiKey] = useState(true);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
   const [hasPassword, setHasPassword] = useState(true);
  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
@@ -74,9 +78,6 @@ export default function APIPageClient({ machineId }) {
   const tsEverReachableRef = useRef(false);
   const [tunnelEverReachable, setTunnelEverReachable] = useState(false);
   const [tsEverReachable, setTsEverReachable] = useState(false);
-
-  // API key visibility toggle state
-  const [visibleKeys, setVisibleKeys] = useState(new Set());
 
   // Advanced key creation fields
   const [groups, setGroups] = useState([]);
@@ -147,10 +148,16 @@ export default function APIPageClient({ machineId }) {
 
   const { copied, copy } = useCopyToClipboard();
 
-  // Security gate: block remote exposure while dashboard uses default password or login is off.
+  // Security gate: block remote exposure while the dashboard uses the default
+  // password, or while the legacy "require login" switch is off.
+  //
+  // `requireLogin` does not relax access any more: the guard requires a JWT for
+  // the admin dashboard on every request, and the public LLM API is gated only
+  // by the "Require API key" switch. Keeping the setting on is still treated as
+  // the operator's recorded intent before a tunnel is exposed.
   const isLoginUnsafe = !requireLogin || !hasPassword;
   const unsafeReason = !requireLogin
-    ? "Enable \"Require login\" and set a custom password before activating the tunnel."
+    ? "Login is always required for the dashboard. Switch \"Require login\" back on to record that intent, then change the default password before activating the tunnel."
     : "Change the default dashboard password before activating the tunnel.";
 
   // Auto-scroll install log
@@ -261,10 +268,13 @@ export default function APIPageClient({ machineId }) {
       ]);
       if (settingsRes.ok) {
         const data = await settingsRes.json();
-        setRequireApiKey(data.requireApiKey || false);
+        // `data.requireApiKey` is absent from an older payload; treat absence as
+        // "on" so the switch never renders off without evidence.
+        setRequireApiKey(data.requireApiKey !== false);
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
+        setSettingsLoaded(true);
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -898,18 +908,13 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
-  const maskKey = (fullKey) => {
-    if (!fullKey || fullKey.length <= 10) return fullKey || "";
-    return fullKey.slice(0, 6) + "•".repeat(fullKey.length - 10) + fullKey.slice(-4);
-  };
-
-  const toggleKeyVisibility = (keyId) => {
-    setVisibleKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(keyId)) next.delete(keyId);
-      else next.add(keyId);
-      return next;
-    });
+  // Fixed-prefix display for a key that already exists. The raw secret is never
+  // rendered in this list: keys created before `keyPrefix` existed fall back to
+  // the first 8 characters of the stored key, and the remainder is always
+  // elided. The full value is shown exactly once, in the create-success modal.
+  const keyDisplay = (k) => {
+    const prefix = k.keyPrefix || (k.key ? k.key.slice(0, 8) : "");
+    return prefix ? `${prefix}…` : "—";
   };
 
   const [baseUrl, setBaseUrl] = useState("/v1");
@@ -1152,11 +1157,11 @@ export default function APIPageClient({ machineId }) {
               <SecurityWarning
                 message={
                   !requireLogin
-                    ? "Require login is disabled — anyone can access your dashboard via tunnel."
+                    ? "The login requirement is switched off in settings. The dashboard still enforces a session, but restore the setting so the intent is recorded."
                     : "Dashboard uses the default password — change it in Profile settings."
                 }
                 action={{
-                  label: !requireLogin ? "Enable" : "Change password",
+                  label: !requireLogin ? "Open settings" : "Change password",
                   href: "/dashboard/profile",
                 }}
               />
@@ -1195,12 +1200,14 @@ export default function APIPageClient({ machineId }) {
           <div>
             <p className="font-medium">Require API key</p>
             <p className="text-sm text-text-muted">
-              Requests without a valid key will be rejected
+              Requests to the public LLM API without a valid key are rejected. The admin dashboard always requires a
+              login, regardless of this switch.
             </p>
           </div>
           <Toggle
             checked={requireApiKey}
             onChange={() => handleRequireApiKey(!requireApiKey)}
+            disabled={!settingsLoaded}
           />
         </div>
 
@@ -1281,26 +1288,14 @@ export default function APIPageClient({ machineId }) {
                     <p className="font-medium">{key.name}</p>
                     <div className="flex items-center gap-1.5 mt-1">
                       <code className="text-xs text-text-muted font-mono">
-                        {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
+                        {keyDisplay(key)}
                       </code>
-                      <button
-                        onClick={() => toggleKeyVisibility(key.id)}
-                        className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
-                        title={visibleKeys.has(key.id) ? "Hide key" : "Show key"}
+                      <span
+                        className="material-symbols-outlined text-[14px] text-text-muted"
+                        title="Only the prefix is stored for display"
                       >
-                        <span className="material-symbols-outlined text-[14px]">
-                          {visibleKeys.has(key.id) ? "visibility_off" : "visibility"}
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => copy(key.key, key.id)}
-                        className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
-                        title="Copy key"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          {copied === key.id ? "check" : "content_copy"}
-                        </span>
-                      </button>
+                        lock
+                      </span>
                     </div>
                   </td>
                   <td className="px-2 py-3">

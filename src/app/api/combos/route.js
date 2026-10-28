@@ -53,6 +53,11 @@ export async function POST(request) {
     return NextResponse.json(combo, { status: 201 });
   } catch (error) {
     console.log("Error creating combo:", error);
+    // Repo-layer member validation ("Combo members must be provider/model") is a
+    // user input problem → 400 with the exact message, not a generic 500.
+    if (error?.message === "Combo members must be provider/model") {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: "Failed to create combo" }, { status: 500 });
   }
 }

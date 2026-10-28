@@ -92,8 +92,15 @@ export default function DashboardLayout({ children }) {
 
       {/* Main content */}
       <main className="flex flex-col flex-1 h-full min-w-0 relative transition-colors duration-300 isolate">
-        {/* Faint grid background */}
-        <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
+        {/* Blueprint grid background */}
+        <div
+          className="hero-blueprint-grid absolute inset-0 pointer-events-none -z-10"
+          aria-hidden="true"
+          style={{
+            maskImage: "radial-gradient(ellipse 80% 70% at 20% 30%, black 0%, transparent 65%)",
+            WebkitMaskImage: "radial-gradient(ellipse 80% 70% at 20% 30%, black 0%, transparent 65%)",
+          }}
+        />
         <Header key={pathname} onMenuClick={() => setSidebarOpen(true)} />
         <div className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
           <div className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}>{children}</div>

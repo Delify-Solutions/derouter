@@ -20,7 +20,7 @@ const nextConfig = {
   // letter). That throw happens at module scope, so every consumer of `open` dies on
   // import — including xAI/Grok token refresh, which loads the OAuth service that imports
   // it. Keeping it external preserves the real `import.meta.url` at runtime.
-  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite", "open"],
+  serverExternalPackages: ["better-sqlite3", "node:sqlite", "bun:sqlite", "open"],
   turbopack: {
     root: tracingRoot
   },
@@ -56,6 +56,35 @@ const nextConfig = {
       ignored: /[\\/](node_modules|\.git|logs|\.next|\.next-cli-build|gitbook|cli|open-sse\.old|tests|docs)[\\/]/,
     };
     return config;
+  },
+  async headers() {
+    // Two inline <script> blocks (theme bootstrap in the root layout and the
+    // next-themes/segment bootstrap) and Monaco's eval-based worker bootstrap make
+    // 'unsafe-inline' and 'unsafe-eval' mandatory for script-src. Everything else
+    // stays locked to same-origin so injected markup cannot load remote code.
+    const contentSecurityPolicy = [
+      "default-src 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "img-src 'self' data: blob: https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com",
+      "connect-src 'self' https: wss:",
+    ].join("; ");
+
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: contentSecurityPolicy },
+        ],
+      },
+    ];
   },
   async rewrites() {
     return [

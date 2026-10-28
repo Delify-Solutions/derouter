@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 7;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -94,10 +94,17 @@ export const TABLES = {
       windowStartedAt: "TEXT",
       windowCostUsd: "REAL DEFAULT 0",
       updatedAt: "TEXT",
+      // Tenant ownership + dual-read lookup (key kept for backward compatibility;
+      // keyHash is the sha256 of the raw key, keyPrefix its first 8 chars).
+      userId: "TEXT",
+      keyHash: "TEXT",
+      keyPrefix: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
       "CREATE INDEX IF NOT EXISTS idx_ak_group ON apiKeys(groupId)",
+      "CREATE INDEX IF NOT EXISTS idx_ak_user ON apiKeys(userId)",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_ak_keyhash ON apiKeys(keyHash)",
     ],
   },
   keyGroups: {
@@ -145,11 +152,20 @@ export const TABLES = {
       provider: "TEXT",
       model: "TEXT",
       connectionId: "TEXT",
+      // DEPRECATED: raw API-key secret. New rows leave this NULL and store only
+      // apiKeyId; it is kept so historical rows (written before the migration)
+      // remain attributable. Never write a secret here when the owner resolves.
       apiKey: "TEXT",
+      // Owning apiKeys.id for rows written from this release on. Nullable: legacy
+      // rows have none until migration 005 backfills what it can.
+      apiKeyId: "TEXT",
       endpoint: "TEXT",
       promptTokens: "INTEGER DEFAULT 0",
       completionTokens: "INTEGER DEFAULT 0",
       cost: "REAL DEFAULT 0",
+      // Authoritative cost in integer nanoUSD (1e-9 USD). `cost` (REAL) is kept
+      // only for legacy readers; writers set both.
+      costNanoUsd: "INTEGER DEFAULT 0",
       status: "TEXT",
       tokens: "TEXT",
       meta: "TEXT",
@@ -160,6 +176,11 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
       "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
       "CREATE INDEX IF NOT EXISTS idx_uh_apikey_ts ON usageHistory(apiKey, timestamp DESC)",
+      // New lookup path: rows written from this release on carry apiKeyId instead
+      // of the raw secret. idx_uh_apikey_ts stays for legacy rows and for the
+      // dual-path reads until the next release can drop `apiKey`.
+      "CREATE INDEX IF NOT EXISTS idx_uh_apikeyid_ts ON usageHistory(apiKeyId, timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_ts_nano ON usageHistory(timestamp DESC, costNanoUsd)",
     ],
   },
   usageDaily: {
@@ -185,6 +206,159 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
       "CREATE INDEX IF NOT EXISTS idx_rd_apikey_ts ON requestDetails(apiKey, timestamp DESC)",
+    ],
+  },
+
+  // ── Tenants & billing ──────────────────────────────────────────────────
+  // All money columns are integer nanoUSD (1e-9 USD). Never floats.
+  users: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      email: "TEXT UNIQUE NOT NULL",
+      passwordHash: "TEXT NOT NULL",
+      displayName: "TEXT",
+      groupId: "TEXT",
+      status: "TEXT NOT NULL",
+      overdraftNanoUsd: "INTEGER DEFAULT 0",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+      lastLoginAt: "TEXT",
+    },
+    indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
+  },
+  userSessions: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      tokenHash: "TEXT UNIQUE NOT NULL",
+      createdAt: "TEXT",
+      expiresAt: "TEXT",
+      ip: "TEXT",
+      userAgent: "TEXT",
+      revokedAt: "TEXT",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_us_user ON userSessions(userId)"],
+  },
+  emailVerifications: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      tokenHash: "TEXT UNIQUE NOT NULL",
+      purpose: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
+      consumedAt: "TEXT",
+      createdAt: "TEXT",
+    },
+    // tokenHash is UNIQUE (auto-indexed); that is the only lookup path.
+    indexes: [],
+  },
+  plans: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      code: "TEXT UNIQUE NOT NULL",
+      name: "TEXT",
+      description: "TEXT",
+      priceNanoUsd: "INTEGER NOT NULL",
+      creditNanoUsd: "INTEGER NOT NULL",
+      durationDays: "INTEGER NOT NULL",
+      isActive: "INTEGER DEFAULT 1",
+      sortOrder: "INTEGER",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+    },
+    // code is UNIQUE inline (auto-indexed) — that covers lookup by code.
+    indexes: [],
+  },
+  orders: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      planId: "TEXT NOT NULL",
+      amountNanoUsd: "INTEGER",
+      creditNanoUsd: "INTEGER",
+      durationDays: "INTEGER",
+      status: "TEXT NOT NULL",
+      method: "TEXT DEFAULT 'manual'",
+      payerNote: "TEXT",
+      adminNote: "TEXT",
+      approvedBy: "TEXT",
+      createdAt: "TEXT",
+      paidAt: "TEXT",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders(userId, status)"],
+  },
+  userPlans: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      // NULL for a credit-only grant: a gift code with grantKind='credit' or an
+      // admin adjustment credits the wallet without any plans row behind it.
+      planId: "TEXT",
+      orderId: "TEXT",
+      source: "TEXT NOT NULL",
+      creditTotalNanoUsd: "INTEGER NOT NULL",
+      creditRemainingNanoUsd: "INTEGER NOT NULL",
+      startsAt: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
+      status: "TEXT NOT NULL",
+      createdAt: "TEXT",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_up_user ON userPlans(userId, status, expiresAt)"],
+  },
+  creditLedger: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      userPlanId: "TEXT",
+      apiKeyId: "TEXT",
+      // Idempotency key: one ledger row per request/charge.
+      requestKey: "TEXT UNIQUE",
+      deltaNanoUsd: "INTEGER NOT NULL",
+      balanceAfterNanoUsd: "INTEGER",
+      kind: "TEXT NOT NULL",
+      meta: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_cl_user_ts ON creditLedger(userId, createdAt)"],
+  },
+  giftCodes: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      code: "TEXT UNIQUE NOT NULL",
+      grantKind: "TEXT NOT NULL",
+      planId: "TEXT",
+      creditNanoUsd: "INTEGER",
+      durationDays: "INTEGER",
+      maxRedemptions: "INTEGER DEFAULT 1",
+      redeemedCount: "INTEGER DEFAULT 0",
+      perUserLimit: "INTEGER DEFAULT 1",
+      startsAt: "TEXT",
+      expiresAt: "TEXT",
+      isActive: "INTEGER DEFAULT 1",
+      note: "TEXT",
+      createdBy: "TEXT",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+    },
+    // code is UNIQUE inline (auto-indexed) — that covers redemption lookup.
+    indexes: [],
+  },
+  giftRedemptions: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      giftId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      userPlanId: "TEXT",
+      redeemedAt: "TEXT",
+    },
+    // No UNIQUE(giftId, userId) here on purpose: a code may be redeemed up to
+    // giftCodes.perUserLimit times by the same account, and that limit is
+    // admin-configurable, so a hard constraint cannot express it. Uniqueness of
+    // a redemption is per (giftId, userId) up to that limit, enforced by the
+    // synchronous claim transaction in redeemGiftCode — not by a constraint.
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_gr_gift_user ON giftRedemptions(giftId, userId)",
+      "CREATE INDEX IF NOT EXISTS idx_gr_user ON giftRedemptions(userId)",
     ],
   },
 };

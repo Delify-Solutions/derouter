@@ -32,6 +32,17 @@ export async function POST(request) {
   // Always clear saml_state cookie after attempt
   cookieStore.delete("saml_state");
 
+  // No saml_state cookie means this POST was not preceded by /api/auth/saml/start
+  // in this browser. Such an assertion is either unsolicited (attacker-initiated
+  // login) or a replay; refuse it before touching the SAML library.
+  if (!storedRequestId) {
+    recordFail(ip);
+    return NextResponse.json(
+      { error: "Missing SAML state" },
+      { status: 403, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const formData = await request.formData();
     const SAMLResponse = formData.get("SAMLResponse");

@@ -22,6 +22,7 @@ import { matchesAllowed } from "@/lib/auth/modelMatching.js";
 import { extractApiKey, isValidApiKey } from "@/sse/services/auth.js";
 import { getApiKeyForAuth } from "@/lib/db/repos/apiKeysRepo.js";
 import { getSettings } from "@/lib/localDb";
+import { isInternalRequest, signInternalRequest } from "@/lib/auth/internalHeaders";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -133,10 +134,6 @@ const parseOpenAIStyleModels = (data) => {
   return data?.data || data?.models || data?.results || [];
 };
 
-// Header sent by fetchCompatibleModelIds to detect cross-instance /models fetches
-// and break recursive loops between derouter instances connected to each other.
-const INTERNAL_MODELS_FETCH_HEADER = "x-dr-internal-models-fetch";
-
 // LLM kind sentinel — combos/models with no explicit kind default to LLM
 const LLM_KIND = "llm";
 
@@ -201,7 +198,7 @@ async function fetchCompatibleModelIds(connection) {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(url, {
       method: "GET",
-      headers: { ...headers, [INTERNAL_MODELS_FETCH_HEADER]: "1" },
+      headers: { ...headers, ...signInternalRequest({ method: "GET", url }) },
       cache: "no-store",
       signal: controller.signal,
     });
@@ -309,7 +306,7 @@ export async function buildModelsList(kindFilter, options = {}) {
 
   // Combos first (filtered by kind). Public /v1/models returns ONLY combos — the
   // pool models below are emitted exclusively for internal cross-instance
-  // discovery (skipDynamicFetch, x-dr-internal-models-fetch: 1), which needs the
+  // discovery (skipDynamicFetch, signed internal header), which needs the
   // full provider catalog. This avoids leaking pool models (e.g. `vin/GLM-5.2`)
   // to key holders whose allowedModels are combo names: matchesAllowed() suffix-
   // matches a combo name against a `provider/model` pool id (e.g. "glm-5.2" is a
@@ -612,12 +609,13 @@ export async function OPTIONS() {
  *                                      listing to those combo names.
  *   skipDynamicFetch: boolean        — true for internal cross-instance discovery.
  *
- * Internal discovery fetches (x-dr-internal-models-fetch: 1) bypass auth and
- * allow-listing — they carry the upstream provider's key, not a derouter key,
- * and must see the full catalog for compatible-model discovery.
+ * Internal discovery fetches (signed x-dr-internal header, see
+ * lib/auth/internalHeaders) bypass auth and allow-listing — they carry the
+ * upstream provider's key, not a derouter key, and must see the full catalog
+ * for compatible-model discovery.
  */
 export async function resolveKeyScopeForModels(request) {
-  const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
+  const skipDynamicFetch = isInternalRequest(request);
   if (skipDynamicFetch) {
     return { allowedModels: null, skipDynamicFetch: true };
   }

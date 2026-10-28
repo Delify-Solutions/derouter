@@ -11,6 +11,73 @@ import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
+// Upper bound for reading a whole (non-streaming) provider body. Without it a
+// provider that answers 200 and then trickles bytes forever pins the request
+// (and its concurrency slot) indefinitely.
+export const DEFAULT_BODY_TIMEOUT_MS = 600000;
+
+/**
+ * Settle `pending` no later than `ms`, or as soon as `signal` aborts.
+ *
+ * `response.json()` / `.text()` (and a stream reader) have no timeout of their
+ * own: the connect timer in executors/base.js is cleared once headers arrive,
+ * so the body itself was unbounded. Racing the read against a deadline bounds
+ * it; `onAbort` releases the underlying body so the socket is not leaked.
+ *
+ * @param {Promise<any>} pending - In-flight read
+ * @param {AbortSignal|null} signal - Combined request/body signal (may be null)
+ * @param {number} ms - Read deadline
+ * @param {Function|null} onAbort - Cancels the underlying body on abort
+ * @returns {Promise<any>}
+ */
+export async function guardWithTimeout(pending, signal, ms = DEFAULT_BODY_TIMEOUT_MS, onAbort = null) {
+  const timeoutMs = Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_BODY_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+  // The loser of the race must not surface as an unhandled rejection.
+  pending.catch(() => { });
+
+  if (combined.aborted) {
+    try { onAbort?.(); } catch { /* already consumed */ }
+    throw combined.reason instanceof Error ? combined.reason : new Error(`upstream body read aborted after ${timeoutMs}ms`);
+  }
+
+  let onAbortListener;
+  const aborted = new Promise((_, reject) => {
+    onAbortListener = () => {
+      try { onAbort?.(); } catch { /* already consumed */ }
+      const reason = combined.reason;
+      reject(reason instanceof Error ? reason : new Error(`upstream body read aborted after ${timeoutMs}ms`));
+    };
+    combined.addEventListener("abort", onAbortListener, { once: true });
+  });
+
+  try {
+    return await Promise.race([pending, aborted]);
+  } finally {
+    combined.removeEventListener("abort", onAbortListener);
+  }
+}
+
+/**
+ * Read a provider Response body with a hard deadline and abort propagation.
+ *
+ * @param {Response} response - Upstream provider response
+ * @param {AbortSignal|null} signal - Combined request/body signal (may be null)
+ * @param {number} ms - Body read deadline
+ * @param {"text"|"json"} mode - Read mode
+ * @returns {Promise<any>} Parsed JSON or body text
+ */
+export async function readBodyWithTimeout(response, signal, ms = DEFAULT_BODY_TIMEOUT_MS, mode = "text") {
+  const pending = mode === "json" ? response.json() : response.text();
+  return guardWithTimeout(pending, signal, ms, () => {
+    // Release the socket; the pending read() otherwise stays open until the
+    // provider finishes (or the process dies).
+    response.body?.cancel?.();
+  });
+}
+
 function parseToolArguments(value) {
   if (!value) return {};
   if (typeof value === "object") return value;
@@ -281,13 +348,13 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 /**
  * Handle non-streaming response from provider.
  */
-export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
+export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS }) {
   trackDone();
   const contentType = providerResponse.headers.get("content-type") || "";
   let responseBody;
 
   if (contentType.includes("text/event-stream")) {
-    const sseText = await providerResponse.text();
+    const sseText = await readBodyWithTimeout(providerResponse, requestSignal, timeoutMs, "text");
     const parsed = parseSSEToOpenAIResponse(sseText, model);
     if (!parsed) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
@@ -296,10 +363,18 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
     responseBody = parsed;
   } else {
     try {
-      responseBody = await providerResponse.json();
+      responseBody = await readBodyWithTimeout(providerResponse, requestSignal, timeoutMs, "json");
     } catch (err) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
       console.error(`[ChatCore] Failed to parse JSON from ${provider}:`, err.message);
+      // A timeout/abort is not a malformed body — say which it was so the
+      // caller (and the usage log) can tell a slow provider from a broken one.
+      if (err?.name === "TimeoutError") {
+        return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream body read timed out after ${timeoutMs}ms from ${provider}`);
+      }
+      if (err?.name === "AbortError") {
+        return createErrorResult(499, "Request aborted");
+      }
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${provider}`);
     }
   }

@@ -4,6 +4,10 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
+// readBodyWithTimeout/guardWithTimeout live in nonStreamingHandler (which imports
+// parseSSEToOpenAIResponse from here). The cycle is safe: both are function
+// declarations consumed at call time, never during module evaluation.
+import { readBodyWithTimeout, guardWithTimeout, DEFAULT_BODY_TIMEOUT_MS } from "./nonStreamingHandler.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
@@ -179,12 +183,19 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
  * Handle case: provider forced streaming but client wants JSON.
  * Supports both Codex/Responses API SSE and standard Chat Completions SSE.
  */
-export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log }) {
+export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS, bodySignal = null }) {
   const contentType = providerResponse.headers.get("content-type") || "";
   const isSSE = contentType.includes("text/event-stream") || (contentType === "" && isResponsesProvider(provider));
   if (!isSSE) return null; // not handled here
 
   trackDone();
+
+  // Both reads below must be bounded and abortable: this path consumes the whole
+  // upstream body, and the connect timer is already gone by now.
+  const effectiveSignal = bodySignal
+    ? (requestSignal ? AbortSignal.any([requestSignal, bodySignal]) : bodySignal)
+    : requestSignal;
+  const readDeadlineMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_BODY_TIMEOUT_MS;
 
   const ctx = {
     provider, model, connectionId, apiKey,
@@ -199,7 +210,12 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
   const isCodexResponsesApi = isResponsesProvider(provider) || targetFormat === FORMATS.OPENAI_RESPONSES;
   if (isCodexResponsesApi) {
     try {
-      const jsonResponse = await convertResponsesStreamToJson(providerResponse.body);
+      const jsonResponse = await guardWithTimeout(
+        convertResponsesStreamToJson(providerResponse.body),
+        effectiveSignal,
+        readDeadlineMs,
+        () => providerResponse.body?.cancel?.()
+      );
       if (onRequestSuccess) await onRequestSuccess();
 
       const usage = jsonResponse.usage || {};
@@ -287,13 +303,17 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       return { success: true, response: new Response(JSON.stringify(finalResp), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
     } catch (err) {
       console.error("[ChatCore] Responses API SSE→JSON failed:", err);
+      if (err?.name === "TimeoutError") {
+        return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream stream read timed out after ${readDeadlineMs}ms`);
+      }
+      if (err?.name === "AbortError") return createErrorResult(499, "Request aborted");
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");
     }
   }
 
   // Standard Chat Completions SSE path
   try {
-    const sseText = await providerResponse.text();
+    const sseText = await readBodyWithTimeout(providerResponse, effectiveSignal, readDeadlineMs, "text");
     const parsed = parseSSEToOpenAIResponse(sseText, model);
     if (!parsed) return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Invalid SSE response for non-streaming request");
     if (parsed.error) {
@@ -363,6 +383,10 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     return { success: true, response: new Response(JSON.stringify(finalBody), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {
     console.error("[ChatCore] Chat Completions SSE→JSON failed:", err);
+    if (err?.name === "TimeoutError") {
+      return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream stream read timed out after ${readDeadlineMs}ms`);
+    }
+    if (err?.name === "AbortError") return createErrorResult(499, "Request aborted");
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");
   }
 }

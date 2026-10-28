@@ -46,6 +46,29 @@ async function normalizeProxyPoolId(proxyPoolId) {
   return { proxyPoolId: normalizedId };
 }
 
+// Allow-list of providerSpecificData keys that are safe to expose to the UI.
+// Union of the public client route's SAFE_PSD_FIELDS and the provider GET needs.
+// Anything not listed here (copilotToken, cookie, refresh tokens, ...) is dropped.
+const SAFE_PSD_KEYS = [
+  "nodeName", "baseUrl", "prefix", "accountId", "region", "projectId",
+  "subscriptionTier", "email", "username", "authType", "organization",
+  "expiresAt", "siteUrl", "modelMap", "noAuth", "awsRegion", "deploymentName",
+  "azureEndpoint", "deployment", "apiVersion", "resourceUrl", "proxyPoolId",
+  "connectionProxyEnabled", "connectionProxyUrl", "connectionNoProxy",
+  "githubLogin", "githubName", "githubEmail", "githubUserId",
+  "firstName", "lastName", "authMethod", "authKind", "profileArn",
+  // Model catalogs, not credentials — /api/providers consumers
+  // (cli-tools ToolDetailClient) render these.
+  "customModels", "enabledModels",
+];
+
+function safeProviderSpecificData(psd) {
+  if (!psd || typeof psd !== "object") return psd ?? null;
+  const out = {};
+  for (const k of SAFE_PSD_KEYS) if (psd[k] !== undefined) out[k] = psd[k];
+  return out;
+}
+
 // GET /api/providers - List all connections
 export async function GET() {
   try {
@@ -69,6 +92,7 @@ export async function GET() {
       return {
         ...c,
         name,
+        providerSpecificData: safeProviderSpecificData(c.providerSpecificData),
         apiKey: undefined,
         accessToken: undefined,
         refreshToken: undefined,

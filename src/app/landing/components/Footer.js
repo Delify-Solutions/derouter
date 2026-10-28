@@ -1,61 +1,102 @@
 "use client";
 
+import Link from "next/link";
+
+const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
+const REPO_URL = "https://github.com/Delify-Solutions/derouter";
+const LICENSE_URL = "https://github.com/Delify-Solutions/derouter/blob/main/LICENSE";
+
+const COLUMNS = [
+  {
+    title: "Product",
+    links: [
+      { href: "#product", label: "What it does" },
+      { href: "#how-it-works", label: "How it works" },
+      { href: "#features", label: "Features" },
+      { href: "#get-started", label: "Get started" },
+    ],
+  },
+  {
+    title: "Account",
+    links: [
+      { href: "/register", label: "Create account" },
+      { href: "/login", label: "Sign in" },
+      { href: "/register?next=/account/plans", label: "Pricing" },
+      { href: "/usage", label: "Usage lookup" },
+    ],
+  },
+  {
+    title: "Docs",
+    links: [
+      { href: DOCS_URL, label: "README", external: true },
+      { href: REPO_URL, label: "Repository", external: true },
+      { href: LICENSE_URL, label: "MIT license", external: true },
+    ],
+  },
+];
+
 export default function Footer() {
   return (
-    <footer className="border-t border-[#3a2f27] bg-[#120f0d] pt-16 pb-8 px-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8 mb-16">
-          {/* Brand */}
-          <div className="col-span-2 lg:col-span-2">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="size-6 rounded bg-[#f97815] flex items-center justify-center text-white">
-                <span className="material-symbols-outlined text-[16px]">hub</span>
-              </div>
-              <h3 className="text-white text-lg font-bold">derouter</h3>
+    <footer className="bg-bg">
+      <div className="shell py-14">
+        <div className="grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <span className="flex size-8 items-center justify-center border border-border text-text-main">
+                <span className="material-symbols-outlined text-[18px]">hub</span>
+              </span>
+              <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
             </div>
-            <p className="text-gray-500 text-sm max-w-xs mb-6">
-              The unified endpoint for AI generation. Connect, route, and manage your AI providers with ease.
+            <p className="mt-4 max-w-xs text-sm text-text-muted">
+              A hosted proxy for AI providers, with per-key usage metering and prepaid credit.
             </p>
-            <div className="flex gap-4">
-              <a className="text-gray-400 hover:text-white transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">
-                <span className="material-symbols-outlined">code</span>
-              </a>
+          </div>
+
+          {COLUMNS.map((column) => (
+            <div key={column.title}>
+              <p className="meta text-text-muted">{column.title}</p>
+              <ul className="mt-4 flex flex-col gap-2.5">
+                {column.links.map((link) => (
+                  <li key={`${column.title}-${link.label}`}>
+                    {link.external ? (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-text-muted transition-colors duration-150 hover:text-text-main"
+                      >
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        href={link.href}
+                        className="text-sm text-text-muted transition-colors duration-150 hover:text-text-main"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
-          
-          {/* Product */}
-          <div className="flex flex-col gap-4">
-            <h4 className="font-bold text-white">Product</h4>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="#features">Features</a>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="/admin/ss">Dashboard</a>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">Changelog</a>
-          </div>
-          
-          {/* Resources */}
-          <div className="flex flex-col gap-4">
-            <h4 className="font-bold text-white">Resources</h4>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter#readme" target="_blank" rel="noopener noreferrer">Documentation</a>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">GitHub</a>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://www.npmjs.com/package/derouter" target="_blank" rel="noopener noreferrer">NPM</a>
-          </div>
-          
-          {/* Legal */}
-          <div className="flex flex-col gap-4">
-            <h4 className="font-bold text-white">Legal</h4>
-            <a className="text-gray-400 hover:text-[#f97815] text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
-          </div>
+          ))}
         </div>
-        
-        {/* Bottom */}
-        <div className="border-t border-[#3a2f27] pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-gray-600 text-sm">© 2025 derouter. All rights reserved.</p>
-          <div className="flex gap-6">
-            <a className="text-gray-600 hover:text-white text-sm transition-colors" href="https://github.com/Delify-Solutions/derouter" target="_blank" rel="noopener noreferrer">GitHub</a>
-            <a className="text-gray-600 hover:text-white text-sm transition-colors" href="https://www.npmjs.com/package/derouter" target="_blank" rel="noopener noreferrer">NPM</a>
-          </div>
+
+        <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">
+            © {new Date().getFullYear()} derouter
+          </p>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle transition-colors duration-150 hover:text-text-main"
+          >
+            <span className="material-symbols-outlined text-[14px]">code</span>
+            Delify-Solutions/derouter
+          </a>
         </div>
       </div>
     </footer>
   );
 }
-

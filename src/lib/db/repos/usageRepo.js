@@ -2,11 +2,101 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { costFromTokensNano, nanoToUsd } from "../../../shared/utils/money.js";
+import { chargeCreditsSync, resolveApiKeyOwner } from "./billingRepo.js";
+import { hashApiKey } from "./apiKeysRepo.js";
+
+// Money is stored as integer nanoUSD. `costNanoUsd` is authoritative; the legacy
+// float `cost` column is written alongside for readers we do not control.
+// A row whose nano value is 0 but float cost is non-zero predates the backfill
+// (e.g. imported from legacy JSON), so fall back to the float.
+function rowCostUsd(nano, usd) {
+  return nano ? nanoToUsd(nano) : usd || 0;
+}
+
+// Integer cost of one usageHistory row. Rows imported from legacy JSON only have
+// the float `cost`, so round it once here rather than leaking a float upward.
+function rowCostNano(nano, usd) {
+  return nano ? Math.round(nano) : Math.round((usd || 0) * 1e9);
+}
+
+// Daily rollup blobs carry both `costNanoUsd` (authoritative) and `cost` (legacy
+// float mirror). Prefer the integer; older blobs may only have the float.
+
+// Accumulate one integer nanoUSD cost into an aggregate. The legacy float mirror
+// is re-derived from the running integer total, so repeated float addition can
+// never drift (0.006 x 500 must stay exactly $3.00).
+function addCostTo(acc, costNano) {
+  acc.costNanoUsd = (acc.costNanoUsd || 0) + (costNano || 0);
+  acc.cost = nanoToUsd(acc.costNanoUsd);
+}
+
+// Cost of a usageDaily blob — either the whole day or one of its counters
+// (byProvider/byModel/...). Blobs written before the nano migration only carry
+// the legacy float, so round it once here. The integer always wins when present.
+function blobCostNano(c) {
+  return c?.costNanoUsd ? Math.round(c.costNanoUsd) : Math.round((c?.cost || 0) * 1e9);
+}
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
   if (key.length <= 8) return key.charAt(0) + "***";
   return key.slice(0, 8) + "***";
+}
+
+// apiKeys.id for a raw key string, or null when no apiKeys row owns it (a
+// locally configured admin key). Dual lookup mirrors resolveApiKeyOwner: legacy
+// rows still have the plaintext in apiKeys.key, newer ones only keyHash.
+//
+// Cached per adapter for 60s: this runs on the hot path (keyEnforcement calls
+// getKeyRateUsage once or twice per proxied request), and a doomed-to-be-stale
+// entry is no worse than resolveApiKeyOwner's own cache, which already answers
+// for the same rows with the same TTL.
+const KEY_ID_TTL_MS = 60 * 1000;
+const keyIdCaches = new WeakMap();
+
+function resolveApiKeyId(db, apiKey) {
+  if (!db || !apiKey) return null;
+  let cache = keyIdCaches.get(db);
+  if (!cache) {
+    cache = new Map();
+    keyIdCaches.set(db, cache);
+  }
+  const hit = cache.get(apiKey);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+
+  let value = null;
+  try {
+    let row = db.get(`SELECT id FROM apiKeys WHERE key = ?`, [apiKey]);
+    if (!row) {
+      const hash = hashApiKey(apiKey);
+      if (hash) row = db.get(`SELECT id FROM apiKeys WHERE keyHash = ?`, [hash]);
+    }
+    value = row?.id ?? null;
+  } catch {
+    return null;
+  }
+
+  cache.set(apiKey, { value, expiresAt: Date.now() + KEY_ID_TTL_MS });
+  // Bounded for the same reason as the owner cache: a key-rotation loop must not
+  // grow this without limit.
+  if (cache.size > 1000) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  return value;
+}
+
+// WHERE fragment matching every usageHistory row of one raw api key, plus its
+// params. Rows written before migration 005 carry the raw secret in `apiKey`;
+// rows written since carry only `apiKeyId` and leave `apiKey` NULL. Both kinds
+// belong to the same key, so the union (apiKey = ? OR apiKeyId = ?) is matched —
+// a key's history must never be split. When no apiKeys row owns the string (an
+// admin/local key), the raw comparison alone is the whole history.
+function usageKeyCond(db, apiKey) {
+  const keyId = resolveApiKeyId(db, apiKey);
+  if (!keyId) return { cond: "apiKey = ?", params: [apiKey] };
+  return { cond: "(apiKey = ? OR apiKeyId = ?)", params: [apiKey, keyId] };
 }
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
@@ -63,12 +153,16 @@ function getLocalDateKey(timestamp) {
 }
 
 function addToCounter(target, key, values) {
-  if (!target[key]) target[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+  if (!target[key]) target[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
+  // Seed from the legacy float once, for rollup blobs written before nano existed.
+  if (target[key].costNanoUsd == null) target[key].costNanoUsd = Math.round((target[key].cost || 0) * 1e9);
   target[key].requests += values.requests || 1;
   target[key].promptTokens += values.promptTokens || 0;
   target[key].completionTokens += values.completionTokens || 0;
   target[key].cachedTokens += values.cachedTokens || 0;
-  target[key].cost += values.cost || 0;
+  // Integer accumulates; the float mirror is re-derived so it never drifts.
+  target[key].costNanoUsd = (target[key].costNanoUsd || 0) + (values.costNanoUsd || 0);
+  target[key].cost = nanoToUsd(target[key].costNanoUsd);
   if (values.meta) Object.assign(target[key], values.meta);
 }
 
@@ -76,14 +170,19 @@ function aggregateEntryToDay(day, entry) {
   const promptTokens = entry.tokens?.prompt_tokens || entry.tokens?.input_tokens || 0;
   const completionTokens = entry.tokens?.completion_tokens || entry.tokens?.output_tokens || 0;
   const cachedTokens = entry.tokens?.cached_tokens || entry.tokens?.cache_read_input_tokens || 0;
-  const cost = entry.cost || 0;
-  const vals = { promptTokens, completionTokens, cachedTokens, cost };
+  // Integer nanoUSD is the authoritative day total; `cost` is re-derived from it
+  // as the legacy float mirror so old dashboard readers keep working.
+  const costNano = entry.costNanoUsd != null ? Math.round(entry.costNanoUsd) : Math.round((entry.cost || 0) * 1e9);
+  const vals = { promptTokens, completionTokens, cachedTokens, costNanoUsd: costNano };
 
+  // Seed from the legacy float once, for day blobs written before nano existed.
+  if (day.costNanoUsd == null) day.costNanoUsd = Math.round((day.cost || 0) * 1e9);
   day.requests = (day.requests || 0) + 1;
   day.promptTokens = (day.promptTokens || 0) + promptTokens;
   day.completionTokens = (day.completionTokens || 0) + completionTokens;
   day.cachedTokens = (day.cachedTokens || 0) + cachedTokens;
-  day.cost = (day.cost || 0) + cost;
+  day.costNanoUsd = (day.costNanoUsd || 0) + costNano;
+  day.cost = nanoToUsd(day.costNanoUsd);
 
   day.byProvider ||= {};
   day.byModel ||= {};
@@ -100,9 +199,17 @@ function aggregateEntryToDay(day, entry) {
     addToCounter(day.byAccount, entry.connectionId, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
   }
 
-  const apiKeyVal = entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key";
-  const akModelKey = `${apiKeyVal}|${entry.model}|${entry.provider || "unknown"}`;
-  addToCounter(day.byApiKey, akModelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKey || null } });
+  // Key identity for the rollup blob. Rows written from v7 on carry apiKeyId and
+  // no raw secret, so the id is the stable identity; legacy rows and admin keys
+  // with no apiKeys row still identify by the raw string. Readers canonicalize
+  // both onto the id (see getUsageStats) so one key never splits across buckets.
+  // meta.apiKey follows the same rule as the usageHistory column: drop the secret
+  // when the id is known, keep it only for a key nothing else can attribute.
+  const apiKeyIdent = entry.apiKeyId
+    ? `id:${entry.apiKeyId}`
+    : (entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key");
+  const akModelKey = `${apiKeyIdent}|${entry.model}|${entry.provider || "unknown"}`;
+  addToCounter(day.byApiKey, akModelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKeyId ? null : (entry.apiKey || null), apiKeyId: entry.apiKeyId || null } });
 
   const endpoint = entry.endpoint || "Unknown";
   const epKey = `${endpoint}|${entry.model}|${entry.provider || "unknown"}`;
@@ -134,44 +241,27 @@ async function ensureRingInitialized() {
   recentRing.initialized = true;
   try {
     const db = await getAdapter();
-    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
+    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, costNanoUsd, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
     recentRing.items = rows.reverse().map((r) => ({
       timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
-      apiKey: r.apiKey, endpoint: r.endpoint, cost: r.cost, status: r.status,
+      apiKey: r.apiKey, endpoint: r.endpoint, cost: rowCostUsd(r.costNanoUsd, r.cost), costNanoUsd: rowCostNano(r.costNanoUsd, r.cost), status: r.status,
       tokens: parseJson(r.tokens, {}),
     }));
   } catch {}
 }
 
-// Compute the USD cost for one request.
-// `requestedModel` carries the original client model string. When the client asked
-// for a combo (bare name, no "/"), a combo-level price override takes precedence
-// over the per-pool price — so budgets for key-holders (who consume combos) are
-// charged at the combo price the admin set, not the internal pool model's price.
-async function calculateCost(provider, model, tokens, requestedModel) {
+// Compute the cost of one request as integer nanoUSD.
+// `requestedModel` carries the original client model string; resolvePrice uses it
+// to let a combo-level price override take precedence for bare combo names, so
+// budgets for key-holders (who consume combos) are charged at the combo price
+// the admin set, not the internal pool model's price.
+async function calculateCostNano(provider, model, tokens, requestedModel) {
   if (!tokens) return 0;
   try {
-    let pricing = null;
-
-    // Combo-level override first (only for bare combo names, not raw provider/model).
-    if (requestedModel && !requestedModel.includes("/")) {
-      const { getPricingForCombo } = await import("./comboPricingRepo.js");
-      const comboPricing = await getPricingForCombo(requestedModel);
-      if (comboPricing) pricing = comboPricing;
-    }
-
-    // Fall back to per-pool pricing.
-    if (!pricing && provider && model) {
-      const { getPricingForModel } = await import("./pricingRepo.js");
-      pricing = await getPricingForModel(provider, model);
-    }
+    const { resolvePrice } = await import("./pricingRepo.js");
+    const { pricing } = await resolvePrice({ provider, model, requestedModel });
     if (!pricing) return 0;
-
-    // Delegate the actual math to the single source of truth (avoids the two
-    // copies drifting apart — see open-sse/providers/pricing.js for the
-    // cache-inclusive prompt_tokens convention this assumes).
-    const { calculateCostFromTokens } = await import("open-sse/providers/pricing.js");
-    return calculateCostFromTokens(tokens, pricing);
+    return costFromTokensNano(tokens, pricing);
   } catch (e) {
     console.error("Error calculating cost:", e);
     return 0;
@@ -272,30 +362,54 @@ export async function saveRequestUsage(entry) {
     const db = await getAdapter();
 
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
-    entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens, entry.requestedModel);
+    // Authoritative integer nanoUSD; legacy float `cost` is derived from it so
+    // the two columns can never disagree.
+    entry.costNanoUsd = await calculateCostNano(entry.provider, entry.model, entry.tokens, entry.requestedModel);
+    entry.cost = nanoToUsd(entry.costNanoUsd);
 
     const tokens = entry.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
+
+    // Resolve the owning tenant key BEFORE the insert: the row stores that key's
+    // id instead of the raw secret, and the dedup predicate below needs to know
+    // whether an id exists. `resolveApiKeyOwner` returns null for a key with no
+    // apiKeys row OR no userId (an admin/local key), which is exactly the set that
+    // must keep its raw value to stay attributable.
+    const owner = entry.apiKey ? resolveApiKeyOwner(db, entry.apiKey) : null;
+    const apiKeyId = owner?.apiKeyId ?? null;
+    // Carried on the entry so the daily rollup records the same identity.
+    entry.apiKeyId = apiKeyId;
 
     let inserted = false;
 
     // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
     // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
     db.transaction(() => {
+      // Dedup: a retried request must not be recorded twice. New rows no longer
+      // carry the raw key when an owner resolved, so the old raw comparison would
+      // miss them. Match explicitly on the same identity that will be written:
+      // by apiKeyId when the key has one, otherwise by the raw key (legacy
+      // admin/local keys). The apiKey arm is kept alongside the id arm for a
+      // legacy row of a tenant key that 005 could not backfill — it is still the
+      // same key, so a retry must still dedupe against it.
+      const keyCond = apiKeyId
+        ? "(apiKeyId = ? OR apiKey = ?)"
+        : "COALESCE(apiKey, '') = COALESCE(?, '')";
+      const keyParams = apiKeyId ? [apiKeyId, entry.apiKey || null] : [entry.apiKey || null];
       const existing = db.get(
         `SELECT id, endpoint FROM usageHistory
          WHERE timestamp = ?
            AND COALESCE(provider, '') = COALESCE(?, '')
            AND COALESCE(model, '') = COALESCE(?, '')
            AND COALESCE(connectionId, '') = COALESCE(?, '')
-           AND COALESCE(apiKey, '') = COALESCE(?, '')
+           AND ${keyCond}
            AND promptTokens = ?
            AND completionTokens = ?
          ORDER BY id DESC LIMIT 1`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
-          entry.connectionId || null, entry.apiKey || null,
+          entry.connectionId || null, ...keyParams,
           promptTokens, completionTokens,
         ]
       );
@@ -307,20 +421,42 @@ export async function saveRequestUsage(entry) {
         return;
       }
 
-      db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // `apiKey` is the deprecated column: only a key with no owning apiKeys row
+      // still needs its raw value to stay attributable. Tenant keys store their
+      // apiKeyId and leave the secret out of the database entirely.
+      const insertedUsage = db.run(
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
-          entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
-          promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
+          entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
+          entry.endpoint || null,
+          promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null }),
         ]
       );
 
+      // Charge the owner's wallet in the SAME transaction as the usage row, keyed
+      // on that row's id so a retry is idempotent. Failures are logged, never
+      // thrown: a billing problem must not discard recorded usage.
+      if (entry.apiKey) {
+        try {
+          if (owner) {
+            chargeCreditsSync(db, {
+              userId: owner.userId,
+              apiKeyId: owner.apiKeyId,
+              requestKey: "usage:" + insertedUsage.lastInsertRowid,
+              costNanoUsd: entry.costNanoUsd || 0,
+            });
+          }
+        } catch (e) {
+          console.error("[billing] charge failed", e.message);
+        }
+      }
+
       const dateKey = getLocalDateKey(entry.timestamp);
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       const day = row ? parseJson(row.data, {}) : {
-        requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+        requests: 0, promptTokens: 0, completionTokens: 0, cost: 0, costNanoUsd: 0,
         byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
       };
       aggregateEntryToDay(day, entry);
@@ -355,12 +491,22 @@ export async function getUsageHistory(filter = {}) {
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
-  if (filter.apiKey) { conds.push("apiKey = ?"); params.push(filter.apiKey); }
+  if (filter.apiKey) {
+    // Union of both row kinds (legacy raw `apiKey` + post-005 `apiKeyId`) so a
+    // key's history is never split.
+    const { cond, params: keyParams } = usageKeyCond(db, filter.apiKey);
+    conds.push(cond);
+    params.push(...keyParams);
+  }
   if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
+  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, costNanoUsd, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
+
+  // Post-005 rows carry apiKeyId and no raw key, so derive the mask from the
+  // caller's own key: a key holder's receipt must still identify the key.
+  const filterKeyMasked = filter.apiKey ? maskApiKey(filter.apiKey) : null;
 
   return rows.map((r) => {
     const meta = parseJson(r.meta, {});
@@ -373,8 +519,12 @@ export async function getUsageHistory(filter = {}) {
       model: requestedModel || r.model, // display model: combo name if known, else resolved
       resolvedModel: r.model,            // internal fallback model (kept for cost/accuracy)
       requestedModel,
-      connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
-      cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
+      connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey) ?? filterKeyMasked, endpoint: r.endpoint,
+      // Legacy float (derived from the authoritative integer) + the integer itself,
+      // so money-aware consumers never have to re-parse a float.
+      cost: rowCostUsd(r.costNanoUsd, r.cost),
+      costNanoUsd: rowCostNano(r.costNanoUsd, r.cost),
+      status: r.status, tokens: parseJson(r.tokens, {}),
       // Raw meta JSON (carries requestedModel + latencyMs). Exposed so downstream
       // readers (e.g. /api/usage/key/receipts) can compute Tok/s from latencyMs.
       meta,
@@ -415,7 +565,40 @@ export async function getUsageStats(period = "all") {
   let allApiKeys = [];
   try { allApiKeys = await getApiKeys(); } catch {}
   const apiKeyMap = {};
-  for (const k of allApiKeys) apiKeyMap[k.key] = { name: k.name, id: k.id, createdAt: k.createdAt };
+  const apiKeyMapById = {};
+  for (const k of allApiKeys) {
+    // `masked` is the only key-derived value that leaves this function for display:
+    // usage views must never receive the secret itself.
+    const info = {
+      name: k.name, id: k.id, createdAt: k.createdAt,
+      masked: k.key ? maskApiKey(k.key) : (k.keyPrefix ? `${k.keyPrefix}***` : null),
+    };
+    if (k.key) apiKeyMap[k.key] = info;
+    if (k.id) apiKeyMapById[k.id] = info;
+  }
+
+  // Rollup buckets and history rows identify a key either by apiKeys.id (rows
+  // written from v7 on) or by the raw string (legacy rows, admin keys with no
+  // apiKeys row). Canonicalize both onto one identity so the same key lands in one
+  // bucket regardless of the period being viewed: a raw key that apiKeys still
+  // owns resolves to its id, so a pre-v7 bucket and a v7 bucket for the same key
+  // merge instead of appearing as two keys.
+  // Memoized per call: resolveApiKeyId hits the DB (key, then keyHash) and a
+  // stats pass walks every row, but there are only a handful of distinct keys.
+  const resolvedKeyId = new Map();
+  const keyIdFor = (apiKey) => {
+    if (!apiKey) return null;
+    if (!resolvedKeyId.has(apiKey)) resolvedKeyId.set(apiKey, apiKeyMap[apiKey]?.id ?? resolveApiKeyId(db, apiKey));
+    return resolvedKeyId.get(apiKey);
+  };
+  const keyIdent = (apiKeyId, apiKey) => {
+    const id = apiKeyId || keyIdFor(apiKey);
+    return id ? `id:${id}` : (apiKey || "local-no-key");
+  };
+  const keyInfoOf = (apiKeyId, apiKey) => {
+    const id = apiKeyId || keyIdFor(apiKey);
+    return (id ? apiKeyMapById[id] : null) || (apiKey ? apiKeyMap[apiKey] : null) || null;
+  };
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
   const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
@@ -444,6 +627,8 @@ export async function getUsageStats(period = "all") {
   const stats = {
     totalRequests: 0,
     totalPromptTokens: 0, totalCompletionTokens: 0, totalCachedTokens: 0, totalCost: 0,
+    // Integer nanoUSD total — authoritative. `totalCost` is the legacy float mirror.
+    totalCostNanoUsd: 0,
     byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
     last10Minutes: [],
     pending: pendingRequests,
@@ -474,11 +659,11 @@ export async function getUsageStats(period = "all") {
   const bucketMap = {};
   for (let i = 0; i < 10; i++) {
     const ts = currentMinuteStart.getTime() - (9 - i) * 60 * 1000;
-    bucketMap[ts] = { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0 };
+    bucketMap[ts] = { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0, costNanoUsd: 0 };
     stats.last10Minutes.push(bucketMap[ts]);
   }
   const recent10 = db.all(
-    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
+    `SELECT timestamp, promptTokens, completionTokens, cost, costNanoUsd FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
     [tenMinutesAgo.toISOString(), now.toISOString()]
   );
   for (const r of recent10) {
@@ -488,7 +673,7 @@ export async function getUsageStats(period = "all") {
       bucketMap[minuteStart].requests++;
       bucketMap[minuteStart].promptTokens += r.promptTokens || 0;
       bucketMap[minuteStart].completionTokens += r.completionTokens || 0;
-      bucketMap[minuteStart].cost += r.cost || 0;
+      addCostTo(bucketMap[minuteStart], rowCostNano(r.costNanoUsd, r.cost));
     }
   }
 
@@ -505,15 +690,16 @@ export async function getUsageStats(period = "all") {
       stats.totalPromptTokens += day.promptTokens || 0;
       stats.totalCompletionTokens += day.completionTokens || 0;
       stats.totalCachedTokens += day.cachedTokens || 0;
-      stats.totalCost += day.cost || 0;
+      stats.totalCostNanoUsd += blobCostNano(day);
+      stats.totalCost = nanoToUsd(stats.totalCostNanoUsd);
 
       for (const [prov, p] of Object.entries(day.byProvider || {})) {
-        if (!stats.byProvider[prov]) stats.byProvider[prov] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+        if (!stats.byProvider[prov]) stats.byProvider[prov] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
         stats.byProvider[prov].requests += p.requests || 0;
         stats.byProvider[prov].promptTokens += p.promptTokens || 0;
         stats.byProvider[prov].completionTokens += p.completionTokens || 0;
         stats.byProvider[prov].cachedTokens += p.cachedTokens || 0;
-        stats.byProvider[prov].cost += p.cost || 0;
+        addCostTo(stats.byProvider[prov], blobCostNano(p));
       }
 
       for (const [mk, m] of Object.entries(day.byModel || {})) {
@@ -522,13 +708,13 @@ export async function getUsageStats(period = "all") {
         const statsKey = provider ? `${rawModel} (${provider})` : rawModel;
         const providerDisplayName = providerNodeNameMap[provider] || provider;
         if (!stats.byModel[statsKey]) {
-          stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, lastUsed: dateKey };
+          stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel, provider: providerDisplayName, lastUsed: dateKey };
         }
         stats.byModel[statsKey].requests += m.requests || 0;
         stats.byModel[statsKey].promptTokens += m.promptTokens || 0;
         stats.byModel[statsKey].completionTokens += m.completionTokens || 0;
         stats.byModel[statsKey].cachedTokens += m.cachedTokens || 0;
-        stats.byModel[statsKey].cost += m.cost || 0;
+        addCostTo(stats.byModel[statsKey], blobCostNano(m));
         if (dateKey > (stats.byModel[statsKey].lastUsed || "")) stats.byModel[statsKey].lastUsed = dateKey;
       }
 
@@ -539,13 +725,13 @@ export async function getUsageStats(period = "all") {
         const providerDisplayName = providerNodeNameMap[provider] || provider;
         const accountKey = `${rawModel} (${provider} - ${accountName})`;
         if (!stats.byAccount[accountKey]) {
-          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, connectionId: connId, accountName, lastUsed: dateKey };
+          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel, provider: providerDisplayName, connectionId: connId, accountName, lastUsed: dateKey };
         }
         stats.byAccount[accountKey].requests += a.requests || 0;
         stats.byAccount[accountKey].promptTokens += a.promptTokens || 0;
         stats.byAccount[accountKey].completionTokens += a.completionTokens || 0;
         stats.byAccount[accountKey].cachedTokens += a.cachedTokens || 0;
-        stats.byAccount[accountKey].cost += a.cost || 0;
+        addCostTo(stats.byAccount[accountKey], blobCostNano(a));
         if (dateKey > (stats.byAccount[accountKey].lastUsed || "")) stats.byAccount[accountKey].lastUsed = dateKey;
       }
 
@@ -553,20 +739,23 @@ export async function getUsageStats(period = "all") {
         const rawModel = ak.rawModel || "";
         const provider = ak.provider || "";
         const providerDisplayName = providerNodeNameMap[provider] || provider;
-        const apiKeyVal = ak.apiKey;
-        const keyInfo = apiKeyVal ? apiKeyMap[apiKeyVal] : null;
-        const keyName = keyInfo?.name || (apiKeyVal ? apiKeyVal.slice(0, 8) + "..." : "Local (No API Key)");
-        const apiKeyMasked = maskApiKey(apiKeyVal);
-        const apiKeyKey = apiKeyMasked || "local-no-key";
-        if (!stats.byApiKey[akKey]) {
-          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey, lastUsed: dateKey };
+        const info = keyInfoOf(ak.apiKeyId, ak.apiKey);
+        const keyName = info?.name || (ak.apiKeyId ? "Key " + String(ak.apiKeyId).slice(0, 8) + "..." : (ak.apiKey ? ak.apiKey.slice(0, 8) + "..." : "Local (No API Key)"));
+        const apiKeyMasked = info?.masked ?? maskApiKey(ak.apiKey);
+        const apiKeyKey = keyIdent(ak.apiKeyId, ak.apiKey);
+        // Bucket key is rebuilt from the canonical identity, not the stored blob
+        // key, because pre-v7 blobs embed the raw secret while v7 blobs embed
+        // `id:<uuid>` — both must merge into one bucket per key.
+        const groupKey = `${apiKeyKey}|${rawModel}|${provider || "unknown"}`;
+        if (!stats.byApiKey[groupKey]) {
+          stats.byApiKey[groupKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey, lastUsed: dateKey };
         }
-        stats.byApiKey[akKey].requests += ak.requests || 0;
-        stats.byApiKey[akKey].promptTokens += ak.promptTokens || 0;
-        stats.byApiKey[akKey].completionTokens += ak.completionTokens || 0;
-        stats.byApiKey[akKey].cachedTokens += ak.cachedTokens || 0;
-        stats.byApiKey[akKey].cost += ak.cost || 0;
-        if (dateKey > (stats.byApiKey[akKey].lastUsed || "")) stats.byApiKey[akKey].lastUsed = dateKey;
+        stats.byApiKey[groupKey].requests += ak.requests || 0;
+        stats.byApiKey[groupKey].promptTokens += ak.promptTokens || 0;
+        stats.byApiKey[groupKey].completionTokens += ak.completionTokens || 0;
+        stats.byApiKey[groupKey].cachedTokens += ak.cachedTokens || 0;
+        addCostTo(stats.byApiKey[groupKey], blobCostNano(ak));
+        if (dateKey > (stats.byApiKey[groupKey].lastUsed || "")) stats.byApiKey[groupKey].lastUsed = dateKey;
       }
 
       for (const [epKey, ep] of Object.entries(day.byEndpoint || {})) {
@@ -575,13 +764,13 @@ export async function getUsageStats(period = "all") {
         const provider = ep.provider || "";
         const providerDisplayName = providerNodeNameMap[provider] || provider;
         if (!stats.byEndpoint[epKey]) {
-          stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, endpoint, rawModel, provider: providerDisplayName, lastUsed: dateKey };
+          stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, endpoint, rawModel, provider: providerDisplayName, lastUsed: dateKey };
         }
         stats.byEndpoint[epKey].requests += ep.requests || 0;
         stats.byEndpoint[epKey].promptTokens += ep.promptTokens || 0;
         stats.byEndpoint[epKey].completionTokens += ep.completionTokens || 0;
         stats.byEndpoint[epKey].cachedTokens += ep.cachedTokens || 0;
-        stats.byEndpoint[epKey].cost += ep.cost || 0;
+        addCostTo(stats.byEndpoint[epKey], blobCostNano(ep));
         if (dateKey > (stats.byEndpoint[epKey].lastUsed || "")) stats.byEndpoint[epKey].lastUsed = dateKey;
       }
     }
@@ -589,7 +778,7 @@ export async function getUsageStats(period = "all") {
     // Overlay precise lastUsed timestamps from history
     const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
     const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory WHERE timestamp >= ?`,
       [new Date(overlayCutoff).toISOString()]
     );
     for (const e of histRows) {
@@ -603,9 +792,10 @@ export async function getUsageStats(period = "all") {
         if (stats.byAccount[accountKey] && new Date(ts) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = ts;
       }
 
-      const apiKeyKey = (e.apiKey && typeof e.apiKey === "string")
-        ? `${e.apiKey}|${e.model}|${e.provider || "unknown"}`
-        : "local-no-key";
+      const keyIdPart = keyIdent(e.apiKeyId, e.apiKey && typeof e.apiKey === "string" ? e.apiKey : null);
+      const apiKeyKey = keyIdPart === "local-no-key"
+        ? "local-no-key"
+        : `${keyIdPart}|${e.model}|${e.provider || "unknown"}`;
       if (stats.byApiKey[apiKeyKey] && new Date(ts) > new Date(stats.byApiKey[apiKeyKey].lastUsed)) stats.byApiKey[apiKeyKey].lastUsed = ts;
 
       const endpoint = e.endpoint || "Unknown";
@@ -623,7 +813,7 @@ export async function getUsageStats(period = "all") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
     const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, tokens FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
     );
 
@@ -632,73 +822,78 @@ export async function getUsageStats(period = "all") {
       const promptTokens = tokens.prompt_tokens || 0;
       const completionTokens = tokens.completion_tokens || 0;
       const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
-      const entryCost = r.cost || 0;
+      const entryCostNano = rowCostNano(r.costNanoUsd, r.cost);
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
 
       stats.totalPromptTokens += promptTokens;
       stats.totalCompletionTokens += completionTokens;
       stats.totalCachedTokens += cachedTokens;
-      stats.totalCost += entryCost;
+      stats.totalCostNanoUsd += entryCostNano;
+      stats.totalCost = nanoToUsd(stats.totalCostNanoUsd);
 
-      if (!stats.byProvider[r.provider]) stats.byProvider[r.provider] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+      if (!stats.byProvider[r.provider]) stats.byProvider[r.provider] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
       stats.byProvider[r.provider].requests++;
       stats.byProvider[r.provider].promptTokens += promptTokens;
       stats.byProvider[r.provider].completionTokens += completionTokens;
       stats.byProvider[r.provider].cachedTokens += cachedTokens;
-      stats.byProvider[r.provider].cost += entryCost;
+      addCostTo(stats.byProvider[r.provider], entryCostNano);
 
       const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
       if (!stats.byModel[modelKey]) {
-        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
+        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
       }
       stats.byModel[modelKey].requests++;
       stats.byModel[modelKey].promptTokens += promptTokens;
       stats.byModel[modelKey].completionTokens += completionTokens;
       stats.byModel[modelKey].cachedTokens += cachedTokens;
-      stats.byModel[modelKey].cost += entryCost;
+      addCostTo(stats.byModel[modelKey], entryCostNano);
       if (new Date(r.timestamp) > new Date(stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = r.timestamp;
 
       if (r.connectionId) {
         const accountName = connectionMap[r.connectionId] || `Account ${r.connectionId.slice(0, 8)}...`;
         const accountKey = `${r.model} (${r.provider} - ${accountName})`;
         if (!stats.byAccount[accountKey]) {
-          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, connectionId: r.connectionId, accountName, lastUsed: r.timestamp };
+          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, connectionId: r.connectionId, accountName, lastUsed: r.timestamp };
         }
         stats.byAccount[accountKey].requests++;
         stats.byAccount[accountKey].promptTokens += promptTokens;
         stats.byAccount[accountKey].completionTokens += completionTokens;
         stats.byAccount[accountKey].cachedTokens += cachedTokens;
-        stats.byAccount[accountKey].cost += entryCost;
+        addCostTo(stats.byAccount[accountKey], entryCostNano);
         if (new Date(r.timestamp) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = r.timestamp;
       }
 
-      if (r.apiKey && typeof r.apiKey === "string") {
-        const keyInfo = apiKeyMap[r.apiKey];
-        const keyName = keyInfo?.name || r.apiKey.slice(0, 8) + "...";
-        const apiKeyMasked = maskApiKey(r.apiKey);
-        const akKey = `${apiKeyMasked}|${r.model}|${r.provider || "unknown"}`;
+      const liveKeyIdent = keyIdent(r.apiKeyId, r.apiKey);
+      if (liveKeyIdent !== "local-no-key") {
+        const keyInfo = keyInfoOf(r.apiKeyId, r.apiKey);
+        const apiKeyMasked = keyInfo?.masked ?? maskApiKey(r.apiKey);
+        const keyName = keyInfo?.name || (r.apiKeyId ? "Key " + String(r.apiKeyId).slice(0, 8) + "..." : r.apiKey.slice(0, 8) + "...");
+        const akKey = `${liveKeyIdent}|${r.model}|${r.provider || "unknown"}`;
         if (!stats.byApiKey[akKey]) {
-          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: apiKeyMasked, lastUsed: r.timestamp };
+          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: liveKeyIdent, lastUsed: r.timestamp };
         }
         const ake = stats.byApiKey[akKey];
-        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens; ake.cost += entryCost;
+        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
+        addCostTo(ake, entryCostNano);
         if (new Date(r.timestamp) > new Date(ake.lastUsed)) ake.lastUsed = r.timestamp;
       } else {
         if (!stats.byApiKey["local-no-key"]) {
-          stats.byApiKey["local-no-key"] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked: null, keyName: "Local (No API Key)", apiKeyKey: "local-no-key", lastUsed: r.timestamp };
+          stats.byApiKey["local-no-key"] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked: null, keyName: "Local (No API Key)", apiKeyKey: "local-no-key", lastUsed: r.timestamp };
         }
         const ake = stats.byApiKey["local-no-key"];
-        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens; ake.cost += entryCost;
+        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
+        addCostTo(ake, entryCostNano);
         if (new Date(r.timestamp) > new Date(ake.lastUsed)) ake.lastUsed = r.timestamp;
       }
 
       const endpoint = r.endpoint || "Unknown";
       const epKey = `${endpoint}|${r.model}|${r.provider || "unknown"}`;
       if (!stats.byEndpoint[epKey]) {
-        stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, endpoint, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
+        stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, endpoint, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
       }
       const epe = stats.byEndpoint[epKey];
-      epe.requests++; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens; epe.cost += entryCost;
+      epe.requests++; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens;
+      addCostTo(epe, entryCostNano);
       if (new Date(r.timestamp) > new Date(epe.lastUsed)) epe.lastUsed = r.timestamp;
     }
   }
@@ -719,10 +914,10 @@ export async function getChartData(period = "7d") {
     const startTime = startOfDay.getTime();
     const endTime = startTime + bucketCount * bucketMs;
     const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0, costNanoUsd: 0 }));
 
     const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, promptTokens, completionTokens, cost, costNanoUsd FROM usageHistory WHERE timestamp >= ?`,
       [new Date(startTime).toISOString()]
     );
     for (const r of rows) {
@@ -731,7 +926,7 @@ export async function getChartData(period = "7d") {
       const idx = Math.floor((t - startTime) / bucketMs);
       if (idx >= 0 && idx < bucketCount) {
         buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
-        buckets[idx].cost += r.cost || 0;
+        addCostTo(buckets[idx], rowCostNano(r.costNanoUsd, r.cost));
       }
     }
     return buckets;
@@ -742,10 +937,10 @@ export async function getChartData(period = "7d") {
     const bucketMs = 3600000;
     const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
     const startTime = now - bucketCount * bucketMs;
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0, costNanoUsd: 0 }));
 
     const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, promptTokens, completionTokens, cost, costNanoUsd FROM usageHistory WHERE timestamp >= ?`,
       [new Date(startTime).toISOString()]
     );
     for (const r of rows) {
@@ -753,7 +948,7 @@ export async function getChartData(period = "7d") {
       if (t < startTime || t > now) continue;
       const idx = Math.min(Math.floor((t - startTime) / bucketMs), bucketCount - 1);
       buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
-      buckets[idx].cost += r.cost || 0;
+      addCostTo(buckets[idx], rowCostNano(r.costNanoUsd, r.cost));
     }
     return buckets;
   }
@@ -775,7 +970,8 @@ export async function getChartData(period = "7d") {
     return {
       label: labelFn(d),
       tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
-      cost: dayData ? (dayData.cost || 0) : 0,
+      costNanoUsd: blobCostNano(dayData),
+      cost: nanoToUsd(blobCostNano(dayData)),
     };
   });
 }
@@ -830,21 +1026,24 @@ export async function getRecentLogs(limit = 200) {
 //  prompt sent in, not generated, so they're excluded. Thresholds: <10 slow,
 //  20-40 normal, 80+ instant.)
 export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
-  if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 }, peakTpm: 0, peakRpm: 0, peakTokS: 0 };
+  if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 }, peakTpm: 0, peakRpm: 0, peakTokS: 0 };
   const db = await getAdapter();
-  const conds = ["apiKey = ?"];
-  const params = [apiKey];
+  // Union of legacy raw-key rows and post-005 apiKeyId rows — a key's summary
+  // must include its whole history, never just one row shape.
+  const keyFilter = usageKeyCond(db, apiKey);
+  const conds = [keyFilter.cond];
+  const params = [...keyFilter.params];
   if (startDate) { conds.push("timestamp >= ?"); params.push(new Date(startDate).toISOString()); }
   if (endDate) { conds.push("timestamp <= ?"); params.push(new Date(endDate).toISOString()); }
   const where = `WHERE ${conds.join(" AND ")}`;
 
   const rows = db.all(
-    `SELECT model, timestamp, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    `SELECT model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
     params
   );
 
   const byModel = {};
-  const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 };
 
   // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), and the
   // per-request generation-speed peak (Tok/s = output / generation_seconds).
@@ -866,21 +1065,21 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     // attributed, just under the pool-model label.
     const meta = parseJson(r.meta, {}) || {};
     const model = meta.requestedModel || r.model || "unknown";
-    if (!byModel[model]) byModel[model] = { model, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0 };
+    if (!byModel[model]) byModel[model] = { model, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 };
     const m = byModel[model];
     m.input += prompt;
     m.output += completion;
     m.cacheRead += cacheRead;
     m.cacheCreation += cacheCreation;
     m.requests += 1;
-    m.cost += r.cost || 0;
+    addCostTo(m, rowCostNano(r.costNanoUsd, r.cost));
 
     totals.input += prompt;
     totals.output += completion;
     totals.cacheRead += cacheRead;
     totals.cacheCreation += cacheCreation;
     totals.requests += 1;
-    totals.cost += r.cost || 0;
+    addCostTo(totals, rowCostNano(r.costNanoUsd, r.cost));
 
     const ts = r.timestamp || "";
     const minute = ts.slice(0, 16); // YYYY-MM-DDTHH:MM
@@ -929,12 +1128,12 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
   const where = `WHERE ${conds.join(" AND ")}`;
 
   const rows = db.all(
-    `SELECT provider, timestamp, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
+    `SELECT provider, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
     params
   );
 
   const byProvider = {};
-  const totals = { input: 0, output: 0, requests: 0, cost: 0 };
+  const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0 };
 
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
@@ -943,17 +1142,17 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
     const tokSum = prompt + completion;
     const provider = r.provider || "unknown";
 
-    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, _minTok: {}, _minReq: {}, _peakTokS: 0 };
+    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, _minTok: {}, _minReq: {}, _peakTokS: 0 };
     const p = byProvider[provider];
     p.input += prompt;
     p.output += completion;
     p.requests += 1;
-    p.cost += r.cost || 0;
+    addCostTo(p, rowCostNano(r.costNanoUsd, r.cost));
 
     totals.input += prompt;
     totals.output += completion;
     totals.requests += 1;
-    totals.cost += r.cost || 0;
+    addCostTo(totals, rowCostNano(r.costNanoUsd, r.cost));
 
     const ts = r.timestamp || "";
     const minute = ts.slice(0, 16);
@@ -977,8 +1176,8 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
     for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
     for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
     peakTokS = Math.round((p._peakTokS || 0) * 10) / 10;
-    const { provider, input, output, requests, cost } = p;
-    return { provider, input, output, requests, cost, peakTpm, peakRpm, peakTokS };
+    const { provider, input, output, requests, cost, costNanoUsd } = p;
+    return { provider, input, output, requests, cost, costNanoUsd, peakTpm, peakRpm, peakTokS };
   }).sort((a, b) => (b.requests || 0) - (a.requests || 0));
 
   return { items, totals };
@@ -992,10 +1191,12 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
 export async function getKeyRateUsage(apiKey, windowMs = 60000) {
   const db = await getAdapter();
   const since = new Date(Date.now() - windowMs).toISOString();
+  // Both row shapes count: legacy rows match on the raw key, new rows on apiKeyId.
+  const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
     `SELECT COUNT(*) as requests, COALESCE(SUM(COALESCE(promptTokens,0) + COALESCE(completionTokens,0)),0) as tokens
-     FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
-    [apiKey, since],
+     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+    [...keyFilter.params, since],
   );
   return {
     requests: row?.requests ?? 0,
@@ -1037,30 +1238,68 @@ export async function getProviderRateUsage(windowMs = 60000) {
 export async function getKeyOldestTokenAt(apiKey, windowMs = 60000) {
   const db = await getAdapter();
   const since = new Date(Date.now() - windowMs).toISOString();
+  const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
     `SELECT MIN(timestamp) as oldest
-     FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
-    [apiKey, since],
+     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+    [...keyFilter.params, since],
   );
   return row?.oldest ?? null;
 }
 
-// Sum cost for an apiKey since a given ISO timestamp (for budget window).
-export async function getKeyCostSince(apiKey, sinceIso) {
+// Per-row integer nanoUSD expression. `costNanoUsd` is authoritative; rows that
+// never got it (legacy JSON import path, which only writes the float `cost`)
+// fall back to their rounded float. Per-row rounding keeps the SUM integral.
+const COST_NANO_EXPR = `(COALESCE(costNanoUsd, 0) + CASE WHEN COALESCE(costNanoUsd, 0) = 0 THEN CAST(ROUND(COALESCE(cost, 0) * 1000000000) AS INTEGER) ELSE 0 END)`;
+
+// Sum cost for an apiKey since a given ISO timestamp as integer nanoUSD.
+// Budget enforcement uses this: integer math means 500 × 6_000_000 nano sums to
+// exactly 3_000_000_000 instead of drifting through float addition.
+export async function getKeyCostSinceNano(apiKey, sinceIso) {
   const db = await getAdapter();
+  const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
-    `SELECT COALESCE(SUM(cost),0) as total FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
-    [apiKey, sinceIso],
+    `SELECT COALESCE(SUM(${COST_NANO_EXPR}),0) as total FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+    [...keyFilter.params, sinceIso],
   );
-  return row?.total ?? 0;
+  return Math.round(row?.total ?? 0);
+}
+
+// Sum cost for an apiKey since a given ISO timestamp, as a legacy USD float.
+// Kept for the read routes that still display dollars; new money paths should
+// use getKeyCostSinceNano.
+export async function getKeyCostSince(apiKey, sinceIso) {
+  return nanoToUsd(await getKeyCostSinceNano(apiKey, sinceIso));
+}
+
+// Sum cost over an arbitrary usageHistory filter, as integer nanoUSD.
+// Supported filter keys: provider, model, apiKey, startDate, endDate.
+export async function getUsageCostTotalNano(filter = {}) {
+  const db = await getAdapter();
+  const conds = [];
+  const params = [];
+  if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
+  if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
+  if (filter.apiKey) {
+    // Union of legacy raw-key rows and post-005 apiKeyId rows.
+    const keyFilter = usageKeyCond(db, filter.apiKey);
+    conds.push(keyFilter.cond);
+    params.push(...keyFilter.params);
+  }
+  if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
+  if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
+  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  const row = db.get(`SELECT COALESCE(SUM(${COST_NANO_EXPR}),0) as total FROM usageHistory ${where}`, params);
+  return Math.round(row?.total ?? 0);
 }
 
 // Count requests for an apiKey since a given ISO timestamp (for window request count).
 export async function getKeyRequestCountSince(apiKey, sinceIso) {
   const db = await getAdapter();
+  const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
-    `SELECT COUNT(*) as c FROM usageHistory WHERE apiKey = ? AND timestamp >= ?`,
-    [apiKey, sinceIso],
+    `SELECT COUNT(*) as c FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+    [...keyFilter.params, sinceIso],
   );
   return row?.c ?? 0;
 }
@@ -1074,11 +1313,14 @@ export async function getKeyRequestCountSince(apiKey, sinceIso) {
 export async function deleteKeyUsageHistory(apiKey) {
   if (!apiKey) return { history: 0, details: 0 };
   const db = await getAdapter();
+  // Both row shapes must be removed, otherwise half a key's log would survive.
+  const keyFilter = usageKeyCond(db, apiKey);
   let history = 0;
   let details = 0;
   db.transaction(() => {
-    const h = db.run(`DELETE FROM usageHistory WHERE apiKey = ?`, [apiKey]);
+    const h = db.run(`DELETE FROM usageHistory WHERE ${keyFilter.cond}`, keyFilter.params);
     history = h.changes || 0;
+    // requestDetails has no apiKeyId column — only its raw-key rows exist.
     const d = db.run(`DELETE FROM requestDetails WHERE apiKey = ?`, [apiKey]);
     details = d.changes || 0;
     // Invalidate any in-memory stats snapshot so the next read recomputes.

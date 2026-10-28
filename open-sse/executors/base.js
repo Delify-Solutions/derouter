@@ -5,6 +5,11 @@ import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
 
+// Hard deadline for consuming an upstream response body (after headers). The
+// connect timer only covers time-to-headers; a provider that returns 200 and
+// then stalls, or a client that keeps the socket open, needs its own bound.
+export const DEFAULT_BODY_TIMEOUT_MS = 600000;
+
 /**
  * BaseExecutor - Base class for provider executors
  */
@@ -137,6 +142,18 @@ export class BaseExecutor {
       const connectTimer = setTimeout(() => connectCtrl.abort(new Error("fetch connect timeout")), timeoutMs);
       const mergedSignal = signal ? AbortSignal.any([signal, connectCtrl.signal]) : connectCtrl.signal;
 
+      // Once headers arrive the connect timer is cleared (keeping it armed would
+      // abort the response body mid-stream). The body then needs its own bound:
+      // a provider that answers 200 and never finishes would otherwise hang the
+      // request forever. AbortSignal.timeout is unref'd in Node, so an unused
+      // deadline never keeps the event loop alive.
+      const bodyTimeoutMs = this.config?.bodyTimeoutMs ?? DEFAULT_BODY_TIMEOUT_MS;
+      const bodyCtrl = new AbortController();
+      const bodyDeadline = AbortSignal.timeout(bodyTimeoutMs);
+      const onBodyDeadline = () => bodyCtrl.abort(new Error(`upstream body timeout after ${bodyTimeoutMs}ms`));
+      if (bodyDeadline.aborted) onBodyDeadline();
+      else bodyDeadline.addEventListener("abort", onBodyDeadline, { once: true });
+
       try {
         const bodyStr = JSON.stringify(transformedBody);
         const fetchT0 = Date.now();
@@ -160,9 +177,10 @@ export class BaseExecutor {
           continue;
         }
 
-        return { response, url, headers, transformedBody };
+        return { response, url, headers, transformedBody, bodySignal: bodyCtrl.signal, bodyTimeoutMs };
       } catch (error) {
         clearTimeout(connectTimer);
+        bodyDeadline.removeEventListener("abort", onBodyDeadline);
         lastError = error;
         const isConnectTimeout = connectCtrl.signal.aborted && error.name === "AbortError";
         dbg("FETCH", `${this.provider.toUpperCase()} ✖ ${error.name}: ${error.message}${isConnectTimeout ? " (connect timeout)" : ""}`);

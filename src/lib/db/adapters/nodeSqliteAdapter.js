@@ -15,7 +15,8 @@ export async function createNodeSqliteAdapter(filePath) {
     return origEmit.call(process, name, data, ...rest);
   };
 
-  // Dynamic import — fails on Node < 22.5 → driver.js falls back to sql.js
+  // Dynamic import — fails on Node < 22.5, where driver.js marks this driver
+  // unavailable and reports that no SQLite backend could be loaded.
   const sqlite = await import("node:sqlite");
   const Database = sqlite.DatabaseSync;
   const db = new Database(filePath);

@@ -399,13 +399,25 @@ export function getDefaultPricing() {
 }
 
 /**
- * Format cost for display
- * @param {number} cost
+ * Format a USD cost for display with adaptive precision:
+ *   >= $1     -> 2 decimals
+ *   >= $0.01  -> 4 decimals
+ *   otherwise -> 6 decimals
+ * null/undefined/NaN -> "$0".
+ *
+ * Dependency-free by design: open-sse must not import from `@/`, so this mirrors
+ * src/shared/utils/money.js fmtUsd/fmtUsdNano instead of sharing code.
+ *
+ * @param {number} cost - cost in dollars
  * @returns {string}
  */
 export function formatCost(cost) {
-  if (cost === null || cost === undefined || isNaN(cost)) return "$0.00";
-  return `$${cost.toFixed(2)}`;
+  if (cost === null || cost === undefined) return "$0";
+  const n = Number(cost);
+  if (!Number.isFinite(n) || n === 0) return "$0";
+  const abs = Math.abs(n);
+  const digits = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+  return `${n < 0 ? "-" : ""}$${abs.toFixed(digits)}`;
 }
 
 /**

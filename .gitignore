@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-cli-build/
+.next-w2/
 /out/
 cli/.build-home/
 product
@@ -54,8 +55,6 @@ source/*
 .cursor/*
 docs/*
 !docs/ARCHITECTURE.md
-test/*
-open-sse/test/*
 RM.vn.md
 RM.md
 cursor/*
@@ -63,7 +62,6 @@ PUBLIC.md
 Thanks.md
 PUBLIC.en.md
 PR/*
-package-lock.json
 
 
 #Ignore vscode AI rules

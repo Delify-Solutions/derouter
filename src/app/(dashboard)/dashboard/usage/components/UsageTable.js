@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
+import { fmtUsd } from "@/shared/utils/money";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
-const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+// Money is a legacy USD float here (stats API); fmtUsd is the single formatter.
+const fmtCost = (n) => fmtUsd(n || 0);
 
 function fmtTime(iso) {
   if (!iso) return "Never";

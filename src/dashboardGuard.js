@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { verifyUserToken } from "@/lib/auth/userSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { safeEqual } from "@/lib/auth/internalHeaders";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const CLI_TOKEN_SALT = "dr-cli-auth";
@@ -13,10 +15,12 @@ async function getCliToken() {
   return cachedCliToken;
 }
 
-async function hasValidCliToken(request) {
+// Exported for API routes that grant extra trust to the local CLI (e.g. the
+// first-time password branch of /api/settings).
+export async function hasValidCliToken(request) {
   const token = request.headers.get(CLI_TOKEN_HEADER);
   if (!token) return false;
-  return token === await getCliToken();
+  return safeEqual(token, await getCliToken());
 }
 
 // Public API paths — no auth required (LLM API has its own key auth inside handler).
@@ -32,7 +36,14 @@ const PUBLIC_API_PATHS = [
   "/api/version",
   "/api/settings/require-login",
   "/api/usage/key",
+  // Customer signup/login/verification. These authenticate themselves; the
+  // /api/account/* surface behind them is NOT public.
+  "/api/public",
 ];
+
+// Public pages for customer accounts. The admin entry point stays hidden at
+// /admin/ss, so these render the tenant-facing forms only.
+const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email"];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.
@@ -48,31 +59,11 @@ const ALWAYS_PROTECTED = [
   "/api/oauth/kiro/auto-import",
 ];
 
-// Require auth, but allow through if requireLogin is disabled
-const PROTECTED_API_PATHS = [
-  "/api/settings",
-  "/api/keys",
-  "/api/providers",
-  "/api/provider-nodes",
-  "/api/proxy-pools",
-  "/api/combos",
-  "/api/models",
-  "/api/usage",
-  "/api/oauth",
-  "/api/cloud",
-  "/api/media-providers",
-  "/api/pricing",
-  "/api/tags",
-  "/api/cli-tools",
-  "/api/mcp",
-  "/api/translator",
-  "/api/tunnel",
-  "/api/groups",
-];
-
 // Routes that spawn child processes or read host secrets — restrict to localhost.
 const LOCAL_ONLY_PATHS = [
   "/api/cli-tools/cowork-settings",
+  // Probes a client-supplied URL server-side; keep it off the network.
+  "/api/cli-tools/cowork-mcp-tools",
   "/api/cli-tools/antigravity-mitm",
   "/api/mcp/",
   "/api/tunnel/tailscale-install",
@@ -168,7 +159,8 @@ async function canAccessPublicLlmApi(request) {
 
 async function canAccessLocalOnlyRoute(request) {
   if (await hasValidCliToken(request)) return true;
-  // Browser on host: loopback Host + Origin (blocks tunnel/CSRF) + auth (JWT or requireLogin=false)
+  // Browser on the host machine: loopback peer + loopback Origin (blocks tunnel/CSRF)
+  // plus a dashboard JWT.
   if (isLocalRequest(request) && await isAuthenticated(request)) return true;
   return false;
 }
@@ -176,6 +168,20 @@ async function canAccessLocalOnlyRoute(request) {
 async function hasValidToken(request) {
   const token = request.cookies.get("auth_token")?.value;
   return await verifyDashboardAuthToken(token);
+}
+
+// Customer session: the `user_token` cookie or a Bearer token. Signed with a
+// different key than the admin JWT, so the two can never be swapped.
+async function hasValidUserToken(request) {
+  const token = request.cookies.get("user_token")?.value;
+  if (token) {
+    if (await verifyUserToken(token)) return true;
+  }
+  const header = request.headers.get("authorization");
+  if (header?.startsWith("Bearer ")) {
+    return !!(await verifyUserToken(header.slice(7).trim()));
+  }
+  return false;
 }
 
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
@@ -188,10 +194,10 @@ async function loadSettings() {
 }
 
 async function isAuthenticated(request) {
-  if (await hasValidToken(request)) return true;
-  const settings = await loadSettings();
-  if (settings && settings.requireLogin === false) return true;
-  return false;
+  // JWT only. The relaxed-login setting used to bypass this and turned the toggle
+  // into "no auth at all"; that setting now only affects the LLM surface, which
+  // authenticates requests with its own API keys.
+  return await hasValidToken(request);
 }
 
 function isPublicApi(pathname) {
@@ -232,9 +238,45 @@ export async function proxy(request) {
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
     if (isPublicApi(pathname)) return NextResponse.next();
+
+    // Customer account API: `user_token` only. Checked before the admin JWT/CLI
+    // branch so an admin session can never reach a tenant's account surface.
+    // Handlers re-check the session (defence in depth).
+    if (pathname.startsWith("/api/account")) {
+      if (await hasValidUserToken(request)) return NextResponse.next();
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     if (await hasValidCliToken(request) || await isAuthenticated(request))
       return NextResponse.next();
+
+    // Fresh-install bootstrap: with no password hash stored there is no credential
+    // to authenticate with, so the only way to set one is a loopback browser.
+    // Loopback peer + loopback Origin already exclude tunnels and CSRF; nothing
+    // remote can reach this branch. A settings read failure fails closed.
+    if (
+      pathname === "/api/settings" &&
+      (request.method === "PATCH" || request.method === "POST") &&
+      isLocalRequest(request)
+    ) {
+      const settings = await loadSettings();
+      if (settings && !settings.password) return NextResponse.next();
+    }
+
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Customer account pages: the layout owns the redirect message; the guard only
+  // enforces that a valid customer token exists.
+  if (pathname.startsWith("/account")) {
+    if (await hasValidUserToken(request)) return NextResponse.next();
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Public customer pages. Checked before the admin 404 rules below so /login is
+  // reachable for customers while the admin entry point stays at /admin/ss.
+  if (PUBLIC_PAGE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    return NextResponse.next();
   }
 
   // Protect all dashboard routes
@@ -279,18 +321,18 @@ export async function proxy(request) {
     return notFound();
   }
 
-  // Hide admin UI: unauthenticated / returns 404.
-  // Authenticated / falls through to src/app/page.js which redirects to /dashboard.
+  // `/` is the public landing page. src/app/page.js is a server component that
+  // redirects authenticated sessions itself (admin cookie → /dashboard, customer
+  // cookie → /account) and renders the landing page for everyone else, so the
+  // middleware only has to let the request through. `/landing` is a permanent
+  // redirect to `/` issued by its own page and falls through to the same result.
   if (pathname === "/") {
-    if (await isAuthenticated(request)) return NextResponse.next();
-    return notFound();
+    return NextResponse.next();
   }
 
-  // Old login path is removed — return JSON 404 so it doesn't render the
-  // themed not-found page (keeps the admin entry point uniform and hidden).
-  if (pathname === "/login" || pathname.startsWith("/login/")) {
-    return notFound();
-  }
+  // /login, /register and /verify-email are customer pages, already let through
+  // by PUBLIC_PAGE_PATHS above. The admin entry point remains the hidden
+  // /admin/ss path.
 
   // Public usage check page (?key= deep link, then stripped) — no admin login
   // required. The page fetches /api/usage/key (public) with the user's key.

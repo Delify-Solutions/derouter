@@ -9,7 +9,9 @@ export const APP_CONFIG = {
 
 // GitHub configuration
 export const GITHUB_CONFIG = {
-  changelogUrl: "#",
+  // Served from public/ so the changelog is a same-origin document instead of
+  // third-party HTML injected into the modal.
+  changelogUrl: "/CHANGELOG.md",
   donateUrl: "#",
 };
 

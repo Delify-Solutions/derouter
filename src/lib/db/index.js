@@ -1,6 +1,7 @@
 // Public API barrel — all DB functions
 import { getAdapter } from "./driver.js";
 import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
+import { hashApiKey } from "./repos/apiKeysRepo.js";
 
 // Settings
 export {
@@ -30,7 +31,7 @@ export {
 // API keys
 export {
   getApiKeys, getApiKeyById, getApiKeyByKey, createApiKey, updateApiKey, deleteApiKey,
-  validateApiKey, getApiKeyForAuth, resetKeyWindow, setKeyWindowCost,
+  validateApiKey, getApiKeyForAuth, resetKeyWindow, setKeyWindowCost, hashApiKey,
 } from "./repos/apiKeysRepo.js";
 
 // Key groups
@@ -38,6 +39,15 @@ export {
   getKeyGroups, getKeyGroupById, getKeyGroupByName,
   createKeyGroup, updateKeyGroup, deleteKeyGroup,
 } from "./repos/keyGroupsRepo.js";
+
+// Tenant users, sessions and single-use email tokens
+export {
+  getUserById, getUserByEmail, getUserByEmailWithPassword, listUsers,
+  createUser, updateUser, deleteUser, resolveDefaultGroupId,
+  createSession, getSessionByToken, revokeSession, revokeAllUserSessions, revokeOtherUserSessions, touchLastLogin,
+  createVerification, consumeVerification, getVerificationByToken, replaceVerification,
+  hashToken, normalizeEmail, isValidEmailShape, publicUser, SESSION_TTL,
+} from "./repos/userRepo.js";
 
 // Combos
 export {
@@ -54,13 +64,20 @@ export {
 
 // Pricing
 export {
-  getPricing, getPricingForModel, updatePricing, resetPricing, resetAllPricing,
+  getPricing, getPricingForModel, resolvePrice, updatePricing, resetPricing, resetAllPricing,
 } from "./repos/pricingRepo.js";
 
 // Combo-level pricing (admin-set price per combo, overrides per-pool for combo requests)
 export {
   getComboPricing, getPricingForCombo, updateComboPricing, resetComboPricing, resetAllComboPricing,
 } from "./repos/comboPricingRepo.js";
+
+// Gift codes
+export {
+  createGiftCode, listGiftCodes, getGiftCodeById, updateGiftCode, deleteGiftCode,
+  listRedemptions, listUserRedemptions, listGiftPlans, redeemGiftCode,
+  normalizeGiftCode, formatGiftCode, generateGiftCode,
+} from "./repos/giftRepo.js";
 
 // Disabled models
 export {
@@ -72,7 +89,7 @@ export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
-  getKeyRateUsage, getKeyCostSince, getKeyRequestCountSince,
+  getKeyRateUsage, getKeyCostSince, getKeyCostSinceNano, getUsageCostTotalNano, getKeyRequestCountSince,
   getKeyUsageSummary, getProviderUsageSummary, getProviderRateUsage,
   deleteKeyUsageHistory,
 } from "./repos/usageRepo.js";
@@ -82,6 +99,16 @@ export {
   saveRequestDetail, getRequestDetails, getRequestDetailById, getDistinctProviders,
   clearAllRequestDetails,
 } from "./repos/requestDetailsRepo.js";
+
+// Billing: wallet, credit grants/charges, plans, orders, ledger
+export {
+  walletSummary, getAvailableNanoUsd, grantUserPlan, chargeCreditsSync,
+  expireStalePlans, runExpirySweep, getLedger, resolveApiKeyOwner, NO_PLAN_ID,
+  validatePlanInput,
+  listPlans, getPlanById, getPlanByCode, createPlan, updatePlan, deletePlan,
+  listOrders, getOrderById, createOrder, updateOrderStatus,
+  approveOrder, cancelOrder, refundOrder,
+} from "./repos/billingRepo.js";
 
 // Export/import full DB
 export async function exportDb() {
@@ -152,9 +179,15 @@ export async function importDb(payload) {
       );
     }
     for (const k of payload.apiKeys || []) {
+      // Derive the dual-read columns so an imported key is found by either the
+      // plaintext `key` or its sha256 — same contract as createApiKey.
       db.run(
-        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt, keyHash, keyPrefix) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1,
+          k.createdAt || new Date().toISOString(),
+          hashApiKey(k.key), k.key ? String(k.key).slice(0, 8) : null,
+        ]
       );
     }
     for (const c of payload.combos || []) {

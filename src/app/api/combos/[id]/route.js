@@ -84,6 +84,11 @@ export async function PUT(request, { params }) {
 
     return NextResponse.json(combo);
   } catch (error) {
+    // updateCombo() validates members at the repo layer. A bad member list is the
+    // caller's mistake, so return 400 with the repo's message instead of a 500.
+    if (error?.message === "Combo members must be provider/model") {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.log("Error updating combo:", error);
     return NextResponse.json({ error: "Failed to update combo" }, { status: 500 });
   }

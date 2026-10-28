@@ -1,6 +1,7 @@
 "use server";
 
 import { NextResponse } from "next/server";
+import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard";
 
 const TIMEOUT_MS = 8000;
 
@@ -16,6 +17,7 @@ async function probeMcp(url) {
   const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
   try {
     // Step 1: initialize
+    await assertPublicUrlResolved(url);
     const initRes = await fetch(url, {
       method: "POST",
       headers,
@@ -38,6 +40,7 @@ async function probeMcp(url) {
     if (sessionId) listHeaders["mcp-session-id"] = sessionId;
 
     // Step 2: notifications/initialized (required by spec before tools/list)
+    await assertPublicUrlResolved(url);
     await fetch(url, {
       method: "POST",
       headers: listHeaders,
@@ -46,6 +49,7 @@ async function probeMcp(url) {
     }).catch(() => {});
 
     // Step 3: tools/list
+    await assertPublicUrlResolved(url);
     const listRes = await fetch(url, {
       method: "POST",
       headers: listHeaders,
@@ -87,7 +91,22 @@ export async function POST(request) {
     if (!url || typeof url !== "string") {
       return NextResponse.json({ error: "url required" }, { status: 400 });
     }
-    const result = await probeMcp(url);
+    // Reject non-HTTP(S) schemes and literal internal hosts before any DNS work.
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return NextResponse.json({ error: "Only http(s) URLs are supported" }, { status: 400 });
+    }
+    try {
+      await assertPublicUrlResolved(parsedUrl.toString());
+    } catch (e) {
+      return NextResponse.json({ error: e.message, tools: [] }, { status: 400 });
+    }
+    const result = await probeMcp(parsedUrl.toString());
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: e.message, tools: [] }, { status: 500 });

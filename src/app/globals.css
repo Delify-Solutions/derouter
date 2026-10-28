@@ -8,112 +8,110 @@
 .fonts-loaded .material-symbols-outlined { opacity: 1; transition: opacity .12s ease-out; }
 
 /* ============================================================
-   derouter palette — adopted from 9remote_private/web
-   Brand orange (dark) / soft coral (light), neutral warm bases
+   derouter design tokens — adopted from delify.vn
+   Green brand ramp, zinc neutrals, hard 0px radius, hairline borders
    ============================================================ */
 :root {
-  /* Brand scale (light) - centered on #E56A4A */
-  --color-brand-50: #fdf1ed;
-  --color-brand-100: #fadccf;
-  --color-brand-200: #f4b59c;
-  --color-brand-300: #ee8d6a;
-  --color-brand-400: #ea7855;
-  --color-brand-500: #E56A4A;
-  --color-brand-600: #cc5236;
-  --color-brand-700: #a64027;
-  --color-brand-800: #7a2f1d;
-  --color-brand-900: #4d1e12;
+  /* Brand scale (light) - centered on #16a34a */
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-300: #86efac;
+  --color-brand-400: #4ade80;
+  --color-brand-500: #16a34a;
+  --color-brand-600: #15803d;
+  --color-brand-700: #14532d;
+  --color-brand-800: #0f3b1f;
+  --color-brand-900: #052e16;
+  --color-brand-950: #052e16;
 
   /* Primary (legacy alias for backward compat with existing components) */
-  --color-primary: var(--color-brand-500);
-  --color-primary-hover: var(--color-brand-600);
+  --color-primary: #16a34a;
+  --color-primary-hover: #15803d;
 
   /* Surfaces & backgrounds (light) */
-  --color-bg: #FDFAF6;
-  --color-bg-alt: #F7F3EE;
+  --color-bg: #ffffff;
+  --color-bg-alt: #fafafa;
   --color-surface: #ffffff;
   --color-surface-2: #f4f4f5;
-  --color-surface-3: #e7e7e9;
-  --color-sidebar: rgba(244, 241, 236, 0.85);
+  --color-surface-3: #e4e4e7;
+  --color-sidebar: rgba(255, 255, 255, 0.8);
 
   /* Borders */
-  --color-border: #e5e7eb;
-  --color-border-subtle: #f1f1f3;
+  --color-border: #e4e4e7;
+  --color-border-subtle: #f4f4f5;
 
   /* Text */
-  --color-text: #0a0a0a;
-  --color-text-main: #0a0a0a;
-  --color-text-muted: #6B7280;
-  --color-text-subtle: #9CA3AF;
+  --color-text: #09090b;
+  --color-text-main: #09090b;
+  --color-text-muted: #71717a;
+  --color-text-subtle: #a1a1aa;
 
   /* Status */
   --color-danger: #cf222e;
-  --color-success: #10B981;
+  --color-success: #16a34a;
   --color-warning: #F59E0B;
   --color-info: #3B82F6;
 
-  /* Radius */
-  --radius-brand: 10px;
-  --radius-brand-lg: 14px;
+  /* Radius - delify uses hard edges everywhere */
+  --radius-brand: 0px;
+  --radius-brand-lg: 0px;
 
-  /* Shadows */
-  --shadow-soft: 0 1px 2px 0 rgba(0,0,0,0.04);
-  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.18);
-  --shadow-elevated: 0 12px 28px -4px rgba(60, 50, 45, 0.06);
-  --shadow-elev:
-    inset 0 1px 0 0 rgba(255,255,255,0.8),
-    0 1px 2px rgba(15,23,42,0.04),
-    0 12px 36px -8px rgba(15,23,42,0.10);
-  --shadow-focus: 0 0 0 3px rgba(229,106,74,0.18);
+  /* Shadows - hairline only, no elevation glow */
+  --shadow-soft: inset 0 -1px 0 0 rgb(228 228 231 / 0.7);
+  --shadow-elev: 0 1px 2px rgb(9 9 11 / 0.04);
+  --shadow-elevated: var(--shadow-elev);
+  /* Compat alias: older components referenced --shadow-warm for hover lift. */
+  --shadow-warm: var(--shadow-elev);
+
+  /* Type */
+  --font-display: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
 
   color-scheme: light;
 }
 
 .dark {
-  /* Brand scale (dark) - centered on #E56A4A, same as light for consistency */
-  --color-brand-50: #fdf1ed;
-  --color-brand-100: #fadccf;
-  --color-brand-200: #f4b59c;
-  --color-brand-300: #ee8d6a;
-  --color-brand-400: #ea7855;
-  --color-brand-500: #E56A4A;
-  --color-brand-600: #cc5236;
-  --color-brand-700: #a64027;
-  --color-brand-800: #7a2f1d;
-  --color-brand-900: #4d1e12;
+  /* Brand ramp - light values kept for 50-300, 500 lifted for contrast */
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-300: #86efac;
+  --color-brand-400: #4ade80;
+  --color-brand-500: #4ade80;
+  --color-brand-600: #15803d;
+  --color-brand-700: #14532d;
+  --color-brand-800: #0f3b1f;
+  --color-brand-900: #052e16;
+  --color-brand-950: #052e16;
 
-  --color-primary: #E56A4A;
-  --color-primary-hover: #cc5236;
+  --color-primary: #4ade80;
+  --color-primary-hover: #86efac;
 
-  /* Surfaces (dark - Claude-like neutral warm) */
-  --color-bg: #1a1a1a;
-  --color-bg-alt: #1F1F1E;
-  --color-surface: #262626;
-  --color-surface-2: #303030;
-  --color-surface-3: #3a3a3a;
-  --color-sidebar: rgba(30, 30, 30, 0.85);
+  /* Surfaces (dark - zinc) */
+  --color-bg: #09090b;
+  --color-bg-alt: #18181b;
+  --color-surface: #18181b;
+  --color-surface-2: #27272a;
+  --color-surface-3: #3f3f46;
+  --color-sidebar: rgba(9, 9, 11, 0.75);
 
-  --color-border: #333333;
-  --color-border-subtle: #2a2a2a;
+  --color-border: #27272a;
+  --color-border-subtle: rgb(255 255 255 / 0.08);
 
-  --color-text: #ededed;
-  --color-text-main: #ededed;
-  --color-text-muted: #9ca3af;
-  --color-text-subtle: #6b7280;
+  --color-text: #fafafa;
+  --color-text-main: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-text-subtle: #71717a;
 
   --color-danger: #ef4444;
-  --color-success: #22c55e;
+  --color-success: #16a34a;
   --color-warning: #fbbf24;
   --color-info: #60a5fa;
 
-  --shadow-soft: 0 1px 2px 0 rgba(0,0,0,0.3);
-  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
-  --shadow-elevated: 0 12px 28px -4px rgba(0, 0, 0, 0.45);
-  --shadow-elev:
-    inset 0 1px 0 0 rgba(255,255,255,0.06),
-    0 1px 2px rgba(0,0,0,0.4),
-    0 16px 48px -8px rgba(0,0,0,0.55);
-  --shadow-focus: 0 0 0 3px rgba(229, 106, 74, 0.18);
+  --shadow-soft: inset 0 -1px 0 0 rgb(255 255 255 / 0.04);
+  --shadow-elev: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-elevated: var(--shadow-elev);
+  --shadow-warm: var(--shadow-elev);
 
   color-scheme: dark;
 }
@@ -146,10 +144,12 @@ select {
   --color-brand-700: var(--color-brand-700);
   --color-brand-800: var(--color-brand-800);
   --color-brand-900: var(--color-brand-900);
+  --color-brand-950: var(--color-brand-950);
 
   /* Primary aliases */
   --color-primary: var(--color-primary);
   --color-primary-hover: var(--color-primary-hover);
+  --color-accent: var(--color-primary);
 
   /* Semantic */
   --color-bg: var(--color-bg);
@@ -164,39 +164,27 @@ select {
   --color-text-main: var(--color-text-main);
   --color-text-muted: var(--color-text-muted);
   --color-text-subtle: var(--color-text-subtle);
-  --color-accent: var(--color-brand-500);
   --color-danger: var(--color-danger);
   --color-success: var(--color-success);
   --color-warning: var(--color-warning);
   --color-info: var(--color-info);
 
-  /* Static fallbacks (explicit per-mode usage if needed) */
-  --color-bg-light: #FCFBF9;
-  --color-bg-dark: #1a1a1a;
-  --color-surface-light: #ffffff;
-  --color-surface-dark: #262626;
-  --color-sidebar-light: #F4F1EC;
-  --color-sidebar-dark: #1F1F1E;
-  --color-border-light: #e5e7eb;
-  --color-border-dark: #333333;
-  --color-text-main-light: #0a0a0a;
-  --color-text-main-dark: #ededed;
-  --color-text-muted-light: #6B7280;
-  --color-text-muted-dark: #9ca3af;
+  /* Static dark-scheme surface alias (Avatar ring uses it explicitly) */
+  --color-surface-dark: #18181b;
 
-  /* Radius */
+  /* Radius - hard edges */
   --radius-brand: var(--radius-brand);
   --radius-brand-lg: var(--radius-brand-lg);
 
-  /* Shadows */
+  /* Shadows - hairline only */
   --shadow-soft: var(--shadow-soft);
-  --shadow-warm: var(--shadow-warm);
   --shadow-elevated: var(--shadow-elevated);
   --shadow-elev: var(--shadow-elev);
-  --shadow-focus: var(--shadow-focus);
 
-  /* Font - Inter primary, Apple system fallback */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  /* Fonts - wired to next/font CSS variables set in app/layout.js */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
 }
 
 /* Base */
@@ -210,12 +198,20 @@ body {
 
 /* Selection - brand-tinted */
 ::selection {
-  background-color: rgba(229, 106, 74, 0.25);
-  color: var(--color-primary);
+  background-color: rgb(22 163 74 / 0.18);
+  color: var(--color-text-main);
 }
 .dark ::selection {
-  background-color: rgba(229, 106, 74, 0.3);
-  color: var(--color-brand-300);
+  background-color: rgb(74 222 128 / 0.24);
+  color: var(--color-text-main);
+}
+
+/* Keyboard focus: 2px brand outline, offset. Text fields opt out and show focus on their border. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
 }
 
 /* iOS keyboard accent */
@@ -241,19 +237,19 @@ input, textarea {
 /* Thin horizontal scrollbar - brand colored */
 .scroll-thin-x {
   scrollbar-width: thin;
-  scrollbar-color: rgba(229, 106, 74, 0.55) transparent;
+  scrollbar-color: rgb(22 163 74 / 0.55) transparent;
 }
 .dark .scroll-thin-x {
-  scrollbar-color: rgba(229, 106, 74, 0.55) transparent;
+  scrollbar-color: rgb(74 222 128 / 0.55) transparent;
 }
 .scroll-thin-x::-webkit-scrollbar { height: 3px; }
 .scroll-thin-x::-webkit-scrollbar-track { background: transparent; }
 .scroll-thin-x::-webkit-scrollbar-thumb {
-  background: rgba(229, 106, 74, 0.55);
+  background: rgb(22 163 74 / 0.55);
   border-radius: 3px;
 }
 .dark .scroll-thin-x::-webkit-scrollbar-thumb {
-  background: rgba(229, 106, 74, 0.55);
+  background: rgb(74 222 128 / 0.55);
 }
 
 /* Global thin mac-like scrollbars (overrides clunky Windows/Linux default) */
@@ -287,46 +283,32 @@ input, textarea {
   background-color: rgba(180, 180, 180, 0.5);
 }
 
-/* Reusable elevated card */
+/* Reusable flat card surfaces */
 .card-soft {
   background-color: var(--color-surface);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-brand-lg);
 }
 .card-elev {
   background-color: var(--color-surface);
-  box-shadow: var(--shadow-elev);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-brand-lg);
 }
 
-/* Hero gradient (compat) */
+/* Hero background (compat) */
 .bg-hero-gradient {
-  background: linear-gradient(180deg, var(--color-bg-alt) 0%, var(--color-bg) 100%);
+  background: var(--color-bg);
 }
 
-/* macOS Vibrancy */
+/* Frosted surface (compat) - neutrals only, no warm tint */
 .bg-vibrancy {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   background: rgba(255, 255, 255, 0.72);
 }
 .dark .bg-vibrancy {
-  background: rgba(38, 38, 38, 0.72);
+  background: rgba(9, 9, 11, 0.72);
 }
-
-/* macOS Traffic Lights */
-.traffic-lights {
-  display: flex;
-  gap: 8px;
-}
-.traffic-light {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-.traffic-light.red { background: #FF5F56; }
-.traffic-light.yellow { background: #FFBD2E; }
-.traffic-light.green { background: #27C93F; }
 
 /* Material Symbols */
 .material-symbols-outlined {
@@ -387,12 +369,12 @@ button:disabled,
 
 @keyframes border-glow {
   0%, 100% {
-    box-shadow: 0 0 5px rgba(229, 106, 74, 0.3), 0 0 10px rgba(229, 106, 74, 0.2);
-    border-color: rgba(229, 106, 74, 0.5);
+    box-shadow: 0 0 5px rgb(22 163 74 / 0.3), 0 0 10px rgb(22 163 74 / 0.2);
+    border-color: rgb(22 163 74 / 0.5);
   }
   50% {
-    box-shadow: 0 0 10px rgba(229, 106, 74, 0.5), 0 0 20px rgba(229, 106, 74, 0.3);
-    border-color: rgba(229, 106, 74, 0.8);
+    box-shadow: 0 0 10px rgb(22 163 74 / 0.5), 0 0 20px rgb(22 163 74 / 0.3);
+    border-color: rgb(22 163 74 / 0.8);
   }
 }
 .animate-border-glow { animation: border-glow 2s ease-in-out infinite; }
@@ -419,58 +401,81 @@ button:disabled,
 }
 .animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }
 
-/* CTA shimmer + glow pulse */
-@keyframes ctaShimmer {
-  0% { transform: translateX(-120%) skewX(-20deg); }
-  100% { transform: translateX(220%) skewX(-20deg); }
-}
-@keyframes ctaGlowPulse {
-  0%, 100% { box-shadow: 0 8px 24px -8px rgba(229, 106, 74, 0.45), 0 0 0 0 rgba(229, 106, 74, 0.5); }
-  50% { box-shadow: 0 12px 32px -8px rgba(229, 106, 74, 0.6), 0 0 0 8px rgba(229, 106, 74, 0); }
-}
+/* CTA (compat) - flat brand fill, no glow, no shimmer */
 .btn-cta {
   position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  animation: ctaGlowPulse 2.4s ease-in-out infinite;
+  background-color: var(--color-brand-500);
+  color: #ffffff;
+  transition: background-color 150ms;
 }
-.btn-cta::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
-  animation: ctaShimmer 2.8s ease-in-out infinite;
-  pointer-events: none;
-  z-index: 1;
+.btn-cta:hover {
+  background-color: var(--color-brand-600);
 }
-.btn-cta > * { position: relative; z-index: 2; }
 
-/* Dot Grid Background Pattern */
+/* Blueprint grid background */
 .dot-grid-bg {
   background-color: var(--color-bg);
   background-image:
-    radial-gradient(circle at 15% 20%, rgba(229, 106, 74, 0.10) 0%, transparent 40%),
-    radial-gradient(circle at 85% 80%, rgba(229, 106, 74, 0.06) 0%, transparent 40%);
+    linear-gradient(#0000000d 1px, #0000 0),
+    linear-gradient(90deg, #0000000d 1px, #0000 0);
+  background-size: 44px 44px;
 }
 .dark .dot-grid-bg {
   background-image:
-    radial-gradient(circle at 15% 20%, rgba(229, 106, 74, 0.18) 0%, transparent 40%),
-    radial-gradient(circle at 85% 80%, rgba(229, 106, 74, 0.10) 0%, transparent 40%);
+    linear-gradient(#ffffff0f 1px, #0000 0),
+    linear-gradient(90deg, #ffffff0f 1px, #0000 0);
 }
 
-/* Landing-style faint grid overlay (use absolute pos inside relative parent) */
+/* Blueprint grid overlay (use absolute pos inside relative parent) */
 .landing-grid {
   background-image:
-    linear-gradient(to right, var(--color-accent) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--color-accent) 1px, transparent 1px);
-  background-size: 40px 40px;
-  opacity: 0.08;
+    linear-gradient(#0000000d 1px, #0000 0),
+    linear-gradient(90deg, #0000000d 1px, #0000 0);
+  background-size: 44px 44px;
+  opacity: 1;
 }
 .dark .landing-grid {
-  opacity: 0.04;
+  background-image:
+    linear-gradient(#ffffff0f 1px, #0000 0),
+    linear-gradient(90deg, #ffffff0f 1px, #0000 0);
+  opacity: 1;
+}
+
+/* Blueprint grid for hero sections */
+.hero-blueprint-grid {
+  background-image:
+    linear-gradient(#0000000d 1px, #0000 0),
+    linear-gradient(90deg, #0000000d 1px, #0000 0);
+  background-size: 44px 44px;
+}
+.dark .hero-blueprint-grid {
+  background-image:
+    linear-gradient(#ffffff0f 1px, #0000 0),
+    linear-gradient(90deg, #ffffff0f 1px, #0000 0);
+}
+
+/* Landing hero: the blueprint grid is decoration and must fade out before it
+   reaches the copy, per the UI DNA (masked, never under text). The gradient is
+   anchored top-right so the left column, where the headline sits, stays clean. */
+.blueprint-fade {
+  -webkit-mask-image: radial-gradient(ellipse 80% 90% at 100% 0%, #000 0%, #000 22%, transparent 72%);
+  mask-image: radial-gradient(ellipse 80% 90% at 100% 0%, #000 0%, #000 22%, transparent 72%);
+}
+
+/* Page shell: 1280px content column with 2rem gutters */
+.shell {
+  max-width: 1280px;
+  padding-inline: 2rem;
+  margin-inline: auto;
+}
+
+/* Eyebrow / meta label */
+.meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
 }
 
 /* Topology: router card pulse (no flying rings) + electric edge beam */

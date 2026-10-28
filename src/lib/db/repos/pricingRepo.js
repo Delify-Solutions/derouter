@@ -49,11 +49,66 @@ export async function getPricing() {
 }
 
 export async function getPricingForModel(provider, model) {
-  if (!model) return null;
-  const userPricing = await getUserPricing();
-  if (provider && userPricing[provider]?.[model]) return userPricing[provider][model];
-  const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
-  return resolveConst(provider, model);
+  const { pricing } = await resolvePrice({ provider, model });
+  return pricing;
+}
+
+/**
+ * Single pricing-precedence chain for one request. Every money path must go
+ * through here so combos, user overrides, provider rates, canonical models and
+ * pattern fallbacks can never disagree.
+ *
+ * Precedence (first match wins):
+ *   1. combo override — only when `requestedModel` is a bare name (no "/"),
+ *      i.e. the client asked for a combo rather than provider/model.
+ *   2. user per-provider exact override (pricing kv scope)
+ *   3. built-in PROVIDER_PRICING[provider][model]
+ *   4. MODEL_PRICING[baseModel] (vendor prefix stripped)
+ *   5. PATTERN_PRICING glob match
+ *
+ * @param {{ provider?: string, model?: string, requestedModel?: string }} args
+ * @returns {Promise<{ pricing: object|null, source: "combo"|"user"|"provider"|"model"|"pattern"|"none" }>}
+ */
+export async function resolvePrice({ provider, model, requestedModel } = {}) {
+  const none = { pricing: null, source: "none" };
+
+  // 1. Combo override: bare names only ("mygpt"), never "provider/model".
+  if (requestedModel && !requestedModel.includes("/")) {
+    const { getPricingForCombo } = await import("./comboPricingRepo.js");
+    const comboPricing = await getPricingForCombo(requestedModel);
+    if (comboPricing) return { pricing: comboPricing, source: "combo" };
+  }
+
+  // 2. User per-provider exact override.
+  if (provider && model) {
+    const userPricing = await getUserPricing();
+    if (userPricing[provider]?.[model]) {
+      return { pricing: userPricing[provider][model], source: "user" };
+    }
+  }
+
+  const sse = await import("open-sse/providers/pricing.js");
+
+  // 3. Built-in provider-specific override.
+  if (provider && model && sse.PROVIDER_PRICING[provider]?.[model]) {
+    return { pricing: sse.PROVIDER_PRICING[provider][model], source: "provider" };
+  }
+
+  if (!model) return none;
+
+  // 4. Canonical model price ("deepseek/deepseek-chat" → "deepseek-chat").
+  const baseModel = model.includes("/") ? model.split("/").pop() : model;
+  if (sse.MODEL_PRICING[baseModel]) return { pricing: sse.MODEL_PRICING[baseModel], source: "model" };
+  if (sse.MODEL_PRICING[model]) return { pricing: sse.MODEL_PRICING[model], source: "model" };
+
+  // 5. Glob pattern fallback.
+  for (const { pattern, pricing } of sse.PATTERN_PRICING) {
+    if (sse.matchPattern(pattern, baseModel) || sse.matchPattern(pattern, model)) {
+      return { pricing, source: "pattern" };
+    }
+  }
+
+  return none;
 }
 
 // Atomic merge inside transaction (per-provider read-modify-write)

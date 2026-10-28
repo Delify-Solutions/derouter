@@ -221,10 +221,10 @@ function buildCliPackage() {
     process.exit(1);
   }
 
-  // Step 3b: Ensure sql.js (pure JS fallback) bundled in app/cli/app/node_modules.
+  // Step 3b: Configure SQLite drivers.
   // Strip better-sqlite3 (native) — it lives in ~/.derouter/runtime to avoid
-  // Windows EBUSY during global CLI updates. node:sqlite (Node ≥22.5) is also
-  // available as a no-install middle tier.
+  // Windows EBUSY during global CLI updates. node:sqlite (Node ≥22.5) is the
+  // no-install driver, and bun:sqlite covers the Bun runtime.
   console.log("3️⃣ b Configuring SQLite drivers...");
   function ensureModuleInBundle(pkg) {
     const dest = path.join(cliAppDir, "node_modules", pkg);
@@ -238,17 +238,16 @@ function buildCliPackage() {
     ];
     const src = candidates.find((p) => fs.existsSync(p));
     if (!src) {
-      console.warn(`⚠️  ${pkg} not found locally — bundle will rely on node:sqlite or runtime install`);
+      console.warn(`⚠️  ${pkg} not found locally — it must be resolvable at runtime`);
       return;
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     copyRecursive(src, dest);
     console.log(`✅ Bundled ${pkg}`);
   }
-  ensureModuleInBundle("sql.js");
   // `open` is external (see serverExternalPackages in next.config.mjs), so it must exist in
   // the bundle's node_modules or every importer throws MODULE_NOT_FOUND at runtime. Output
-  // tracing normally copies it; this is the same belt-and-braces guard used for sql.js.
+  // tracing normally copies it; this is a belt-and-braces guard.
   ensureModuleInBundle("open");
   const betterDir = path.join(cliAppDir, "node_modules", "better-sqlite3");
   if (fs.existsSync(betterDir)) {

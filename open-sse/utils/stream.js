@@ -14,6 +14,25 @@ export { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER };
 // sharedEncoder is stateless — safe to share across streams
 const sharedEncoder = new TextEncoder();
 
+// Retained-copy cap. A live stream keeps accumulatedContent / accumulatedThinking
+// / the partial-line `buffer` for logging and usage estimation, so a long
+// completion would otherwise pin its whole text in memory per connection. The
+// bytes streamed to the client are unaffected — only these copies are capped,
+// keeping the head (enough for prompt-echo / early-content heuristics) and the
+// tail (enough for finish heuristics and recent content).
+const MAX_BUFFER_BYTES = Number(process.env.STREAM_MAX_BUFFER_BYTES || 4 * 1024 * 1024);
+const KEEP_HEAD_BYTES = 64 * 1024;
+
+function truncateMiddle(s, maxBytes) {
+  if (s.length <= maxBytes) return s;
+  // Clamp the head so the result is never longer than maxBytes: a configured cap
+  // below KEEP_HEAD_BYTES would otherwise make the tail slice negative and hand
+  // back the entire (uncapped) string.
+  const headBytes = Math.max(0, Math.min(KEEP_HEAD_BYTES, maxBytes));
+  const tailBytes = Math.max(0, maxBytes - headBytes);
+  return s.slice(0, headBytes) + (tailBytes > 0 ? s.slice(-tailBytes) : "");
+}
+
 /**
  * Stream modes
  */
@@ -65,6 +84,33 @@ export function createSSEStream(options = {}) {
   let totalContentLength = 0;
   let accumulatedContent = "";
   let accumulatedThinking = "";
+  // Retained copies are capped (see MAX_BUFFER_BYTES); when a cap trips we record
+  // it so the finalized usage object can carry the loss instead of hiding it.
+  let truncated = false;
+  let retainedOriginalLength = 0;
+
+  const appendAccumulated = (field, text) => {
+    retainedOriginalLength += text.length;
+    if (field === "thinking") {
+      accumulatedThinking += text;
+      if (accumulatedThinking.length > MAX_BUFFER_BYTES) {
+        truncated = true;
+        accumulatedThinking = truncateMiddle(accumulatedThinking, MAX_BUFFER_BYTES);
+      }
+      return;
+    }
+    accumulatedContent += text;
+    if (accumulatedContent.length > MAX_BUFFER_BYTES) {
+      truncated = true;
+      accumulatedContent = truncateMiddle(accumulatedContent, MAX_BUFFER_BYTES);
+    }
+  };
+  const capBuffer = () => {
+    if (buffer.length > MAX_BUFFER_BYTES) {
+      truncated = true;
+      buffer = truncateMiddle(buffer, MAX_BUFFER_BYTES);
+    }
+  };
   let ttftAt = null;
   let sseLineCount = 0;
   let sseEmittedCount = 0;
@@ -98,10 +144,19 @@ export function createSSEStream(options = {}) {
     }
 
     if (onStreamComplete) {
+      // Never let the cap silently drop content: the completed usage/meta object
+      // carries the truncation marker and the pre-truncation retained length.
+      const reportedUsage = truncated
+        ? {
+            ...(finalUsage && typeof finalUsage === "object" ? finalUsage : {}),
+            _truncated: true,
+            _originalLength: retainedOriginalLength,
+          }
+        : finalUsage;
       onStreamComplete({
         content: accumulatedContent,
         thinking: accumulatedThinking
-      }, finalUsage, ttftAt);
+      }, reportedUsage, ttftAt);
     }
   };
 
@@ -113,7 +168,14 @@ export function createSSEStream(options = {}) {
       reqLogger?.appendProviderChunk?.(text);
 
       const lines = buffer.split("\n");
+      // Only the leftover partial line is *retained* between chunks — completed
+      // lines are emitted by the loop below. A provider that never terminates a
+      // line (no "\n" at all) would otherwise pin the entire response here; past
+      // MAX_BUFFER_BYTES there is no SSE event boundary to parse anyway, so the
+      // middle is dropped and `truncated` records the loss instead of the process
+      // growing without bound.
       buffer = lines.pop() || "";
+      capBuffer();
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -186,11 +248,11 @@ export function createSSEStream(options = {}) {
               const reasoning = delta?.reasoning_content;
               if (content && typeof content === "string") {
                 totalContentLength += content.length;
-                accumulatedContent += content;
+                appendAccumulated("content", content);
               }
               if (reasoning && typeof reasoning === "string") {
                 totalContentLength += reasoning.length;
-                accumulatedThinking += reasoning;
+                appendAccumulated("thinking", reasoning);
               }
 
               const extracted = extractUsage(parsed);
@@ -281,23 +343,23 @@ export function createSSEStream(options = {}) {
         // Claude format - content
         if (parsed.delta?.text) {
           totalContentLength += parsed.delta.text.length;
-          accumulatedContent += parsed.delta.text;
+          appendAccumulated("content", parsed.delta.text);
         }
         // Claude format - thinking
         if (parsed.delta?.thinking) {
           totalContentLength += parsed.delta.thinking.length;
-          accumulatedThinking += parsed.delta.thinking;
+          appendAccumulated("thinking", parsed.delta.thinking);
         }
         
         // OpenAI format - content
         if (parsed.choices?.[0]?.delta?.content) {
           totalContentLength += parsed.choices[0].delta.content.length;
-          accumulatedContent += parsed.choices[0].delta.content;
+          appendAccumulated("content", parsed.choices[0].delta.content);
         }
         // OpenAI format - reasoning
         if (parsed.choices?.[0]?.delta?.reasoning_content) {
           totalContentLength += parsed.choices[0].delta.reasoning_content.length;
-          accumulatedThinking += parsed.choices[0].delta.reasoning_content;
+          appendAccumulated("thinking", parsed.choices[0].delta.reasoning_content);
         }
         
         // Gemini format
@@ -307,9 +369,9 @@ export function createSSEStream(options = {}) {
               totalContentLength += part.text.length;
               // Check if this is thinking content
               if (part.thought === true) {
-                accumulatedThinking += part.text;
+                appendAccumulated("thinking", part.text);
               } else {
-                accumulatedContent += part.text;
+                appendAccumulated("content", part.text);
               }
             }
           }
@@ -379,6 +441,8 @@ export function createSSEStream(options = {}) {
       trackPendingRequest(model, provider, connectionId, false);
       try {
         const remaining = decoder.decode();
+        // Not capped: this tail is emitted to the client below, so it must survive
+        // intact. The string is discarded when flush returns.
         if (remaining) buffer += remaining;
 
         if (mode === STREAM_MODE.PASSTHROUGH) {

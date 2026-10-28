@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, Button, Toggle, Input } from "@/shared/components";
+import { Card, Button, Toggle, Input, Select } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { useTheme } from "@/shared/hooks/useTheme";
@@ -735,6 +735,128 @@ export default function ProfilePage() {
 
   const observabilityEnabled = settings.enableObservability === true;
 
+  // ── Tenant signup / mail / Telegram config ────────────────────────────────
+  // One card, one save. Secrets (`smtpRelayToken`, `telegramBotToken`) are only
+  // submitted when the field was edited, so leaving it empty keeps the stored value.
+  // The settings endpoint is admin-only, so echoing them back into these inputs is
+  // the same trust boundary as the admin password card.
+  const [notifyForm, setNotifyForm] = useState({
+    siteName: "",
+    publicBaseUrl: "",
+    publicSignupEnabled: true,
+    requireEmailVerification: true,
+    defaultUserGroupId: "",
+    smtpRelayUrl: "",
+    smtpRelayToken: "",
+    smtpFrom: "",
+    telegramBotToken: "",
+    telegramChatId: "",
+  });
+  const [notifyStatus, setNotifyStatus] = useState({ type: "", message: "" });
+  const [notifyLoading, setNotifyLoading] = useState(false);
+  const [notifyTestLoading, setNotifyTestLoading] = useState(false);
+  const [notifyTestStatus, setNotifyTestStatus] = useState({ type: "", message: "" });
+  const [notifyGroupOptions, setNotifyGroupOptions] = useState([]);
+
+  useEffect(() => {
+    setNotifyForm((prev) => ({
+      ...prev,
+      siteName: settings.siteName || "",
+      publicBaseUrl: settings.publicBaseUrl || "",
+      publicSignupEnabled: settings.publicSignupEnabled !== false,
+      requireEmailVerification: settings.requireEmailVerification !== false,
+      defaultUserGroupId: settings.defaultUserGroupId || "",
+      smtpRelayUrl: settings.smtpRelayUrl || "",
+      smtpFrom: settings.smtpFrom || "",
+      telegramBotToken: settings.telegramBotToken || "",
+      telegramChatId: settings.telegramChatId || "",
+    }));
+  }, [
+    settings.siteName,
+    settings.publicBaseUrl,
+    settings.publicSignupEnabled,
+    settings.requireEmailVerification,
+    settings.defaultUserGroupId,
+    settings.smtpRelayUrl,
+    settings.smtpFrom,
+    settings.telegramBotToken,
+    settings.telegramChatId,
+  ]);
+
+  useEffect(() => {
+    fetch("/api/groups")
+      .then((res) => (res.ok ? res.json() : { groups: [] }))
+      .then((data) => {
+        const options = (Array.isArray(data?.groups) ? data.groups : []).map((group) => ({
+          value: group.id,
+          label: group.name,
+        }));
+        setNotifyGroupOptions(options);
+      })
+      .catch(() => setNotifyGroupOptions([]));
+  }, []);
+
+  const updateNotifyField = (field, value) => {
+    setNotifyForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const saveNotifySettings = async (event) => {
+    event.preventDefault();
+    setNotifyLoading(true);
+    setNotifyStatus({ type: "", message: "" });
+    try {
+      const payload = {
+        siteName: notifyForm.siteName.trim(),
+        publicBaseUrl: notifyForm.publicBaseUrl.trim(),
+        publicSignupEnabled: notifyForm.publicSignupEnabled,
+        requireEmailVerification: notifyForm.requireEmailVerification,
+        defaultUserGroupId: notifyForm.defaultUserGroupId || "",
+        smtpRelayUrl: notifyForm.smtpRelayUrl.trim(),
+        smtpFrom: notifyForm.smtpFrom.trim(),
+        telegramBotToken: notifyForm.telegramBotToken.trim(),
+        telegramChatId: notifyForm.telegramChatId.trim(),
+      };
+      // Empty token = keep the stored one (the API strips secrets from responses).
+      if (notifyForm.smtpRelayToken.trim()) payload.smtpRelayToken = notifyForm.smtpRelayToken.trim();
+
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSettings((prev) => ({ ...prev, ...data }));
+        setNotifyForm((prev) => ({ ...prev, smtpRelayToken: "" }));
+        setNotifyStatus({ type: "success", message: "Account and notification settings saved" });
+      } else {
+        setNotifyStatus({ type: "error", message: data.error || "Failed to save settings" });
+      }
+    } catch (err) {
+      setNotifyStatus({ type: "error", message: "An error occurred while saving" });
+    } finally {
+      setNotifyLoading(false);
+    }
+  };
+
+  const sendTestNotification = async () => {
+    setNotifyTestLoading(true);
+    setNotifyTestStatus({ type: "", message: "" });
+    try {
+      const res = await fetch("/api/settings/test-notify", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setNotifyTestStatus({ type: "success", message: data.message || "Test message sent" });
+      } else {
+        setNotifyTestStatus({ type: "error", message: data.error || "Test message failed" });
+      }
+    } catch (err) {
+      setNotifyTestStatus({ type: "error", message: "Could not reach the server" });
+    } finally {
+      setNotifyTestLoading(false);
+    }
+  };
+
   const handleShutdown = async () => {
     setIsShuttingDown(true);
     try {
@@ -866,7 +988,9 @@ export default function ProfilePage() {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm sm:text-base">Require login</p>
                 <p className="text-xs sm:text-sm text-text-muted">
-                  When ON, dashboard requires password. When OFF, access without login.
+                  Deprecated. The dashboard, its API and the public LLM API all require
+                  authentication regardless of this value. Kept only so existing
+                  configuration keeps loading.
                 </p>
               </div>
               <Toggle
@@ -1613,6 +1737,167 @@ export default function ProfilePage() {
               disabled={loading}
             />
           </div>
+        </Card>
+
+        {/* Tenant signup, mail relay and Telegram notifications */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center size-8 border border-border text-text-muted shrink-0">
+              <span className="material-symbols-outlined text-[18px]">mail</span>
+            </div>
+            <div>
+              <h3 className="text-base font-semibold">Customer accounts</h3>
+              <p className="text-sm text-text-muted">Public signup, verification mail and admin alerts</p>
+            </div>
+          </div>
+
+          <form onSubmit={saveNotifySettings} className="flex flex-col gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="Site name"
+                value={notifyForm.siteName}
+                onChange={(e) => updateNotifyField("siteName", e.target.value)}
+                placeholder="derouter"
+                disabled={loading || notifyLoading}
+              />
+              <Input
+                label="Public base URL"
+                value={notifyForm.publicBaseUrl}
+                onChange={(e) => updateNotifyField("publicBaseUrl", e.target.value)}
+                placeholder="https://router.example.com"
+                inputClassName="font-mono"
+                hint="Used to build links in email. Empty derives it from the request."
+                disabled={loading || notifyLoading}
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-border pt-4">
+              <div className="flex items-start sm:items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Public signup</p>
+                  <p className="text-xs text-text-muted">Allow self-service account creation at /register</p>
+                </div>
+                <Toggle
+                  checked={notifyForm.publicSignupEnabled}
+                  onChange={(value) => updateNotifyField("publicSignupEnabled", value)}
+                  disabled={loading || notifyLoading}
+                />
+              </div>
+              <div className="flex items-start sm:items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">Require email verification</p>
+                  <p className="text-xs text-text-muted">
+                    New accounts start unverified and cannot sign in until the link is opened
+                  </p>
+                </div>
+                <Toggle
+                  checked={notifyForm.requireEmailVerification}
+                  onChange={(value) => updateNotifyField("requireEmailVerification", value)}
+                  disabled={loading || notifyLoading}
+                />
+              </div>
+              <Select
+                label="Default user group"
+                options={notifyGroupOptions}
+                value={notifyForm.defaultUserGroupId}
+                onChange={(e) => updateNotifyField("defaultUserGroupId", e.target.value)}
+                placeholder="Oldest group"
+                hint="New accounts join this group. Empty uses the oldest group; inactive groups are ignored."
+                disabled={loading || notifyLoading}
+              />
+            </div>
+
+            <div className="flex flex-col gap-4 border-t border-border pt-4">
+              <div>
+                <p className="meta text-text-muted">Mail relay</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  Verification mail is posted as JSON to this URL. Without a relay every message is
+                  still written to <span className="font-mono">logs/mail/</span> so a link can be
+                  recovered.
+                </p>
+              </div>
+              <Input
+                label="SMTP relay URL"
+                value={notifyForm.smtpRelayUrl}
+                onChange={(e) => updateNotifyField("smtpRelayUrl", e.target.value)}
+                placeholder="http://localhost:8788/mail"
+                inputClassName="font-mono"
+                disabled={loading || notifyLoading}
+              />
+              <Input
+                label="Relay token"
+                type="password"
+                value={notifyForm.smtpRelayToken}
+                onChange={(e) => updateNotifyField("smtpRelayToken", e.target.value)}
+                placeholder={settings.smtpRelayToken ? "Stored — leave empty to keep" : "Optional bearer token"}
+                inputClassName="font-mono"
+                autoComplete="off"
+                disabled={loading || notifyLoading}
+              />
+              <Input
+                label="From address"
+                value={notifyForm.smtpFrom}
+                onChange={(e) => updateNotifyField("smtpFrom", e.target.value)}
+                placeholder="no-reply@localhost"
+                inputClassName="font-mono"
+                disabled={loading || notifyLoading}
+              />
+            </div>
+
+            <div className="flex flex-col gap-4 border-t border-border pt-4">
+              <div>
+                <p className="meta text-text-muted">Telegram</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  New registrations are announced to this chat.
+                </p>
+              </div>
+              <Input
+                label="Bot token"
+                type="password"
+                value={notifyForm.telegramBotToken}
+                onChange={(e) => updateNotifyField("telegramBotToken", e.target.value)}
+                placeholder="123456:ABC-DEF"
+                inputClassName="font-mono"
+                autoComplete="off"
+                disabled={loading || notifyLoading}
+              />
+              <Input
+                label="Chat ID"
+                value={notifyForm.telegramChatId}
+                onChange={(e) => updateNotifyField("telegramChatId", e.target.value)}
+                placeholder="-1001234567890"
+                inputClassName="font-mono"
+                disabled={loading || notifyLoading}
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="secondary"
+                loading={notifyTestLoading}
+                disabled={loading || notifyTestLoading}
+                onClick={sendTestNotification}
+                className="w-full sm:w-auto"
+              >
+                Send test message
+              </Button>
+              <Button type="submit" variant="primary" loading={notifyLoading} className="w-full sm:w-auto">
+                Save
+              </Button>
+            </div>
+
+            {notifyTestStatus.message && (
+              <p className={`text-xs ${notifyTestStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                {notifyTestStatus.message}
+              </p>
+            )}
+            {notifyStatus.message && (
+              <p className={`text-xs ${notifyStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                {notifyStatus.message}
+              </p>
+            )}
+          </form>
         </Card>
 
         {/* Account actions */}

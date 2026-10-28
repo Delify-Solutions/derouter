@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { getSettings } from "@/lib/localDb";
+import { safeEqual } from "./internalHeaders.js";
 
 export const OIDC_COOKIE_NAMES = {
   state: "oidc_state",
@@ -83,6 +84,50 @@ export function createOidcState() {
 
 export function createOidcNonce() {
   return crypto.randomBytes(16).toString("base64url");
+}
+
+/**
+ * Constant-time compare of the state returned by the IdP against the one stored in
+ * the oidc_state cookie. An early-exit string compare would leak the prefix of the
+ * expected CSRF token to an attacker who can drive the callback.
+ * @param {string|undefined} stored
+ * @param {string|undefined} received
+ * @returns {boolean}
+ */
+export function verifyOidcState(stored, received) {
+  return Boolean(stored) && safeEqual(stored, received);
+}
+
+/**
+ * The callback is a top-level navigation back from the IdP, so an attacker who can
+ * make a browser hit it with their own `code`/`state` performs login CSRF (the
+ * victim ends up signed in as the attacker). Browsers send Origin or Referer on that
+ * navigation; when present it must match our own host.
+ * @param {Request} request
+ * @param {string} publicOrigin
+ * @returns {boolean}
+ */
+export function isSameOriginCallback(request, publicOrigin) {
+  const host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  const candidate = request.headers.get("origin") || request.headers.get("referer");
+  if (!candidate) return true;
+  let source;
+  try {
+    source = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (host && source.host.toLowerCase() === host) return true;
+  // A reverse proxy can rewrite the Host header, so also compare against the
+  // configured/derived public origin — that is the origin the browser sees.
+  try {
+    return source.origin.toLowerCase() === new URL(publicOrigin).origin.toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 export function buildOidcAuthorizationUrl({
@@ -222,6 +267,11 @@ export async function verifyOidcIdToken({
     audience,
     nonce,
   });
+  // jose compares the nonce with a plain string compare. Re-check it in constant
+  // time so a caller cannot learn the expected value byte-by-byte.
+  if (nonce && !safeEqual(payload?.nonce ?? "", nonce)) {
+    throw new Error("OIDC nonce mismatch");
+  }
   return payload;
 }
 

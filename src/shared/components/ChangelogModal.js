@@ -8,6 +8,63 @@ import { GITHUB_CONFIG } from "@/shared/constants/config";
 
 marked.setOptions({ gfm: true, breaks: true });
 
+// The changelog is rendered with dangerouslySetInnerHTML, so the markdown has to be
+// neutralised first: marked does not sanitise (raw HTML in the source is passed
+// through) and the document is fetched, so it is attacker-influenced text.
+//
+// A DOMParser walk is used rather than pure regex because attribute values can be
+// entity-encoded (`&#106;avascript:alert(1)`) or split with whitespace, which the
+// parser normalises for us. Parsing HTML with DOMParser does not execute scripts.
+const BLOCKED_TAGS = new Set([
+  "script", "iframe", "frame", "frameset", "object", "embed", "applet",
+  "link", "meta", "style", "form", "base", "noscript", "template",
+]);
+const URL_ATTRS = new Set(["href", "src", "action", "formaction", "poster", "data", "xlink:href", "srcdoc"]);
+const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
+const FALLBACK_PATTERNS = [
+  [/<\s*(script|iframe|object|embed|link|meta|style|form)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, ""],
+  [/<\s*(script|iframe|object|embed|link|meta|style|form|base)\b[^>]*\/?>/gi, ""],
+  [/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ""],
+  [/\b(href|src|action|formaction|xlink:href)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '$1="#"'],
+];
+
+function isDangerousUrl(value) {
+  // Strip control/whitespace characters the browser ignores when parsing the scheme.
+  const cleaned = String(value).replace(/[\u0000-\u0020]/g, "").toLowerCase();
+  const match = /^([a-z][a-z0-9+.-]*):/.exec(cleaned);
+  return Boolean(match) && !ALLOWED_PROTOCOLS.has(`${match[1]}:`);
+}
+
+function sanitizeHtml(html) {
+  if (!html) return "";
+
+  if (typeof DOMParser === "undefined") {
+    // Non-browser fallback (SSR/tests). The component only renders client-side, so
+    // this path is a belt-and-braces regex strip of the same vectors.
+    return FALLBACK_PATTERNS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), String(html));
+  }
+
+  const doc = new DOMParser().parseFromString(String(html), "text/html");
+  for (const el of Array.from(doc.body.querySelectorAll("*"))) {
+    if (BLOCKED_TAGS.has(el.tagName.toLowerCase())) {
+      el.remove();
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      // Every inline handler: onclick, onerror, onload, …
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (URL_ATTRS.has(name) && isDangerousUrl(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+  return doc.body.innerHTML;
+}
+
 export default function ChangelogModal({ isOpen, onClose }) {
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,8 +80,11 @@ export default function ChangelogModal({ isOpen, onClose }) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.text();
       })
-      .then((md) => setHtml(marked.parse(md)))
-      .catch((err) => setError(err.message || "Failed to load"))
+      .then((md) => setHtml(sanitizeHtml(marked.parse(md))))
+      .catch((err) => {
+        setError(err.message || "Failed to load");
+        setHtml("");
+      })
       .finally(() => setLoading(false));
   }, [isOpen, html]);
 

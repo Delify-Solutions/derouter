@@ -3,7 +3,6 @@
  */
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
-import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 
@@ -277,7 +276,13 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, depth = 0, visited = new Set() }) {
+  // Cycle guard: a combo that (directly or transitively) lists itself would
+  // otherwise recurse forever. The set is seeded with this combo's own name so
+  // a member referencing it is caught on the first hop, and it is threaded
+  // through nested handleComboChat calls that opt into passing it.
+  if (comboName && !visited.has(comboName)) visited.add(comboName);
+
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -299,6 +304,15 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
+    if (visited.has(modelStr)) {
+      log.warn("COMBO", `skipping ${modelStr}: cycle detected`);
+      continue;
+    }
+    if (depth > 5) {
+      log.warn("COMBO", "combo nesting depth exceeded");
+      break;
+    }
+    visited.add(modelStr);
     log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 
     try {
@@ -371,12 +385,24 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
     log.warn("COMBO", `All models failed | ${msg} (${retryHuman})`);
-    return unavailableResponse(status, msg, earliestRetryAfter, retryHuman);
+    // Same shape as unavailableResponse(), plus the cycle guard state so a
+    // skipped-model / depth-abort can be told apart from plain unavailability.
+    const retryAfterSec = Math.max(Math.ceil((new Date(earliestRetryAfter).getTime() - Date.now()) / 1000), 1);
+    return new Response(
+      JSON.stringify({ error: { message: `${msg} (${retryHuman})` }, cycleGuard: { depth, visited: [...visited] } }),
+      {
+        status,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(retryAfterSec)
+        }
+      }
+    );
   }
 
   log.warn("COMBO", `All models failed | ${msg}`);
   return new Response(
-    JSON.stringify({ error: { message: msg } }),
+    JSON.stringify({ error: { message: msg }, cycleGuard: { depth, visited: [...visited] } }),
     { status, headers: { "Content-Type": "application/json" } }
   );
 }

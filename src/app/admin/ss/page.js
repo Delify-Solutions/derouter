@@ -40,7 +40,9 @@ export default function LoginPage() {
 
         if (res.ok) {
           const data = await res.json();
-          if (data.authenticated === true || data.requireLogin === false) {
+          // The dashboard is JWT-only now, so an unauthenticated visitor must not be
+          // bounced to /dashboard on the strength of a legacy settings flag.
+          if (data.authenticated === true) {
             window.location.assign("/dashboard");
             return;
           }
@@ -141,9 +143,9 @@ export default function LoginPage() {
   if (hasPassword === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg p-4">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <p className="text-text-muted mt-4">Loading...</p>
+        <div className="flex items-center gap-3 border border-border px-4 py-3">
+          <span className="material-symbols-outlined animate-spin text-[18px] text-text-muted">progress_activity</span>
+          <p className="font-mono text-xs uppercase tracking-[0.14em] text-text-muted">Loading</p>
         </div>
       </div>
     );
@@ -151,12 +153,16 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg p-4 relative overflow-hidden">
-      {/* Faint grid background */}
-      <div className="landing-grid absolute inset-0 pointer-events-none" aria-hidden="true" />
+      {/* Blueprint grid behind the card; the card is opaque so no text sits on it. */}
+      <div
+        className="hero-blueprint-grid absolute inset-0 pointer-events-none opacity-70"
+        aria-hidden="true"
+      />
       <div className="relative z-10 w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary mb-2">derouter</h1>
-          <p className="text-text-muted">
+        <div className="mb-8 border border-border bg-surface p-6">
+          <p className="meta text-text-muted">Admin</p>
+          <h1 className="mt-2 font-mono text-2xl font-semibold uppercase tracking-[0.14em] text-text-main">derouter</h1>
+          <p className="mt-3 text-sm text-text-muted">
             {samlAvailable
               ? "Sign in with SAML 2.0 Single Sign-On"
               : oidcAvailable
@@ -172,7 +178,7 @@ export default function LoginPage() {
                 Set a new password before accessing the dashboard remotely.
               </p>
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">New password</label>
+                <label className="meta text-text-muted">New password</label>
                 <Input
                   type="password"
                   placeholder="Enter new password"
@@ -201,7 +207,7 @@ export default function LoginPage() {
               </Button>
             )}
 
-            {ssoAvailable && passwordAvailable && <div className="h-px bg-border/60" />}
+            {ssoAvailable && passwordAvailable && <div className="h-px bg-border" />}
 
             {passwordAvailable ? (
               <form onSubmit={handleLogin} className="flex flex-col gap-4">
@@ -218,7 +224,7 @@ export default function LoginPage() {
                 )}
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium">Password</label>
+                  <label className="meta text-text-muted">Password</label>
                   <Input
                     type="password"
                     placeholder="Enter password"
@@ -235,7 +241,7 @@ export default function LoginPage() {
                   )}
                   {resetHint && (
                     <p className="text-xs text-text-muted">
-                      Forgot password? Open <code className="bg-sidebar px-1 rounded">derouter</code> CLI on the host → <b>Settings</b> → <b>Reset Password to Default</b>.
+                      Forgot password? Open <code className="border border-border bg-surface-2 px-1 font-mono">derouter</code> CLI on the host → <b>Settings</b> → <b>Reset Password to Default</b>.
                     </p>
                   )}
                 </div>
@@ -251,7 +257,7 @@ export default function LoginPage() {
                 </Button>
 
                 <p className="text-xs text-center text-text-muted mt-2">
-                  Default password is <code className="bg-sidebar px-1 rounded">123456</code>
+                  Default password is <code className="border border-border bg-surface-2 px-1 font-mono">123456</code>
                 </p>
                 {hasPassword === false && (
                   <p className="text-xs text-center text-amber-600 dark:text-amber-400">

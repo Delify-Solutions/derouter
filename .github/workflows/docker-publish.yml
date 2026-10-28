@@ -75,3 +75,33 @@ jobs:
           # Cache across runs for faster rebuilds (free for public-ish GH shared cache).
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Verify the published artefact actually boots and answers /api/health.
+      # Uses the first pushed tag; `docker run` pulls it from GHCR (we are logged in),
+      # so this exercises the exact image consumers get.
+      - name: Smoke test image
+        id: smoke
+        run: |
+          set -euo pipefail
+          tag="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          echo "Smoke-testing $tag"
+          docker run -d --name smoke -p 20128:20128 "$tag"
+          ok=0
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:20128/api/health || true)"
+            if [ "$code" = "200" ]; then
+              echo "Health check returned 200 after ${i}s"
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Health check failed (last status: ${code:-none})"
+            docker logs smoke || true
+            exit 1
+          fi
+
+      - name: Cleanup smoke container
+        if: always()
+        run: docker rm -f smoke || true
