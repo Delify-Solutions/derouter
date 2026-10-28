@@ -1,43 +1,53 @@
-"use client";
-
 import Link from "next/link";
+import PropTypes from "prop-types";
+import { PLANS, USAGE_WINDOWS, fmtUsd } from "./salesData";
 
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
+const SIGNUP_URL = "/register?next=/account/plans";
 
-const SPECS = [
-  { label: "Base URL", value: "/v1" },
-  { label: "Wire format", value: "OpenAI compatible" },
-  { label: "Billing", value: "Prepaid credit" },
-];
+// Server component: không có state, không cần xuống client. Mọi con số đọc từ
+// salesData.js và danh mục model nhận qua props, không viết tay trong JSX.
+export default function HeroSection({ models }) {
+  const entryPlan = PLANS[0];
 
-export default function HeroSection() {
+  const specs = [
+    { label: "Giá từ", value: `${fmtUsd(entryPlan.priceUsd)}/tháng` },
+    { label: "Danh mục", value: `${models.length} model lập trình` },
+    {
+      label: "Cửa sổ hạn mức",
+      value: USAGE_WINDOWS.map((w) => `${Math.round(w.fraction * 100)}% · ${w.label}`).join("  "),
+    },
+    { label: "Endpoint", value: "POST /v1/chat/completions" },
+  ];
+
   return (
-    <section className="relative overflow-hidden border-b border-border">
-      {/* Blueprint grid, masked so it fades before it reaches the copy. */}
+    <section id="hero" className="relative overflow-hidden border-b border-border">
+      {/* Lưới blueprint, mask để không bao giờ nằm dưới chữ. */}
       <div
-        className="hero-blueprint-grid blueprint-fade absolute inset-0 pointer-events-none"
+        className="hero-blueprint-grid blueprint-fade pointer-events-none absolute inset-0"
         aria-hidden="true"
       />
 
       <div className="shell relative py-20 md:py-28">
         <div className="max-w-3xl">
-          <p className="meta text-text-muted">Hosted AI proxy</p>
+          <p className="meta text-text-muted">Thuê bao model lập trình</p>
 
           <h1 className="mt-4 text-4xl font-semibold leading-[1.15] tracking-tight md:text-6xl">
-            One endpoint for every AI provider
+            Go và Go Plus: một thuê bao, mọi model lập trình
           </h1>
 
           <p className="mt-6 max-w-2xl text-base text-text-muted md:text-lg">
-            Point any OpenAI-compatible client at a single base URL. derouter resolves the model you ask for to a
-            provider connection, streams the response back, and meters every request against your balance.
+            Trả một khoản cố định mỗi tháng để dùng các model lập trình phổ biến qua một endpoint
+            tương thích OpenAI. Hạn mức được chia riêng cho từng model và kiểm tra theo ba cửa sổ:
+            5 giờ, 1 tuần và 1 tháng.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/register"
+              href={SIGNUP_URL}
               className="inline-flex h-12 items-center justify-center border border-brand-500 bg-brand-500 px-7 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600"
             >
-              Create account
+              Mua gói
             </Link>
             <a
               href={DOCS_URL}
@@ -46,19 +56,17 @@ export default function HeroSection() {
               className="inline-flex h-12 items-center justify-center gap-2 border border-border px-7 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-text-main transition-colors duration-150 hover:bg-surface-2"
             >
               <span className="material-symbols-outlined text-[18px]">description</span>
-              Read the docs
+              Đọc tài liệu
             </a>
           </div>
         </div>
 
-        <dl className="mt-12 grid grid-cols-1 border border-border sm:grid-cols-3">
-          {SPECS.map((spec, index) => (
-            <div
-              key={spec.label}
-              className={`px-5 py-4 ${index > 0 ? "border-t border-border sm:border-l sm:border-t-0" : ""}`}
-            >
+        {/* gap-px + bg-border: mỗi ô chia sẻ đúng một đường kẻ ở mọi breakpoint. */}
+        <dl className="mt-12 grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+          {specs.map((spec) => (
+            <div key={spec.label} className="bg-bg px-5 py-4">
               <dt className="meta text-text-muted">{spec.label}</dt>
-              <dd className="mt-1 font-mono text-sm text-text-main">{spec.value}</dd>
+              <dd className="mt-1 break-words font-mono text-sm text-text-main">{spec.value}</dd>
             </div>
           ))}
         </dl>
@@ -66,3 +74,7 @@ export default function HeroSection() {
     </section>
   );
 }
+
+HeroSection.propTypes = {
+  models: PropTypes.array.isRequired,
+};

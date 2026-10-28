@@ -428,5 +428,46 @@ export async function enforceKeyAccess(apiKey, model) {
     } catch { /* usage logging must never break the deny path */ }
     return NextResponse.json({ error: "Model not allowed for this key" }, { status: 403 });
   }
+
+  // Subscription allowance: per-model ceilings over 5h / week / month. Runs after
+  // the per-key checks because a key that is already denied should report the
+  // key-level reason, which the customer can act on by changing their key, not
+  // their plan. A user without a plan (credit-only grants) returns allowance:null
+  // and is unaffected.
+  if (model) {
+    const { checkPlanAllowance } = await import("@/lib/auth/planAllowance.js");
+    const allowance = await checkPlanAllowance(apiKey, model);
+    if (!allowance.ok) {
+      try {
+        const { saveRequestDetail } = await import("@/lib/usageDb.js");
+        const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
+        const status = String(allowance.status);
+        saveRequestDetail(buildRequestDetail({
+          provider: null,
+          model,
+          apiKey,
+          status,
+          errorSource: "platform",
+          response: { error: allowance.error, resetAt: allowance.resetAt ?? undefined },
+        }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+        saveUsageError({
+          provider: "platform",
+          model,
+          apiKey,
+          requestedModel: model,
+          status,
+          errorSource: "platform",
+        }).catch(() => {});
+      } catch { /* usage logging must never break the deny path */ }
+
+      const headers = { ...(allowance.headers || {}) };
+      if (allowance.retryAfter) headers["Retry-After"] = String(allowance.retryAfter);
+      return NextResponse.json(
+        { error: allowance.error, resetAt: allowance.resetAt ?? undefined },
+        { status: allowance.status, headers }
+      );
+    }
+  }
+
   return null;
 }

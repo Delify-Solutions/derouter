@@ -645,11 +645,40 @@ export async function resolveKeyScopeForModels(request) {
 
   // Scope the listing to the key's allow-list when a key resolves. A key with
   // no group/allow-list → resolved.allowedModels = null → unrestricted.
+  // A subscription plan additionally narrows this to the models the plan meters:
+  // advertising a model the plan will 403 on wastes a round trip and, worse,
+  // makes a client believe a cheaper model is available when it is not.
   let allowedModels = null;
   if (apiKey) {
     const auth = await getApiKeyForAuth(apiKey);
     if (auth?.resolved?.allowedModels) {
       allowedModels = auth.resolved.allowedModels;
+    }
+
+    const userId = auth?.key?.userId;
+    if (userId) {
+      const { planModelAllowList, planAcceptsCombo, sameModel } = await import("@/lib/auth/planAllowance.js");
+      const planModels = await planModelAllowList(userId);
+      if (planModels) {
+        // The accepted set is the plan's own model ids plus every combo whose
+        // members are all covered. A partially-covered combo is excluded: its
+        // failover would land on a model the customer did not pay for.
+        const accepted = [...planModels];
+        try {
+          for (const combo of await getCombos()) {
+            if (combo?.name && (await planAcceptsCombo(userId, combo.name))) {
+              accepted.push(combo.name);
+            }
+          }
+        } catch { /* no combos table → nothing to add */ }
+
+        // Intersect, never replace: a plan can only take models away from what
+        // the key already allows. Replacing would let an admin grant a model to
+        // a key that the key's own allow-list explicitly excludes.
+        allowedModels = allowedModels
+          ? allowedModels.filter((m) => accepted.some((p) => sameModel(m, p)))
+          : accepted;
+      }
     }
   }
 

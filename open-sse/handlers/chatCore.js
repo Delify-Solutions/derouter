@@ -76,6 +76,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   const sourceFormat = sourceFormatOverride || detectFormat(body);
 
+  // The client's original model string, before combo expansion rewrote it. Only a
+  // bare name (no "/") is kept: that is a combo alias or a plain model id, and it
+  // is what the usage rows and receipts display. Computed here because the two
+  // error paths below report it and previously referenced an undeclared binding,
+  // which threw a ReferenceError and masked the real provider failure.
+  const _reqModelRaw = clientRawRequest?.body?.model;
+  const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/")
+    ? _reqModelRaw
+    : null;
+
   // Check for bypass patterns (warmup, skip, cc naming)
   const bypassResponse = handleBypassRequest(body, model, userAgent, ccFilterNaming);
   if (bypassResponse) return bypassResponse;

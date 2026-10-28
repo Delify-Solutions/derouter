@@ -1272,6 +1272,34 @@ export async function getKeyCostSince(apiKey, sinceIso) {
   return nanoToUsd(await getKeyCostSinceNano(apiKey, sinceIso));
 }
 
+/**
+ * Cost per model, for one user, since a given instant. One query for every
+ * model, so metering a request does not issue a lookup per configured limit.
+ *
+ * Mirrors how the charge path attributes a row: post-005 rows carry apiKeyId
+ * and belong to a tenant through apiKeys.userId; legacy rows only have the raw
+ * key. Both are counted so a plan limit cannot be bypassed by using an old key.
+ *
+ * @returns {Promise<Map<string, number>>} model id -> integer nanoUSD spent
+ */
+export async function getModelCostSinceNano(userId, sinceIso) {
+  const db = await getAdapter();
+  if (!userId) return new Map();
+  const rows = db.all(
+    `SELECT COALESCE(uh.model, '') AS model,
+            COALESCE(SUM(${COST_NANO_EXPR}), 0) AS total
+       FROM usageHistory uh
+       LEFT JOIN apiKeys ak ON ak.id = uh.apiKeyId
+      WHERE (ak.userId = ? OR uh.apiKey IN (SELECT key FROM apiKeys WHERE userId = ?))
+        AND uh.timestamp >= ?
+      GROUP BY COALESCE(uh.model, '')`,
+    [userId, userId, sinceIso]
+  );
+  const out = new Map();
+  for (const r of rows) out.set(r.model, Math.round(Number(r.total) || 0));
+  return out;
+}
+
 // Sum cost over an arbitrary usageHistory filter, as integer nanoUSD.
 // Supported filter keys: provider, model, apiKey, startDate, endDate.
 export async function getUsageCostTotalNano(filter = {}) {

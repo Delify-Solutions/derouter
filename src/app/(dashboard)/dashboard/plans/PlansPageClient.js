@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle } from "@/shared/components";
 import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
+import PlanModelLimits from "./components/PlanModelLimits";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 
@@ -416,6 +417,11 @@ export default function PlansPageClient() {
               <span className="text-sm text-text-muted">Inactive plans stay on existing orders only.</span>
             </div>
             <Toggle checked={draft.isActive} onChange={(v) => setField("isActive", v)} />
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <h3 className="meta text-text-subtle mb-3">Hạn mức theo model</h3>
+            <PlanModelLimits planId={editing?.id ?? null} />
           </div>
 
           {formError && (

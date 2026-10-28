@@ -158,7 +158,10 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
  * still applies — repeated identical errors within the same minute collapse to
  * one row, same as successful duplicates already do.
  */
-export function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource }) {
+export async function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource }) {
+  // Always returns a promise: every caller chains `.catch()` onto the result, so
+  // an early `return` of undefined turned a harmless "no status" skip into a
+  // TypeError that replaced the real provider error in the response.
   if (!status) return;
   saveRequestUsage({
     provider: provider || "unknown",

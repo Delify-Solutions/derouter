@@ -35,7 +35,7 @@ export const LOCALES = [
   "no",
   "fa",
 ];
-export const DEFAULT_LOCALE = "en";
+export const DEFAULT_LOCALE = "vi";
 export const LOCALE_COOKIE = "locale";
 
 export const LOCALE_NAMES = {

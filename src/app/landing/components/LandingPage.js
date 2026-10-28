@@ -1,48 +1,38 @@
-"use client";
-
 import Navigation from "./Navigation";
 import HeroSection from "./HeroSection";
-import FlowAnimation from "./FlowAnimation";
-import HowItWorks from "./HowItWorks";
-import Features from "./Features";
+import PlansSection from "./PlansSection";
+import ModelsSection from "./ModelsSection";
+import PricingSection from "./PricingSection";
 import GetStarted from "./GetStarted";
+import FaqSection from "./FaqSection";
 import Footer from "./Footer";
+import { MODELS, SAMPLE_MODEL } from "./modelCatalog";
 
-// Public landing page. Rendered by src/app/page.js (a server component) so the
-// root can redirect live sessions to /dashboard or /account before any of this
-// markup is produced.
+// Trang bán hàng của hai gói thuê bao Go / Go Plus. Được render từ
+// src/app/page.js (server component) để root kịp chuyển phiên đang đăng nhập
+// sang /dashboard hoặc /account trước khi markup này được tạo.
 //
-// Section order is fixed: hero → what it does → how it works → features →
-// get started (with the closing call to action) → footer.
+// Component này là server component: danh mục model và giá token được dựng một
+// lần ở đây (modelCatalog.js đọc registry của router), rồi truyền xuống các
+// section. Chỉ những section có tương tác mới là client component.
+//
+// Thứ tự section là hợp đồng: hero → so sánh gói → danh mục model → bảng giá
+// chi tiết → cách dùng → FAQ → footer.
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
       <Navigation />
 
       <main>
-        <HeroSection />
-
-        <section id="product" className="border-b border-border">
-          <div className="shell py-20">
-            <p className="meta text-text-muted">What it does</p>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-              One proxy in front of every provider
-            </h2>
-            <p className="mt-3 max-w-2xl text-text-muted">
-              Your tools keep speaking the OpenAI wire format. derouter resolves the model you asked for to a
-              provider connection, streams the response back, and records what the request cost.
-            </p>
-
-            <FlowAnimation />
-          </div>
-        </section>
-
-        <HowItWorks />
-        <Features />
-        <GetStarted />
+        <HeroSection models={MODELS} />
+        <PlansSection models={MODELS} sampleModel={SAMPLE_MODEL} />
+        <ModelsSection models={MODELS} />
+        <PricingSection models={MODELS} />
+        <GetStarted models={MODELS} />
+        <FaqSection models={MODELS} />
       </main>
 
-      <Footer />
+      <Footer modelCount={MODELS.length} />
     </div>
   );
 }

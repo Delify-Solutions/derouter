@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -268,6 +268,29 @@ export const TABLES = {
     },
     // code is UNIQUE inline (auto-indexed) — that covers lookup by code.
     indexes: [],
+  },
+  // Per-model allowance for a subscription plan, modelled on how OpenCode Go
+  // meters its plans: a monthly dollar ceiling PER MODEL, drawn down by that
+  // model's own traffic. Zero rows for a plan means "no per-model ceiling" and
+  // the plan falls back to its flat creditNanoUsd, so existing plans keep
+  // working untouched.
+  //
+  // monthlyNanoUsd is the 100% ceiling. The shorter windows are derived, not
+  // stored: 5h = 20% and week = 50% of it. Storing them would let an admin
+  // create a plan whose windows contradict each other.
+  planModelLimits: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      planId: "TEXT NOT NULL",
+      // Model id as sent by the client. Matched with matchesAllowed() so a
+      // wildcard entry ("anthropic/*") covers a whole family.
+      model: "TEXT NOT NULL",
+      monthlyNanoUsd: "INTEGER NOT NULL",
+      createdAt: "TEXT",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_pml_plan_model ON planModelLimits(planId, model)",
+    ],
   },
   orders: {
     columns: {

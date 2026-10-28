@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import PropTypes from "prop-types";
+import { PLANS, fmtUsd } from "./salesData";
 
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
 const REPO_URL = "https://github.com/Delify-Solutions/derouter";
@@ -8,34 +10,34 @@ const LICENSE_URL = "https://github.com/Delify-Solutions/derouter/blob/main/LICE
 
 const COLUMNS = [
   {
-    title: "Product",
+    title: "Gói thuê bao",
     links: [
-      { href: "#product", label: "What it does" },
-      { href: "#how-it-works", label: "How it works" },
-      { href: "#features", label: "Features" },
-      { href: "#get-started", label: "Get started" },
+      { href: "#plans", label: "So sánh Go và Go Plus" },
+      { href: "#models", label: "Danh mục model" },
+      { href: "#pricing", label: "Bảng giá chi tiết" },
+      { href: "#faq", label: "Câu hỏi thường gặp" },
     ],
   },
   {
-    title: "Account",
+    title: "Tài khoản",
     links: [
-      { href: "/register", label: "Create account" },
-      { href: "/login", label: "Sign in" },
-      { href: "/register?next=/account/plans", label: "Pricing" },
-      { href: "/usage", label: "Usage lookup" },
+      { href: "/register", label: "Tạo tài khoản" },
+      { href: "/login", label: "Đăng nhập" },
+      { href: "/register?next=/account/plans", label: "Mua gói" },
+      { href: "/usage", label: "Tra cứu sử dụng" },
     ],
   },
   {
-    title: "Docs",
+    title: "Tài liệu",
     links: [
       { href: DOCS_URL, label: "README", external: true },
-      { href: REPO_URL, label: "Repository", external: true },
-      { href: LICENSE_URL, label: "MIT license", external: true },
+      { href: REPO_URL, label: "Mã nguồn", external: true },
+      { href: LICENSE_URL, label: "Giấy phép MIT", external: true },
     ],
   },
 ];
 
-export default function Footer() {
+export default function Footer({ modelCount }) {
   return (
     <footer className="bg-bg">
       <div className="shell py-14">
@@ -48,8 +50,13 @@ export default function Footer() {
               <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
             </div>
             <p className="mt-4 max-w-xs text-sm text-text-muted">
-              A hosted proxy for AI providers, with per-key usage metering and prepaid credit.
+              Thuê bao model lập trình theo tháng, hạn mức riêng cho từng model, dùng qua một
+              endpoint tương thích OpenAI.
             </p>
+            <p className="mt-3 font-mono text-[11px] text-text-subtle">
+              {PLANS.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-text-subtle">{modelCount} model trong danh mục</p>
           </div>
 
           {COLUMNS.map((column) => (
@@ -100,3 +107,7 @@ export default function Footer() {
     </footer>
   );
 }
+
+Footer.propTypes = {
+  modelCount: PropTypes.number.isRequired,
+};

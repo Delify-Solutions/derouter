@@ -4,20 +4,22 @@ import { useState } from "react";
 import Link from "next/link";
 
 const PRODUCT_LINKS = [
-  { href: "#product", label: "Product" },
-  { href: "#how-it-works", label: "How it works" },
-  { href: "#features", label: "Features" },
-  { href: "#get-started", label: "Get started" },
+  { href: "#plans", label: "Gói" },
+  { href: "#models", label: "Model" },
+  { href: "#pricing", label: "Bảng giá" },
+  { href: "#get-started", label: "Cách dùng" },
+  { href: "#faq", label: "Hỏi đáp" },
 ];
 
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
+const SIGNUP_URL = "/register?next=/account/plans";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-bg/90 backdrop-blur-sm">
-      <div className="shell h-16 flex items-center justify-between gap-4">
+      <div className="shell flex h-16 items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-3">
           <span className="flex size-8 items-center justify-center border border-border text-text-main">
             <span className="material-symbols-outlined text-[18px]">hub</span>
@@ -25,7 +27,7 @@ export default function Navigation() {
           <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
         </Link>
 
-        <nav aria-label="Primary" className="hidden md:flex items-center gap-6">
+        <nav aria-label="Chính" className="hidden items-center gap-6 md:flex">
           {PRODUCT_LINKS.map((item) => (
             <a
               key={item.href}
@@ -35,41 +37,35 @@ export default function Navigation() {
               {item.label}
             </a>
           ))}
-          <Link
-            href="/register?next=/account/plans"
-            className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
-          >
-            Pricing
-          </Link>
           <a
             href={DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
           >
-            Docs
+            Tài liệu
           </a>
         </nav>
 
         <div className="flex items-center gap-2">
           <Link
             href="/login"
-            className="hidden sm:inline-flex h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+            className="hidden h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main sm:inline-flex"
           >
-            Sign in
+            Đăng nhập
           </Link>
           <Link
-            href="/register"
-            className="hidden sm:inline-flex h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600"
+            href={SIGNUP_URL}
+            className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
           >
-            Create account
+            Mua gói
           </Link>
           <button
             type="button"
-            className="md:hidden flex size-8 items-center justify-center border border-border text-text-main"
+            className="flex size-8 items-center justify-center border border-border text-text-main md:hidden"
             onClick={() => setMobileMenuOpen((open) => !open)}
             aria-expanded={mobileMenuOpen}
-            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-label={mobileMenuOpen ? "Đóng menu" : "Mở menu"}
           >
             <span className="material-symbols-outlined text-[18px]">
               {mobileMenuOpen ? "close" : "menu"}
@@ -79,48 +75,41 @@ export default function Navigation() {
       </div>
 
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-border bg-bg">
-          <nav aria-label="Mobile" className="shell flex flex-col py-2">
+        <div className="border-t border-border bg-bg md:hidden">
+          <nav aria-label="Di động" className="shell flex flex-col py-2">
             {PRODUCT_LINKS.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+                className="flex h-10 items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
               >
                 {item.label}
               </a>
             ))}
-            <Link
-              href="/register?next=/account/plans"
-              onClick={() => setMobileMenuOpen(false)}
-              className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
-            >
-              Pricing
-            </Link>
             <a
               href={DOCS_URL}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileMenuOpen(false)}
-              className="h-10 flex items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+              className="flex h-10 items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
             >
-              Docs
+              Tài liệu
             </a>
-            <div className="mt-2 mb-3 flex flex-col gap-2">
+            <div className="mb-3 mt-2 flex flex-col gap-2">
               <Link
                 href="/login"
                 onClick={() => setMobileMenuOpen(false)}
-                className="h-10 flex items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
+                className="flex h-10 items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
               >
-                Sign in
+                Đăng nhập
               </Link>
               <Link
-                href="/register"
+                href={SIGNUP_URL}
                 onClick={() => setMobileMenuOpen(false)}
-                className="h-10 flex items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
               >
-                Create account
+                Mua gói
               </Link>
             </div>
           </nav>
