@@ -102,6 +102,32 @@ jobs:
             exit 1
           fi
 
+          # /api/health is a static response; it proves the server booted but not that
+          # the database layer works. These do:
+          #  * the public plan listing touches SQLite through the repo layer, so a
+          #    failed migration or a missing driver turns this into a 500
+          #  * an unauthenticated admin endpoint must be 401, which proves the guard
+          #    loaded — a broken proxy/middleware would return 200 or 404 here
+          for pair in "public/plans:200" "keys:401" "account/me:401"; do
+            path="${pair%%:*}"
+            want="${pair##*:}"
+            got="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:20128/api/$path" || true)"
+            if [ "$got" != "$want" ]; then
+              echo "GET /api/$path expected $want, got $got"
+              docker logs smoke || true
+              exit 1
+            fi
+            echo "GET /api/$path -> $got"
+          done
+
+          # The container must have created and migrated its database on first boot.
+          if ! docker exec smoke test -s /app/data/db/data.sqlite; then
+            echo "Database file was not created under DATA_DIR"
+            docker logs smoke || true
+            exit 1
+          fi
+          echo "Database present: /app/data/db/data.sqlite"
+
       - name: Cleanup smoke container
         if: always()
         run: docker rm -f smoke || true

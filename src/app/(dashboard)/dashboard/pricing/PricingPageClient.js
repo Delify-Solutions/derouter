@@ -404,7 +404,7 @@ export default function PricingPageClient() {
             ))}
           </div>
           <p className="text-xs text-text-muted">
-            Leave prices at 0 if a field doesn't apply. This creates or overrides the pool
+            Leave prices at 0 if a field doesn&apos;t apply. This creates or overrides the pool
             price for this provider/model pair.
           </p>
         </div>

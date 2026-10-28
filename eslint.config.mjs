@@ -35,9 +35,12 @@ const eslintConfig = defineConfig([
   // both ship as CJS (package.json has no "type": "module"), so `require()` is the correct
   // primitive there. Converting them to ESM would break the packaged layout — the CLI is
   // executed straight from the published tree and custom-server.js is started by `node` with
-  // no build step. Keep the rule on everywhere else, where a `require()` is a real defect.
+  // no build step. src/lib/updater/updater.js is copied verbatim out of the bundle into
+  // DATA_DIR/runtime/updater/ and spawned as a detached plain-Node process by appUpdater.js,
+  // so it is also CJS by contract. Keep the rule on everywhere else, where a `require()` is a
+  // real defect.
   {
-    files: ["custom-server.js", "src/mitm/**/*.js", "cli/**/*.js", "scripts/**/*.js"],
+    files: ["custom-server.js", "src/mitm/**/*.js", "cli/**/*.js", "scripts/**/*.js", "src/lib/updater/updater.js"],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
     },

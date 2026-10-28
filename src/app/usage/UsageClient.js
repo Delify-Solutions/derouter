@@ -733,7 +733,7 @@ export default function UsageClient({ hasUserSession = false }) {
                   </tbody>
                 </table>
                 <p className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-                  Prices in $ per 1M tokens. A model's allowed/usable set for this key is shown at full opacity; dimmed rows are not permitted by this key's allow-list.
+                  Prices in $ per 1M tokens. A model&apos;s allowed/usable set for this key is shown at full opacity; dimmed rows are not permitted by this key&apos;s allow-list.
                 </p>
               </div>
             )}

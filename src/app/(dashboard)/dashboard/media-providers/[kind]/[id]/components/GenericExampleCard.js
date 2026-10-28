@@ -344,6 +344,7 @@ export function GenericExampleCard({ providerId, kind }) {
                 )}
               </div>
               {refImagePreviewSrc && (
+                // eslint-disable-next-line @next/next/no-img-element -- user-supplied URL or data-URI preview; dimensions unknown
                 <img
                   src={refImagePreviewSrc}
                   alt="Reference"
@@ -379,6 +380,7 @@ export function GenericExampleCard({ providerId, kind }) {
                 )}
               </div>
               {maskImagePreviewSrc && (
+                // eslint-disable-next-line @next/next/no-img-element -- user-supplied URL or data-URI preview; dimensions unknown
                 <img
                   src={maskImagePreviewSrc}
                   alt="Mask"
@@ -487,6 +489,7 @@ export function GenericExampleCard({ providerId, kind }) {
         {partialImage?.b64_json && !result && (
           <div>
             <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Partial preview</span>
+            {/* eslint-disable-next-line @next/next/no-img-element -- streamed base64 frame; dimensions unknown until decode */}
             <img
               src={`data:image/png;base64,${partialImage.b64_json}`}
               alt="Partial"
@@ -531,6 +534,7 @@ export function GenericExampleCard({ providerId, kind }) {
                   Download
                 </a>
               </div>
+              {/* eslint-disable-next-line @next/next/no-img-element -- blob/URL/data-URI response; dimensions unknown */}
               <img
                 src={binaryImageUrl || (result?.data?.data?.[0]?.b64_json ? `data:image/png;base64,${result.data.data[0].b64_json}` : result?.data?.data?.[0]?.url)}
                 alt="Generated"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import Image from "next/image";
 import PropTypes from "prop-types";
 import {
   ReactFlow,
@@ -56,9 +57,12 @@ function ProviderNode({ data }) {
         style={{ backgroundColor: `${color}15` }}
       >
         {imageUrl && !imgError ? (
-          <img
+          <Image
             src={imageUrl}
             alt={label}
+            width={24}
+            height={24}
+            unoptimized
             className="w-6 h-6 rounded-sm object-contain"
             loading="lazy"
             decoding="async"
@@ -112,9 +116,12 @@ function RouterNode({ data }) {
       <Handle type="source" position={Position.Left} id="left" className="!bg-transparent !border-0 !w-0 !h-0" />
       <Handle type="source" position={Position.Right} id="right" className="!bg-transparent !border-0 !w-0 !h-0" />
 
-      <img
+      <Image
         src="/favicon.svg"
         alt="derouter"
+        width={24}
+        height={24}
+        unoptimized
         className={`w-6 h-6 mr-2 ${powering ? "topology-router-icon" : ""}`}
         loading="lazy"
         decoding="async"
@@ -369,37 +376,49 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
   const lastSet = useMemo(() => new Set(lastKey ? [lastKey] : []), [lastKey]);
   const errorSet = useMemo(() => new Set(errorKey ? [errorKey] : []), [errorKey]);
 
-  // Track firstSeen per active provider; drop provider if running too long (BE stuck)
-  const firstSeenRef = useRef({});
+  // Track firstSeen per active provider; drop provider if running too long (BE stuck).
+  // State, not a ref: activeSet below is a memo and must recompute when a stamp changes.
+  const [firstSeen, setFirstSeen] = useState({});
   // Wall-clock timestamp used to age out stuck providers. Updated by the tick
   // below so render never has to call Date.now() itself.
   const [now, setNow] = useState(() => Date.now());
 
+  // One 1s tick seeds new providers, prunes inactive ones and advances the clock.
+  // A leading pass applies seed/prune right after mount or an active-set change, so
+  // aging starts at the same instant it did when this ran in its own effect.
   useEffect(() => {
-    const seen = firstSeenRef.current;
-    const now = Date.now();
-    for (const p of rawActiveSet) {
-      if (!seen[p]) seen[p] = now;
-    }
-    for (const p of Object.keys(seen)) {
-      if (!rawActiveSet.has(p)) delete seen[p];
-    }
-  }, [rawActiveSet]);
-
-  useEffect(() => {
-    if (rawActiveSet.size === 0) return;
-    const id = setInterval(() => setNow(Date.now()), FE_ACTIVE_TICK_MS);
-    return () => clearInterval(id);
+    // Seed timestamps for new providers, drop stamps for providers that went idle.
+    // Returns the tick timestamp so the caller can advance the clock with it.
+    const syncSeen = () => {
+      const ts = Date.now();
+      setFirstSeen((prev) => {
+        const stale = Object.keys(prev).filter((p) => !rawActiveSet.has(p));
+        const fresh = [...rawActiveSet].filter((p) => !prev[p]);
+        if (stale.length === 0 && fresh.length === 0) return prev;
+        const next = { ...prev };
+        for (const p of stale) delete next[p];
+        for (const p of fresh) next[p] = ts;
+        return next;
+      });
+      return ts;
+    };
+    const leading = setTimeout(syncSeen, 0);
+    if (rawActiveSet.size === 0) return () => clearTimeout(leading);
+    const id = setInterval(() => setNow(syncSeen()), FE_ACTIVE_TICK_MS);
+    return () => {
+      clearTimeout(leading);
+      clearInterval(id);
+    };
   }, [rawActiveSet]);
 
   const activeSet = useMemo(() => {
     const filtered = new Set();
     for (const p of rawActiveSet) {
-      const ts = firstSeenRef.current[p];
+      const ts = firstSeen[p];
       if (!ts || now - ts < FE_ACTIVE_TIMEOUT_MS) filtered.add(p);
     }
     return filtered;
-  }, [rawActiveSet, now]);
+  }, [rawActiveSet, firstSeen, now]);
 
   const { nodes, edges } = useMemo(
     () => buildLayout(providers, activeSet, lastSet, errorSet),

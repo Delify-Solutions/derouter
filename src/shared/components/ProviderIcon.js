@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import PropTypes from "prop-types";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
 
@@ -41,11 +42,12 @@ export default function ProviderIcon({
   }
 
   return (
-    <img
+    <Image
       src={effectiveSrc}
       alt={alt}
       width={size}
       height={size}
+      unoptimized
       className={className}
       loading="lazy"
       decoding="async"

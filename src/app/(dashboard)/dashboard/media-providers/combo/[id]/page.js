@@ -361,6 +361,7 @@ export default function ComboDetailPage() {
                       Download
                     </a>
                   </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- blob URL from test run; dimensions unknown */}
                   <img src={testResult.imageUrl} alt="Generated" className="max-w-full rounded-lg border border-border" loading="lazy" decoding="async" />
                 </div>
               )}

@@ -102,6 +102,7 @@ function DonateChannelCard({ channel }) {
         <div className="text-xs text-text-muted mb-3 text-center">{description}</div>
       )}
       {qr && (
+        // eslint-disable-next-line @next/next/no-img-element -- QR payload from remote donate feed; dimensions unknown
         <img
           src={qr}
           alt={`${label} QR`}
