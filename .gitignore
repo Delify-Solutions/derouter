@@ -90,3 +90,5 @@ graphify-out/*
 
 # Kiro local workspace state
 .kiro/
+# Local-only compose override (e.g. http://localhost testing).
+docker-compose.override.yml
