@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, CardSkeleton, ConfirmModal, Select } from "@/shared/components";
+import { Button, CardSkeleton, ConfirmModal, Select, Modal, Input } from "@/shared/components";
 import { fmtUsdNano } from "@/shared/utils/money";
 
 const STATUS_FILTERS = [
@@ -42,6 +42,12 @@ export default function UsersPageClient() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [confirmState, setConfirmState] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ email: "", displayName: "", password: "", groupId: "" });
+  const [creating, setCreating] = useState(false);
+  const [resetTarget, setResetTarget] = useState(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
@@ -122,6 +128,59 @@ export default function UsersPageClient() {
     }
   };
 
+  const submitCreate = async () => {
+    setCreating(true);
+    setError("");
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: createDraft.email.trim(),
+          displayName: createDraft.displayName.trim() || null,
+          password: createDraft.password,
+          groupId: createDraft.groupId || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Không tạo được tài khoản");
+        return;
+      }
+      setCreateOpen(false);
+      setCreateDraft({ email: "", displayName: "", password: "", groupId: "" });
+      await load();
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const submitReset = async () => {
+    if (!resetTarget) return;
+    setResetting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/users/${resetTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: resetPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Không đặt lại được mật khẩu");
+        return;
+      }
+      setResetTarget(null);
+      setResetPassword("");
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const removeUser = (user) => {
     setConfirmState({
       title: "Delete user",
@@ -159,18 +218,20 @@ export default function UsersPageClient() {
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-2">
-        <p className="meta text-text-muted">Tenants</p>
+        <p className="meta text-text-muted">Khách hàng</p>
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <h1 className="text-2xl font-semibold text-text-main">Users</h1>
+          <h1 className="text-2xl font-semibold text-text-main">Người dùng</h1>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" icon="refresh" onClick={load}>
-              Refresh
+              Tải lại
+            </Button>
+            <Button size="sm" icon="person_add" onClick={() => setCreateOpen(true)}>
+              Tạo tài khoản
             </Button>
           </div>
         </div>
         <p className="text-sm text-text-muted max-w-2xl">
-          Customer accounts created through public signup. Group membership decides the limits
-          their API keys inherit.
+          Tài khoản khách hàng. Nhóm quyết định hạn mức mà API key của họ kế thừa.
         </p>
       </header>
 
@@ -309,6 +370,15 @@ export default function UsersPageClient() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          icon="key"
+                          aria-label={`Đặt lại mật khẩu cho ${user.email}`}
+                          title="Đặt lại mật khẩu"
+                          disabled={busyId === user.id}
+                          onClick={() => { setResetTarget(user); setResetPassword(""); }}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           icon="delete"
                           aria-label={`Delete ${user.email}`}
                           disabled={busyId === user.id}
@@ -324,6 +394,79 @@ export default function UsersPageClient() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Tạo tài khoản"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} disabled={creating}>Huỷ</Button>
+            <Button onClick={submitCreate} loading={creating}>Tạo</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Email"
+            value={createDraft.email}
+            onChange={(e) => setCreateDraft((d) => ({ ...d, email: e.target.value }))}
+          />
+          <Input
+            label="Tên hiển thị"
+            value={createDraft.displayName}
+            onChange={(e) => setCreateDraft((d) => ({ ...d, displayName: e.target.value }))}
+            placeholder="Không bắt buộc"
+          />
+          <Input
+            label="Mật khẩu"
+            type="password"
+            value={createDraft.password}
+            onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
+            hint="Ít nhất 8 ký tự"
+          />
+          <div className="flex flex-col gap-1">
+            <label className="meta text-text-subtle">Nhóm</label>
+            <Select
+              value={createDraft.groupId}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, groupId: e.target.value }))}
+              options={[
+                { value: "", label: "Không nhóm (dùng mặc định)" },
+                ...groups.map((g) => ({ value: g.id, label: g.name })),
+              ]}
+            />
+          </div>
+          <p className="text-[11px] text-text-subtle">
+            Tài khoản được tạo ở trạng thái đã xác minh — admin bảo lãnh địa chỉ này, nên không
+            cần chờ email.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!resetTarget}
+        onClose={() => setResetTarget(null)}
+        title="Đặt lại mật khẩu"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setResetTarget(null)} disabled={resetting}>Huỷ</Button>
+            <Button onClick={submitReset} loading={resetting}>Đặt lại</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-text-muted">
+            {resetTarget?.email}
+          </p>
+          <Input
+            label="Mật khẩu mới"
+            type="password"
+            value={resetPassword}
+            onChange={(e) => setResetPassword(e.target.value)}
+            hint="Ít nhất 8 ký tự. Mọi phiên đăng nhập hiện tại sẽ bị đăng xuất."
+          />
+        </div>
+      </Modal>
 
       <ConfirmModal
         isOpen={!!confirmState}

@@ -1,9 +1,9 @@
 import PropTypes from "prop-types";
-import { PLANS, USAGE_WINDOWS, fmtUsd } from "./salesData";
+import { USAGE_WINDOWS, fmtUsd } from "./salesData";
 
 // FAQ ngắn: chỉ trả lời những câu mà cơ chế trong repo thực sự quyết định, để
 // trang không hứa điều hệ thống không làm.
-export default function FaqSection({ models, copy }) {
+export default function FaqSection({ plans, models, copy }) {
   const questions = [
     {
       q: "Hạn mức tính theo số request hay theo token?",
@@ -18,8 +18,12 @@ export default function FaqSection({ models, copy }) {
       )}% trong 1 tuần và 100% trong 1 tháng. Cửa sổ ngắn không cộng dồn vào cửa sổ dài — chúng chặn song song.`,
     },
     {
-      q: "Go Plus mở thêm model nào?",
-      a: `Không. Cả hai gói mở cùng ${models.length} model. Go Plus chỉ nâng hạn mức mỗi model lên ${PLANS[1].limitMultiplier} lần, phù hợp khi agent chạy liên tục.`,
+      q: "Các gói khác nhau ở đâu?",
+      a: plans.length > 1
+        ? `Cùng danh mục model, khác hạn mức mỗi model. ${plans
+            .map((p) => `${p.name} ${fmtUsd(p.priceUsd)}/tháng`)
+            .join(", ")}.`
+        : "Hiện chỉ có một gói đang mở bán.",
     },
     {
       q: "Dùng hết hạn mức thì sao?",
@@ -56,7 +60,7 @@ export default function FaqSection({ models, copy }) {
         </dl>
 
         <p className="mt-4 font-mono text-[11px] text-text-subtle">
-          {PLANS.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
+          {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
         </p>
       </div>
     </section>
@@ -64,6 +68,7 @@ export default function FaqSection({ models, copy }) {
 }
 
 FaqSection.propTypes = {
+  plans: PropTypes.array.isRequired,
   models: PropTypes.array.isRequired,
   copy: PropTypes.object.isRequired,
 };

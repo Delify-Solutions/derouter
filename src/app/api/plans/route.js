@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listPlans, createPlan, validatePlanInput } from "@/lib/db/repos/billingRepo.js";
+import { getKeyGroups } from "@/lib/db/repos/keyGroupsRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -9,7 +10,15 @@ export async function GET(request) {
   try {
     const onlyActive = request.nextUrl.searchParams.get("active") === "1";
     const plans = await listPlans({ onlyActive });
-    return NextResponse.json({ plans }, { headers: NO_STORE });
+    // Groups are returned alongside so the admin form can render the
+    // "restricted to" picker without a second request.
+    let groups = [];
+    try {
+      groups = await getKeyGroups();
+    } catch {
+      // No groups table yet — the picker just has nothing to offer.
+    }
+    return NextResponse.json({ plans, groups }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "Failed to load plans" }, { status: 500, headers: NO_STORE });
   }

@@ -1,15 +1,20 @@
 // Danh mục model của trang bán hàng, dựng từ dữ liệu thật của router.
 //
-// - Danh sách model: src/shared/constants/models.js (registry provider
-//   "opencode-go"), nên trang không thể quảng cáo model mà router không phục vụ.
-// - Giá token: open-sse/providers/pricing.js — đúng bảng giá router dùng để
-//   tính tiền, nên bảng trên trang không lệch với hoá đơn.
+// - Danh sách model: registry provider "opencode-go" — trang không thể quảng cáo
+//   model mà router không phục vụ.
+// - Giá token: open-sse/providers/pricing.js, đúng bảng giá router dùng để tính
+//   tiền, nên bảng trên trang không lệch với hoá đơn.
+//
+// Hạn mức theo model KHÔNG còn nằm ở đây: nó là dữ liệu của từng gói
+// (planModelLimits) và được truyền vào từ LandingPage. Trước đây file này giữ
+// một bảng MONTHLY_LIMIT_USD cố định, tức là landing tự quyết định model nào
+// được bán thay vì hỏi gói — sửa gói trong admin không có tác dụng gì.
 //
 // Chỉ server component được import file này (nó kéo cả registry provider vào
 // bundle); component phía client nhận dữ liệu đã dựng qua props.
 import { getProviderModels } from "@/shared/constants/models";
 import { getPricingForModel } from "open-sse/providers/pricing.js";
-import { MONTHLY_LIMIT_USD, PROVIDER_ID, SAMPLE_MODEL_ID } from "./salesData";
+import { PROVIDER_ID } from "./salesData";
 
 // Bảng giá nội bộ chưa phủ hết mọi id. Model nào không tra được theo provider
 // thì tra tiếp bảng của một provider bán cùng model đó — không có fallback này
@@ -26,21 +31,21 @@ function resolveRate(modelId) {
   return null;
 }
 
-// Danh mục công bố = model có trong registry VÀ có hạn mức trong bảng của
-// salesData.js. Thứ tự giữ nguyên thứ tự registry.
-export const MODELS = getProviderModels(PROVIDER_ID)
-  .filter((model) => MONTHLY_LIMIT_USD[model.id] > 0)
-  .map((model) => {
-    const rate = resolveRate(model.id) || { input: null, output: null, cached: null };
-    return {
-      id: model.id,
-      name: model.name || model.id,
-      formats: model.supportedFormats || ["openai"],
-      input: rate.input,
-      output: rate.output,
-      cached: rate.cached,
-      monthlyLimitUsd: MONTHLY_LIMIT_USD[model.id],
-    };
-  });
+// Toàn bộ model của provider. Lọc theo gói là việc của PlansSection /
+// PricingSection, nơi biết gói nào đang bán model nào.
+export const MODELS = getProviderModels(PROVIDER_ID).map((model) => {
+  const rate = resolveRate(model.id) || { input: null, output: null, cached: null };
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    formats: model.supportedFormats || ["openai"],
+    input: rate.input,
+    output: rate.output,
+    cached: rate.cached,
+  };
+});
 
-export const SAMPLE_MODEL = MODELS.find((model) => model.id === SAMPLE_MODEL_ID) || MODELS[0];
+/** Nhãn wire format cho một model. */
+export function formatsOf(modelId) {
+  return MODELS.find((m) => m.id === modelId)?.formats ?? ["openai"];
+}

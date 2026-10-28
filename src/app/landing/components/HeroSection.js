@@ -1,25 +1,29 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
-import { PLANS, USAGE_WINDOWS, fmtUsd } from "./salesData";
+import { USAGE_WINDOWS, fmtUsd, windowLimitFor, interpolate } from "./salesData";
 
-const SIGNUP_URL = "/register?next=/account/plans";
-
-// Server component. Every string comes from `copy` (operator-editable, stored in
-// settings.landingCopy) and every number is derived from salesData / the model
-// catalogue — so changing the words never means editing JSX, and changing a
-// price never means editing words.
-export default function HeroSection({ models, copy }) {
-  const entryPlan = PLANS[0];
+// Server component. Every string comes from `copy` (operator-editable) and every
+// number from the plans rows passed in — so changing the words never means
+// editing JSX, and changing a price never means editing words.
+export default function HeroSection({ plans, models, copy }) {
+  // The cheapest visible plan is the "from" figure. Plans arrive ordered by the
+  // admin's sortOrder, not by price, so this must be computed rather than taken
+  // from index 0.
+  const cheapest = plans.length
+    ? plans.reduce((min, p) => (p.priceUsd < min.priceUsd ? p : min), plans[0])
+    : null;
 
   const specs = [
-    { label: "Giá từ", value: `${fmtUsd(entryPlan.priceUsd)}/tháng` },
+    cheapest
+      ? { label: "Giá từ", value: `${fmtUsd(cheapest.priceUsd)}/tháng` }
+      : null,
     { label: "Danh mục", value: `${models.length} model lập trình` },
     {
       label: "Cửa sổ hạn mức",
       value: USAGE_WINDOWS.map((w) => `${Math.round(w.fraction * 100)}% · ${w.label}`).join("  "),
     },
     { label: "Endpoint", value: "POST /v1/chat/completions" },
-  ];
+  ].filter(Boolean);
 
   return (
     <section id="hero" className="relative overflow-hidden border-b border-border">
@@ -32,12 +36,12 @@ export default function HeroSection({ models, copy }) {
       <div className="shell relative py-20 md:py-28">
         <div className="max-w-3xl">
           <h1 className="text-4xl font-semibold leading-[1.15] tracking-tight md:text-6xl">
-            {copy.heroTitle}
+            {interpolate(copy.heroTitle, { plans: plans.length })}
           </h1>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
-              href={SIGNUP_URL}
+              href="/account/plans"
               className="inline-flex h-12 items-center justify-center border border-brand-500 bg-brand-500 px-7 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600"
             >
               {copy.heroPrimaryCta}
@@ -57,6 +61,7 @@ export default function HeroSection({ models, copy }) {
 }
 
 HeroSection.propTypes = {
+  plans: PropTypes.array.isRequired,
   models: PropTypes.array.isRequired,
   copy: PropTypes.object.isRequired,
 };

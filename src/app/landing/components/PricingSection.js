@@ -2,13 +2,38 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { PLANS, USAGE_WINDOWS, fmtRate, fmtUsd, windowLimitFor } from "./salesData";
+import { USAGE_WINDOWS, fmtRate, fmtUsd, windowLimitFor, monthlyLimitFor } from "./salesData";
 
 // Bảng giá chi tiết: desktop là bảng, dưới md là card. Cả hai đọc cùng một
 // nguồn (models từ registry + gói đang chọn), nên hai bố cục không thể lệch số.
-export default function PricingSection({ models, copy }) {
-  const [planId, setPlanId] = useState(PLANS[0].id);
-  const plan = PLANS.find((item) => item.id === planId) || PLANS[0];
+export default function PricingSection({ plans, models, copy }) {
+  // The plan switcher is driven by the plans the admin actually has on sale. A
+  // hardcoded pair here would show limits for plans that do not exist, or hide
+  // a plan that does.
+  const [planId, setPlanId] = useState(plans[0]?.id ?? null);
+  const plan = plans.find((item) => item.id === planId) ?? plans[0] ?? null;
+
+  // Only models this plan sells. A row for a model the plan does not meter would
+  // print an em dash in every limit column and imply the plan covers it.
+  const rows = plan
+    ? models.filter((model) => monthlyLimitFor(plan, model.id) !== null)
+    : [];
+
+  if (!plan) {
+    return (
+      <section id="pricing" className="border-b border-border">
+        <div className="shell py-20">
+          <p className="meta text-text-muted">{copy.pricingEyebrow}</p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
+            {copy.pricingTitle}
+          </h2>
+          <p className="mt-6 border border-border bg-surface p-6 text-sm text-text-muted">
+            Chưa có gói nào được mở bán nên chưa có bảng giá.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   const headings = [
     "Model",
@@ -29,8 +54,7 @@ export default function PricingSection({ models, copy }) {
           <p className="mt-3 max-w-2xl text-text-muted">{copy.pricingSubtitle}</p>
         ) : null}
         <p className="mt-3 max-w-2xl text-text-muted">
-          Giá token tính bằng USD cho 1 triệu token và giống nhau ở cả hai gói. Cột hạn mức thay
-          đổi theo gói bạn chọn.
+          Giá token tính bằng USD cho 1 triệu token. Cột hạn mức thay đổi theo gói bạn chọn.
         </p>
 
         <div
@@ -38,7 +62,7 @@ export default function PricingSection({ models, copy }) {
           aria-label="Chọn gói để xem hạn mức"
           className="mt-8 inline-flex border border-border"
         >
-          {PLANS.map((item) => {
+          {plans.map((item) => {
             const active = item.id === planId;
             return (
               <button
@@ -76,7 +100,7 @@ export default function PricingSection({ models, copy }) {
               </tr>
             </thead>
             <tbody>
-              {models.map((model) => (
+              {rows.map((model) => (
                 <tr key={model.id} className="border-b border-border last:border-b-0">
                   <th scope="row" className="px-4 py-3 font-normal">
                     <span className="block text-sm font-semibold text-text-main">{model.name}</span>
@@ -98,7 +122,7 @@ export default function PricingSection({ models, copy }) {
 
         {/* Mobile: một card cho mỗi model, cùng dữ liệu, không cuộn ngang. */}
         <ul className="mt-6 flex flex-col gap-3 md:hidden">
-          {models.map((model) => (
+          {rows.map((model) => (
             <li key={model.id} className="border border-border bg-surface">
               <div className="border-b border-border px-4 py-3">
                 <h3 className="text-sm font-semibold text-text-main">{model.name}</h3>
@@ -145,6 +169,7 @@ export default function PricingSection({ models, copy }) {
 }
 
 PricingSection.propTypes = {
+  plans: PropTypes.array.isRequired,
   models: PropTypes.array.isRequired,
   copy: PropTypes.object.isRequired,
 };

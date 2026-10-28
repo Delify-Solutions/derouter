@@ -14,7 +14,15 @@ const EMPTY_FORM = {
   priceUsd: "",
   creditUsd: "",
   durationDays: "30",
+  // Two separate switches: listed vs buyable. A plan can be advertised before
+  // its capacity exists ("coming soon"), which neither flag expresses alone.
   isActive: true,
+  isPurchasable: true,
+  isFeatured: false,
+  // Empty array = any group may buy. Stored in the plan row as JSON.
+  allowedGroupIds: [],
+  // "" = unlimited. Counted per calendar month over orders.
+  purchaseLimitPerMonth: "",
   sortOrder: "",
 };
 
@@ -53,6 +61,10 @@ function planToDraft(plan) {
     creditUsd: String(plan.creditNanoUsd / 1e9),
     durationDays: String(plan.durationDays ?? 30),
     isActive: plan.isActive !== false,
+    isPurchasable: plan.isPurchasable !== false,
+    isFeatured: plan.isFeatured === true,
+    allowedGroupIds: Array.isArray(plan.allowedGroupIds) ? plan.allowedGroupIds : [],
+    purchaseLimitPerMonth: plan.purchaseLimitPerMonth == null ? "" : String(plan.purchaseLimitPerMonth),
     sortOrder: plan.sortOrder == null ? "" : String(plan.sortOrder),
   };
 }
@@ -70,6 +82,9 @@ export default function PlansPageClient() {
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  // Key groups offered in the "restricted to" picker; loaded with the plan list
+  // so the form does not need a second round trip when it opens.
+  const [groups, setGroups] = useState([]);
 
   const errors = validateDraft(draft);
   const invalid = Object.keys(errors).length > 0;
@@ -81,6 +96,7 @@ export default function PlansPageClient() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load plans");
       setPlans(Array.isArray(data.plans) ? data.plans : []);
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
     } catch (e) {
       setLoadError(e.message || "Failed to load plans");
     } finally {
@@ -129,6 +145,10 @@ export default function PlansPageClient() {
       creditNanoUsd: usdToNano(Number(draft.creditUsd)),
       durationDays: Number(draft.durationDays),
       isActive: draft.isActive,
+      isPurchasable: draft.isPurchasable,
+      isFeatured: draft.isFeatured,
+      allowedGroupIds: draft.allowedGroupIds.length ? draft.allowedGroupIds : null,
+      purchaseLimitPerMonth: draft.purchaseLimitPerMonth === "" ? null : Number(draft.purchaseLimitPerMonth),
       sortOrder: draft.sortOrder === "" ? null : Number(draft.sortOrder),
     };
 
@@ -254,7 +274,7 @@ export default function PlansPageClient() {
                       : "border-border bg-surface-2 text-text-muted"
                   }`}
                 >
-                  {plan.isActive ? "Active" : "Inactive"}
+                  {!plan.isActive ? "Ẩn" : plan.isPurchasable === false ? "Chưa mở bán" : "Đang bán"}
                 </span>
               </div>
 
@@ -262,7 +282,7 @@ export default function PlansPageClient() {
                 <p className="px-6 pt-3 text-sm text-text-muted">{plan.description}</p>
               )}
 
-              <dl className="grid grid-cols-2 gap-px bg-border mx-6 my-5 border border-border">
+              <dl className="grid grid-cols-2 lg:grid-cols-3 gap-px bg-border mx-6 my-5 border border-border">
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Price</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">{fmtUsdNano(plan.priceNanoUsd)}</dd>
@@ -280,6 +300,20 @@ export default function PlansPageClient() {
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Sort</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">{plan.sortOrder ?? "—"}</dd>
+                </div>
+                <div className="bg-surface px-4 py-3">
+                  <dt className="meta text-text-subtle">Nhóm</dt>
+                  <dd className="font-mono text-sm text-text-main mt-1">
+                    {Array.isArray(plan.allowedGroupIds) && plan.allowedGroupIds.length
+                      ? `${plan.allowedGroupIds.length} nhóm`
+                      : "Mọi nhóm"}
+                  </dd>
+                </div>
+                <div className="bg-surface px-4 py-3">
+                  <dt className="meta text-text-subtle">Giới hạn / tháng</dt>
+                  <dd className="font-mono text-sm text-text-main mt-1">
+                    {plan.purchaseLimitPerMonth ? `${plan.purchaseLimitPerMonth} lần` : "Không"}
+                  </dd>
                 </div>
               </dl>
 
@@ -411,12 +445,93 @@ export default function PlansPageClient() {
             />
           </div>
 
-          <div className="flex items-center justify-between border border-border px-4 py-3">
-            <div className="flex flex-col">
-              <span className="meta text-text-subtle">Visible in shop</span>
-              <span className="text-sm text-text-muted">Inactive plans stay on existing orders only.</span>
+          {/* Ba công tắc độc lập: hiển thị, mua được, nổi bật. Tách khỏi nhau để
+              một gói có thể đang quảng cáo mà chưa mở bán. */}
+          <div className="flex flex-col gap-px border border-border bg-border">
+            <div className="flex items-center justify-between bg-surface px-4 py-3">
+              <div className="flex flex-col">
+                <span className="meta text-text-subtle">Hiển thị trên trang giá</span>
+                <span className="text-sm text-text-muted">
+                  Tắt thì gói không xuất hiện ở trang chủ; đơn cũ vẫn giữ nguyên.
+                </span>
+              </div>
+              <Toggle checked={draft.isActive} onChange={(v) => setField("isActive", v)} />
             </div>
-            <Toggle checked={draft.isActive} onChange={(v) => setField("isActive", v)} />
+
+            <div className="flex items-center justify-between bg-surface px-4 py-3">
+              <div className="flex flex-col">
+                <span className="meta text-text-subtle">Cho phép mua</span>
+                <span className="text-sm text-text-muted">
+                  Tắt thì gói vẫn hiện nhưng nút mua bị khoá — dùng khi chưa có đủ hạn mức.
+                </span>
+              </div>
+              <Toggle
+                checked={draft.isPurchasable}
+                disabled={!draft.isActive}
+                onChange={(v) => setField("isPurchasable", v)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between bg-surface px-4 py-3">
+              <div className="flex flex-col">
+                <span className="meta text-text-subtle">Gói nổi bật</span>
+                <span className="text-sm text-text-muted">
+                  Đánh dấu thẻ này trên trang chủ. Chỉ nên chọn một gói.
+                </span>
+              </div>
+              <Toggle checked={draft.isFeatured} onChange={(v) => setField("isFeatured", v)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <span className="meta text-text-subtle">Nhóm được mua</span>
+              <span className="text-[11px] text-text-muted">
+                Để trống = mọi nhóm. Chọn một hay nhiều nhóm thì chỉ người thuộc nhóm đó mua được.
+              </span>
+              {groups.length === 0 ? (
+                <p className="text-[11px] text-text-subtle">
+                  Chưa có nhóm nào. Tạo ở mục Groups nếu muốn giới hạn.
+                </p>
+              ) : (
+                <div className="flex max-h-40 flex-col gap-1 overflow-auto border border-border p-2">
+                  {groups.map((group) => {
+                    const checked = draft.allowedGroupIds.includes(group.id);
+                    return (
+                      <label
+                        key={group.id}
+                        className="flex items-center gap-2 text-sm text-text-main"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setField(
+                              "allowedGroupIds",
+                              e.target.checked
+                                ? [...draft.allowedGroupIds, group.id]
+                                : draft.allowedGroupIds.filter((id) => id !== group.id)
+                            )
+                          }
+                        />
+                        {group.name}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Input
+                label="Số lần mua tối đa mỗi tháng"
+                value={draft.purchaseLimitPerMonth}
+                onChange={(e) => setField("purchaseLimitPerMonth", e.target.value)}
+                placeholder="Để trống = không giới hạn"
+                inputMode="numeric"
+                hint="Tính theo tháng dương lịch. Đơn đã huỷ không tính."
+              />
+            </div>
           </div>
 
           <div className="border-t border-border pt-4">

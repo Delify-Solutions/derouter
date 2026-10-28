@@ -492,6 +492,14 @@ export async function getLedger(userId, { limit = 100, offset = 0 } = {}) {
 
 function rowToPlan(row) {
   if (!row) return null;
+  // allowedGroupIds is a JSON array of keyGroups ids; null means "any group".
+  // An empty array is normalised to null too: "no group selected" in the admin
+  // form must mean unrestricted, not "nobody may buy" — the latter would make a
+  // plan invisible with no hint as to why.
+  const parsedGroups = parseJson(row.allowedGroupIds, null);
+  const allowedGroupIds = Array.isArray(parsedGroups) && parsedGroups.length > 0
+    ? parsedGroups.filter((g) => typeof g === "string")
+    : null;
   return {
     id: row.id,
     code: row.code,
@@ -501,6 +509,10 @@ function rowToPlan(row) {
     creditNanoUsd: nano(row.creditNanoUsd),
     durationDays: nano(row.durationDays),
     isActive: row.isActive === 1 || row.isActive === true,
+    isPurchasable: row.isPurchasable == null ? true : row.isPurchasable === 1 || row.isPurchasable === true,
+    allowedGroupIds,
+    purchaseLimitPerMonth: row.purchaseLimitPerMonth == null ? null : nano(row.purchaseLimitPerMonth),
+    isFeatured: row.isFeatured === 1 || row.isFeatured === true,
     sortOrder: row.sortOrder == null ? null : nano(row.sortOrder),
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
@@ -520,6 +532,27 @@ export function validatePlanInput(input = {}) {
   if (!Number.isInteger(credit) || credit <= 0) return "creditNanoUsd must be an integer > 0";
   const days = Number(input.durationDays);
   if (!Number.isInteger(days) || days < 1) return "durationDays must be an integer >= 1";
+
+  // allowedGroupIds: null (anyone) or a non-empty array of group ids. An empty
+  // array is rejected rather than coerced, because "restricted to nobody" is
+  // never what an admin means and would look like a plan silently disappearing.
+  if (input.allowedGroupIds !== undefined && input.allowedGroupIds !== null) {
+    if (!Array.isArray(input.allowedGroupIds)) return "allowedGroupIds must be an array or null";
+    if (input.allowedGroupIds.length === 0) {
+      return "allowedGroupIds is empty — leave it null to allow every group";
+    }
+    if (!input.allowedGroupIds.every((g) => typeof g === "string" && g.trim())) {
+      return "allowedGroupIds must contain non-empty group ids";
+    }
+  }
+
+  // purchaseLimitPerMonth: null/0 = unlimited, otherwise a positive integer.
+  if (input.purchaseLimitPerMonth !== undefined && input.purchaseLimitPerMonth !== null) {
+    const limit = Number(input.purchaseLimitPerMonth);
+    if (!Number.isInteger(limit) || limit < 0) {
+      return "purchaseLimitPerMonth must be a non-negative integer (0 = unlimited)";
+    }
+  }
   return null;
 }
 
@@ -562,19 +595,30 @@ export async function createPlan(input = {}) {
     creditNanoUsd: nano(input.creditNanoUsd),
     durationDays: nano(input.durationDays),
     isActive: input.isActive !== false,
+    isPurchasable: input.isPurchasable !== false,
+    allowedGroupIds: Array.isArray(input.allowedGroupIds) && input.allowedGroupIds.length > 0
+      ? input.allowedGroupIds.map((g) => String(g).trim())
+      : null,
+    purchaseLimitPerMonth: input.purchaseLimitPerMonth == null || Number(input.purchaseLimitPerMonth) === 0
+      ? null
+      : nano(input.purchaseLimitPerMonth),
+    isFeatured: input.isFeatured === true,
     sortOrder: input.sortOrder == null ? null : nano(input.sortOrder),
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, creditNanoUsd, durationDays, isActive, sortOrder, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.creditNanoUsd,
-      plan.durationDays, plan.isActive ? 1 : 0, plan.sortOrder, plan.createdAt, plan.updatedAt,
+      plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
+      plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
+      plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
+      plan.sortOrder, plan.createdAt, plan.updatedAt,
     ]
   );
-  return plan;
+  return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [plan.id]));
 }
 
 export async function updatePlan(id, patch = {}) {
@@ -591,12 +635,20 @@ export async function updatePlan(id, patch = {}) {
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, sortOrder = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
       nano(merged.priceNanoUsd), nano(merged.creditNanoUsd), nano(merged.durationDays),
-      merged.isActive ? 1 : 0, merged.sortOrder == null ? null : nano(merged.sortOrder),
+      merged.isActive ? 1 : 0, merged.isPurchasable ? 1 : 0,
+      Array.isArray(merged.allowedGroupIds) && merged.allowedGroupIds.length > 0
+        ? stringifyJson(merged.allowedGroupIds.map((g) => String(g).trim()))
+        : null,
+      merged.purchaseLimitPerMonth == null || Number(merged.purchaseLimitPerMonth) === 0
+        ? null
+        : nano(merged.purchaseLimitPerMonth),
+      merged.isFeatured ? 1 : 0,
+      merged.sortOrder == null ? null : nano(merged.sortOrder),
       merged.updatedAt, id,
     ]
   );
@@ -670,6 +722,57 @@ export async function getOrderById(id) {
  * Create a pending manual order. Price/credit/duration are SNAPSHOTTED here so a
  * later plan edit cannot rewrite what a customer already agreed to pay.
  */
+/**
+ * Why this user may NOT buy this plan right now, or null when the purchase is
+ * allowed.
+ *
+ * Two independent gates, both derived from the plan row:
+ *  1. group membership — a plan can be restricted to specific keyGroups.
+ *  2. per-month purchase count — counted over orders in the current calendar
+ *     month, so a refunded/cancelled order re-opens the slot rather than
+ *     permanently consuming it.
+ *
+ * Kept separate from createOrder so the catalogue route can ask the same
+ * question without creating anything, and so the answer can be shown as a
+ * reason on the pricing page instead of a mysterious 403 at checkout.
+ */
+export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
+  if (!plan) return { code: "not_found", reason: "Gói không tồn tại" };
+  if (!plan.isActive) return { code: "inactive", reason: "Gói đã ngừng bán" };
+  if (!plan.isPurchasable) return { code: "not_purchasable", reason: "Gói chưa mở bán" };
+
+  if (Array.isArray(plan.allowedGroupIds) && plan.allowedGroupIds.length > 0) {
+    const groupId = user?.groupId ?? null;
+    if (!groupId || !plan.allowedGroupIds.includes(groupId)) {
+      return { code: "group_restricted", reason: "Gói này chỉ dành cho một số nhóm người dùng" };
+    }
+  }
+
+  const limit = nano(plan.purchaseLimitPerMonth ?? 0);
+  if (limit > 0 && user?.id) {
+    // Calendar month in UTC. A rolling 30-day window would be kinder but makes
+    // the limit unpredictable ("why did it reset on the 3rd?"); calendar month
+    // is what the admin wrote and what a customer can reason about.
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    const row = db.get(
+      `SELECT COUNT(*) AS n FROM orders
+        WHERE userId = ? AND planId = ? AND createdAt >= ? AND status <> 'cancelled'`,
+      [user.id, plan.id, start]
+    );
+    const used = Number(row?.n ?? 0);
+    if (used >= limit) {
+      return {
+        code: "purchase_limit",
+        reason: `Gói này chỉ mua được ${limit} lần mỗi tháng (đã dùng ${used}/${limit})`,
+        used,
+        limit,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function createOrder({ userId, planId, payerNote = null, method = "manual" } = {}) {
   if (!userId) throw new Error("createOrder requires a userId");
   if (!planId) throw new Error("createOrder requires a planId");
@@ -677,7 +780,12 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
 
   const plan = rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [planId]));
   if (!plan) throw new Error("Plan not found");
-  if (!plan.isActive) throw new Error("Plan is not available");
+
+  // Buyability is decided in one place so the catalogue, the checkout button and
+  // this call can never disagree about whether a plan may be bought.
+  const user = db.get(`SELECT id, groupId FROM users WHERE id = ?`, [userId]);
+  const blocker = await planPurchaseBlocker(db, plan, user);
+  if (blocker) throw new Error(blocker.reason);
 
   const order = {
     id: uuidv4(),

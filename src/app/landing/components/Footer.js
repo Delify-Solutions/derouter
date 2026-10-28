@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import PropTypes from "prop-types";
-import { PLANS, fmtUsd } from "./salesData";
+import { fmtUsd } from "./salesData";
 
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
 const REPO_URL = "https://github.com/Delify-Solutions/derouter";
@@ -37,7 +37,7 @@ const COLUMNS = [
   },
 ];
 
-export default function Footer({ modelCount }) {
+export default function Footer({ modelCount, plans = [] }) {
   return (
     <footer className="bg-bg">
       <div className="shell py-14">
@@ -54,7 +54,7 @@ export default function Footer({ modelCount }) {
               endpoint tương thích OpenAI.
             </p>
             <p className="mt-3 font-mono text-[11px] text-text-subtle">
-              {PLANS.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
+              {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
             </p>
             <p className="mt-1 font-mono text-[11px] text-text-subtle">{modelCount} model trong danh mục</p>
           </div>
@@ -109,5 +109,6 @@ export default function Footer({ modelCount }) {
 }
 
 Footer.propTypes = {
+  plans: PropTypes.array,
   modelCount: PropTypes.number.isRequired,
 };

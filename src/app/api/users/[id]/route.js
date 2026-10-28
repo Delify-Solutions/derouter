@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import {
   getApiKeys,
   getKeyGroupById,
@@ -89,11 +90,34 @@ export async function PATCH(request, { params }) {
     patch.email = email;
   }
 
-  if (Object.keys(patch).length === 0) {
+  // Password reset is a separate concern from the profile patch above: it is
+  // hashed, it invalidates every session, and it must not be possible to set it
+  // through a generic field assignment.
+  let newPasswordHash = null;
+  if (Object.prototype.hasOwnProperty.call(body, "password")) {
+    const password = typeof body.password === "string" ? body.password : "";
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: "Mật khẩu phải có ít nhất 8 ký tự" },
+        { status: 400, headers: NO_STORE }
+      );
+    }
+    newPasswordHash = await bcrypt.hash(password, 10);
+  }
+
+  if (Object.keys(patch).length === 0 && !newPasswordHash) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400, headers: NO_STORE });
   }
 
-  const updated = await updateUser(id, patch);
+  const updated = newPasswordHash
+    ? await updateUser(id, { ...patch, passwordHash: newPasswordHash })
+    : await updateUser(id, patch);
+
+  // A reset password must not leave the old session (and whoever was holding it)
+  // signed in.
+  if (newPasswordHash) {
+    await revokeAllUserSessions(id);
+  }
 
   // Suspension must take effect immediately, not when the JWT expires.
   if (patch.status && patch.status !== "active") {

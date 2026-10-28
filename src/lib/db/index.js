@@ -10,7 +10,7 @@ export {
 
 // Operator-authored content (docs pages + landing copy)
 export {
-  listPublishedDocs, listAllDocs, getDocBySlug, getDocById,
+  listPublishedDocs, listDocsBySection, listAllDocs, getDocBySlug, getDocById,
   createDoc, updateDoc, deleteDoc, validateSlug,
   LANDING_COPY_DEFAULTS, mergeLandingCopy,
 } from "./repos/contentRepo.js";

@@ -3,12 +3,12 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-import { PLANS, fmtUsd } from "./salesData";
+import { fmtUsd } from "./salesData";
 
 const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
 const CHECKOUT_URL = "/register?next=/account/plans";
 
-export default function GetStarted({ models, text }) {
+export default function GetStarted({ models, plans = [], text }) {
   const { copied, copy } = useCopyToClipboard();
   const exampleModel = models[0];
 
@@ -23,9 +23,11 @@ export default function GetStarted({ models, text }) {
     {
       number: "01",
       title: "Tạo tài khoản và chọn gói",
-      body: `Đăng ký bằng email, xác nhận liên kết được gửi tới hộp thư, rồi chọn ${PLANS[0].name} (${fmtUsd(
-        PLANS[0].priceUsd
-      )}/tháng) hoặc ${PLANS[1].name} (${fmtUsd(PLANS[1].priceUsd)}/tháng) trong mục Plans.`,
+      body: plans.length
+        ? `Đăng ký bằng email, xác nhận liên kết được gửi tới hộp thư, rồi chọn ${plans
+            .map((p) => `${p.name} (${fmtUsd(p.priceUsd)}/tháng)`)
+            .join(" hoặc ")} trong mục Plans.`
+        : "Đăng ký bằng email và xác nhận liên kết được gửi tới hộp thư.",
     },
     {
       number: "02",
@@ -133,6 +135,7 @@ export default function GetStarted({ models, text }) {
 }
 
 GetStarted.propTypes = {
+  plans: PropTypes.array,
   models: PropTypes.array.isRequired,
   text: PropTypes.object.isRequired,
 };

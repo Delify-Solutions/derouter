@@ -2,7 +2,7 @@
 // Kept for backward compatibility with existing imports.
 export {
   getSettings, updateSettings, isCloudEnabled, getCloudUrl,
-  listPublishedDocs, listAllDocs, getDocBySlug, getDocById,
+  listPublishedDocs, listDocsBySection, listAllDocs, getDocBySlug, getDocById,
   createDoc, updateDoc, deleteDoc, validateSlug,
   getProviderConnections, getProviderConnectionById,
   createProviderConnection, updateProviderConnection,

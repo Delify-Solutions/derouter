@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 11;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -261,13 +261,31 @@ export const TABLES = {
       priceNanoUsd: "INTEGER NOT NULL",
       creditNanoUsd: "INTEGER NOT NULL",
       durationDays: "INTEGER NOT NULL",
+      // Visibility vs purchasability are two separate switches on purpose:
+      //   isActive     listed on the public pricing page at all
+      //   isPurchasable  the buy button works; false = "coming soon" / retired
+      //                  but still shown, which is how a plan can be advertised
+      //                  before its capacity exists.
       isActive: "INTEGER DEFAULT 1",
+      isPurchasable: "INTEGER DEFAULT 1",
+      // NULL = any group may buy. Otherwise a JSON array of keyGroups ids: the
+      // plan is restricted to customers whose users.groupId is in the list.
+      // Stored as JSON rather than a join table because it is read as a whole
+      // unit (is this group allowed?) and never queried per member.
+      allowedGroupIds: "TEXT",
+      // Purchases allowed per calendar month. NULL or 0 = unlimited. Counted
+      // over orders, not userPlans, so a refund re-opens the slot.
+      purchaseLimitPerMonth: "INTEGER",
+      // Highlighted card on the landing page ("most popular").
+      isFeatured: "INTEGER DEFAULT 0",
       sortOrder: "INTEGER",
       createdAt: "TEXT",
       updatedAt: "TEXT",
     },
     // code is UNIQUE inline (auto-indexed) — that covers lookup by code.
-    indexes: [],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_plans_visible ON plans(isActive, sortOrder)",
+    ],
   },
   // Operator-authored documentation served at /docs/<slug>.
   //
@@ -287,12 +305,20 @@ export const TABLES = {
       // shared/utils/markdown.js — never injected raw.
       body: "TEXT NOT NULL",
       isPublished: "INTEGER DEFAULT 0",
+      // Grouping for the docs sidebar, mirroring how opencode.ai/v2/docs splits
+      // its navigation into CLI / Build / API / Console. A page belongs to one
+      // section; the section list is derived from the pages themselves so an
+      // admin can invent a new group simply by typing it.
+      section: "TEXT",
+      // Card description on the docs index. Separate from `summary` so the index
+      // can stay terse while the page header keeps its longer intro.
+      excerpt: "TEXT",
       sortOrder: "INTEGER DEFAULT 0",
       createdAt: "TEXT",
       updatedAt: "TEXT",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_docs_published ON docsPages(isPublished, sortOrder)",
+      "CREATE INDEX IF NOT EXISTS idx_docs_published ON docsPages(isPublished, section, sortOrder)",
     ],
   },
   // Per-model allowance for a subscription plan, modelled on how OpenCode Go

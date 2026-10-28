@@ -1,14 +1,14 @@
-// Số liệu bán hàng của landing page — nguồn duy nhất.
+// Dựng dữ liệu hiển thị cho trang bán hàng TỪ DATABASE.
 //
-// Đổi giá gói, hạn mức hay tỷ lệ cửa sổ thì sửa DUY NHẤT ở file này; không
-// component nào được phép tự viết con số vào JSX.
+// Trước đây file này hardcode hai gói Go/Go Plus, nên sửa gói trong
+// /dashboard/plans không hề đổi landing — hai nơi nói hai chuyện khác nhau.
+// Giờ gói, giá, thời hạn, thứ tự, cờ nổi bật và hạn mức theo model đều đọc từ
+// bảng plans + planModelLimits; chỉ những thứ thật sự là câu chữ (perk, nhãn)
+// mới nằm trong code.
 //
-// File này KHÔNG import gì, nên dùng được ở cả server component lẫn client
-// component. Danh mục model thật do ./modelCatalog.js dựng từ registry của
-// router rồi truyền xuống dưới dạng props.
+// File này KHÔNG import gì để dùng được ở cả server lẫn client component.
 
-// Provider mà hai gói thuê bao này mở ra
-// (xem open-sse/providers/registry/opencode-go.js).
+// Provider mà các gói thuê bao này mở ra.
 export const PROVIDER_ID = "opencode-go";
 
 // Ba cửa sổ lồng nhau: mỗi request phải lọt qua CẢ BA. Tỷ lệ tính trên hạn mức
@@ -19,105 +19,49 @@ export const USAGE_WINDOWS = [
   { id: "month", label: "1 tháng", fraction: 1 },
 ];
 
-// Hai gói thuê bao. limitMultiplier nhân với MONTHLY_LIMIT_USD của từng model.
-export const PLANS = [
-  {
-    id: "go",
-    name: "Go",
-    summary: "Cho một người dùng hằng ngày với chi phí cố định.",
-    priceUsd: 10,
-    limitMultiplier: 1,
-    badge: "Tiêu chuẩn",
-    highlighted: false,
-    perks: [
-      "Hạn mức tính riêng cho từng model trong danh mục",
-      "Ba cửa sổ: 5 giờ, 1 tuần, 1 tháng",
-      "Dùng như một provider OpenAI tương thích",
-      "Theo dõi hạn mức còn lại qua header phản hồi",
-    ],
-  },
-  {
-    id: "go-plus",
-    name: "Go Plus",
-    summary: "Cùng danh mục model, hạn mức cao hơn cho công việc nặng.",
-    priceUsd: 40,
-    limitMultiplier: 4,
-    badge: "Hạn mức cao",
-    highlighted: true,
-    perks: [
-      "Hạn mức mỗi model cao hơn Go",
-      "Cùng cửa sổ 5 giờ, 1 tuần, 1 tháng",
-      "Đủ cho agent chạy liên tục trong ngày",
-      "Theo dõi hạn mức còn lại qua header phản hồi",
-    ],
-  },
+// Perk mặc định cho một gói thuê bao. Đây là lời quảng cáo, không phải dữ liệu:
+// chúng mô tả cơ chế mà hệ thống thực sự làm (hạn mức theo model, ba cửa sổ,
+// endpoint tương thích OpenAI, header phản hồi). Admin có thể thay bằng cách
+// thêm cột perks sau này; hiện giữ trong code để landing không hứa điều hệ thống
+// không làm.
+export const DEFAULT_PERKS = [
+  "Hạn mức tính riêng cho từng model trong danh mục",
+  "Ba cửa sổ: 5 giờ, 1 tuần, 1 tháng",
+  "Dùng như một provider OpenAI tương thích",
+  "Theo dõi hạn mức còn lại qua header phản hồi",
 ];
 
-// Hạn mức THÁNG của gói Go cho từng model, tính bằng USD.
-// Gói Go Plus lấy số ở đây nhân với limitMultiplier của gói đó.
-// Model nào không có trong bảng này thì không được bán trong gói.
-export const MONTHLY_LIMIT_USD = {
-  "glm-5.3-flash": 60,
-  "glm-5.2": 60,
-  "glm-5.1": 60,
-  "kimi-k2.7-code": 60,
-  "kimi-k2.6": 40,
-  "deepseek-v4-pro": 20,
-  "deepseek-v4-flash": 80,
-  "deepseek-v4-flash-vision-exp": 30,
-  "mimo-v2.5": 60,
-  "mimo-v2.5-pro": 30,
-  "minimax-m3": 60,
-  "minimax-m2.7": 40,
-  "minimax-m2.5": 40,
-  "qwen3.7-max": 15,
-  "qwen3.7-plus": 60,
-  "qwen3.6-plus": 60,
-};
-
-// Model dùng làm ví dụ minh hoạ hạn mức ở phần so sánh gói.
-export const SAMPLE_MODEL_ID = "glm-5.2";
-
-// Nhãn hiển thị cho wire format mà model khai báo trong registry.
+// Nhãn cho wire format. Giữ trong code vì đây là tên giao thức, không phải câu
+// chữ tiếp thị: "OpenAI" luôn là "OpenAI" ở mọi ngôn ngữ.
 export const FORMAT_LABELS = {
   openai: "OpenAI",
   claude: "Claude",
   "openai-responses": "Responses",
+  anthropic: "Claude",
 };
 
-/** Hạn mức tháng (USD) của một model trong một gói. */
-export function monthlyLimitFor(plan, model) {
-  return Math.round(model.monthlyLimitUsd * plan.limitMultiplier);
-}
-
-/** Hạn mức (USD) của một model trong một cửa sổ. `fraction` nằm trong 0..1. */
-export function windowLimitFor(plan, model, fraction) {
-  return Math.round(monthlyLimitFor(plan, model) * fraction * 100) / 100;
-}
-
-/** Giá token: USD cho 1 triệu token. */
 export function fmtRate(rate) {
   if (rate === null || rate === undefined) return "—";
-  if (rate === 0) return "Miễn phí";
-  if (rate >= 1) return `$${rate.toFixed(2)}`;
-  if (rate >= 0.01) return `$${rate.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
-  return `$${rate.toFixed(6)}`;
+  const value = Number(rate);
+  if (!Number.isFinite(value)) return "—";
+  if (value === 0) return "0";
+  if (value < 0.01) return value.toFixed(4).replace(/0+$/, "");
+  if (value < 1) return value.toFixed(2).replace(/0+$/, "");
+  return value.toFixed(2).replace(/\.00$/, "");
 }
 
-/** Số tiền USD của gói và hạn mức. */
 export function fmtUsd(usd) {
   const value = Number(usd) || 0;
-  if (value === 0) return "$0";
-  return `$${Number.isInteger(value) ? value : value.toFixed(2)}`;
+  return `$${value.toFixed(value % 1 === 0 ? 0 : 2)}`;
 }
 
 /**
  * Fill `{name}` placeholders in operator-authored copy.
  *
  * The admin writes prose, and some sentences must state a fact that lives in
- * code (the model count, the Go Plus multiplier). Hard-coding the number in the
- * default text would make it wrong the moment the catalogue changes, so the text
- * carries a placeholder and the value is substituted at render.
+ * code (the model count, the plan count). Hard-coding the number in the default
+ * text would make it wrong the moment the data changes, so the text carries a
+ * placeholder and the value is substituted at render.
  *
  * Unknown placeholders are left untouched — better a visible `{foo}` than a
  * silently mangled sentence.
@@ -127,4 +71,80 @@ export function interpolate(template, values = {}) {
   return template.replace(/\{(\w+)\}/g, (match, key) =>
     Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match
   );
+}
+
+/**
+ * Turn a plans row (already mapped by billingRepo.rowToPlan) plus its per-model
+ * limits into the shape the landing sections expect.
+ *
+ * Deliberately omits anything the public must not see: nothing here is secret,
+ * but `allowedGroupIds` and `purchaseLimitPerMonth` are gating rules — they are
+ * published as a boolean ("can I buy this") by the account route, not as policy
+ * details.
+ *
+ * @param {object} plan      row from listPlans()
+ * @param {Array}  limits    rows from listPlanModelLimits(plan.id)
+ */
+export function toSalesPlan(plan, limits = []) {
+  const priceUsd = (Number(plan.priceNanoUsd) || 0) / 1e9;
+  const creditUsd = (Number(plan.creditNanoUsd) || 0) / 1e9;
+
+  // Hạn mức tháng lớn nhất trong các model của gói — dùng cho câu "ví dụ với
+  // model X". Không lấy trung bình vì con số đó không tương ứng với model nào.
+  const monthlyByModel = {};
+  let topModel = null;
+  for (const limit of limits) {
+    const usd = (Number(limit.monthlyNanoUsd) || 0) / 1e9;
+    monthlyByModel[limit.model] = usd;
+    if (!topModel || usd > topModel.usd) topModel = { model: limit.model, usd };
+  }
+
+  return {
+    id: plan.id,
+    code: plan.code,
+    name: plan.name || plan.code,
+    summary: plan.description || "",
+    priceUsd,
+    creditUsd,
+    durationDays: plan.durationDays,
+    // `isFeatured` in the admin list decides the highlighted card. Nothing is
+    // highlighted when no plan is flagged — inventing an emphasis the operator
+    // did not ask for would misrepresent their pricing.
+    highlighted: Boolean(plan.isFeatured),
+    perks: DEFAULT_PERKS,
+    monthlyByModel,
+    sampleModel: topModel,
+    modelCount: limits.length,
+    purchasable: plan.isPurchasable !== false,
+    badge: plan.isFeatured ? "Nổi bật" : null,
+  };
+}
+
+/**
+ * Hạn mức tháng (USD) của một model trong một gói. Trả về null khi gói không
+ * đặt hạn mức cho model đó — nghĩa là model không được bán trong gói này.
+ */
+export function monthlyLimitFor(plan, modelId) {
+  if (!plan?.monthlyByModel || !modelId) return null;
+  const direct = plan.monthlyByModel[modelId];
+  if (direct !== undefined) return direct;
+  // Provider-prefixed vs bare id: "anthropic/x" và "x" là cùng một model, cùng
+  // quy ước với matchesAllowed() ở phía server.
+  const bare = String(modelId).includes("/") ? String(modelId).split("/").slice(1).join("/") : null;
+  if (bare && plan.monthlyByModel[bare] !== undefined) return plan.monthlyByModel[bare];
+  const prefixed = Object.keys(plan.monthlyByModel).find((k) => k.endsWith(`/${modelId}`));
+  return prefixed ? plan.monthlyByModel[prefixed] : null;
+}
+
+/** Hạn mức của một cửa sổ, suy ra từ hạn mức tháng. */
+export function windowLimitFor(plan, modelId, fraction) {
+  const monthly = monthlyLimitFor(plan, modelId);
+  if (monthly === null) return null;
+  return Math.round(monthly * fraction * 100) / 100;
+}
+
+/** Các model thực sự bán trong một gói, dùng cho bảng giá. */
+export function modelsForPlan(plan) {
+  if (!plan?.monthlyByModel) return [];
+  return Object.entries(plan.monthlyByModel).map(([id, monthlyUsd]) => ({ id, monthlyUsd }));
 }

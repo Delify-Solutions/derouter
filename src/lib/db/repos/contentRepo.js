@@ -35,6 +35,8 @@ function rowToDoc(row) {
     slug: row.slug,
     title: row.title || "",
     summary: row.summary || "",
+    excerpt: row.excerpt || "",
+    section: row.section || "",
     body: row.body || "",
     isPublished: row.isPublished === 1 || row.isPublished === true,
     sortOrder: row.sortOrder ?? 0,
@@ -47,12 +49,30 @@ function rowToDoc(row) {
 export async function listPublishedDocs() {
   const db = await getAdapter();
   const rows = db.all(
-    `SELECT id, slug, title, summary, isPublished, sortOrder, updatedAt, createdAt
+    `SELECT id, slug, title, summary, excerpt, section, isPublished, sortOrder, updatedAt, createdAt
        FROM docsPages
       WHERE isPublished = 1
       ORDER BY sortOrder ASC, title ASC`
   );
   return rows.map(rowToDoc);
+}
+
+/**
+ * Published pages grouped by section, ordered for the sidebar.
+ *
+ * The section list is derived from the rows, not from a fixed enum: an admin who
+ * types a new section name gets a new group, which is what keeps the docs
+ * navigation editable without a schema change.
+ */
+export async function listDocsBySection() {
+  const docs = await listPublishedDocs();
+  const groups = new Map();
+  for (const doc of docs) {
+    const key = doc.section || "Khác";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(doc);
+  }
+  return [...groups.entries()].map(([section, pages]) => ({ section, pages }));
 }
 
 /** Every page, including drafts, for the admin list. */
@@ -80,7 +100,7 @@ export async function getDocById(id) {
   return rowToDoc(db.get(`SELECT * FROM docsPages WHERE id = ?`, [id]));
 }
 
-export async function createDoc({ slug, title, summary = "", body = "", isPublished = true, sortOrder = 0 } = {}) {
+export async function createDoc({ slug, title, summary = "", excerpt = "", section = "", body = "", isPublished = true, sortOrder = 0 } = {}) {
   const invalid = validateSlug(slug);
   if (invalid) throw new Error(invalid);
   if (!title || !String(title).trim()) throw new Error("Tiêu đề không được để trống");
@@ -95,14 +115,19 @@ export async function createDoc({ slug, title, summary = "", body = "", isPublis
     slug: String(slug).trim(),
     title: String(title).trim(),
     summary: summary ? String(summary).trim() : "",
+    excerpt: excerpt ? String(excerpt).trim() : "",
+    section: section ? String(section).trim() : "",
     body: body ?? "",
     isPublished: isPublished !== false,
     sortOrder: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0,
   };
   db.run(
-    `INSERT INTO docsPages(id, slug, title, summary, body, isPublished, sortOrder, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [doc.id, doc.slug, doc.title, doc.summary, doc.body, doc.isPublished ? 1 : 0, doc.sortOrder, now, now]
+    `INSERT INTO docsPages(id, slug, title, summary, excerpt, section, body, isPublished, sortOrder, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      doc.id, doc.slug, doc.title, doc.summary, doc.excerpt, doc.section,
+      doc.body, doc.isPublished ? 1 : 0, doc.sortOrder, now, now,
+    ]
   );
   return getDocById(doc.id);
 }
@@ -128,14 +153,19 @@ export async function updateDoc(id, patch = {}) {
     slug: patch.slug !== undefined ? String(patch.slug).trim() : current.slug,
     title: patch.title !== undefined ? String(patch.title).trim() : current.title,
     summary: patch.summary !== undefined ? String(patch.summary).trim() : current.summary,
+    excerpt: patch.excerpt !== undefined ? String(patch.excerpt).trim() : current.excerpt,
+    section: patch.section !== undefined ? String(patch.section).trim() : current.section,
     body: patch.body !== undefined ? patch.body : current.body,
     isPublished: patch.isPublished !== undefined ? (patch.isPublished ? 1 : 0) : current.isPublished,
     sortOrder: patch.sortOrder !== undefined ? Number(patch.sortOrder) || 0 : current.sortOrder,
   };
 
   db.run(
-    `UPDATE docsPages SET slug = ?, title = ?, summary = ?, body = ?, isPublished = ?, sortOrder = ?, updatedAt = ? WHERE id = ?`,
-    [merged.slug, merged.title, merged.summary, merged.body, merged.isPublished, merged.sortOrder, new Date().toISOString(), id]
+    `UPDATE docsPages SET slug = ?, title = ?, summary = ?, excerpt = ?, section = ?, body = ?, isPublished = ?, sortOrder = ?, updatedAt = ? WHERE id = ?`,
+    [
+      merged.slug, merged.title, merged.summary, merged.excerpt, merged.section,
+      merged.body, merged.isPublished, merged.sortOrder, new Date().toISOString(), id,
+    ]
   );
   return getDocById(id);
 }

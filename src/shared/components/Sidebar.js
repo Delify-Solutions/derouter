@@ -18,6 +18,9 @@ const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "trave
 
 const navItems = [
   { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: "api" },
+  // Người dùng là thực thể trung tâm của mô hình multi-tenant: không có lối vào
+  // này thì admin không thể đổi nhóm, khoá hay xem ai đang dùng bao nhiêu.
+  { href: "/dashboard/users", label: "Người dùng", icon: "person" },
   { href: "/dashboard/groups", label: "Groups", icon: "group_work" },
   { href: "/dashboard/pricing", label: "Pricing", icon: "sell" },
   { href: "/dashboard/plans", label: "Plans", icon: "sell" },

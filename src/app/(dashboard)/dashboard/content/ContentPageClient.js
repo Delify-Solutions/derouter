@@ -66,7 +66,7 @@ const COPY_GROUPS = [
   },
 ];
 
-const EMPTY_DOC = { slug: "", title: "", summary: "", body: "", isPublished: false, sortOrder: 0 };
+const EMPTY_DOC = { slug: "", title: "", summary: "", excerpt: "", section: "", body: "", isPublished: false, sortOrder: 0 };
 
 function fmtDate(value) {
   if (!value) return "—";
@@ -170,6 +170,8 @@ export default function ContentPageClient() {
         slug: data.doc.slug,
         title: data.doc.title,
         summary: data.doc.summary || "",
+        excerpt: data.doc.excerpt || "",
+        section: data.doc.section || "",
         body: data.doc.body || "",
         isPublished: data.doc.isPublished,
         sortOrder: data.doc.sortOrder ?? 0,
@@ -363,7 +365,7 @@ export default function ContentPageClient() {
                       </Badge>
                     </div>
                     <p className="mt-0.5 truncate font-mono text-[11px] text-text-subtle">
-                      /docs/{doc.slug} · cập nhật {fmtDate(doc.updatedAt)}
+                      {doc.section ? `${doc.section} · ` : ""}/docs/{doc.slug} · cập nhật {fmtDate(doc.updatedAt)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
@@ -442,8 +444,37 @@ export default function ContentPageClient() {
             onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
           />
 
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="meta text-text-subtle">Nhóm (tab trên đầu trang docs)</label>
+              <input
+                list="docs-sections"
+                value={draft.section}
+                onChange={(e) => setDraft((d) => ({ ...d, section: e.target.value }))}
+                placeholder="VD: Bắt đầu, API, Hạn mức"
+                className="mt-1 w-full border border-border bg-surface px-3 py-2 text-sm text-text-main"
+              />
+              {/* Gợi ý từ các nhóm đã có, nhưng vẫn cho gõ tên mới: danh sách
+                  nhóm được suy ra từ chính các trang, không phải enum cố định. */}
+              <datalist id="docs-sections">
+                {[...new Set(docs.map((d) => d.section).filter(Boolean))].map((sec) => (
+                  <option key={sec} value={sec} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="meta text-text-subtle">Mô tả trên thẻ (index)</label>
+              <input
+                value={draft.excerpt}
+                onChange={(e) => setDraft((d) => ({ ...d, excerpt: e.target.value }))}
+                placeholder="Một câu, hiện trên thẻ ở /docs"
+                className="mt-1 w-full border border-border bg-surface px-3 py-2 text-sm text-text-main"
+              />
+            </div>
+          </div>
+
           <div>
-            <label className="meta text-text-subtle">Mô tả ngắn</label>
+            <label className="meta text-text-subtle">Mô tả dưới tiêu đề trang</label>
             <textarea
               value={draft.summary}
               onChange={(e) => setDraft((d) => ({ ...d, summary: e.target.value }))}

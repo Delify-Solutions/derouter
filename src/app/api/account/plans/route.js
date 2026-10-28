@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveAccountUser } from "@/lib/auth/userSession";
-import { walletSummary, listPlans } from "@/lib/db/repos/billingRepo.js";
+import { walletSummary, listPlans, planPurchaseBlocker } from "@/lib/db/repos/billingRepo.js";
+import { getAdapter } from "@/lib/db/driver.js";
 import { fmtUsdNano } from "@/shared/utils/money.js";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,25 @@ export async function GET(request) {
           creditRemainingUsd: fmtUsdNano(plan.creditRemainingNanoUsd),
           creditUsedUsd: fmtUsdNano(plan.creditUsedNanoUsd),
         })),
-        plans: plans.map(money),
+        // Every plan carries whether THIS user may buy it, and why not. Computing
+        // it here means the pricing page can disable the button with a reason
+        // instead of letting the customer click through to a bare 403.
+        plans: await Promise.all(
+          plans.map(async (plan) => {
+            const db = await getAdapter();
+            const blocker = await planPurchaseBlocker(
+              db,
+              plan,
+              { id: session.userId, groupId: session.user?.groupId ?? null }
+            );
+            return {
+              ...money(plan),
+              purchasable: !blocker,
+              blockedReason: blocker?.reason ?? null,
+              blockedCode: blocker?.code ?? null,
+            };
+          })
+        ),
       },
       { headers: NO_STORE }
     );
