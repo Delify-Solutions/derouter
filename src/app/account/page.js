@@ -70,13 +70,34 @@ export default async function AccountOverviewPage() {
       </header>
 
       <section className="grid gap-4 sm:grid-cols-2">
-        <div className="border border-border bg-surface p-6">
-          <p className="meta text-text-muted">Credit balance</p>
-          <p className="font-mono text-[32px] leading-none text-text-main mt-3">
-            {fmtUsdNano(wallet.availableNanoUsd)}
-          </p>
-          <p className="text-xs text-text-muted mt-2">Available across active plans</p>
-        </div>
+        {/* A subscriber's ceiling is per model and refills on its own windows, so
+            the wallet figure is not their limit — showing it as the headline made
+            people believe $500 was spendable when the model allowance ran out
+            first. Subscribers see the plan count and the quota page; credit is
+            shown only to accounts that actually pay from credit. */}
+        {activePlans.length > 0 ? (
+          <div className="border border-border bg-surface p-6">
+            <p className="meta text-text-muted">Gói đang dùng</p>
+            <p className="font-mono text-[32px] leading-none text-text-main mt-3">
+              {activePlans.length}
+            </p>
+            <p className="text-xs text-text-muted mt-2">
+              <Link href="/account/quota" className="underline">
+                Xem hạn mức còn lại theo từng model
+              </Link>
+            </p>
+          </div>
+        ) : (
+          <div className="border border-border bg-surface p-6">
+            <p className="meta text-text-muted">Số dư credit</p>
+            <p className="font-mono text-[32px] leading-none text-text-main mt-3">
+              {fmtUsdNano(wallet.availableNanoUsd)}
+            </p>
+            <p className="text-xs text-text-muted mt-2">
+              Dùng cho lưu lượng không thuộc gói nào
+            </p>
+          </div>
+        )}
 
         <div className="border border-border bg-surface p-6">
           <p className="meta text-text-muted">API keys</p>
@@ -122,27 +143,33 @@ export default async function AccountOverviewPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {/* No credit columns: on a subscription the ceiling is per model and
+                refills on its own windows, so "remaining credit" is not what
+                limits the customer and showing it implied a balance they could
+                never spend down. The quota page carries the real numbers. */}
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="meta text-text-muted font-medium px-6 py-3">Plan</th>
-                  <th className="meta text-text-muted font-medium px-6 py-3">Remaining</th>
-                  <th className="meta text-text-muted font-medium px-6 py-3">Granted</th>
-                  <th className="meta text-text-muted font-medium px-6 py-3">Expires</th>
+                  <th className="meta text-text-muted font-medium px-6 py-3">Gói</th>
+                  <th className="meta text-text-muted font-medium px-6 py-3">Bắt đầu</th>
+                  <th className="meta text-text-muted font-medium px-6 py-3">Hết hạn</th>
+                  <th className="meta text-text-muted font-medium px-6 py-3">Hạn mức</th>
                 </tr>
               </thead>
               <tbody>
                 {activePlans.map((plan) => (
                   <tr key={plan.id} className="border-b border-border last:border-b-0">
-                    <td className="px-6 py-3 text-sm text-text-main">{plan.planName || plan.planCode || "Plan"}</td>
-                    <td className="px-6 py-3 font-mono text-[12px] text-text-main">
-                      {fmtUsdNano(plan.creditRemainingNanoUsd ?? 0)}
-                    </td>
+                    <td className="px-6 py-3 text-sm text-text-main">{plan.planName || plan.planCode || "Gói"}</td>
                     <td className="px-6 py-3 font-mono text-[12px] text-text-muted">
-                      {fmtUsdNano(plan.creditTotalNanoUsd ?? 0)}
+                      {plan.startsAt ? new Date(plan.startsAt).toISOString().slice(0, 10) : "—"}
                     </td>
                     <td className="px-6 py-3 font-mono text-[12px] text-text-muted">
                       {plan.expiresAt ? new Date(plan.expiresAt).toISOString().slice(0, 10) : "—"}
+                    </td>
+                    <td className="px-6 py-3 font-mono text-[12px] text-text-main">
+                      <Link href="/account/quota" className="underline">
+                        Xem theo model
+                      </Link>
                     </td>
                   </tr>
                 ))}

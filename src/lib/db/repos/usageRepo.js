@@ -438,15 +438,40 @@ export async function saveRequestUsage(entry) {
       // Charge the owner's wallet in the SAME transaction as the usage row, keyed
       // on that row's id so a retry is idempotent. Failures are logged, never
       // thrown: a billing problem must not discard recorded usage.
+      //
+      // A customer on a subscription is NOT charged: their plan is a per-model
+      // allowance that refills on its own windows, and the usage row above is the
+      // only record needed to meter it (planAllowance sums it per model). Taking
+      // credit from them as well would charge the same request twice — once
+      // against the plan ceiling, once against the wallet — and the wallet figure
+      // was never spendable anyway, since the ceiling always ran out first.
+      //
+      // Credit is the fallback for traffic no plan covers: pay-as-you-go grants
+      // (gift codes, admin adjustments) and customers between subscriptions.
       if (entry.apiKey) {
         try {
           if (owner) {
-            chargeCreditsSync(db, {
-              userId: owner.userId,
-              apiKeyId: owner.apiKeyId,
-              requestKey: "usage:" + insertedUsage.lastInsertRowid,
-              costNanoUsd: entry.costNanoUsd || 0,
-            });
+            const nowIso2 = entry.timestamp || new Date().toISOString();
+            const onPlan = db.get(
+              `SELECT 1 AS hit
+                 FROM userPlans up
+                 JOIN plans p ON p.id = up.planId
+                WHERE up.userId = ?
+                  AND up.status = 'active'
+                  AND up.expiresAt > ?
+                  AND p.id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM planModelLimits pml WHERE pml.planId = p.id)
+                LIMIT 1`,
+              [owner.userId, nowIso2]
+            );
+            if (!onPlan) {
+              chargeCreditsSync(db, {
+                userId: owner.userId,
+                apiKeyId: owner.apiKeyId,
+                requestKey: "usage:" + insertedUsage.lastInsertRowid,
+                costNanoUsd: entry.costNanoUsd || 0,
+              });
+            }
           }
         } catch (e) {
           console.error("[billing] charge failed", e.message);

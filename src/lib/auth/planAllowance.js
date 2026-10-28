@@ -43,31 +43,74 @@ function nowMs() {
 }
 
 /**
- * The subscription a user currently has an active, unexpired plan on.
- * Returns null when the user is on credit-only grants (gift codes, admin
- * adjustments) — those have no per-model allowance, which is a supported state.
+ * Every subscription a user currently holds, oldest purchase first.
+ *
+ * A customer may own several plans at once (bought one, then upgraded, or stacked
+ * two months of the same plan). Their allowances ADD UP: holding Go and Go Plus
+ * gives the sum of both ceilings on each model, which is what a customer who paid
+ * twice reasonably expects.
+ *
+ * ORDER BY startsAt, then createdAt: the earliest-purchased plan is consumed
+ * first, so when one expires the user is still inside the newer one. expiresAt is
+ * deliberately NOT the sort key — a plan bought today that runs 30 days and one
+ * bought last week that runs 365 days should still be spent in purchase order.
+ *
+ * Returns [] when the user is on credit-only grants (gift codes, admin
+ * adjustments); those have no per-model allowance, which is a supported state.
  */
-async function getActivePlanForUser(db, userId, at) {
-  if (!userId) return null;
-  const row = db.get(
-    `SELECT p.*
+async function getActivePlansForUser(db, userId, at) {
+  if (!userId) return [];
+  const rows = db.all(
+    `SELECT p.*, up.startsAt, up.expiresAt, up.createdAt
        FROM userPlans up
        JOIN plans p ON p.id = up.planId
       WHERE up.userId = ?
         AND up.status = 'active'
         AND up.expiresAt > ?
         AND p.id IS NOT NULL
-      ORDER BY up.expiresAt ASC
-      LIMIT 1`,
+      ORDER BY up.startsAt ASC, up.createdAt ASC`,
     [userId, at]
   );
-  if (!row) return null;
-  return {
+  return rows.map((row) => ({
     id: row.id,
     code: row.code,
     name: row.name,
     creditNanoUsd: Number(row.creditNanoUsd) || 0,
-  };
+    startsAt: row.startsAt,
+    expiresAt: row.expiresAt,
+  }));
+}
+
+/**
+ * Combined per-model ceiling across every plan the user holds.
+ *
+ * Two plans covering the same model add their monthly figures; a model only one
+ * plan covers keeps that plan's figure. This is the number the customer was sold,
+ * so it is what enforcement uses.
+ *
+ * @returns {Map<string, {monthlyNanoUsd:number, sources:Array}>} model -> merged
+ */
+function mergeLimitsAcrossPlans(limitsByPlan, plans) {
+  /** @type {Map<string, {monthlyNanoUsd:number, sources:Array}>} */
+  const merged = new Map();
+
+  for (const plan of plans) {
+    const limits = limitsByPlan.get(plan.id) ?? [];
+    for (const limit of limits) {
+      const existing = merged.get(limit.model);
+      if (existing) {
+        existing.monthlyNanoUsd += limit.monthlyNanoUsd;
+        existing.sources.push({ planId: plan.id, planName: plan.name || plan.code, monthlyNanoUsd: limit.monthlyNanoUsd });
+      } else {
+        merged.set(limit.model, {
+          monthlyNanoUsd: limit.monthlyNanoUsd,
+          sources: [{ planId: plan.id, planName: plan.name || plan.code, monthlyNanoUsd: limit.monthlyNanoUsd }],
+        });
+      }
+    }
+  }
+
+  return merged;
 }
 
 /** Window start instants for every configured window, relative to `now`. */
@@ -145,17 +188,33 @@ export async function checkPlanAllowance(apiKey, model, { now = nowMs() } = {}) 
 
   const db = await getAdapter();
   const at = new Date(now).toISOString();
-  const plan = await getActivePlanForUser(db, userId, at);
-  if (!plan) return { ok: true, allowance: null };
+
+  // Every plan the user holds, oldest purchase first. A customer may stack plans;
+  // their ceilings add up rather than one plan silently winning.
+  const plans = await getActivePlansForUser(db, userId, at);
+  if (!plans.length) return { ok: true, allowance: null };
 
   const limitsByPlan = await listAllPlanModelLimits();
-  const limits = limitsByPlan.get(plan.id) ?? [];
-  if (!limits.length) return { ok: true, allowance: null };
+  const mergedLimits = mergeLimitsAcrossPlans(limitsByPlan, plans);
+  if (!mergedLimits.size) return { ok: true, allowance: null };
 
-  // 1. Is this model part of the plan at all? A combo is metered through its
+  // Flatten the merged map back into the shape the rest of this function expects
+  // (a list of { model, monthlyNanoUsd }) so the matching logic below does not
+  // need a second implementation for the multi-plan case.
+  const limits = [...mergedLimits.entries()].map(([model, value]) => ({
+    model,
+    monthlyNanoUsd: value.monthlyNanoUsd,
+    sources: value.sources,
+  }));
+
+  const planLabel = plans.length === 1
+    ? (plans[0].name || plans[0].code)
+    : `${plans.length} gói`;
+
+  // 1. Is this model part of any plan at all? A combo is metered through its
   //    members: a plan that allows every member must accept the alias, and a
-  //    combo whose members are all outside the plan must be rejected as a whole
-  //    rather than silently routing to something the plan excludes.
+  //    combo whose members are all outside every plan must be rejected as a whole
+  //    rather than silently routing to something the customer did not buy.
   const targets = await meterTargets(model);
   const allowed = planAllowedModels(limits);
 
@@ -165,7 +224,7 @@ export async function checkPlanAllowance(apiKey, model, { now = nowMs() } = {}) 
       return {
         ok: false,
         status: 403,
-        error: `Gói ${plan.name || plan.code} không bao gồm model ${model}`,
+        error: `${planLabel} không bao gồm model ${model}`,
       };
     }
     if (outside.length > 0) {
@@ -175,7 +234,7 @@ export async function checkPlanAllowance(apiKey, model, { now = nowMs() } = {}) 
         ok: false,
         status: 403,
         error:
-          `Gói ${plan.name || plan.code} chỉ bao gồm một phần model của combo ${model}. ` +
+          `${planLabel} chỉ bao gồm một phần model của combo ${model}. ` +
           `Ngoài gói: ${outside.join(", ")}`,
       };
     }
@@ -217,7 +276,7 @@ export async function checkPlanAllowance(apiKey, model, { now = nowMs() } = {}) 
         ok: false,
         status: 429,
         error:
-          `Gói ${plan.name || plan.code} đã dùng hết hạn mức ${w.label} cho model ${model}. ` +
+          `${planLabel} đã dùng hết hạn mức ${w.label} cho model ${model}. ` +
           `Hạn mức ${w.label}: ${cap} nanoUSD, đã dùng ${spend[w.id]}.`,
         retryAfter: Math.ceil(w.ms / 1000),
         resetAt,
@@ -250,7 +309,10 @@ export async function checkPlanAllowance(apiKey, model, { now = nowMs() } = {}) 
   return {
     ok: true,
     allowance: {
-      plan: { id: plan.id, code: plan.code, name: plan.name },
+      // Every plan is reported, not just a winner: the ceiling is their sum, and
+      // a support question ("what did I actually buy?") needs the list.
+      plans: plans.map((p) => ({ id: p.id, code: p.code, name: p.name, expiresAt: p.expiresAt })),
+      sources: limit.sources ?? [],
       model,
       monthlyNanoUsd: limit.monthlyNanoUsd,
       monthRemainingNanoUsd: Math.max(0, limit.monthlyNanoUsd - spend.month),
@@ -293,17 +355,24 @@ export function allowanceHeaders(allowance) {
 }
 
 /**
- * The model ids a user's active plan meters, or null when the plan imposes no
- * per-model restriction. Used by /v1/models so the catalog matches what the
+ * The model ids the user's plans meter between them, or null when no plan imposes
+ * a per-model restriction. Used by /v1/models so the catalog matches what the
  * request path will actually accept.
+ *
+ * The union across plans: holding Go (haiku only) and Pro (haiku + gpt-4o) must
+ * advertise both models, not just the newest plan's.
  */
 export async function planModelAllowList(userId, { now = nowMs() } = {}) {
   if (!userId) return null;
   const db = await getAdapter();
-  const plan = await getActivePlanForUser(db, userId, new Date(now).toISOString());
-  if (!plan) return null;
-  const limits = (await listAllPlanModelLimits()).get(plan.id) ?? [];
-  return planAllowedModels(limits);
+  const plans = await getActivePlansForUser(db, userId, new Date(now).toISOString());
+  if (!plans.length) return null;
+
+  const limitsByPlan = await listAllPlanModelLimits();
+  const merged = mergeLimitsAcrossPlans(limitsByPlan, plans);
+  if (!merged.size) return null;
+
+  return [...merged.keys()];
 }
 
 /** Two model ids naming the same model, using the shared allow-list matcher. */

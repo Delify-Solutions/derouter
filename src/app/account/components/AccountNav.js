@@ -8,6 +8,9 @@ import { cn } from "@/shared/utils/cn";
 const NAV = [
   { href: "/account", label: "Overview", icon: "dashboard" },
   { href: "/account/plans", label: "Plans", icon: "workspace_premium" },
+  // Hạn mức theo model là con số khách thuê bao cần xem thường xuyên nhất — nó
+  // là giới hạn thật, khác với credit ví.
+  { href: "/account/quota", label: "Hạn mức", icon: "speed" },
   { href: "/account/gift", label: "Gift code", icon: "redeem" },
   { href: "/account/keys", label: "API keys", icon: "key" },
   { href: "/account/usage", label: "Usage", icon: "monitoring" },
