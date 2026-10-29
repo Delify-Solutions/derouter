@@ -20,6 +20,9 @@ import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
+  // Customer-owned keys never appear here (they are managed on /dashboard/users);
+  // this count tells the operator they exist.
+  const [customerKeyCount, setCustomerKeyCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -332,14 +335,22 @@ export default function APIPageClient({ machineId }) {
 
   async function fetchData() {
     try {
+      // Only admin keys come back from /api/keys (spec api-access-enforcement);
+      // `customerKeyCount` tells the operator how many keys belong to accounts and
+      // are therefore managed on those accounts instead.
       const fetchKeys = async () => {
         const res = await fetch("/api/keys");
-        if (!res.ok) return [];
+        if (!res.ok) return { keys: [], customerKeyCount: 0 };
         const data = await res.json();
-        return data.keys || [];
+        return {
+          keys: data.keys || [],
+          customerKeyCount: Number(data.customerKeyCount) || 0,
+        };
       };
 
-      let existing = await fetchKeys();
+      const first = await fetchKeys();
+      setCustomerKeyCount(first.customerKeyCount);
+      let existing = first.keys;
       // Auto-provision a default key for first-time users so the endpoint works out of the box.
       if (existing.length === 0) {
         try {
@@ -348,7 +359,11 @@ export default function APIPageClient({ machineId }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: "Default Key" }),
           });
-          if (createRes.ok) existing = await fetchKeys();
+          if (createRes.ok) {
+            const refreshed = await fetchKeys();
+            existing = refreshed.keys;
+            setCustomerKeyCount(refreshed.customerKeyCount);
+          }
         } catch { /* fall through to empty render */ }
       }
       setKeys(existing);
@@ -1201,6 +1216,12 @@ export default function APIPageClient({ machineId }) {
             Create Key
           </Button>
         </div>
+
+        {customerKeyCount > 0 && (
+          <p className="text-sm text-text-muted pb-4 mb-4 border-b border-border">
+            {customerKeyCount} key của khách — quản lý ở trang Người dùng
+          </p>
+        )}
 
         <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
           <div>

@@ -1,6 +1,7 @@
 import { getSettings } from "@/lib/localDb";
 import { sendMail, buildVerificationEmail, buildResetEmail } from "@/lib/mail/mailer";
 import { createVerification, replaceVerification } from "@/lib/db/repos/userRepo.js";
+import { safeNext } from "@/shared/utils/safeNext";
 
 // Shared pieces of the customer onboarding flow: where links point, and what the
 // verification / reset mail looks like. Kept out of the route handlers so the
@@ -33,9 +34,14 @@ export function siteNameOf(settings) {
   return name || "derouter";
 }
 
-export function verificationLink(token, request, settings) {
+export function verificationLink(token, request, settings, next = null) {
   const base = resolveBaseUrl(request, settings);
-  return `${base}/verify-email?token=${encodeURIComponent(token)}`;
+  const link = `${base}/verify-email?token=${encodeURIComponent(token)}`;
+  // The post-login target rides along so the visitor lands on the plan they
+  // picked. Validated again on the way in AND on the way out, so a crafted
+  // `next` in the signup body cannot turn the mail into an open redirect.
+  const safe = safeNext(next);
+  return safe ? `${link}&next=${encodeURIComponent(safe)}` : link;
 }
 
 export function resetLink(token, request, settings) {
@@ -50,7 +56,7 @@ export function resetLink(token, request, settings) {
  * Returns the token (callers need it only for logging) — the mail result is
  * intentionally swallowed: registration must not leak transport state.
  */
-export async function sendVerificationEmail({ user, request, settings, replace = false }) {
+export async function sendVerificationEmail({ user, request, settings, replace = false, next = null }) {
   const issue = replace ? replaceVerification : createVerification;
   const { token } = await issue({
     userId: user.id,
@@ -59,7 +65,7 @@ export async function sendVerificationEmail({ user, request, settings, replace =
   });
 
   const siteName = siteNameOf(settings);
-  const link = verificationLink(token, request, settings);
+  const link = verificationLink(token, request, settings, next);
   const message = buildVerificationEmail({ email: user.email, link, siteName });
   const result = await sendMail({ to: user.email, ...message });
   if (!result.ok) {
@@ -96,14 +102,7 @@ export async function loadAccountSettings() {
   }
 }
 
-export const PASSWORD_MIN_LENGTH = 10;
-
-export function validatePassword(password) {
-  if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
-    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
-  }
-  if (password.length > 200) {
-    return "Password must be at most 200 characters";
-  }
-  return null;
-}
+// The policy itself lives in a dependency-free module so `node --test` can assert
+// its exact message; re-exported here because every existing caller imports it from
+// this path.
+export { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH, validatePassword } from "./passwordPolicy.js";

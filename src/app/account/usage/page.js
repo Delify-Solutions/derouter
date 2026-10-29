@@ -90,7 +90,7 @@ export default async function AccountUsagePage({ searchParams }) {
 
   const keysView = keys.map((key) => ({
     id: key.id,
-    name: key.name || "Unnamed key",
+    name: key.name || "Key chưa đặt tên",
     keyPrefix: key.keyPrefix || key.key?.slice(0, 8) || "",
     isActive: key.isActive,
     createdAt: key.createdAt,
@@ -108,8 +108,8 @@ export default async function AccountUsagePage({ searchParams }) {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="meta text-text-muted">Usage</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Requests and spend</h1>
+        <p className="meta text-text-muted">Lịch sử dùng</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Request và chi phí</h1>
         <p className="text-sm text-text-muted">
           Every request made with your keys, newest first. Billing is prepaid: each row debits the credit balance of
           the plan it consumed.

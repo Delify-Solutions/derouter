@@ -787,10 +787,15 @@ export default function ProfilePage() {
     fetch("/api/groups")
       .then((res) => (res.ok ? res.json() : { groups: [] }))
       .then((data) => {
-        const options = (Array.isArray(data?.groups) ? data.groups : []).map((group) => ({
-          value: group.id,
-          label: group.name,
-        }));
+        // Only active groups are valid as the default: a new account must land in
+        // a group that can actually grant models, and the settings route rejects
+        // anything else with a 400.
+        const options = (Array.isArray(data?.groups) ? data.groups : [])
+          .filter((group) => group.isActive !== false)
+          .map((group) => ({
+            value: group.id,
+            label: group.name,
+          }));
         setNotifyGroupOptions(options);
       })
       .catch(() => setNotifyGroupOptions([]));
@@ -1805,6 +1810,19 @@ export default function ProfilePage() {
                 hint="New accounts join this group. Empty uses the oldest group; inactive groups are ignored."
                 disabled={loading || notifyLoading}
               />
+
+              {notifyForm.requireEmailVerification && !String(notifyForm.smtpRelayUrl || "").trim() && (
+                <div
+                  role="alert"
+                  className="border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300"
+                >
+                  <span className="material-symbols-outlined text-[18px] shrink-0" aria-hidden="true">warning</span>
+                  <span>
+                    Đang bật xác minh email nhưng chưa cấu hình mail relay — khách mới sẽ không nhận
+                    được mail xác minh. Cấu hình relay hoặc tắt xác minh email.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-4 border-t border-border pt-4">

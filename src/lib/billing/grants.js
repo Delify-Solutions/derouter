@@ -1,0 +1,151 @@
+// Granting a purchased plan — the one path that creates credit.
+//
+// Every grant (order approval, refund compensation, plan gift, credit gift, admin
+// grant) funnels through grantUserPlan so they cannot disagree about debt paydown,
+// ledger shape or the limits snapshot.
+//
+// Moved out of billingRepo.js (design D13) so the driver-free engine and the admin
+// actions can call it without importing an adapter-resolving module (D8).
+import { v4 as uuidv4 } from "uuid";
+import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, nano } from "./ledger.js";
+import { serializeLimits } from "./limits.js";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Placeholder written into userPlans.planId while the schema still declares that
+// column NOT NULL, for a credit-only grant that genuinely has no plan (a gift code
+// with grantKind='credit'). "" is never a real plans.id, so every join misses it
+// and the plan reads as absent — same presentation as a NULL. Once the column is
+// nullable (migration 003), the probe below inserts real NULLs and this value
+// stops being written.
+export const NO_PLAN_ID = "";
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+export function isoPlusDays(days, from = Date.now()) {
+  const d = Math.max(1, Math.floor(Number(days) || 0));
+  return new Date(from + d * DAY_MS).toISOString();
+}
+
+// Does userPlans.planId allow NULL? Probed once per adapter and cached: the column
+// definition cannot change under a live connection except via a migration, and a
+// migration replaces the process's DB anyway. Reading the constraint beats
+// guessing, because the INSERT is inside a caller's transaction — an exception
+// there would poison their work.
+const planIdNullableByAdapter = new WeakMap();
+
+export function planIdIsNullable(db) {
+  const cached = planIdNullableByAdapter.get(db);
+  if (cached !== undefined) return cached;
+  let nullable = true;
+  try {
+    const cols = db.all(`PRAGMA table_info(userPlans)`);
+    const col = cols.find((c) => c.name === "planId");
+    // No table/column (fresh DB before sync) → let the INSERT decide.
+    nullable = !col || !col.notnull;
+  } catch {
+    nullable = true;
+  }
+  planIdNullableByAdapter.set(db, nullable);
+  return nullable;
+}
+
+/**
+ * Create a userPlans row for a purchase/gift/admin grant.
+ * SYNCHRONOUS — call inside an existing db.transaction.
+ *
+ * The granted credit first repays whatever the account owes
+ * (users.overdraftNanoUsd); only the remainder lands on the new plan, so a grant
+ * can never leave a user both funded and in debt.
+ *
+ * `limits` is the normalised/serialisable snapshot of the plan's per-window limits
+ * (spec plan-queue-billing "Each grant creates an independent purchased plan").
+ * Credit-only grants pass `[]`. `priority` is always NULL: a new plan joins the
+ * queue at its expiry position, never ahead of an order the customer chose.
+ *
+ * @returns {{ userPlan: object, appliedToOverdraftNanoUsd: number }}
+ */
+export function grantUserPlan(db, {
+  userId,
+  planId = null,
+  orderId = null,
+  source,
+  creditNanoUsd,
+  durationDays,
+  limits = [],
+  meta = null,
+  now = null,
+  // Ledger kind for the credit entry. A refund is still a grant of credit, but it
+  // has to be auditable as its own event, not as a second 'grant'.
+  ledgerKind = "grant",
+} = {}) {
+  if (!db) throw new Error("grantUserPlan requires the db adapter");
+  if (!userId) throw new Error("grantUserPlan requires a userId");
+  if (!source) throw new Error("grantUserPlan requires a source");
+
+  const credit = Math.max(0, nano(creditNanoUsd));
+  const startsAt = now || nowIso();
+  const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
+
+  // 1. Repay overdraft out of the granted credit.
+  const overdraftBefore = getDebtNanoSync(db, userId);
+  const paydown = Math.min(credit, overdraftBefore);
+  if (paydown > 0) {
+    setDebtNanoSync(db, userId, overdraftBefore - paydown);
+    insertLedgerSync(db, {
+      userId,
+      userPlanId: null,
+      deltaNanoUsd: paydown,
+      kind: "adjust",
+      meta: { reason: "overdraft_paydown", source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
+      createdAt: startsAt,
+    });
+  }
+
+  // 2. The remainder becomes the plan's credit.
+  const planCredit = credit - paydown;
+  const planIdValue = planId != null && planId !== NO_PLAN_ID
+    ? planId
+    : planIdIsNullable(db) ? null : NO_PLAN_ID;
+  const userPlan = {
+    id: uuidv4(),
+    userId,
+    planId: planIdValue,
+    orderId,
+    source,
+    creditTotalNanoUsd: planCredit,
+    creditRemainingNanoUsd: planCredit,
+    startsAt,
+    expiresAt,
+    status: "active",
+    priority: null,
+    limits: serializeLimits(limits),
+    createdAt: startsAt,
+  };
+
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, priority, limits, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source,
+      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
+      userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.priority,
+      userPlan.limits, userPlan.createdAt,
+    ]
+  );
+
+  insertLedgerSync(db, {
+    userId,
+    userPlanId: userPlan.id,
+    deltaNanoUsd: planCredit,
+    kind: ledgerKind,
+    meta: meta && typeof meta === "object"
+      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown }
+      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
+    createdAt: startsAt,
+  });
+
+  return { userPlan, appliedToOverdraftNanoUsd: paydown };
+}

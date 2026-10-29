@@ -110,11 +110,11 @@ export default function GiftRedeemForm({ onRedeemed }) {
         <div className="flex flex-col gap-2 border border-brand-500/30 bg-brand-500/10 px-4 py-4">
           <div className="flex items-center gap-2 text-sm font-medium text-brand-700 dark:text-brand-400">
             <span className="material-symbols-outlined text-[18px]">check_circle</span>
-            <span>Code redeemed</span>
+            <span>Đã nhập mã</span>
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             <div>
-              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Credited</dt>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Đã cộng</dt>
               <dd className="mt-1 font-mono text-text-main">{fmtUsdNano(result.creditAppliedNanoUsd ?? 0)}</dd>
               {(result.appliedToOverdraftNanoUsd ?? 0) > 0 && (
                 <dd className="mt-1 text-xs text-text-muted">
@@ -123,11 +123,11 @@ export default function GiftRedeemForm({ onRedeemed }) {
               )}
             </div>
             <div>
-              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Plan</dt>
-              <dd className="mt-1 font-mono text-text-main">{result.planName || "Credit grant"}</dd>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Gói</dt>
+              <dd className="mt-1 font-mono text-text-main">{result.planName || "Cộng credit"}</dd>
             </div>
             <div>
-              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Expires</dt>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Hết hạn</dt>
               <dd className="mt-1 font-mono text-text-main">{fmtWhen(result.expiresAt)}</dd>
             </div>
           </dl>

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import LoginForm from "./components/LoginForm";
 
 export const dynamic = "force-dynamic";
@@ -9,5 +10,10 @@ export default async function LoginPage({ searchParams }) {
   const params = await searchParams;
   const resetToken = typeof params?.token === "string" ? params.token : "";
 
-  return <LoginForm resetToken={resetToken} />;
+  // useSearchParams (?next=) needs a Suspense boundary during pre-rendering.
+  return (
+    <Suspense fallback={<div className="h-40" />}>
+      <LoginForm resetToken={resetToken} />
+    </Suspense>
+  );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserByEmail, normalizeEmail } from "@/lib/localDb";
 import { loadAccountSettings, sendResetEmail } from "@/lib/users/register";
+import { checkLimits, getClientIp } from "@/lib/auth/actionLimiter.js";
 
 // Always answers the same way: a reset request must not reveal whether the
 // address exists.
@@ -9,15 +10,10 @@ const OK = { ok: true, message: "If that address has an account, a reset link is
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
-const RATE_LIMIT_MS = 60_000;
-if (!global._forgotPasswordLast) global._forgotPasswordLast = new Map();
-const lastSent = global._forgotPasswordLast;
-
-function prune(now) {
-  for (const [email, at] of lastSent) {
-    if (now - at > RATE_LIMIT_MS * 10) lastSent.delete(email);
-  }
-}
+const HOUR_MS = 60 * 60 * 1000;
+// Same shape as resend-verification: tight per address, looser per client IP.
+const EMAIL_LIMIT = 3;
+const IP_LIMIT = 10;
 
 export async function POST(request) {
   let body;
@@ -28,15 +24,21 @@ export async function POST(request) {
   }
 
   const email = normalizeEmail(body?.email);
-  if (!email) return NextResponse.json(OK, { headers: NO_STORE });
 
-  const now = Date.now();
-  prune(now);
-  const previous = lastSent.get(email);
-  if (previous && now - previous < RATE_LIMIT_MS) {
-    return NextResponse.json(OK, { headers: NO_STORE });
+  // The per-email limit applies whether or not the account exists, so a flood
+  // cannot be aimed at an address and a probe cannot learn from the 429 either.
+  const limits = [{ bucket: `forgot:ip:${getClientIp(request)}`, limit: IP_LIMIT, windowMs: HOUR_MS }];
+  if (email) limits.unshift({ bucket: `forgot:email:${email}`, limit: EMAIL_LIMIT, windowMs: HOUR_MS });
+
+  const gate = checkLimits(limits);
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { error: `Bạn đã yêu cầu đặt lại mật khẩu quá nhiều lần. Vui lòng thử lại sau ${Math.ceil(gate.retryAfterSec / 60)} phút.` },
+      { status: 429, headers: { ...NO_STORE, "Retry-After": String(gate.retryAfterSec) } }
+    );
   }
-  lastSent.set(email, now);
+
+  if (!email) return NextResponse.json(OK, { headers: NO_STORE });
 
   try {
     const user = await getUserByEmail(email);

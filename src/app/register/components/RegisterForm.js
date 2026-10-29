@@ -1,13 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button, Input } from "@/shared/components";
+import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice } from "@/app/login/components/AuthShell";
 
 export default function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Carried through signup → verification mail → verify-email page → login, so a
+  // visitor who clicked "Chọn Go" on the landing page ends on that plan. Dropped
+  // when invalid (open-redirect guard, design D17).
+  const nextTarget = safeNext(searchParams?.get?.("next"));
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -36,6 +42,8 @@ export default function RegisterForm() {
           email: email.trim(),
           password,
           displayName: displayName.trim() || undefined,
+          // The API validates it again and only the verification mail carries it.
+          ...(nextTarget ? { next: nextTarget } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -57,7 +65,10 @@ export default function RegisterForm() {
         eyebrow="Account"
         title="Check your inbox"
         footer={
-          <Link href="/login" className="text-brand-600 dark:text-brand-400 hover:underline">
+          <Link
+            href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
+            className="text-brand-600 dark:text-brand-400 hover:underline"
+          >
             Go to sign in
           </Link>
         }
@@ -91,7 +102,10 @@ export default function RegisterForm() {
       footer={
         <span>
           Already registered?{" "}
-          <Link href="/login" className="text-brand-600 dark:text-brand-400 hover:underline">
+          <Link
+            href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
+            className="text-brand-600 dark:text-brand-400 hover:underline"
+          >
             Sign in
           </Link>
         </span>

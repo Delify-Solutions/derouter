@@ -1,27 +1,40 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, CardSkeleton, ConfirmModal, Select, Modal, Input } from "@/shared/components";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Button, Input, Modal, Pagination, Select, CardSkeleton } from "@/shared/components";
 import { fmtUsdNano } from "@/shared/utils/money";
 
 const STATUS_FILTERS = [
-  { id: "all", label: "All" },
-  { id: "active", label: "Active" },
-  { id: "unverified", label: "Unverified" },
-  { id: "suspended", label: "Suspended" },
+  { id: "", label: "Mọi trạng thái" },
+  { id: "active", label: "Đang hoạt động" },
+  { id: "unverified", label: "Chưa xác minh" },
+  { id: "suspended", label: "Đang khoá" },
+];
+
+const PLAN_FILTERS = [
+  { id: "", label: "Mọi gói" },
+  { id: "active", label: "Đang có gói" },
+  { id: "none", label: "Không có gói" },
+  { id: "debt", label: "Đang nợ" },
 ];
 
 const STATUS_STYLES = {
   active: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400",
-  unverified: "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
-  suspended: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+  unverified: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  suspended: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
 };
+
+const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khoá" };
+
+const PAGE_SIZE = 50;
 
 function formatDate(value) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toISOString().replace("T", " ").slice(0, 16);
+  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function StatusBadge({ status }) {
@@ -29,108 +42,106 @@ function StatusBadge({ status }) {
   return (
     <span className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${cls}`}>
       <span className="size-1.5 bg-current" aria-hidden="true" />
-      {status}
+      {STATUS_LABEL[status] || status}
     </span>
   );
 }
 
+/**
+ * Admin users list (spec admin-user-management "Users list").
+ *
+ * Server-driven now: search, the three filters, sorting and pagination are query
+ * parameters, so the list shows the customers the operator asked for instead of
+ * filtering a full download in the browser.
+ *
+ * A row navigates to `/dashboard/users/<id>`; the inline destructive controls are
+ * gone from here on purpose — suspensions and deletions belong on the detail page
+ * where they have a reason field and an audit trail.
+ */
 export default function UsersPageClient() {
-  const [users, setUsers] = useState([]);
-  const [groups, setGroups] = useState([]);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [data, setData] = useState({ users: [], total: 0, page: 1, pageSize: PAGE_SIZE, groups: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [confirmState, setConfirmState] = useState(null);
-  const [busyId, setBusyId] = useState(null);
+  const [settings, setSettings] = useState(null);
+
+  const [q, setQ] = useState(searchParams.get("q") || "");
+  const [groupFilter, setGroupFilter] = useState(searchParams.get("groupId") || "");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "");
+  const [planFilter, setPlanFilter] = useState(searchParams.get("planState") || "");
+  const [sort, setSort] = useState(searchParams.get("sort") || "createdAt");
+  const [dir, setDir] = useState(searchParams.get("dir") || "desc");
+  const [page, setPage] = useState(Number(searchParams.get("page")) || 1);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState({ email: "", displayName: "", password: "", groupId: "" });
   const [creating, setCreating] = useState(false);
-  const [resetTarget, setResetTarget] = useState(null);
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetting, setResetting] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [usersRes, groupsRes] = await Promise.all([fetch("/api/users"), fetch("/api/groups")]);
-      const usersData = await usersRes.json().catch(() => ({}));
-      if (!usersRes.ok) {
-        setError(usersData.error || "Could not load users");
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), sort, dir });
+      if (q.trim()) params.set("q", q.trim());
+      if (groupFilter) params.set("groupId", groupFilter);
+      if (statusFilter) params.set("status", statusFilter);
+      if (planFilter) params.set("planState", planFilter);
+
+      const [res, settingsRes] = await Promise.all([
+        fetch(`/api/users?${params.toString()}`, { cache: "no-store" }),
+        fetch("/api/settings", { cache: "no-store" }),
+      ]);
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Không tải được danh sách người dùng");
         return;
       }
-      setUsers(Array.isArray(usersData.users) ? usersData.users : []);
-
-      if (groupsRes.ok) {
-        const groupsData = await groupsRes.json().catch(() => ({}));
-        setGroups(Array.isArray(groupsData.groups) ? groupsData.groups : []);
-      }
+      setData({
+        users: Array.isArray(body.users) ? body.users : [],
+        total: Number(body.total) || 0,
+        page: Number(body.page) || 1,
+        pageSize: Number(body.pageSize) || PAGE_SIZE,
+        groups: Array.isArray(body.groups) ? body.groups : [],
+      });
+      if (settingsRes.ok) setSettings(await settingsRes.json().catch(() => null));
     } catch {
-      setError("Could not reach the server");
+      setError("Không kết nối được máy chủ");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, sort, dir, q, groupFilter, statusFilter, planFilter]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  const filtered = useMemo(
-    () => (statusFilter === "all" ? users : users.filter((user) => user.status === statusFilter)),
-    [users, statusFilter]
+  // Filter changes restart at page 1: page 7 of a different result set shows an
+  // empty table the operator cannot explain.
+  useEffect(() => { setPage(1); }, [q, groupFilter, statusFilter, planFilter, sort, dir]);
+
+  const relayWarning =
+    settings?.requireEmailVerification === true && !String(settings?.smtpRelayUrl || "").trim();
+
+  const activeGroups = useMemo(
+    () => data.groups.filter((group) => group.isActive !== false),
+    [data.groups]
   );
 
-  const counts = useMemo(() => {
-    const base = { all: users.length, active: 0, unverified: 0, suspended: 0 };
-    for (const user of users) {
-      if (base[user.status] != null) base[user.status] += 1;
-    }
-    return base;
-  }, [users]);
-
-  const groupOptions = useMemo(
-    () => groups.map((group) => ({ value: group.id, label: group.name })),
-    [groups]
-  );
-
-  const patchUser = async (id, body) => {
-    setBusyId(id);
-    setError("");
-    try {
-      const res = await fetch(`/api/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Could not update the user");
-        return;
-      }
-      setUsers((prev) =>
-        prev.map((user) =>
-          user.id === id
-            ? {
-                ...user,
-                ...data.user,
-                groupName:
-                  data.user?.groupId != null
-                    ? groups.find((group) => group.id === data.user.groupId)?.name ?? null
-                    : null,
-              }
-            : user
-        )
-      );
-    } catch {
-      setError("Could not reach the server");
-    } finally {
-      setBusyId(null);
+  const toggleSort = (column) => {
+    if (sort === column) {
+      setDir(dir === "asc" ? "desc" : "asc");
+    } else {
+      setSort(column);
+      setDir("desc");
     }
   };
 
+  const sortLabel = (column) => (sort === column ? (dir === "asc" ? " ↑" : " ↓") : "");
+
   const submitCreate = async () => {
     setCreating(true);
-    setError("");
+    setCreateError("");
     try {
       const res = await fetch("/api/users", {
         method: "POST",
@@ -142,266 +153,220 @@ export default function UsersPageClient() {
           groupId: createDraft.groupId || null,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Không tạo được tài khoản");
+        setCreateError(body.error || "Không tạo được tài khoản");
         return;
       }
       setCreateOpen(false);
       setCreateDraft({ email: "", displayName: "", password: "", groupId: "" });
       await load();
     } catch {
-      setError("Không kết nối được máy chủ");
+      setCreateError("Không kết nối được máy chủ");
     } finally {
       setCreating(false);
     }
   };
 
-  const submitReset = async () => {
-    if (!resetTarget) return;
-    setResetting(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/users/${resetTarget.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: resetPassword }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Không đặt lại được mật khẩu");
-        return;
-      }
-      setResetTarget(null);
-      setResetPassword("");
-    } catch {
-      setError("Không kết nối được máy chủ");
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const removeUser = (user) => {
-    setConfirmState({
-      title: "Delete user",
-      message: `Delete ${user.email}?\n\nTheir API keys and sessions are revoked immediately. This cannot be undone.`,
-      onConfirm: async () => {
-        setConfirmState(null);
-        setBusyId(user.id);
-        setError("");
-        try {
-          const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            setError(data.error || "Could not delete the user");
-            return;
-          }
-          setUsers((prev) => prev.filter((row) => row.id !== user.id));
-        } catch {
-          setError("Could not reach the server");
-        } finally {
-          setBusyId(null);
-        }
-      },
-    });
-  };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-8">
-        <CardSkeleton />
-        <CardSkeleton />
-      </div>
-    );
-  }
+  const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <p className="meta text-text-muted">Khách hàng</p>
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <h1 className="text-2xl font-semibold text-text-main">Người dùng</h1>
+          <div>
+            <h1 className="text-2xl font-semibold text-text-main">Người dùng</h1>
+            <p className="mt-1 max-w-2xl text-sm text-text-muted">
+              Nhóm quyết định credit và model mà API key của khách được dùng. Bấm vào một dòng để
+              quản lý gói, credit và phiên đăng nhập.
+            </p>
+          </div>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" icon="refresh" onClick={load}>
-              Tải lại
-            </Button>
-            <Button size="sm" icon="person_add" onClick={() => setCreateOpen(true)}>
-              Tạo tài khoản
-            </Button>
+            <Button variant="secondary" size="sm" icon="refresh" onClick={load}>Tải lại</Button>
+            <Button size="sm" icon="person_add" onClick={() => setCreateOpen(true)}>Tạo tài khoản</Button>
           </div>
         </div>
-        <p className="text-sm text-text-muted max-w-2xl">
-          Tài khoản khách hàng. Nhóm quyết định hạn mức mà API key của họ kế thừa.
-        </p>
       </header>
 
-      {error && (
+      {relayWarning && (
         <div
           role="alert"
-          className="border border-red-600/30 bg-red-500/10 text-red-600 dark:text-red-400 text-sm px-4 py-3 flex items-start justify-between gap-4"
+          className="flex items-start gap-2 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
         >
-          <span className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-[18px] mt-0.5">error</span>
-            {error}
+          <span className="material-symbols-outlined text-[18px] shrink-0" aria-hidden="true">warning</span>
+          <span>
+            Đang bật xác minh email nhưng chưa cấu hình mail relay — khách mới sẽ không nhận được
+            mail xác minh. Cấu hình relay hoặc tắt xác minh email.
           </span>
-          <button
-            type="button"
-            onClick={load}
-            className="meta text-red-600 dark:text-red-400 hover:underline shrink-0"
-          >
-            Retry
-          </button>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {STATUS_FILTERS.map((filter) => (
-          <button
-            key={filter.id}
-            type="button"
-            onClick={() => setStatusFilter(filter.id)}
-            aria-pressed={statusFilter === filter.id}
-            className={`h-8 px-3 border font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-150 ${
-              statusFilter === filter.id
-                ? "border-brand-500 text-brand-600 dark:text-brand-400 bg-brand-500/10"
-                : "border-border text-text-muted hover:text-text-main hover:bg-surface-2"
-            }`}
-          >
-            {filter.label}
-            <span className="ml-2 text-text-subtle">{counts[filter.id] ?? 0}</span>
-          </button>
-        ))}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[220px] flex-1">
+          <Input
+            label="Tìm kiếm"
+            value={q}
+            onChange={(event) => setQ(event.target.value)}
+            placeholder="Email hoặc tên hiển thị"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">Nhóm</span>
+          <Select
+            value={groupFilter}
+            onChange={(event) => setGroupFilter(event.target.value)}
+            options={[{ value: "", label: "Mọi nhóm" }, ...data.groups.map((g) => ({ value: g.id, label: g.name }))]}
+            selectClassName="h-10 py-0 text-[12px] font-mono"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">Trạng thái</span>
+          <Select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            options={STATUS_FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+            selectClassName="h-10 py-0 text-[12px] font-mono"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">Gói</span>
+          <Select
+            value={planFilter}
+            onChange={(event) => setPlanFilter(event.target.value)}
+            options={PLAN_FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+            selectClassName="h-10 py-0 text-[12px] font-mono"
+          />
+        </div>
+        <p className="ml-auto font-mono text-[11px] text-text-muted">{data.total} tài khoản</p>
       </div>
 
-      <div className="border border-border bg-surface">
-        {filtered.length === 0 ? (
-          <div className="px-6 py-14 flex flex-col items-start gap-3">
-            <span className="material-symbols-outlined text-[28px] text-text-muted">group</span>
-            <p className="text-text-main font-medium">
-              {users.length === 0 ? "No users yet" : "No users match this filter"}
-            </p>
-            <p className="text-sm text-text-muted max-w-md">
-              {users.length === 0
-                ? "Once someone registers through the public signup form they appear here with their group, status and balance."
-                : "Switch back to All to see every account."}
-            </p>
-            {users.length === 0 ? (
-              <a
-                href="/dashboard/profile"
-                className="inline-flex items-center h-9 px-4 border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main hover:bg-surface-2 transition-colors duration-150"
-              >
-                Configure public signup
-              </a>
-            ) : (
-              <Button variant="secondary" size="sm" onClick={() => setStatusFilter("all")}>
-                Show all
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="meta text-text-muted font-medium px-4 py-3">Email</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Group</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Status</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Keys</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Balance</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Created</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3">Last login</th>
-                  <th className="meta text-text-muted font-medium px-4 py-3 text-right">Actions</th>
+      {error && (
+        <div role="alert" className="flex items-start justify-between gap-4 border border-danger/40 bg-danger/5 px-4 py-3">
+          <span className="flex items-start gap-2 text-sm text-danger">
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">error</span>
+            {error}
+          </span>
+          <Button variant="secondary" size="sm" onClick={load}>Thử lại</Button>
+        </div>
+      )}
+
+      {loading ? (
+        <CardSkeleton />
+      ) : data.users.length === 0 ? (
+        <div className="flex flex-col items-start gap-3 border border-border bg-surface px-6 py-14">
+          <span className="material-symbols-outlined text-[28px] text-text-muted" aria-hidden="true">group</span>
+          <p className="font-medium text-text-main">
+            {data.total === 0 && !q && !groupFilter && !statusFilter && !planFilter
+              ? "Chưa có người dùng nào"
+              : "Không có người dùng khớp bộ lọc"}
+          </p>
+          <p className="max-w-md text-sm text-text-muted">
+            {data.total === 0 && !q && !groupFilter && !statusFilter && !planFilter
+              ? "Khi có người đăng ký qua trang công khai, họ sẽ hiện ở đây."
+              : "Bỏ bộ lọc để xem toàn bộ tài khoản."}
+          </p>
+          {(q || groupFilter || statusFilter || planFilter) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { setQ(""); setGroupFilter(""); setStatusFilter(""); setPlanFilter(""); }}
+            >
+              Xoá bộ lọc
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-border bg-surface">
+          <table className="w-full min-w-[980px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-border bg-surface-2">
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Email</th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Nhóm</th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Trạng thái</th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Gói</th>
+                <th scope="col" className="meta px-4 py-2.5 text-right font-medium text-text-muted">
+                  <button type="button" onClick={() => toggleSort("available")} className="hover:text-text-main">
+                    Credit khả dụng{sortLabel("available")}
+                  </button>
+                </th>
+                <th scope="col" className="meta px-4 py-2.5 text-right font-medium text-text-muted">
+                  <button type="button" onClick={() => toggleSort("spend30d")} className="hover:text-text-main">
+                    Chi 30 ngày{sortLabel("spend30d")}
+                  </button>
+                </th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Dùng gần nhất</th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">
+                  <button type="button" onClick={() => toggleSort("createdAt")} className="hover:text-text-main">
+                    Tạo{sortLabel("createdAt")}
+                  </button>
+                </th>
+                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">
+                  <button type="button" onClick={() => toggleSort("lastLoginAt")} className="hover:text-text-main">
+                    Đăng nhập{sortLabel("lastLoginAt")}
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.users.map((user) => (
+                <tr
+                  key={user.id}
+                  onClick={() => router.push(`/dashboard/users/${user.id}`)}
+                  className="cursor-pointer border-b border-border last:border-b-0 transition-colors duration-150 hover:bg-surface-2/60"
+                >
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/dashboard/users/${user.id}`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="block font-mono text-[12px] text-text-main break-all hover:underline"
+                    >
+                      {user.email}
+                    </Link>
+                    {user.displayName && <span className="text-xs text-text-muted">{user.displayName}</span>}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{user.groupName || "—"}</td>
+                  <td className="px-4 py-3"><StatusBadge status={user.status} /></td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-text-main">{user.queuedPlans}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[12px] text-text-main">
+                    {fmtUsdNano(user.availableNanoUsd)}
+                    {user.debtNanoUsd > 0 && (
+                      <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">
+                        nợ {fmtUsdNano(user.debtNanoUsd)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-[12px] text-text-muted">
+                    {fmtUsdNano(user.spend30dNanoUsd)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.lastUsageAt)}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.createdAt)}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.lastLoginAt)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((user) => (
-                  <tr key={user.id} className="border-b border-border last:border-b-0 hover:bg-surface-2/50 transition-colors duration-150">
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col">
-                        <span className="font-mono text-[12px] text-text-main break-all">{user.email}</span>
-                        {user.displayName && (
-                          <span className="text-xs text-text-muted">{user.displayName}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Select
-                        options={groupOptions}
-                        value={user.groupId || ""}
-                        placeholder="No group"
-                        disabled={busyId === user.id}
-                        onChange={(event) => patchUser(user.id, { groupId: event.target.value })}
-                        selectClassName="h-8 py-0 text-[12px] font-mono"
-                        aria-label={`Group for ${user.email}`}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={user.status} />
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-text-main">{user.keyCount ?? 0}</td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-text-main">
-                      {fmtUsdNano(user.availableNanoUsd ?? 0)}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.createdAt)}</td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.lastLoginAt)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {user.status === "suspended" ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            icon="play_arrow"
-                            disabled={busyId === user.id}
-                            onClick={() => patchUser(user.id, { status: "active" })}
-                          >
-                            Activate
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            icon="pause"
-                            disabled={busyId === user.id}
-                            onClick={() => patchUser(user.id, { status: "suspended" })}
-                          >
-                            Suspend
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon="key"
-                          aria-label={`Đặt lại mật khẩu cho ${user.email}`}
-                          title="Đặt lại mật khẩu"
-                          disabled={busyId === user.id}
-                          onClick={() => { setResetTarget(user); setResetPassword(""); }}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon="delete"
-                          aria-label={`Delete ${user.email}`}
-                          disabled={busyId === user.id}
-                          onClick={() => removeUser(user)}
-                          className="text-red-600 hover:bg-red-500/10"
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {data.total > data.pageSize && (
+        <Pagination
+          currentPage={data.page}
+          pageSize={data.pageSize}
+          totalItems={data.total}
+          onPageChange={setPage}
+        />
+      )}
 
       <Modal
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => { setCreateOpen(false); setCreateError(""); }}
         title="Tạo tài khoản"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)} disabled={creating}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => { setCreateOpen(false); setCreateError(""); }} disabled={creating}>
+              Huỷ
+            </Button>
             <Button onClick={submitCreate} loading={creating}>Tạo</Button>
           </>
         }
@@ -410,74 +375,43 @@ export default function UsersPageClient() {
           <Input
             label="Email"
             value={createDraft.email}
-            onChange={(e) => setCreateDraft((d) => ({ ...d, email: e.target.value }))}
+            onChange={(event) => setCreateDraft((d) => ({ ...d, email: event.target.value }))}
           />
           <Input
             label="Tên hiển thị"
             value={createDraft.displayName}
-            onChange={(e) => setCreateDraft((d) => ({ ...d, displayName: e.target.value }))}
+            onChange={(event) => setCreateDraft((d) => ({ ...d, displayName: event.target.value }))}
             placeholder="Không bắt buộc"
           />
           <Input
             label="Mật khẩu"
             type="password"
             value={createDraft.password}
-            onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
-            hint="Ít nhất 8 ký tự"
+            onChange={(event) => setCreateDraft((d) => ({ ...d, password: event.target.value }))}
+            hint="10–200 ký tự"
           />
           <div className="flex flex-col gap-1">
             <label className="meta text-text-subtle">Nhóm</label>
             <Select
               value={createDraft.groupId}
-              onChange={(e) => setCreateDraft((d) => ({ ...d, groupId: e.target.value }))}
+              onChange={(event) => setCreateDraft((d) => ({ ...d, groupId: event.target.value }))}
               options={[
-                { value: "", label: "Không nhóm (dùng mặc định)" },
-                ...groups.map((g) => ({ value: g.id, label: g.name })),
+                { value: "", label: "Nhóm mặc định" },
+                ...activeGroups.map((group) => ({ value: group.id, label: group.name })),
               ]}
             />
           </div>
+          {createError && (
+            <p role="alert" className="flex items-center gap-1 text-[11px] text-danger">
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
+              {createError}
+            </p>
+          )}
           <p className="text-[11px] text-text-subtle">
-            Tài khoản được tạo ở trạng thái đã xác minh — admin bảo lãnh địa chỉ này, nên không
-            cần chờ email.
+            Tài khoản được tạo ở trạng thái đã xác minh — admin bảo lãnh địa chỉ này.
           </p>
         </div>
       </Modal>
-
-      <Modal
-        isOpen={!!resetTarget}
-        onClose={() => setResetTarget(null)}
-        title="Đặt lại mật khẩu"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setResetTarget(null)} disabled={resetting}>Huỷ</Button>
-            <Button onClick={submitReset} loading={resetting}>Đặt lại</Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-text-muted">
-            {resetTarget?.email}
-          </p>
-          <Input
-            label="Mật khẩu mới"
-            type="password"
-            value={resetPassword}
-            onChange={(e) => setResetPassword(e.target.value)}
-            hint="Ít nhất 8 ký tự. Mọi phiên đăng nhập hiện tại sẽ bị đăng xuất."
-          />
-        </div>
-      </Modal>
-
-      <ConfirmModal
-        isOpen={!!confirmState}
-        onClose={() => setConfirmState(null)}
-        onConfirm={confirmState?.onConfirm}
-        title={confirmState?.title || ""}
-        message={confirmState?.message || ""}
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
-      />
     </div>
   );
 }

@@ -201,11 +201,56 @@ export async function validateApiKey(key) {
   return true;
 }
 
-// Resolve the effective limits for a key, merging with its group (key narrows group).
-// Returns { key: rowToKey(row), group, resolved: { rpm, tpm, budgetUsd, resetWindow, allowedModels, expiresAt } }
+/**
+ * Resolve the effective limits for a request's API key (design D6).
+ *
+ * Two surfaces, deliberately different:
+ *
+ *   * CUSTOMER KEY (`userId` set) — the limits belong to the ACCOUNT, not the key.
+ *     `users.groupId` is read on every request, so an admin moving the customer to
+ *     another group takes effect on the next call without touching any key. Every
+ *     limit column stored on the key itself (group, rpm, tpm, budget, reset window,
+ *     allowed models) is ignored: key-level limits accumulated from earlier admin
+ *     edits are stale by definition, and honoring them would let a customer whose
+ *     key once had `rpm = 1` stay throttled forever. Only `isActive` and `expiresAt`
+ *     still describe the key itself.
+ *     Budget/reset are null because customer spending is governed by the plan queue
+ *     (see capability plan-queue-billing), never by a per-key dollar cap.
+ *
+ *   * ADMIN KEY (no `userId`) — unchanged: the key narrows its own group.
+ *
+ * @returns {null|{key:object, group:object|null, owner:object|null, resolved:object}}
+ */
 export async function getApiKeyForAuth(key) {
   const k = await getApiKeyByKey(key);
   if (!k) return null;
+
+  if (k.userId) {
+    const db = await getAdapter();
+    const user = db.get(`SELECT id, status, groupId FROM users WHERE id = ?`, [k.userId]);
+    const owner = user
+      ? { id: user.id, status: user.status, groupId: user.groupId ?? null }
+      : { id: k.userId, status: "deleted", groupId: null };
+    // An inactive group is as good as absent for enforcement: its limits describe
+    // a group the admin has retired. Callers deny when `group` is null.
+    const group = owner.groupId ? await getKeyGroupById(owner.groupId) : null;
+    const liveGroup = group && group.isActive !== false ? group : null;
+
+    return {
+      key: k,
+      group: liveGroup,
+      owner,
+      resolved: {
+        rpm: liveGroup?.rpm ?? null,
+        tpm: liveGroup?.tpm ?? null,
+        budgetUsd: null,
+        resetWindow: null,
+        allowedModels: liveGroup?.allowedModels ?? null,
+        expiresAt: k.expiresAt,
+      },
+    };
+  }
+
   let group = null;
   if (k.groupId) group = await getKeyGroupById(k.groupId);
 
@@ -219,7 +264,7 @@ export async function getApiKeyForAuth(key) {
     allowedModels: k.allowedModels ?? group?.allowedModels ?? null,
     expiresAt: k.expiresAt, // expiry is per-key only
   };
-  return { key: k, group, resolved };
+  return { key: k, group, owner: null, resolved };
 }
 
 // Reset the cost window on a key (set windowStartedAt = now, windowCostUsd = 0).

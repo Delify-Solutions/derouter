@@ -65,10 +65,10 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
       <table className="w-full min-w-[540px] border-collapse text-left">
         <thead>
           <tr className="border-b border-border">
-            <th className="meta px-4 py-3 text-text-muted">Code</th>
-            <th className="meta px-4 py-3 text-text-muted">Granted</th>
-            <th className="meta px-4 py-3 text-text-muted">Redeemed</th>
-            <th className="meta px-4 py-3 text-text-muted">Expires</th>
+            <th className="meta px-4 py-3 text-text-muted">Mã</th>
+            <th className="meta px-4 py-3 text-text-muted">Đã cấp</th>
+            <th className="meta px-4 py-3 text-text-muted">Nhập lúc</th>
+            <th className="meta px-4 py-3 text-text-muted">Hết hạn</th>
           </tr>
         </thead>
         <tbody>

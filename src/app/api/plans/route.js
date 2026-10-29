@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
-import { listPlans, createPlan, validatePlanInput } from "@/lib/db/repos/billingRepo.js";
+import { listPlans, createPlan, validatePlanInput, planStats } from "@/lib/db/repos/billingRepo.js";
 import { getKeyGroups } from "@/lib/db/repos/keyGroupsRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
-/** Admin plan list. `?active=1` narrows to purchasable plans. */
+/**
+ * Admin plan list. `?active=1` narrows to purchasable plans.
+ *
+ * Every plan carries `limits` (its per-window spending rules) and a `stats` block —
+ * active purchases, distinct active users, revenue from paid orders and credit
+ * consumed. The figures come from three grouped queries for the whole list, not one
+ * query per plan.
+ */
 export async function GET(request) {
   try {
     const onlyActive = request.nextUrl.searchParams.get("active") === "1";
-    const plans = await listPlans({ onlyActive });
+    const [plans, stats] = await Promise.all([listPlans({ onlyActive }), planStats()]);
     // Groups are returned alongside so the admin form can render the
     // "restricted to" picker without a second request.
     let groups = [];
@@ -18,7 +25,18 @@ export async function GET(request) {
     } catch {
       // No groups table yet — the picker just has nothing to offer.
     }
-    return NextResponse.json({ plans, groups }, { headers: NO_STORE });
+    const withStats = plans.map((plan) => ({
+      ...plan,
+      stats: stats.get(plan.id) ?? {
+        activeCount: 0,
+        activeUsers: 0,
+        revenueVnd: 0,
+        revenueUsdNano: 0,
+        revenueNanoUsd: 0,
+        consumedNanoUsd: 0,
+      },
+    }));
+    return NextResponse.json({ plans: withStats, groups }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "Failed to load plans" }, { status: 500, headers: NO_STORE });
   }
@@ -33,7 +51,8 @@ export async function POST(request) {
   }
 
   // Same rules the admin form applies, so a hand-rolled request cannot create a
-  // plan the UI would reject (and vice versa).
+  // plan the UI would reject (and vice versa). Includes the limits validation,
+  // which returns its Vietnamese message naming the offending limit.
   const invalid = validatePlanInput(body);
   if (invalid) return NextResponse.json({ error: invalid }, { status: 400, headers: NO_STORE });
 

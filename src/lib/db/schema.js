@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 15;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -220,11 +220,37 @@ export const TABLES = {
       groupId: "TEXT",
       status: "TEXT NOT NULL",
       overdraftNanoUsd: "INTEGER DEFAULT 0",
+      // Free-text internal note the operator keeps on the account (support
+      // context, arrangements made out of band). Editable without a reason —
+      // it changes nothing about what the customer can do.
+      adminNote: "TEXT",
       createdAt: "TEXT",
       updatedAt: "TEXT",
       lastLoginAt: "TEXT",
     },
     indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
+  },
+  // Every admin or system action on a customer account, with who did it and why.
+  //
+  // A row here is the explanation for a money movement recorded in creditLedger:
+  // the ledger says what changed, this says who caused it and on whose authority.
+  // `userId` is intentionally NOT a foreign key — the audit trail of a deleted
+  // user's deletion must survive the cascade that removes everything else. When
+  // the user row is gone, `details` still carries the email.
+  userAuditLog: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      // "admin:<identity>", "customer" or "system".
+      actor: "TEXT NOT NULL",
+      action: "TEXT NOT NULL",
+      reason: "TEXT",
+      // JSON `{ before, after, ... }` — free-form per action.
+      details: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    // The only read pattern is "this user's log, newest first".
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_ual_user_ts ON userAuditLog(userId, createdAt DESC)"],
   },
   userSessions: {
     columns: {
@@ -259,6 +285,11 @@ export const TABLES = {
       name: "TEXT",
       description: "TEXT",
       priceNanoUsd: "INTEGER NOT NULL",
+      // VietQR price in integer đồng (spec plan-dual-pricing "Two prices per plan").
+      // NULL or 0 = the plan is not sold by bank transfer. Deliberately NOT derived
+      // from priceNanoUsd: no exchange rate is involved on either side, so the
+      // admin can price 250.000đ independently of $10.
+      priceVnd: "INTEGER",
       creditNanoUsd: "INTEGER NOT NULL",
       durationDays: "INTEGER NOT NULL",
       // Visibility vs purchasability are two separate switches on purpose:
@@ -276,6 +307,11 @@ export const TABLES = {
       // Purchases allowed per calendar month. NULL or 0 = unlimited. Counted
       // over orders, not userPlans, so a refund re-opens the slot.
       purchaseLimitPerMonth: "INTEGER",
+      // Per-window spending limits: a JSON array of { hours, maxNanoUsd } sorted
+      // by hours. NULL/[] = no limits (the purchase drains its credit freely).
+      // Snapshotted into the order and the granted purchase, so editing a plan
+      // never rewrites what a customer already bought.
+      limits: "TEXT",
       // Highlighted card on the landing page ("most popular").
       isFeatured: "INTEGER DEFAULT 0",
       sortOrder: "INTEGER",
@@ -321,46 +357,120 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_docs_published ON docsPages(isPublished, section, sortOrder)",
     ],
   },
-  // Per-model allowance for a subscription plan, modelled on how OpenCode Go
-  // meters its plans: a monthly dollar ceiling PER MODEL, drawn down by that
-  // model's own traffic. Zero rows for a plan means "no per-model ceiling" and
-  // the plan falls back to its flat creditNanoUsd, so existing plans keep
-  // working untouched.
-  //
-  // monthlyNanoUsd is the 100% ceiling. The shorter windows are derived, not
-  // stored: 5h = 20% and week = 50% of it. Storing them would let an admin
-  // create a plan whose windows contradict each other.
-  planModelLimits: {
-    columns: {
-      id: "TEXT PRIMARY KEY",
-      planId: "TEXT NOT NULL",
-      // Model id as sent by the client. Matched with matchesAllowed() so a
-      // wildcard entry ("anthropic/*") covers a whole family.
-      model: "TEXT NOT NULL",
-      monthlyNanoUsd: "INTEGER NOT NULL",
-      createdAt: "TEXT",
-    },
-    indexes: [
-      "CREATE UNIQUE INDEX IF NOT EXISTS idx_pml_plan_model ON planModelLimits(planId, model)",
-    ],
-  },
   orders: {
     columns: {
       id: "TEXT PRIMARY KEY",
       userId: "TEXT NOT NULL",
       planId: "TEXT NOT NULL",
+      // Buyer email copied at order creation. Orders outlive the account they
+      // belong to (deleting a customer keeps their orders for accounting), so the
+      // email must not be reachable only through the users row. Named *Snapshot*
+      // because ORDER_SELECT already aliases `u.email AS userEmail`; the select
+      // reads COALESCE(u.email, o.emailSnapshot) so both paths work.
+      emailSnapshot: "TEXT",
+      // Snapshot of the plan's limits at order creation (JSON). NULL for orders
+      // created before GĐ1, which are granted with the plan's current limits.
+      limits: "TEXT",
       amountNanoUsd: "INTEGER",
       creditNanoUsd: "INTEGER",
       durationDays: "INTEGER",
       status: "TEXT NOT NULL",
       method: "TEXT DEFAULT 'manual'",
+      // ── Gateway payment (design D1) ───────────────────────────────────────
+      // Payment code written in the transfer content, e.g. DR8K3Q7MZP. Unique
+      // across orders so a bank memo can only ever name one order; manual orders
+      // leave it NULL and SQLite allows many NULLs under one UNIQUE index.
+      paymentCode: "TEXT",
+      // USD (manual), VND (VietQR) or USDT (Binance Pay).
+      payCurrency: "TEXT",
+      // What the customer must actually send: đồng for VND, nano-USDT for USDT,
+      // nano-USD for a manual order. Snapshotted so a later plan edit cannot
+      // change the amount a customer was told to pay.
+      payAmount: "INTEGER",
+      paymentProviderId: "TEXT",
+      // ISO expiry; set for gateway orders only. A pending order past this
+      // instant is swept to status 'expired' by the payment poller.
+      expiresAt: "TEXT",
+      // The paymentTransactions row that approved this order, when one did.
+      paymentTransactionId: "TEXT",
       payerNote: "TEXT",
       adminNote: "TEXT",
       approvedBy: "TEXT",
       createdAt: "TEXT",
       paidAt: "TEXT",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders(userId, status)"],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders(userId, status)",
+      // One order per payment code. Many NULLs are allowed by SQLite, so manual
+      // orders (no code) coexist with gateway orders under this index.
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_paycode ON orders(paymentCode)",
+      // The poller sweeps pending gateway orders by expiry.
+      "CREATE INDEX IF NOT EXISTS idx_orders_expiry ON orders(status, expiresAt)",
+    ],
+  },
+  // A receiving account the operator can be paid into (design D1).
+  //
+  // `config` holds the non-secret description of the account (bank BIN, display
+  // name, account number, API base URL, identity overrides) so the admin list and
+  // the checkout page can read it without decrypting anything. `secrets` holds a
+  // JSON object whose every value is `encryptSecret` output — it is only ever
+  // decrypted by getProviderWithSecrets() for a fetch, never returned by an API.
+  paymentProviders: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // sepay | web2m | acb | binance
+      kind: "TEXT NOT NULL",
+      name: "TEXT NOT NULL",
+      isActive: "INTEGER DEFAULT 1",
+      // Which active provider of a kind a new order uses: lowest sortOrder wins.
+      sortOrder: "INTEGER DEFAULT 0",
+      config: "TEXT",
+      secrets: "TEXT",
+      pollIntervalSeconds: "INTEGER DEFAULT 30",
+      lastPolledAt: "TEXT",
+      lastError: "TEXT",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_pprov_kind ON paymentProviders(kind, isActive, sortOrder)",
+    ],
+  },
+  // Every transaction received from a provider, stored exactly once (design D1).
+  //
+  // The UNIQUE (providerId, externalId) index is the deduplication guarantee: the
+  // webhook and the poller may see the same transfer, and the second INSERT loses
+  // instead of approving an order twice.
+  paymentTransactions: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      providerId: "TEXT NOT NULL",
+      // Provider kind copied at ingest time so a transaction stays attributable
+      // after its provider row is edited.
+      kind: "TEXT NOT NULL",
+      externalId: "TEXT NOT NULL",
+      // đồng for VND, nano-USDT for USDT. Always positive; direction carries sign.
+      amount: "INTEGER NOT NULL",
+      currency: "TEXT NOT NULL",
+      content: "TEXT",
+      occurredAt: "TEXT",
+      receivedAt: "TEXT NOT NULL",
+      // webhook | poll
+      via: "TEXT",
+      raw: "TEXT",
+      // matched | needs_review | resolved
+      status: "TEXT NOT NULL",
+      reason: "TEXT",
+      orderId: "TEXT",
+      resolvedBy: "TEXT",
+      resolvedAt: "TEXT",
+      resolutionNote: "TEXT",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_ptx_provider_external ON paymentTransactions(providerId, externalId)",
+      "CREATE INDEX IF NOT EXISTS idx_ptx_status_time ON paymentTransactions(status, receivedAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_ptx_order ON paymentTransactions(orderId)",
+    ],
   },
   userPlans: {
     columns: {
@@ -376,9 +486,33 @@ export const TABLES = {
       startsAt: "TEXT NOT NULL",
       expiresAt: "TEXT NOT NULL",
       status: "TEXT NOT NULL",
+      // Explicit queue position written by a customer reorder or an admin action.
+      // NULL = never ordered, which sorts AFTER every plan that has one.
+      priority: "INTEGER",
+      // Snapshot of the plan's per-window limits at grant time (JSON array of
+      // { hours, maxNanoUsd }); NULL/[] = no limits.
+      limits: "TEXT",
       createdAt: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_up_user ON userPlans(userId, status, expiresAt)"],
+  },
+  // One row per (purchase, window length) holding the current window's start and
+  // spend. A window "opens" on the first charge and closes `hours` after it; a
+  // closed window's spend reads as zero and the next charge opens a new one.
+  //
+  // Counters rather than a SUM over creditLedger on every admission: the hot path
+  // must stay O(number of queued plans) indexed reads. rebuildWindowsSync()
+  // recomputes this table from the ledger, so the counters are provable.
+  userPlanWindows: {
+    columns: {
+      userPlanId: "TEXT NOT NULL",
+      hours: "INTEGER NOT NULL",
+      startedAt: "TEXT NOT NULL",
+      spentNanoUsd: "INTEGER NOT NULL DEFAULT 0",
+      updatedAt: "TEXT",
+    },
+    primaryKey: "PRIMARY KEY (userPlanId, hours)",
+    indexes: [],
   },
   creditLedger: {
     columns: {
@@ -386,6 +520,9 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       userPlanId: "TEXT",
       apiKeyId: "TEXT",
+      // usageHistory.id for `charge` rows: the request this money bought, which is
+      // what lets the ledger page show the model and token counts.
+      usageId: "INTEGER",
       // Idempotency key: one ledger row per request/charge.
       requestKey: "TEXT UNIQUE",
       deltaNanoUsd: "INTEGER NOT NULL",
@@ -394,7 +531,12 @@ export const TABLES = {
       meta: "TEXT",
       createdAt: "TEXT NOT NULL",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_cl_user_ts ON creditLedger(userId, createdAt)"],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_cl_user_ts ON creditLedger(userId, createdAt)",
+      // rebuildWindowsSync and the per-plan ledger filter both walk one plan's
+      // rows in time order.
+      "CREATE INDEX IF NOT EXISTS idx_cl_userplan_ts ON creditLedger(userPlanId, createdAt)",
+    ],
   },
   giftCodes: {
     columns: {

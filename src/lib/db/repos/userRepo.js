@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { getSettings } from "./settingsRepo.js";
+import { insertAuditSync } from "../../billing/audit.js";
 
 // Tenant (customer) data access. Admins are NOT users — the admin dashboard is a
 // single-password JWT surface (dashboardSession), these rows are paying customers
@@ -94,7 +95,10 @@ export async function resolveDefaultGroupId() {
     if (row) return row.id;
   }
 
-  const oldest = db.get(`SELECT id FROM keyGroups ORDER BY createdAt ASC, rowid ASC LIMIT 1`);
+  // Fallback: the oldest ACTIVE group. An inactive group cannot own new accounts
+  // — its limits no longer describe anything the admin intends to sell, and the
+  // start-up repair would immediately move the new user out of it anyway.
+  const oldest = db.get(`SELECT id FROM keyGroups WHERE isActive = 1 ORDER BY createdAt ASC, rowid ASC LIMIT 1`);
   return oldest?.id ?? null;
 }
 
@@ -224,21 +228,64 @@ export async function updateUser(id, patch = {}) {
 }
 
 /**
- * Delete a customer and everything this module owns for them (sessions,
- * pending verifications). Their API keys are removed by the caller, which has
- * the key repo in scope.
+ * Delete a customer and everything that belongs to them, in ONE transaction.
+ *
+ * Removed: API keys (a key row outliving its owner would still authenticate),
+ * sessions, pending verification tokens, purchased plans, window state, ledger
+ * rows, gift redemptions, audit entries, and the user row.
+ *
+ * KEPT: `orders`. They are the accounting record of money received, and they carry
+ * `emailSnapshot` so the buyer stays identifiable after the account is gone.
+ *
+ * The deletion itself is then recorded as a `user_deleted` audit entry — written
+ * AFTER the audit wipe on purpose, because this is the one audit row about a user
+ * that must survive their deletion. It keeps the email in `details` for the same
+ * reason.
+ *
+ * @param {string} id
+ * @param {{ actor?: string }} options `actor` is an audit actor ("admin:<identity>")
+ * @returns {Promise<{deleted: boolean, email: string|null, keyCount: number}>}
  */
-export async function deleteUser(id) {
-  if (!id) return false;
+export async function deleteUser(id, { actor = "system" } = {}) {
+  if (!id) return { deleted: false, email: null, keyCount: 0 };
   const db = await getAdapter();
-  let changes = 0;
+
+  let result = { deleted: false, email: null, keyCount: 0 };
   db.transaction(() => {
+    const row = db.get(`SELECT id, email FROM users WHERE id = ?`, [id]);
+    if (!row) return;
+    const email = row.email ?? null;
+    const keyCount = Number(db.get(`SELECT COUNT(*) AS n FROM apiKeys WHERE userId = ?`, [id])?.n ?? 0);
+
+    db.run(`DELETE FROM apiKeys WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userSessions WHERE userId = ?`, [id]);
     db.run(`DELETE FROM emailVerifications WHERE userId = ?`, [id]);
-    const res = db.run(`DELETE FROM users WHERE id = ?`, [id]);
-    changes = res?.changes ?? 0;
+    // Window state is keyed by userPlanId; without a foreign key the cascade has
+    // to be explicit. The table only exists from GĐ1 on, so a database upgraded
+    // mid-release must not fail the deletion over it.
+    try {
+      db.run(
+        `DELETE FROM userPlanWindows WHERE userPlanId IN (SELECT id FROM userPlans WHERE userId = ?)`,
+        [id]
+      );
+    } catch { /* GĐ0 schema has no userPlanWindows yet */ }
+    db.run(`DELETE FROM userPlans WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM creditLedger WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM giftRedemptions WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM userAuditLog WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM users WHERE id = ?`, [id]);
+
+    insertAuditSync(db, {
+      userId: id,
+      actor,
+      action: "user_deleted",
+      details: { userId: id, email },
+      now: new Date().toISOString(),
+    });
+
+    result = { deleted: true, email, keyCount };
   });
-  return changes > 0;
+  return result;
 }
 
 /**
@@ -414,3 +461,48 @@ export async function replaceVerification({ userId, purpose, ttlMs } = {}) {
   );
   return createVerification({ userId, purpose, ttlMs });
 }
+
+// ── Session administration (admin user detail page) ──────────────────────────
+
+/**
+ * Every open session of a user, newest first — creation, expiry, IP and user agent
+ * (spec admin-user-management, `Phiên đăng nhập` tab).
+ */
+export async function listUserSessions(userId) {
+  if (!userId) return [];
+  const db = await getAdapter();
+  const rows = db.all(
+    `SELECT id, userId, createdAt, expiresAt, ip, userAgent, revokedAt
+       FROM userSessions
+      WHERE userId = ? AND revokedAt IS NULL AND expiresAt > ?
+      ORDER BY createdAt DESC`,
+    [userId, new Date().toISOString()]
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    createdAt: row.createdAt ?? null,
+    expiresAt: row.expiresAt ?? null,
+    ip: row.ip ?? null,
+    userAgent: row.userAgent ?? null,
+  }));
+}
+
+/**
+ * Revoke one session by id, scoped to its owner. Returns whether a live session was
+ * actually revoked — a session that already expired must not report success.
+ */
+export async function revokeSessionById(userId, sessionId) {
+  if (!userId || !sessionId) return false;
+  const db = await getAdapter();
+  const res = db.run(
+    `UPDATE userSessions SET revokedAt = ? WHERE id = ? AND userId = ? AND revokedAt IS NULL`,
+    [new Date().toISOString(), sessionId, userId]
+  );
+  return (res?.changes ?? 0) > 0;
+}
+
+// Gift redemptions already have a richer reader in giftRepo.listUserRedemptions
+// (it joins the granted purchase and formats the code); the admin `Mã quà tặng` tab
+// uses that one instead of a second implementation here.
+

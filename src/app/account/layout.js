@@ -26,13 +26,14 @@ export default async function AccountLayout({ children }) {
         <div className="h-16 flex items-center px-4 border-b border-border">
           <span className="meta text-text-main">derouter</span>
         </div>
-        <nav aria-label="Account" className="flex overflow-x-auto">
+        <nav aria-label="Tài khoản" className="flex overflow-x-auto">
           {[
-            { href: "/account", label: "Overview" },
-            { href: "/account/plans", label: "Plans" },
-            { href: "/account/gift", label: "Gift code" },
-            { href: "/account/keys", label: "API keys" },
-            { href: "/account/usage", label: "Usage" },
+            { href: "/account", label: "Tổng quan" },
+            { href: "/account/plans", label: "Gói của tôi" },
+            { href: "/account/ledger", label: "Sổ cái" },
+            { href: "/account/gift", label: "Mã quà tặng" },
+            { href: "/account/keys", label: "API key" },
+            { href: "/account/usage", label: "Lịch sử dùng" },
           ].map((item) => (
             <Link
               key={item.href}

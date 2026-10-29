@@ -4,11 +4,17 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/keys - List API keys
+// GET /api/keys - List ADMIN API keys (design D15).
+//
+// Customer keys (any row with a userId) are excluded: they belong to an account,
+// are managed on that account's page, and their secrets must never appear in an
+// admin listing. The count is reported so the operator knows they exist.
 export async function GET() {
   try {
-    const keys = await getApiKeys();
-    return NextResponse.json({ keys });
+    const all = await getApiKeys();
+    const keys = all.filter((key) => key.userId == null);
+    const customerKeyCount = all.length - keys.length;
+    return NextResponse.json({ keys, customerKeyCount });
   } catch {
     return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
   }

@@ -5,15 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/shared/utils/cn";
 
+// Order is the spec's (customer-portal "Navigation and language"): the questions a
+// customer asks in order — what do I have, what am I paying, what did I spend, what
+// was gifted, how do I connect, what did I use.
 const NAV = [
-  { href: "/account", label: "Overview", icon: "dashboard" },
-  { href: "/account/plans", label: "Plans", icon: "workspace_premium" },
-  // Hạn mức theo model là con số khách thuê bao cần xem thường xuyên nhất — nó
-  // là giới hạn thật, khác với credit ví.
-  { href: "/account/quota", label: "Hạn mức", icon: "speed" },
-  { href: "/account/gift", label: "Gift code", icon: "redeem" },
-  { href: "/account/keys", label: "API keys", icon: "key" },
-  { href: "/account/usage", label: "Usage", icon: "monitoring" },
+  { href: "/account", label: "Tổng quan", icon: "dashboard" },
+  { href: "/account/plans", label: "Gói của tôi", icon: "workspace_premium" },
+  { href: "/account/ledger", label: "Sổ cái", icon: "receipt_long" },
+  { href: "/account/gift", label: "Mã quà tặng", icon: "redeem" },
+  { href: "/account/keys", label: "API key", icon: "key" },
+  { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
 ];
 
 export default function AccountNav({ email = "" }) {
@@ -35,7 +36,7 @@ export default function AccountNav({ email = "" }) {
   };
 
   return (
-    <nav aria-label="Account" className="flex flex-col h-full">
+    <nav aria-label="Tài khoản" className="flex flex-col h-full">
       <div className="h-16 flex items-center px-5 border-b border-border">
         <Link href="/account" className="meta text-text-main hover:text-brand-600 transition-colors">
           derouter
@@ -65,7 +66,7 @@ export default function AccountNav({ email = "" }) {
       <div className="mt-auto border-t border-border p-5 flex flex-col gap-3">
         {email && (
           <div>
-            <p className="meta text-text-subtle">Signed in</p>
+            <p className="meta text-text-subtle">Đăng nhập với</p>
             <p className="font-mono text-[12px] text-text-muted break-all mt-1">{email}</p>
           </div>
         )}
@@ -75,8 +76,8 @@ export default function AccountNav({ email = "" }) {
           disabled={pending}
           className="h-9 border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main hover:bg-surface-2 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          <span className="material-symbols-outlined text-[16px]">logout</span>
-          Sign out
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">logout</span>
+          Đăng xuất
         </button>
       </div>
     </nav>

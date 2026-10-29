@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { randomInt } from "crypto";
 import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
+import { parseLimits } from "../../billing/limits.js";
 
 // Human-typable alphabet: no 0/O/1/I/L, so codes survive being read aloud or
 // copied off a screen by hand.
@@ -399,6 +400,9 @@ export function redeemGiftCode(db, { userId, code } = {}) {
       creditNanoUsd: Number(plan.creditNanoUsd) || 0,
       durationDays: Number(plan.durationDays) || 30,
       planName: plan.name ?? null,
+      // A plan gift snapshots the plan's limits at grant time (spec
+      // plan-queue-billing "Each grant creates an independent purchased plan").
+      limits: parseLimits(plan.limits),
     };
   } else {
     const credit = Number(row.creditNanoUsd) || 0;
@@ -408,6 +412,8 @@ export function redeemGiftCode(db, { userId, code } = {}) {
       creditNanoUsd: credit,
       durationDays: Number(row.durationDays) || 30,
       planName: null,
+      // A credit-only gift has no windows: it is money, not a plan.
+      limits: [],
     };
   }
 
@@ -451,6 +457,7 @@ export function redeemGiftCode(db, { userId, code } = {}) {
         source: "gift",
         creditNanoUsd: grant.creditNanoUsd,
         durationDays: grant.durationDays,
+        limits: grant.limits ?? [],
         meta: { giftId: row.id, giftRedemptionId: redemptionId, giftCode: formatGiftCode(row.code) },
       });
 

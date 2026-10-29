@@ -4,7 +4,10 @@ import { listOrders } from "@/lib/db/repos/billingRepo.js";
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
-const STATUSES = ["pending", "paid", "cancelled", "refunded"];
+// `expired` is a gateway order whose payment window closed unpaid. It is a
+// terminal, non-paying state like `cancelled`: it never counts toward a purchase
+// limit and it can only be revived by an admin assigning a late payment to it.
+const STATUSES = ["pending", "paid", "cancelled", "expired", "refunded"];
 
 export async function GET(request) {
   const status = request.nextUrl.searchParams.get("status");

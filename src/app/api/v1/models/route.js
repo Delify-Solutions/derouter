@@ -623,62 +623,63 @@ export async function resolveKeyScopeForModels(request) {
   const apiKey = extractApiKey(request);
 
   // Enforce requireApiKey (same guard the chat handler uses) for public requests.
+  //
+  // Both denials go through platformErrorResponse, so `/v1/models` answers in the
+  // SAME format as the chat endpoints — `{ error: { message, type, code } }` with
+  // `code: "invalid_api_key"` and `type: "authentication_error"` (spec
+  // api-access-enforcement "Platform denials use one error format"). A client that
+  // branches on `code` must not need a second code path for this endpoint.
   const settings = await getSettings();
   if (settings?.requireApiKey) {
-    if (!apiKey) {
-      return {
-        response: Response.json(
-          { error: { message: "Missing API key", type: "invalid_request_error" } },
-          { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
-        ),
-      };
-    }
-    if (!(await isValidApiKey(apiKey))) {
-      return {
-        response: Response.json(
-          { error: { message: "Invalid API key", type: "invalid_request_error" } },
-          { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
-        ),
-      };
-    }
+    const { platformErrorResponse, PLATFORM_MESSAGES } = await import("@/lib/auth/platformError.js");
+    const denial = () =>
+      platformErrorResponse({
+        status: 401,
+        code: "invalid_api_key",
+        message: PLATFORM_MESSAGES.invalid_api_key,
+      });
+
+    if (!apiKey) return { response: denial() };
+    if (!(await isValidApiKey(apiKey))) return { response: denial() };
   }
 
-  // Scope the listing to the key's allow-list when a key resolves. A key with
-  // no group/allow-list → resolved.allowedModels = null → unrestricted.
-  // A subscription plan additionally narrows this to the models the plan meters:
-  // advertising a model the plan will 403 on wastes a round trip and, worse,
-  // makes a client believe a cheaper model is available when it is not.
+  // Scope the listing to what the key may actually call. For a customer key this
+  // is the owner's group (read per request, so a group change shows up in the
+  // listing without touching the key); for an admin key it is the key's own
+  // narrowing. A subscription NEVER narrows the listing: plans meter spending, not
+  // model eligibility, and advertising fewer models than the group allows would
+  // make a paying customer believe a model is unavailable.
   let allowedModels = null;
   if (apiKey) {
     const auth = await getApiKeyForAuth(apiKey);
+    if (auth?.key?.userId) {
+      // A customer whose account may not call, or whose group is missing, gets the
+      // same platform denial here as on the LLM endpoints (spec: the same rejection
+      // applies to /v1/models).
+      const { platformErrorResponse, PLATFORM_MESSAGES } = await import("@/lib/auth/platformError.js");
+      const owner = auth.owner;
+      if (owner && owner.status !== "active") {
+        const code = owner.status === "suspended" ? "account_suspended" : "account_unverified";
+        return {
+          response: platformErrorResponse({
+            status: 403,
+            code,
+            message: PLATFORM_MESSAGES[code],
+          }),
+        };
+      }
+      if (!auth.group) {
+        return {
+          response: platformErrorResponse({
+            status: 403,
+            code: "model_not_allowed",
+            message: PLATFORM_MESSAGES.group_missing,
+          }),
+        };
+      }
+    }
     if (auth?.resolved?.allowedModels) {
       allowedModels = auth.resolved.allowedModels;
-    }
-
-    const userId = auth?.key?.userId;
-    if (userId) {
-      const { planModelAllowList, planAcceptsCombo, sameModel } = await import("@/lib/auth/planAllowance.js");
-      const planModels = await planModelAllowList(userId);
-      if (planModels) {
-        // The accepted set is the plan's own model ids plus every combo whose
-        // members are all covered. A partially-covered combo is excluded: its
-        // failover would land on a model the customer did not pay for.
-        const accepted = [...planModels];
-        try {
-          for (const combo of await getCombos()) {
-            if (combo?.name && (await planAcceptsCombo(userId, combo.name))) {
-              accepted.push(combo.name);
-            }
-          }
-        } catch { /* no combos table → nothing to add */ }
-
-        // Intersect, never replace: a plan can only take models away from what
-        // the key already allows. Replacing would let an admin grant a model to
-        // a key that the key's own allow-list explicitly excludes.
-        allowedModels = allowedModels
-          ? allowedModels.filter((m) => accepted.some((p) => sameModel(m, p)))
-          : accepted;
-      }
     }
   }
 

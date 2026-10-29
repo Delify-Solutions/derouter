@@ -45,6 +45,7 @@ export {
 export {
   getKeyGroups, getKeyGroupById, getKeyGroupByName,
   createKeyGroup, updateKeyGroup, deleteKeyGroup,
+  getGroupGuard, getGroupMemberCounts, describeGroupGuard, toBool,
 } from "./repos/keyGroupsRepo.js";
 
 // Tenant users, sessions and single-use email tokens
@@ -52,6 +53,7 @@ export {
   getUserById, getUserByEmail, getUserByEmailWithPassword, listUsers,
   createUser, updateUser, deleteUser, resolveDefaultGroupId,
   createSession, getSessionByToken, revokeSession, revokeAllUserSessions, revokeOtherUserSessions, touchLastLogin,
+  listUserSessions, revokeSessionById,
   createVerification, consumeVerification, getVerificationByToken, replaceVerification,
   hashToken, normalizeEmail, isValidEmailShape, publicUser, SESSION_TTL,
 } from "./repos/userRepo.js";
@@ -96,7 +98,7 @@ export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
-  getKeyRateUsage, getKeyCostSince, getKeyCostSinceNano, getUsageCostTotalNano, getKeyRequestCountSince,
+  getKeyRateUsage, getUserRateUsage, getUserOldestTokenAt, getKeyCostSince, getKeyCostSinceNano, getUsageCostTotalNano, getKeyRequestCountSince,
   getKeyUsageSummary, getProviderUsageSummary, getProviderRateUsage,
   deleteKeyUsageHistory,
 } from "./repos/usageRepo.js";

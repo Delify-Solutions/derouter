@@ -2,6 +2,49 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Card, Button, Input, Select, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker } from "@/shared/components";
+import Link from "next/link";
+
+/**
+ * 409 result from the group guard: the group is still depended on. The link is the
+ * action the admin actually wants next — filter the users list by that group.
+ */
+function GuardNotice({ notice, onDismiss }) {
+  const href = notice.groupId ? `/dashboard/users?groupId=${encodeURIComponent(notice.groupId)}` : "/dashboard/users";
+  return (
+    <div className="border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start justify-between gap-4">
+      <div className="flex items-start gap-2 min-w-0">
+        <span className="material-symbols-outlined text-[18px] text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true">
+          lock
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">
+            Không thể xoá hoặc tắt nhóm “{notice.groupName}”
+          </p>
+          <p className="text-xs text-text-muted mt-0.5">
+            {notice.error}
+            {typeof notice.memberCount === "number" && notice.memberCount > 0 ? ` (${notice.memberCount} người dùng)` : ""}
+          </p>
+          <div className="flex flex-wrap gap-3 mt-2">
+            <Link href={href} className="text-xs font-mono uppercase tracking-[0.14em] text-primary hover:underline">
+              Xem người dùng của nhóm
+            </Link>
+            <Link href="/dashboard/profile" className="text-xs font-mono uppercase tracking-[0.14em] text-text-muted hover:text-primary">
+              Đổi nhóm mặc định
+            </Link>
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Đóng thông báo"
+        className="p-1 text-text-muted hover:text-primary"
+      >
+        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+      </button>
+    </div>
+  );
+}
 
 export default function GroupsPageClient() {
   const [groups, setGroups] = useState([]);
@@ -20,6 +63,9 @@ export default function GroupsPageClient() {
   const [isActive, setIsActive] = useState(true);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  // 409 from the delete/deactivate guard: the group is still in use, so show the
+  // reason plus a link to the filtered users list instead of a generic error.
+  const [guardNotice, setGuardNotice] = useState(null);
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -47,6 +93,7 @@ export default function GroupsPageClient() {
 
   const openCreate = () => {
     resetForm();
+    setGuardNotice(null);
     setShowModal(true);
   };
 
@@ -60,6 +107,7 @@ export default function GroupsPageClient() {
     setIsActive(group.isActive !== false);
     setFormError("");
     setEditing(group);
+    setGuardNotice(null);
     setShowModal(true);
   };
 
@@ -85,25 +133,36 @@ export default function GroupsPageClient() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) { setFormError(data.error || "Failed to save group"); return; }
+      if (res.status === 409) {
+        setGuardNotice({ groupId: editing?.id ?? null, groupName: name.trim(), ...data });
+        setFormError("");
+        return;
+      }
+      if (!res.ok) { setFormError(data.error || "Không lưu được nhóm"); return; }
       await fetchGroups();
       setShowModal(false);
       resetForm();
     } catch (e) {
-      setFormError(e.message || "Failed to save group");
+      setFormError(e.message || "Không lưu được nhóm");
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = (group) => {
+    setGuardNotice(null);
     setConfirmState({
-      title: "Delete Group",
-      message: `Delete group "${group.name}"?\n\nKeys in this group become custom keys (limits stay on each key).`,
+      title: "Xoá nhóm",
+      message: `Xoá nhóm "${group.name}"?\n\nKey admin đang dùng nhóm này sẽ mất nhóm (hạn mức riêng của key vẫn giữ).`,
       onConfirm: async () => {
         setConfirmState(null);
         try {
-          await fetch(`/api/groups/${group.id}`, { method: "DELETE" });
+          const res = await fetch(`/api/groups/${group.id}`, { method: "DELETE" });
+          if (res.status === 409) {
+            const data = await res.json();
+            setGuardNotice({ groupId: group.id, groupName: group.name, ...data });
+            return;
+          }
           await fetchGroups();
         } catch { /* ignore */ }
       }
@@ -120,6 +179,9 @@ export default function GroupsPageClient() {
 
   return (
     <div className="flex flex-col gap-8">
+      {guardNotice && !showModal && (
+        <GuardNotice notice={guardNotice} onDismiss={() => setGuardNotice(null)} />
+      )}
       <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -152,12 +214,20 @@ export default function GroupsPageClient() {
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{group.name}</p>
+                    <p className="text-sm font-medium truncate" title={group.name}>{group.name}</p>
+                    {group.isDefault && (
+                      <span className="text-[10px] font-mono uppercase tracking-[0.14em] px-1.5 py-0.5 border border-primary/30 bg-primary/10 text-primary">
+                        Mặc định
+                      </span>
+                    )}
                     {group.isActive === false && (
                       <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">paused</span>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-mono">
+                      {group.memberCount ?? 0} người dùng
+                    </span>
                     {group.rpm != null && (
                       <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">{group.rpm} RPM</span>
                     )}
@@ -274,6 +344,26 @@ export default function GroupsPageClient() {
             <p className="text-sm text-red-500 flex items-center gap-1">
               <span className="material-symbols-outlined text-[14px]">error</span>
               {formError}
+            </p>
+          )}
+
+          {guardNotice && showModal && (
+            <p className="text-sm text-amber-600 dark:text-amber-400 flex items-start gap-1" role="alert">
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">lock</span>
+              <span>
+                {guardNotice.error}
+                {guardNotice.groupId && (
+                  <>
+                    {" — "}
+                    <Link
+                      href={`/dashboard/users?groupId=${encodeURIComponent(guardNotice.groupId)}`}
+                      className="underline hover:text-primary"
+                    >
+                      xem người dùng
+                    </Link>
+                  </>
+                )}
+              </span>
             </p>
           )}
 

@@ -1,30 +1,40 @@
 import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
 
-// GET /api/keys/[id] - Get single key
+// Design D15: this surface is for ADMIN keys only. A customer key (row with a
+// userId) is reported as not found rather than forbidden — the id space is not a
+// directory, and an admin should not be able to edit or delete a customer's key
+// from the endpoint page at all.
+function notFound() {
+  return NextResponse.json({ error: "Key not found" }, { status: 404 });
+}
+
+async function loadAdminKey(id) {
+  const key = await getApiKeyById(id);
+  if (!key || key.userId != null) return null;
+  return key;
+}
+
+// GET /api/keys/[id] - Get single admin key
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
-    const key = await getApiKeyById(id);
-    if (!key) {
-      return NextResponse.json({ error: "Key not found" }, { status: 404 });
-    }
+    const key = await loadAdminKey(id);
+    if (!key) return notFound();
     return NextResponse.json({ key });
   } catch {
     return NextResponse.json({ error: "Failed to fetch key" }, { status: 500 });
   }
 }
 
-// PUT /api/keys/[id] - Update key
+// PUT /api/keys/[id] - Update an admin key
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
 
-    const existing = await getApiKeyById(id);
-    if (!existing) {
-      return NextResponse.json({ error: "Key not found" }, { status: 404 });
-    }
+    const existing = await loadAdminKey(id);
+    if (!existing) return notFound();
 
     // Allow toggling active state + advanced limit fields.
     const updateData = {};
@@ -46,15 +56,16 @@ export async function PUT(request, { params }) {
   }
 }
 
-// DELETE /api/keys/[id] - Delete API key
+// DELETE /api/keys/[id] - Delete an admin key
 export async function DELETE(request, { params }) {
   try {
     const { id } = await params;
 
+    const existing = await loadAdminKey(id);
+    if (!existing) return notFound();
+
     const deleted = await deleteApiKey(id);
-    if (!deleted) {
-      return NextResponse.json({ error: "Key not found" }, { status: 404 });
-    }
+    if (!deleted) return notFound();
 
     return NextResponse.json({ message: "Key deleted successfully" });
   } catch {

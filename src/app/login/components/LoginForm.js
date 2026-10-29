@@ -1,13 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button, Input } from "@/shared/components";
+import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice, ResetPasswordForm } from "./AuthShell";
 
 export default function LoginForm({ resetToken = "" }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Validated once, up front: the landing page sends `?next=/account/plans?plan=go`
+  // so a customer lands back on the plan they picked. An invalid value is ignored
+  // rather than forwarded (open-redirect guard, design D17).
+  const nextTarget = safeNext(searchParams?.get?.("next")) ?? "/account";
   const [mode, setMode] = useState("signin"); // signin | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,7 +62,7 @@ export default function LoginForm({ resetToken = "" }) {
         setError(data.error || "Could not sign in");
         return;
       }
-      router.replace("/account");
+      router.replace(nextTarget);
       router.refresh();
     } catch {
       setError("Could not reach the server. Try again.");

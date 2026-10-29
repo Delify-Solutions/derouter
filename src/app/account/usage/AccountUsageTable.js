@@ -75,7 +75,7 @@ export default function AccountUsageTable({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Period</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Khoảng thời gian</span>
           <div className="flex border border-border">
             {periods.map((p, index) => (
               <Link
@@ -99,7 +99,7 @@ export default function AccountUsageTable({
       {/* Totals */}
       <dl className="grid grid-cols-2 border border-border sm:grid-cols-4">
         {[
-          { label: "Requests", value: fmt(totals.requests) },
+          { label: "Số request", value: fmt(totals.requests) },
           { label: "Tokens", value: fmt(totals.tokens) },
           { label: "Input", value: fmt(totals.input) },
           { label: "Cost", value: totals.costLabel },
@@ -120,7 +120,7 @@ export default function AccountUsageTable({
       <div className="border border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Receipts</h2>
+            <h2 className="text-sm font-semibold">Bản ghi</h2>
             <span className="font-mono text-[11px] text-text-muted">
               {filtered.length}
               {rows.length >= historyLimit ? ` of the latest ${historyLimit}` : ""}
@@ -132,7 +132,7 @@ export default function AccountUsageTable({
               type="text"
               value={filterModel}
               onChange={(event) => setFilterModel(event.target.value)}
-              placeholder="Filter by model"
+              placeholder="Lọc theo model"
               className="h-8 w-44 border border-border bg-surface px-2 font-mono text-[11px] text-text-main focus:border-brand-500 focus:outline-none"
             />
             <select
@@ -140,7 +140,7 @@ export default function AccountUsageTable({
               onChange={(event) => setFilterStatus(event.target.value)}
               className="h-8 border border-border bg-surface px-2 font-mono text-[11px] text-text-main focus:border-brand-500 focus:outline-none"
             >
-              <option value="">All statuses</option>
+              <option value="">Mọi trạng thái</option>
               <option value="2">2xx</option>
               <option value="4">4xx</option>
               <option value="5">5xx</option>
@@ -171,16 +171,16 @@ export default function AccountUsageTable({
             <table className="w-full text-xs">
               <thead className="bg-surface-2">
                 <tr className="border-b border-border text-text-muted">
-                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Time</th>
+                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Thời điểm</th>
                   <th className="px-3 py-2 text-left font-medium">Model</th>
-                  <th className="px-3 py-2 text-center font-medium">Status</th>
-                  <th className="px-3 py-2 text-right font-medium">Latency</th>
-                  <th className="px-3 py-2 text-right font-medium">Input</th>
-                  <th className="px-3 py-2 text-right font-medium">Output</th>
+                  <th className="px-3 py-2 text-center font-medium">Trạng thái</th>
+                  <th className="px-3 py-2 text-right font-medium">Độ trễ</th>
+                  <th className="px-3 py-2 text-right font-medium">Vào</th>
+                  <th className="px-3 py-2 text-right font-medium">Ra</th>
                   <th className="px-3 py-2 text-right font-medium">Tok</th>
-                  <th className="px-3 py-2 text-right font-medium">Cache R</th>
-                  <th className="px-3 py-2 text-right font-medium">Cache W</th>
-                  <th className="px-3 py-2 text-right font-medium">Cost</th>
+                  <th className="px-3 py-2 text-right font-medium">Cache đọc</th>
+                  <th className="px-3 py-2 text-right font-medium">Cache ghi</th>
+                  <th className="px-3 py-2 text-right font-medium">Chi phí</th>
                 </tr>
               </thead>
               <tbody>
