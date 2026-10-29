@@ -278,6 +278,37 @@ test("expired plans cannot be spent and are forfeited with a ledger row", async 
   assert.equal(again.expired, 0);
 });
 
+test("refunding an order takes its unspent credit back and grants nothing", async () => {
+  await reset();
+  const u = insertUser("u-ref", "ref@test.local");
+  insertPlan("p-ref", "ref", 10, 25, 30);
+  const order = await billing.createOrder({ userId: u, planId: "p-ref", method: "manual" });
+  await billing.approveOrder(order.id, "admin");
+
+  // Spend $5 so the refund has both a spent and an unspent part.
+  db.run(`UPDATE userPlans SET creditRemainingNanoUsd = ? WHERE userId = ?`, [USD(20), u]);
+  assert.equal((await billing.walletSummary(u)).availableNanoUsd, USD(20));
+
+  const result = await billing.refundOrder(order.id, { adminId: "a1", adminNote: "customer asked" });
+
+  assert.equal(result.alreadyRefunded, false);
+  assert.equal(result.userPlan, null, "a refund must not create a new plan");
+  assert.equal(result.refundedNanoUsd, USD(20), "only the unspent credit is taken back");
+  assert.equal((await billing.walletSummary(u)).availableNanoUsd, 0);
+
+  const plans = db.all(`SELECT * FROM userPlans WHERE userId = ?`, [u]);
+  assert.equal(plans.length, 1, "no compensation plan");
+  assert.equal(plans[0].status, "refunded");
+  assert.equal(plans[0].creditRemainingNanoUsd, 0);
+
+  const revoke = db.get(`SELECT * FROM creditLedger WHERE userId = ? AND kind = 'revoke'`, [u]);
+  assert.equal(revoke.deltaNanoUsd, -USD(20));
+
+  const again = await billing.refundOrder(order.id, { adminId: "a1" });
+  assert.equal(again.alreadyRefunded, true);
+  assert.equal(db.all(`SELECT * FROM creditLedger WHERE userId = ? AND kind = 'revoke'`, [u]).length, 1);
+});
+
 test("approving an order twice grants exactly once", async () => {
   await reset();
   const u = insertUser("u-ord", "ord@test.local");

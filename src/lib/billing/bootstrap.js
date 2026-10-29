@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getMetaSync, setMetaSync } from "../db/helpers/metaStore.js";
 import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
 import { insertAuditSync } from "./audit.js";
+import { closeUserPlanSync } from "./grants.js";
 import { runBackfillSync } from "./planQueue.js";
 
 function nowIso() {
@@ -151,6 +152,33 @@ function bootstrapOrderEmailsSync(db) {
   );
 }
 
+/**
+ * One-time: refunds used to GRANT the order's credit again instead of taking it
+ * back, so a refunded order left its original plan active and added a second
+ * "refund" plan. Close every still-active plan that belongs to a refunded order,
+ * the original and the compensation alike, as `refunded`.
+ */
+function bootstrapRefundedPlansSync(db) {
+  const at = nowIso();
+  const plans = db.all(
+    `SELECT up.* FROM userPlans up
+       JOIN orders o ON o.id = up.orderId
+      WHERE o.status = 'refunded' AND up.status = 'active'`
+  );
+  let removed = 0;
+  for (const plan of plans) {
+    removed += closeUserPlanSync(db, plan, {
+      status: "refunded",
+      reason: "order_refunded",
+      meta: { bootstrap: "refundedPlans.v1", orderId: plan.orderId },
+      now: at,
+    });
+  }
+  if (plans.length) {
+    console.log(`[bootstrap] refundedPlans: closed ${plans.length} plan(s), removed ${removed} nanoUSD of credit`);
+  }
+}
+
 // Usage rows from before the plan queue existed were never charged (the old
 // per-model ceiling skipped the wallet). This cut-off is the first minute the
 // customer-key billing change shipped, so rows at or after it are ours to bill.
@@ -217,6 +245,9 @@ export function runPostSyncTasksSync(db) {
   }
   if (runOnce(db, "bootstrap.orderEmails.v1", "orderEmails", () => bootstrapOrderEmailsSync(db))) {
     ran.push("orderEmails");
+  }
+  if (runOnce(db, "bootstrap.refundedPlans.v1", "refundedPlans", () => bootstrapRefundedPlansSync(db))) {
+    ran.push("refundedPlans");
   }
   if (runOnce(db, "bootstrap.backfill.v1", "backfill", () => backfillUsage(db))) {
     ran.push("backfill");

@@ -9,6 +9,7 @@ import { fmtUsdNano } from "@/shared/utils/money";
 import BuyPlans from "./BuyPlans";
 import MyOrders from "./MyOrders";
 import PlanHistory from "./PlanHistory";
+import PlanTabs from "./PlanTabs";
 
 const ORDER_CONFIRMED =
   "Đơn đã tạo — chuyển khoản theo hướng dẫn, admin duyệt xong gói sẽ vào hàng đợi.";
@@ -17,9 +18,9 @@ const QUEUE_CHANGED = "Danh sách gói đã thay đổi — đã tải lại";
 /**
  * "Gói của tôi" (spec customer-portal "Plan queue page").
  *
- * Four sections, in the order a customer asks the questions: what is paying now
- * (Hàng đợi), what can I buy (Mua thêm gói), what did I order (Đơn hàng), what did I
- * have before (Lịch sử gói, collapsed).
+ * Three sections, in the order a customer asks the questions: what do I have
+ * (Gói của bạn: the paying queue on "Đang hoạt động", spent or closed plans on
+ * "Không hoạt động"), what can I buy (Mua thêm gói), what did I order (Đơn hàng).
  *
  * The queue is reorderable and every number on a card comes from the server —
  * `statusLabel` and the window state are computed by queueViewSync, the same
@@ -43,6 +44,7 @@ export default function PlansPageClient() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [queueError, setQueueError] = useState("");
   const [notice, setNotice] = useState(null);
+  const [tab, setTab] = useState("active");
   const highlightRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -166,11 +168,11 @@ export default function PlansPageClient() {
     try {
       const res = await fetch(`/api/account/orders/${order.id}`, { method: "DELETE" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Không huỷ được đơn");
-      setNotice({ type: "success", message: "Đã huỷ đơn" });
+      if (!res.ok) throw new Error(body.error || "Không hủy được đơn");
+      setNotice({ type: "success", message: "Đã hủy đơn" });
       await loadOrders();
     } catch (e) {
-      setNotice({ type: "error", message: e.message || "Không huỷ được đơn" });
+      setNotice({ type: "error", message: e.message || "Không hủy được đơn" });
     } finally {
       setCancellingId(null);
     }
@@ -238,20 +240,31 @@ export default function PlansPageClient() {
       </div>
 
       <Section
-        title="Hàng đợi"
-        description="Thứ tự trả tiền. Kéo thả hoặc dùng nút Lên/Xuống, rồi bấm Lưu thứ tự."
+        title="Gói của bạn"
+        description="Gói đang hoạt động trả tiền theo thứ tự trong hàng đợi. Gói hết credit, hết hạn, bị hủy hoặc đã hoàn tiền nằm ở tab Không hoạt động."
       >
-        {loading ? (
-          <CardSkeleton />
-        ) : (
-          <PlanQueue
-            entries={data.queue}
-            editable={data.queue.length > 1}
-            onSave={saveOrder}
-            saving={savingOrder}
-            error={queueError}
-          />
-        )}
+        <PlanTabs
+          tab={tab}
+          onTab={setTab}
+          counts={{ active: data.queue.length, inactive: data.history.length }}
+        />
+        <div role="tabpanel" id={`plans-panel-${tab}`} aria-labelledby={`plans-tab-${tab}`} className="mt-4">
+          {tab === "active" ? (
+            loading ? (
+              <CardSkeleton />
+            ) : (
+              <PlanQueue
+                entries={data.queue}
+                editable={data.queue.length > 1}
+                onSave={saveOrder}
+                saving={savingOrder}
+                error={queueError}
+              />
+            )
+          ) : (
+            <PlanHistory history={data.history} loading={loading} />
+          )}
+        </div>
       </Section>
 
       <BuyPlans
@@ -264,8 +277,6 @@ export default function PlansPageClient() {
       />
 
       <MyOrders orders={orders} loading={ordersLoading} cancellingId={cancellingId} onCancel={cancel} />
-
-      <PlanHistory history={data.history} loading={loading} />
 
       {highlightedPlan && !loading && (
         <p className="sr-only" aria-live="polite">

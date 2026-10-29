@@ -9,9 +9,10 @@
 const STATUS = {
   paying: { label: "Đang trả", icon: "play_circle", cls: "border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-400" },
   waiting: { label: "Chờ", icon: "schedule", cls: "border-border bg-surface-2 text-text-muted" },
-  blocked: { label: "Tạm khoá", icon: "lock", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  blocked: { label: "Tạm khóa", icon: "lock", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
   exhausted: { label: "Hết credit", icon: "battery_alert", cls: "border-border bg-surface-2 text-text-muted" },
   expired: { label: "Hết hạn", icon: "event_busy", cls: "border-border bg-surface-2 text-text-muted" },
+  refunded: { label: "Đã hoàn tiền", icon: "undo", cls: "border-border bg-surface-2 text-text-muted" },
   revoked: { label: "Đã thu hồi", icon: "block", cls: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400" },
 };
 
@@ -33,9 +34,9 @@ export function dateOf(iso) {
 
 export default function StatusTag({ status, reopenAt = null, className = "" }) {
   const spec = STATUS[status] ?? STATUS.waiting;
-  // A blocked plan names when it comes back: "Tạm khoá đến 15:30" is the whole
+  // A blocked plan names when it comes back: "Tạm khóa đến 15:30" is the whole
   // question a customer has at that moment.
-  const label = status === "blocked" && reopenAt ? `Tạm khoá đến ${timeOf(reopenAt)}` : spec.label;
+  const label = status === "blocked" && reopenAt ? `Tạm khóa đến ${timeOf(reopenAt)}` : spec.label;
 
   return (
     <span
