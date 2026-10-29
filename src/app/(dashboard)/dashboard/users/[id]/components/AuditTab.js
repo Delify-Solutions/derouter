@@ -15,7 +15,7 @@ const ACTION_LABEL = {
   session_revoked: "Thu hồi một phiên",
   key_disabled: "Tắt API key",
   key_enabled: "Bật API key",
-  key_deleted: "Xoá API key",
+  key_deleted: "Xóa API key",
   plan_granted: "Cấp gói",
   credit_granted: "Cấp credit",
   plan_extended: "Gia hạn gói",
@@ -23,7 +23,7 @@ const ACTION_LABEL = {
   plan_limits_changed: "Sửa hạn mức gói",
   plan_revoked: "Thu hồi gói",
   queue_reordered: "Đổi thứ tự gói",
-  user_deleted: "Xoá tài khoản",
+  user_deleted: "Xóa tài khoản",
 };
 
 /**

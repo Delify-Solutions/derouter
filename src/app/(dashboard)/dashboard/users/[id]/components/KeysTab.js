@@ -53,7 +53,7 @@ export default function KeysTab({ userId }) {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: body.error || "Không thực hiện được" };
     await load();
-    setNotice(type === "delete" ? "Đã xoá key" : key.isActive ? "Đã tắt key" : "Đã bật key");
+    setNotice(type === "delete" ? "Đã xóa key" : key.isActive ? "Đã tắt key" : "Đã bật key");
     return { ok: true };
   };
 
@@ -111,7 +111,7 @@ export default function KeysTab({ userId }) {
                         className="text-danger hover:bg-red-500/10"
                         onClick={() => setAction({ type: "delete", key })}
                       >
-                        Xoá
+                        Xóa
                       </Button>
                     </div>
                   </td>
@@ -124,13 +124,13 @@ export default function KeysTab({ userId }) {
 
       <ReasonModal
         isOpen={!!action}
-        title={action?.type === "delete" ? "Xoá API key" : action?.key?.isActive ? "Tắt API key" : "Bật API key"}
+        title={action?.type === "delete" ? "Xóa API key" : action?.key?.isActive ? "Tắt API key" : "Bật API key"}
         description={
           action?.type === "delete"
             ? `Key ${action?.key?.name || action?.key?.keyPrefix || ""} sẽ ngừng hoạt động ngay và không thể khôi phục.`
             : `Key ${action?.key?.name || action?.key?.keyPrefix || ""} — hiệu lực từ request kế tiếp.`
         }
-        confirmLabel={action?.type === "delete" ? "Xoá key" : "Xác nhận"}
+        confirmLabel={action?.type === "delete" ? "Xóa key" : "Xác nhận"}
         onClose={() => setAction(null)}
         onConfirm={submit}
       />

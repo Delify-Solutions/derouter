@@ -6,8 +6,8 @@ import { ActionButton, ButtonLink, Empty, ListRow, Section, Tag } from "@/app/ac
 const STATUS_TAG = {
   pending: { tone: "warning", icon: "schedule", label: "Chờ duyệt" },
   paid: { tone: "success", icon: "check_circle", label: "Đã thanh toán" },
-  cancelled: { tone: "neutral", icon: "block", label: "Đã huỷ" },
-  // A gateway order whose payment window closed unpaid. Separate from "Đã huỷ"
+  cancelled: { tone: "neutral", icon: "block", label: "Đã hủy" },
+  // A gateway order whose payment window closed unpaid. Separate from "Đã hủy"
   // because the customer did not cancel it — the code simply stopped being valid.
   expired: { tone: "warning", icon: "timer_off", label: "Hết hạn" },
   refunded: { tone: "neutral", icon: "undo", label: "Đã hoàn tiền" },
@@ -49,7 +49,7 @@ function payAmountLabel(order) {
  */
 export default function MyOrders({ orders, loading, cancellingId, onCancel }) {
   const title = "Đơn hàng";
-  const hint = "Đơn đang chờ có thể huỷ. Đơn chuyển khoản và Binance có trang riêng với mã QR và mã thanh toán.";
+  const hint = "Đơn đang chờ có thể hủy. Đơn chuyển khoản và Binance có trang riêng với mã QR và mã thanh toán.";
 
   if (loading) {
     return (
@@ -99,7 +99,7 @@ export default function MyOrders({ orders, loading, cancellingId, onCancel }) {
                       onClick={() => onCancel(order)}
                       loading={cancellingId === order.id}
                     >
-                      Huỷ đơn
+                      Hủy đơn
                     </ActionButton>
                   )}
                 </>

@@ -7,7 +7,7 @@ import { fmtUsdNano } from "@/shared/utils/money";
 const STATUS_LABEL = {
   pending: "Chờ duyệt",
   paid: "Đã thanh toán",
-  cancelled: "Đã huỷ",
+  cancelled: "Đã hủy",
   expired: "Hết hạn",
   refunded: "Đã hoàn tiền",
 };
@@ -15,7 +15,7 @@ const STATUS_LABEL = {
 const ACTIONS = {
   pending: [
     { action: "approve", label: "Duyệt", variant: "primary" },
-    { action: "cancel", label: "Huỷ", variant: "secondary" },
+    { action: "cancel", label: "Hủy", variant: "secondary" },
   ],
   paid: [{ action: "refund", label: "Hoàn tiền", variant: "secondary" }],
 };

@@ -8,7 +8,7 @@
 //   trong combo, qua cùng chuỗi tra giá dùng để trừ credit.
 //
 // Không có hạn mức nào nằm ở đây: một gói là một pool credit dùng chung cho mọi
-// model người mua gọi được, cộng vài hạn mức theo cửa sổ thời gian trên chính
+// model người mua gọi được, cộng vài hạn mức theo khung giờ trên chính
 // row plans. Trang chỉ trình bày danh mục và giá token.
 //
 // Chỉ server component được import file này (nó kéo cả registry provider vào
@@ -17,6 +17,7 @@ import { getPricingForModel } from "open-sse/providers/pricing.js";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
 import { resolveDefaultGroupId, getKeyGroupById, getCombos } from "@/lib/localDb";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
+import { PROTOCOLS } from "./salesData";
 
 // Bảng giá nội bộ chưa phủ hết mọi id. Model nào không tra được theo provider
 // thì tra tiếp bảng của một provider bán cùng model đó — không có fallback này
@@ -99,7 +100,7 @@ export async function buildModelListForGroup() {
       return {
         id,
         name: model.name || id,
-        formats: ["openai"],
+        formats: PROTOCOLS.map((p) => p.id),
         input: rate?.input ?? null,
         output: rate?.output ?? null,
         cached: rate?.cached ?? null,
@@ -110,5 +111,5 @@ export async function buildModelListForGroup() {
 
 /** Nhãn wire format cho một model. */
 export function formatsOf(models, modelId) {
-  return models?.find((m) => m.id === modelId)?.formats ?? ["openai"];
+  return models?.find((m) => m.id === modelId)?.formats ?? PROTOCOLS.map((p) => p.id);
 }

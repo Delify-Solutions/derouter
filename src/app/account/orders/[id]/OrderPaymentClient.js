@@ -26,7 +26,7 @@ const STATUS_TAG = {
   pending: { label: "Chờ thanh toán", tone: "warning", icon: "schedule" },
   paid: { label: "Đã thanh toán", tone: "success", icon: "check_circle" },
   expired: { label: "Hết hạn", tone: "warning", icon: "timer_off" },
-  cancelled: { label: "Đã huỷ", tone: "neutral", icon: "block" },
+  cancelled: { label: "Đã hủy", tone: "neutral", icon: "block" },
   refunded: { label: "Đã hoàn tiền", tone: "neutral", icon: "undo" },
 };
 
@@ -103,7 +103,7 @@ export default function OrderPaymentClient({ orderId }) {
       if (lastStatus.current && status && status !== lastStatus.current) {
         if (status === "paid") setAnnouncement("Thanh toán thành công — gói đã vào hàng đợi");
         else if (status === "expired") setAnnouncement("Đơn đã hết hạn thanh toán");
-        else if (status === "cancelled") setAnnouncement("Đơn đã được huỷ");
+        else if (status === "cancelled") setAnnouncement("Đơn đã được hủy");
       }
       lastStatus.current = status;
     } catch (error) {
@@ -135,10 +135,10 @@ export default function OrderPaymentClient({ orderId }) {
     try {
       const res = await fetch(`/api/account/orders/${encodeURIComponent(orderId)}`, { method: "DELETE" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Không huỷ được đơn");
+      if (!res.ok) throw new Error(body.error || "Không hủy được đơn");
       await load({ silent: true });
     } catch (error) {
-      setState((current) => ({ ...current, error: error.message || "Không huỷ được đơn" }));
+      setState((current) => ({ ...current, error: error.message || "Không hủy được đơn" }));
     } finally {
       setCancelling(false);
     }
@@ -215,7 +215,7 @@ export default function OrderPaymentClient({ orderId }) {
       {(status === "expired" || status === "cancelled") && (
         <section className="flex flex-col gap-3 border border-warning/40 bg-warning/5 px-6 py-5">
           <p className="font-medium text-text-main">
-            {status === "expired" ? "Đơn đã hết hạn thanh toán" : "Đơn đã được huỷ"}
+            {status === "expired" ? "Đơn đã hết hạn thanh toán" : "Đơn đã được hủy"}
           </p>
           <p className="text-sm text-text-muted">
             {status === "expired"
@@ -300,7 +300,7 @@ export default function OrderPaymentClient({ orderId }) {
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-5">
               <ActionButton onClick={() => load({ silent: true })}>Kiểm tra lại</ActionButton>
               <ActionButton tone="ghost" onClick={cancel} loading={cancelling} disabled={!isPending}>
-                Huỷ đơn
+                Hủy đơn
               </ActionButton>
               <span className="font-mono text-[11px] text-text-subtle">
                 Trang tự cập nhật mỗi 5 giây
@@ -320,7 +320,7 @@ export default function OrderPaymentClient({ orderId }) {
           </p>
           <div className="flex flex-wrap gap-2">
             <ButtonLink href="/account/plans">Về trang gói</ButtonLink>
-            <ActionButton tone="ghost" onClick={cancel} loading={cancelling}>Huỷ đơn</ActionButton>
+            <ActionButton tone="ghost" onClick={cancel} loading={cancelling}>Hủy đơn</ActionButton>
           </div>
         </section>
       )}

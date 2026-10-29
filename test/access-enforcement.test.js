@@ -393,7 +393,7 @@ test("a suspended owner is rejected before any limit check", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.status, 403);
   assert.equal(result.code, "account_suspended");
-  assert.match(result.message, /bị khoá/);
+  assert.match(result.message, /bị khóa/);
 });
 
 test("an unverified owner is rejected with account_unverified", async () => {

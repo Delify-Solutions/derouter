@@ -4,7 +4,7 @@ import Link from "next/link";
 import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
 import CopyBlock from "@/app/account/components/CopyBlock";
-import { fmtUsd } from "./salesData";
+import { PROTOCOLS, fmtUsd } from "./salesData";
 
 const DOCS_URL = "/docs";
 const CHECKOUT_URL = "/register?next=/account/plans";
@@ -18,6 +18,12 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
   const snippet = `curl ${base}/chat/completions -H "Authorization: Bearer <API_KEY>" -H "Content-Type: application/json" -d '{"model":"${
     exampleModel?.id || "<model>"
   }","messages":[{"role":"user","content":"xin chào"}]}'`;
+
+  // Same key, same catalogue, Claude wire format: Anthropic clients send the key
+  // in x-api-key and call /messages relative to the same base.
+  const claudeSnippet = `curl ${base}/messages -H "x-api-key: <API_KEY>" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" -d '{"model":"${
+    exampleModel?.id || "<model>"
+  }","max_tokens":256,"messages":[{"role":"user","content":"xin chào"}]}'`;
 
   const steps = [
     {
@@ -42,7 +48,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
     {
       number: "04",
       title: "Theo dõi hạn mức",
-      body: "Chạm trần một cửa sổ hạn mức sẽ nhận 429 kèm thời điểm mở lại; hết sạch credit sẽ nhận 402. Nhật ký credit trong tài khoản ghi từng khoản trừ.",
+      body: "Chạm trần một khung giờ hạn mức sẽ nhận 429 kèm thời điểm mở lại; hết sạch credit sẽ nhận 402. Nhật ký credit trong tài khoản ghi từng khoản trừ.",
     },
   ];
 
@@ -50,7 +56,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
     { label: "Base URL", value: base },
     { label: "Xác thực", value: "Authorization: Bearer <API key>" },
     { label: "Liệt kê model", value: "GET /v1/models" },
-    { label: "Wire format", value: "OpenAI · Claude · Responses" },
+    { label: "Giao thức", value: PROTOCOLS.map((p) => `${p.label} ${p.path}`).join("\n") },
   ];
 
   return (
@@ -91,8 +97,10 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
 
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-3 border border-border bg-surface p-6">
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Request mẫu</p>
-              <CopyBlock value={snippet} label="Sao chép request mẫu" />
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Request mẫu · OpenAI</p>
+              <CopyBlock value={snippet} label="Sao chép request mẫu OpenAI" />
+              <p className="mt-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Request mẫu · Claude</p>
+              <CopyBlock value={claudeSnippet} label="Sao chép request mẫu Claude" />
               <p className="text-sm text-text-subtle">
                 Thay <span className="font-mono">&lt;API_KEY&gt;</span> bằng key tạo ở mục API key trong tài khoản.
               </p>
@@ -102,7 +110,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
               {facts.map((fact) => (
                 <div key={fact.label} className="bg-surface p-5">
                   <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{fact.label}</dt>
-                  <dd className="mt-2 break-all font-mono text-sm text-text-main">{fact.value}</dd>
+                  <dd className="mt-2 whitespace-pre-line break-all font-mono text-sm text-text-main">{fact.value}</dd>
                 </div>
               ))}
             </dl>

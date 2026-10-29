@@ -1,7 +1,7 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 import CopyBlock from "@/app/account/components/CopyBlock";
-import { fmtUsd, interpolate } from "./salesData";
+import { PROTOCOLS, fmtUsd, interpolate } from "./salesData";
 
 // Server component. Every string comes from `copy` (operator-editable) and every
 // number from the plans rows passed in — so changing the words never means
@@ -18,7 +18,7 @@ export default function HeroSection({ plans, models, copy, baseUrl = "" }) {
     cheapest ? { label: "Giá từ", value: cheapest.priceVndText || fmtUsd(cheapest.priceUsd), unit: `/ ${cheapest.durationDays} ngày` } : null,
     cheapest ? { label: "Credit nhận", value: fmtUsd(cheapest.creditUsd), unit: "dùng chung mọi model" } : null,
     { label: "Danh mục", value: String(models.length), unit: "model lập trình" },
-    { label: "Endpoint", value: "/v1", unit: "tương thích OpenAI" },
+    { label: "Endpoint", value: "/v1", unit: "OpenAI · Claude" },
   ].filter(Boolean);
 
   return (
@@ -35,8 +35,20 @@ export default function HeroSection({ plans, models, copy, baseUrl = "" }) {
             {interpolate(copy.heroTitle, { plans: plans.length })}
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-text-muted md:text-lg">
-            Một API tương thích OpenAI. Credit trừ theo giá token của từng model, gói nào hết thì tự chuyển sang gói kế tiếp.
+            Một API dùng được với cả giao thức OpenAI và Claude. Credit trừ theo giá token của từng model, gói nào hết thì tự chuyển sang gói kế tiếp.
           </p>
+
+          <ul className="mt-6 flex flex-wrap gap-2" aria-label="Giao thức hỗ trợ">
+            {PROTOCOLS.map((protocol) => (
+              <li
+                key={protocol.id}
+                className="inline-flex h-7 items-center gap-2 border border-border bg-surface px-2.5 font-mono text-xs text-text-muted"
+              >
+                <span className="font-semibold uppercase tracking-[0.08em] text-text-main">{protocol.label}</span>
+                <span className="text-text-subtle">{protocol.path}</span>
+              </li>
+            ))}
+          </ul>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link

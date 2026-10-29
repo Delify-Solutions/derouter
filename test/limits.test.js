@@ -86,7 +86,7 @@ test("two limits may not share a window length", () => {
     [{ hours: 5, maxNanoUsd: USD(10) }, { hours: 5, maxNanoUsd: USD(20) }],
     PLAN
   );
-  assert.match(error, /hai hạn mức cùng dùng cửa sổ 5 giờ/);
+  assert.match(error, /hai hạn mức cùng dùng khung 5 giờ/);
 });
 
 // ── Rule: monotonic in the window length ───────────────────────────────────

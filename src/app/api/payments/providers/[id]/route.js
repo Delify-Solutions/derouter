@@ -84,14 +84,14 @@ export async function DELETE(request, { params }) {
     return NextResponse.json(
       {
         error: result.reason === "has_orders"
-          ? `Nguồn này đã có ${result.count} đơn hàng — hãy tắt thay vì xoá`
-          : `Nguồn này đã có ${result.count} giao dịch — hãy tắt thay vì xoá`,
+          ? `Nguồn này đã có ${result.count} đơn hàng — hãy tắt thay vì xóa`
+          : `Nguồn này đã có ${result.count} giao dịch — hãy tắt thay vì xóa`,
         code: result.reason,
         count: result.count,
       },
       { status: 409, headers: NO_STORE }
     );
   } catch {
-    return NextResponse.json({ error: "Không xoá được nguồn nhận tiền" }, { status: 500, headers: NO_STORE });
+    return NextResponse.json({ error: "Không xóa được nguồn nhận tiền" }, { status: 500, headers: NO_STORE });
   }
 }

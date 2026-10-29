@@ -48,7 +48,7 @@ export default function Footer({ modelCount, plans = [] }) {
             </p>
             <p className="mt-4 max-w-xs text-sm text-text-muted">
               Credit dùng chung cho mọi model trong nhóm của bạn, trừ theo giá token, dùng qua
-              một endpoint tương thích OpenAI.
+              một endpoint dùng được với cả OpenAI và Claude.
             </p>
             <p className="mt-3 font-mono text-[11px] text-text-subtle">
               {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}

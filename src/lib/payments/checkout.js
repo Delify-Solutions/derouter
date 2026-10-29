@@ -22,7 +22,7 @@ export const USDT_KINDS = ["binance"];
 /** Why this user may not open more unpaid gateway orders, or null when allowed. */
 export const MAX_PENDING_GATEWAY_ORDERS = 5;
 export const PENDING_LIMIT_MESSAGE =
-  "Bạn đang có quá nhiều đơn chưa thanh toán — thanh toán hoặc huỷ bớt đơn cũ";
+  "Bạn đang có quá nhiều đơn chưa thanh toán — thanh toán hoặc hủy bớt đơn cũ";
 
 function nowIsoDefault() {
   return new Date().toISOString();

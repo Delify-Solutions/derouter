@@ -18,7 +18,7 @@ function GuardNotice({ notice, onDismiss }) {
         </span>
         <div className="min-w-0">
           <p className="text-sm font-medium">
-            Không thể xoá hoặc tắt nhóm “{notice.groupName}”
+            Không thể xóa hoặc tắt nhóm “{notice.groupName}”
           </p>
           <p className="text-xs text-text-muted mt-0.5">
             {notice.error}
@@ -136,8 +136,8 @@ export default function GroupsPageClient() {
   const handleDelete = (group) => {
     setGuardNotice(null);
     setConfirmState({
-      title: "Xoá nhóm",
-      message: `Xoá nhóm "${group.name}"?\n\nKey admin đang dùng nhóm này sẽ mất nhóm (hạn mức riêng của key vẫn giữ).`,
+      title: "Xóa nhóm",
+      message: `Xóa nhóm "${group.name}"?\n\nKey admin đang dùng nhóm này sẽ mất nhóm (hạn mức riêng của key vẫn giữ).`,
       onConfirm: async () => {
         setConfirmState(null);
         try {

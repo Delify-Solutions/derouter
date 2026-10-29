@@ -8,7 +8,7 @@ import ReasonModal from "./ReasonModal";
 const STATUS_OPTIONS = [
   { value: "active", label: "Hoạt động" },
   { value: "unverified", label: "Chưa xác minh" },
-  { value: "suspended", label: "Khoá" },
+  { value: "suspended", label: "Khóa" },
 ];
 
 function Field({ label, children }) {
@@ -116,7 +116,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
 
         <div className="flex flex-col gap-3 border border-border bg-surface p-5">
           <h2 className="meta text-text-muted">Trạng thái</h2>
-          <p className="text-xs text-text-muted">Khoá hoặc chưa xác minh sẽ huỷ mọi phiên và chặn API ngay lập tức.</p>
+          <p className="text-xs text-text-muted">Khóa hoặc chưa xác minh sẽ hủy mọi phiên và chặn API ngay lập tức.</p>
           <Select
             value={draft.status}
             onChange={(event) => setDraft((d) => ({ ...d, status: event.target.value }))}
@@ -158,7 +158,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
             type="password"
             value={draft.password}
             onChange={(event) => setDraft((d) => ({ ...d, password: event.target.value }))}
-            hint="10–200 ký tự. Đặt lại sẽ huỷ mọi phiên đăng nhập."
+            hint="10–200 ký tự. Đặt lại sẽ hủy mọi phiên đăng nhập."
           />
           <Button
             size="sm"
@@ -224,7 +224,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
       <ReasonModal
         isOpen={action === "password"}
         title="Đặt lại mật khẩu"
-        description="Mọi phiên đăng nhập hiện tại sẽ bị huỷ. Mật khẩu không bao giờ được ghi vào nhật ký."
+        description="Mọi phiên đăng nhập hiện tại sẽ bị hủy. Mật khẩu không bao giờ được ghi vào nhật ký."
         confirmLabel="Đặt lại"
         onClose={() => { setAction(null); setDraft((d) => ({ ...d, password: "" })); }}
         values={{ password: draft.password }}

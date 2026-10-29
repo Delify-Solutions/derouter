@@ -168,7 +168,7 @@ export default function PlanQueue({
 
   const cancel = () => {
     setOrder(savedOrder);
-    setMessage("Đã huỷ thay đổi thứ tự");
+    setMessage("Đã hủy thay đổi thứ tự");
   };
 
   const save = async () => {
@@ -240,7 +240,7 @@ export default function PlanQueue({
               disabled={saving}
               className="inline-flex h-8 items-center border border-transparent px-3 font-mono text-xs font-medium text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main disabled:opacity-50"
             >
-              Huỷ
+              Hủy
             </button>
             <button
               type="button"

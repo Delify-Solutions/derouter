@@ -385,7 +385,7 @@ export default function PlansPageClient() {
                 </p>
               </div>
 
-              {/* Hạn mức theo cửa sổ: câu chữ đọc nhanh hơn bảng số. */}
+              {/* Hạn mức theo khung giờ: câu chữ đọc nhanh hơn bảng số. */}
               <div className="px-6 pb-4">
                 <p className="meta text-text-subtle mb-1">Hạn mức</p>
                 {Array.isArray(plan.limits) && plan.limits.length ? (
@@ -397,7 +397,7 @@ export default function PlansPageClient() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="font-mono text-[12px] text-text-muted">Không giới hạn theo cửa sổ</p>
+                  <p className="font-mono text-[12px] text-text-muted">Không giới hạn theo khung giờ</p>
                 )}
               </div>
 
@@ -591,7 +591,7 @@ export default function PlansPageClient() {
               <div className="flex flex-col">
                 <span className="meta text-text-subtle">Cho phép mua</span>
                 <span className="text-sm text-text-muted">
-                  Tắt thì gói vẫn hiện nhưng nút mua bị khoá — dùng khi chưa có đủ hạn mức.
+                  Tắt thì gói vẫn hiện nhưng nút mua bị khóa — dùng khi chưa có đủ hạn mức.
                 </span>
               </div>
               <Toggle
@@ -658,7 +658,7 @@ export default function PlansPageClient() {
                 onChange={(e) => setField("purchaseLimitPerMonth", e.target.value)}
                 placeholder="Để trống = không giới hạn"
                 inputMode="numeric"
-                hint="Tính theo tháng dương lịch. Đơn đã huỷ không tính."
+                hint="Tính theo tháng dương lịch. Đơn đã hủy không tính."
               />
             </div>
           </div>

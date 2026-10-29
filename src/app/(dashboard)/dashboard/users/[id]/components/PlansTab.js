@@ -236,7 +236,7 @@ export default function PlansTab({ userId, onChanged }) {
       <ReasonModal
         isOpen={action?.type === "grant-credit"}
         title="Cấp credit"
-        description="Cộng credit không kèm gói. Credit này không có hạn mức theo cửa sổ."
+        description="Cộng credit không kèm gói. Credit này không có hạn mức theo khung giờ."
         confirmLabel="Cấp credit"
         onClose={() => setAction(null)}
         extraValid={Number(draft.amountUsd) > 0}
@@ -307,7 +307,7 @@ export default function PlansTab({ userId, onChanged }) {
       <ReasonModal
         isOpen={action?.type === "limits"}
         title="Sửa hạn mức của gói đã mua"
-        description={`Hạn mức hiện tại: ${limitsPreview || "không có"}. Cửa sổ bị bỏ sẽ xoá trạng thái; cửa sổ giữ lại giữ nguyên mức đã dùng.`}
+        description={`Hạn mức hiện tại: ${limitsPreview || "không có"}. Khung giờ bị bỏ sẽ xóa trạng thái; khung giờ giữ lại giữ nguyên mức đã dùng.`}
         confirmLabel="Lưu hạn mức"
         onClose={() => setAction(null)}
         extraValid={draft.limits.length > 0}
@@ -323,7 +323,7 @@ export default function PlansTab({ userId, onChanged }) {
             {draft.limits.map((limit, index) => (
               <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
                 <Select
-                  label="Cửa sổ"
+                  label="Khung giờ"
                   value={limit.hours}
                   onChange={(event) =>
                     setDraft((d) => ({
@@ -348,7 +348,7 @@ export default function PlansTab({ userId, onChanged }) {
                   size="sm"
                   variant="ghost"
                   icon="delete"
-                  aria-label={`Xoá hạn mức ${index + 1}`}
+                  aria-label={`Xóa hạn mức ${index + 1}`}
                   onClick={() => setDraft((d) => ({ ...d, limits: d.limits.filter((_, i) => i !== index) }))}
                 />
               </div>

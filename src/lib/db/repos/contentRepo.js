@@ -202,7 +202,7 @@ export const LANDING_COPY_DEFAULTS = {
   plansEyebrow: "Các gói",
   plansTitle: "Trả một lần, nhận credit dùng chung",
   plansSubtitle:
-    "Mỗi gói cấp một khoản credit dùng cho mọi model trong nhóm của bạn, trong thời hạn của gói, có thể kèm hạn mức theo cửa sổ thời gian. Mua thêm gói thì gói mới xếp vào hàng đợi.",
+    "Mỗi gói cấp một khoản credit dùng cho mọi model trong nhóm của bạn, trong thời hạn của gói, có thể kèm hạn mức theo khung giờ. Mua thêm gói thì gói mới xếp vào hàng đợi.",
   plansFootnote:
     "Credit bị trừ theo bảng giá token bên dưới, nên model đắt dùng credit nhanh hơn. Request dài tốn nhiều credit hơn request ngắn.",
 
@@ -220,7 +220,7 @@ export const LANDING_COPY_DEFAULTS = {
 
   faqEyebrow: "Câu hỏi thường gặp",
   faqTitle: "Năm câu hỏi trước khi mua",
-  faqSubtitle: "Credit còn lại giữ nguyên khi bạn mua thêm gói; hạn mức theo cửa sổ tính lại sau mỗi cửa sổ.",
+  faqSubtitle: "Credit còn lại giữ nguyên khi bạn mua thêm gói; hạn mức theo khung giờ tính lại sau mỗi khung giờ.",
 };
 
 /** Merge stored copy over defaults so a new field appears without a migration. */

@@ -1,10 +1,10 @@
 // Dựng dữ liệu hiển thị cho trang bán hàng TỪ DATABASE.
 //
-// Gói, giá, credit, thời hạn, thứ tự, cờ nổi bật và hạn mức theo cửa sổ đều đọc
+// Gói, giá, credit, thời hạn, thứ tự, cờ nổi bật và hạn mức theo khung giờ đều đọc
 // từ bảng plans; chỉ những thứ thật sự là câu chữ (nhãn) nằm trong code.
 //
 // Một gói = MỘT pool credit dùng chung cho mọi model người mua gọi được, có thể
-// có vài hạn mức theo cửa sổ thời gian (5 giờ / 1 ngày / 1 tuần / tuỳ chỉnh).
+// có vài hạn mức theo khung giờ (5 giờ / 1 ngày / 1 tuần / tuỳ chỉnh).
 // Không còn khái niệm hạn mức riêng từng model.
 //
 // File này KHÔNG import gì để dùng được ở cả server lẫn client component.
@@ -21,6 +21,14 @@ export const FORMAT_LABELS = {
   "openai-responses": "Responses",
   anthropic: "Claude",
 };
+
+// Giao thức client có thể dùng để gọi cùng một danh mục model. Router tự chuyển đổi
+// giữa các định dạng, nên mọi model đều gọi được qua cả ba đường dẫn.
+export const PROTOCOLS = [
+  { id: "openai", label: "OpenAI", path: "/v1/chat/completions" },
+  { id: "claude", label: "Claude", path: "/v1/messages" },
+  { id: "openai-responses", label: "Responses", path: "/v1/responses" },
+];
 
 export function fmtRate(rate) {
   if (rate === null || rate === undefined) return "—";
@@ -70,19 +78,19 @@ export function interpolate(template, values = {}) {
 }
 
 // Perk mặc định cho một gói. Đây là lời quảng cáo, không phải dữ liệu: chúng mô
-// tả đúng cơ chế hệ thống làm (một pool credit dùng chung, hạn mức theo cửa sổ,
+// tả đúng cơ chế hệ thống làm (một pool credit dùng chung, hạn mức theo khung giờ,
 // hàng đợi gói, endpoint tương thích OpenAI). Admin thay được bằng cách sửa nội
 // dung ở /dashboard/content.
 export const DEFAULT_PERKS = [
   "Một khoản credit dùng chung cho mọi model trong nhóm của bạn",
   "Mua thêm gói thì phần credit còn lại vẫn giữ nguyên",
-  "Dùng như một provider OpenAI tương thích",
+  "Dùng được với client OpenAI lẫn Claude, chỉ cần đổi base URL",
   "Tự chuyển sang gói kế tiếp trong hàng đợi khi gói đầu chạm hạn mức",
 ];
 
 const WINDOW_LABELS = { 5: "5 giờ", 24: "1 ngày", 168: "1 tuần" };
 
-/** Nhãn cửa sổ: 5 → "5 giờ", 24 → "1 ngày", 168 → "1 tuần", còn lại "<N> giờ". */
+/** Nhãn khung giờ: 5 → "5 giờ", 24 → "1 ngày", 168 → "1 tuần", còn lại "<N> giờ". */
 export function windowLabel(hours) {
   const n = Number(hours);
   return WINDOW_LABELS[n] ?? `${Number.isFinite(n) ? Math.round(n) : 0} giờ`;
