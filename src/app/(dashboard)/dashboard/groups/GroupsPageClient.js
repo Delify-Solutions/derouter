@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, Button, Input, Select, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker } from "@/shared/components";
 import Link from "next/link";
 
 /**
@@ -55,10 +55,6 @@ export default function GroupsPageClient() {
 
   // Form state
   const [name, setName] = useState("");
-  const [rpm, setRpm] = useState("");
-  const [tpm, setTpm] = useState("");
-  const [budgetUsd, setBudgetUsd] = useState("");
-  const [resetWindow, setResetWindow] = useState("");
   const [allowedModels, setAllowedModels] = useState([]);
   const [isActive, setIsActive] = useState(true);
   const [formError, setFormError] = useState("");
@@ -81,10 +77,6 @@ export default function GroupsPageClient() {
 
   const resetForm = () => {
     setName("");
-    setRpm("");
-    setTpm("");
-    setBudgetUsd("");
-    setResetWindow("");
     setAllowedModels([]);
     setIsActive(true);
     setFormError("");
@@ -99,10 +91,6 @@ export default function GroupsPageClient() {
 
   const openEdit = (group) => {
     setName(group.name || "");
-    setRpm(group.rpm != null ? String(group.rpm) : "");
-    setTpm(group.tpm != null ? String(group.tpm) : "");
-    setBudgetUsd(group.budgetUsd != null ? String(group.budgetUsd) : "");
-    setResetWindow(group.resetWindow || "");
     setAllowedModels(Array.isArray(group.allowedModels) ? group.allowedModels : []);
     setIsActive(group.isActive !== false);
     setFormError("");
@@ -119,10 +107,6 @@ export default function GroupsPageClient() {
     const body = {
       name: name.trim(),
       isActive,
-      rpm: rpm ? Number(rpm) : null,
-      tpm: tpm ? Number(tpm) : null,
-      budgetUsd: budgetUsd ? Number(budgetUsd) : null,
-      resetWindow: resetWindow || null,
       allowedModels: allowedModels && allowedModels.length ? allowedModels : null,
     };
 
@@ -228,17 +212,6 @@ export default function GroupsPageClient() {
                     <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-mono">
                       {group.memberCount ?? 0} người dùng
                     </span>
-                    {group.rpm != null && (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">{group.rpm} RPM</span>
-                    )}
-                    {group.tpm != null && (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">{group.tpm} TPM</span>
-                    )}
-                    {group.budgetUsd != null && (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400">
-                        ${group.budgetUsd}{group.resetWindow ? `/${group.resetWindow}` : ""}
-                      </span>
-                    )}
                     {group.allowedModels && group.allowedModels.length > 0 && (
                       <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted" title={group.allowedModels.join(", ")}>
                         {group.allowedModels.length} model{group.allowedModels.length > 1 ? "s" : ""}
@@ -285,45 +258,9 @@ export default function GroupsPageClient() {
             placeholder="Standard Group"
           />
 
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="RPM"
-              type="number"
-              value={rpm}
-              onChange={(e) => setRpm(e.target.value)}
-              placeholder="Unlimited"
-            />
-            <Input
-              label="TPM"
-              type="number"
-              value={tpm}
-              onChange={(e) => setTpm(e.target.value)}
-              placeholder="Unlimited"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Budget ($)"
-              type="number"
-              step="0.01"
-              value={budgetUsd}
-              onChange={(e) => setBudgetUsd(e.target.value)}
-              placeholder="Unlimited"
-            />
-            <Select
-              label="Reset window"
-              value={resetWindow}
-              onChange={(e) => setResetWindow(e.target.value)}
-              placeholder="No reset"
-              options={[
-                { value: "", label: "No reset / unlimited" },
-                { value: "5h", label: "Every 5 hours" },
-                { value: "day", label: "Every day" },
-                { value: "week", label: "Every week" },
-              ]}
-            />
-          </div>
+          <p className="text-xs text-text-muted">
+            Nhóm chỉ quyết định model được dùng và gói nào được mua. RPM/TPM và hạn mức cấu hình ở từng gói.
+          </p>
 
           <AllowedModelsPicker
             value={allowedModels}

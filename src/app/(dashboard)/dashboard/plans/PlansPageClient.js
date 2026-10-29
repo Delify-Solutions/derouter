@@ -29,6 +29,9 @@ const EMPTY_FORM = {
   // "" = unlimited. Counted per calendar month over orders.
   purchaseLimitPerMonth: "",
   sortOrder: "",
+  // Request / token rate while this plan is the one paying. "" = unlimited.
+  rpm: "",
+  tpm: "",
   // Per-window limits as draft rows (strings while typing).
   limits: [],
   // Only meaningful while editing: rewrite the ACTIVE purchases too.
@@ -67,6 +70,13 @@ function validateDraft(draft) {
     errors.sortOrder = "Sort order must be a whole number";
   }
 
+  for (const [field, label] of [["rpm", "RPM"], ["tpm", "TPM"]]) {
+    const raw = String(draft[field] ?? "").trim();
+    if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) < 0)) {
+      errors[field] = `${label} phải là số nguyên không âm`;
+    }
+  }
+
   // Same rules as the API (spec plan-templates "Limit validation"), evaluated
   // against this draft's own credit and duration so the message names the limit.
   const limitsError = draftLimitsError(draft.limits, {
@@ -93,6 +103,8 @@ function planToDraft(plan) {
     allowedGroupIds: Array.isArray(plan.allowedGroupIds) ? plan.allowedGroupIds : [],
     purchaseLimitPerMonth: plan.purchaseLimitPerMonth == null ? "" : String(plan.purchaseLimitPerMonth),
     sortOrder: plan.sortOrder == null ? "" : String(plan.sortOrder),
+    rpm: plan.rpm == null ? "" : String(plan.rpm),
+    tpm: plan.tpm == null ? "" : String(plan.tpm),
     limits: limitsToDraft(plan.limits),
     applyToActive: false,
   };
@@ -188,6 +200,8 @@ export default function PlansPageClient() {
       allowedGroupIds: draft.allowedGroupIds.length ? draft.allowedGroupIds : null,
       purchaseLimitPerMonth: draft.purchaseLimitPerMonth === "" ? null : Number(draft.purchaseLimitPerMonth),
       sortOrder: draft.sortOrder === "" ? null : Number(draft.sortOrder),
+      rpm: String(draft.rpm).trim() === "" ? null : Number(draft.rpm),
+      tpm: String(draft.tpm).trim() === "" ? null : Number(draft.tpm),
       limits: draftToLimits(draft.limits) ?? [],
       // Only sent when the admin ticked the box; the API ignores it otherwise.
       ...(editing && draft.applyToActive ? { applyToActive: true } : {}),
@@ -363,6 +377,13 @@ export default function PlansPageClient() {
                   </dd>
                 </div>
               </dl>
+
+              <div className="px-6 pb-4">
+                <p className="meta text-text-subtle mb-1">Tốc độ</p>
+                <p className="font-mono text-[12px] text-text-muted">
+                  {plan.rpm ? `${plan.rpm} RPM` : "RPM không giới hạn"} · {plan.tpm ? `${plan.tpm} TPM` : "TPM không giới hạn"}
+                </p>
+              </div>
 
               {/* Hạn mức theo cửa sổ: câu chữ đọc nhanh hơn bảng số. */}
               <div className="px-6 pb-4">
@@ -640,6 +661,27 @@ export default function PlansPageClient() {
                 hint="Tính theo tháng dương lịch. Đơn đã huỷ không tính."
               />
             </div>
+          </div>
+
+          <div className="border-t border-border pt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Input
+              label="RPM (request mỗi phút)"
+              value={draft.rpm}
+              onChange={(e) => setField("rpm", e.target.value)}
+              placeholder="Để trống = không giới hạn"
+              inputMode="numeric"
+              error={touched ? errors.rpm : null}
+              hint="Tính chung mọi API key của khách, khi gói này đang trả."
+            />
+            <Input
+              label="TPM (token mỗi phút)"
+              value={draft.tpm}
+              onChange={(e) => setField("tpm", e.target.value)}
+              placeholder="Để trống = không giới hạn"
+              inputMode="numeric"
+              error={touched ? errors.tpm : null}
+              hint="Vượt TPM thì request chờ tối đa 30 giây rồi mới báo 429."
+            />
           </div>
 
           <div className="border-t border-border pt-4 flex flex-col gap-3">

@@ -30,10 +30,9 @@ function rowToGroup(row) {
     id: row.id,
     name: row.name,
     isActive: row.isActive === 1 || row.isActive === true,
-    rpm: row.rpm ?? null,
-    tpm: row.tpm ?? null,
-    budgetUsd: row.budgetUsd ?? null,
-    resetWindow: row.resetWindow ?? null,
+    // A group decides which models its members may call and which plans they may
+    // buy. Rates live on the plan; the legacy rpm/tpm/budget/resetWindow columns
+    // are no longer read or written.
     allowedModels: parseJson(row.allowedModels) ?? null,
     priceOverrides: parseJson(row.priceOverrides) ?? null,
     createdAt: row.createdAt,
@@ -113,20 +112,15 @@ export async function createKeyGroup(input) {
     id: uuidv4(),
     name: input.name,
     isActive: input.isActive !== false,
-    rpm: input.rpm ?? null,
-    tpm: input.tpm ?? null,
-    budgetUsd: input.budgetUsd ?? null,
-    resetWindow: input.resetWindow ?? null,
     allowedModels: input.allowedModels ?? null,
     priceOverrides: input.priceOverrides ?? null,
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO keyGroups(id, name, isActive, rpm, tpm, budgetUsd, resetWindow, allowedModels, priceOverrides, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO keyGroups(id, name, isActive, allowedModels, priceOverrides, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?)`,
     [
       group.id, group.name, group.isActive ? 1 : 0,
-      group.rpm, group.tpm, group.budgetUsd, group.resetWindow,
       stringifyJson(group.allowedModels), stringifyJson(group.priceOverrides),
       group.createdAt, group.updatedAt,
     ]
@@ -173,10 +167,9 @@ export async function updateKeyGroup(id, data) {
     }
 
     db.run(
-      `UPDATE keyGroups SET name = ?, isActive = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, allowedModels = ?, priceOverrides = ?, updatedAt = ? WHERE id = ?`,
+      `UPDATE keyGroups SET name = ?, isActive = ?, allowedModels = ?, priceOverrides = ?, updatedAt = ? WHERE id = ?`,
       [
         merged.name, nextIsActive ? 1 : 0,
-        merged.rpm, merged.tpm, merged.budgetUsd, merged.resetWindow,
         stringifyJson(merged.allowedModels), stringifyJson(merged.priceOverrides),
         merged.updatedAt, id,
       ]

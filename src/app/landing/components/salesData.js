@@ -114,6 +114,9 @@ export function toSalesPlan(plan, offeredMethods = []) {
   const priceVnd = plan.priceVnd == null ? null : Number(plan.priceVnd);
   const limits = Array.isArray(plan.limits) ? plan.limits : [];
   const limitsText = limits.map(describeLimit);
+  // Rates are part of what the plan promises, so they sit with the other limits.
+  if (Number(plan.rpm) > 0) limitsText.push(`${Number(plan.rpm).toLocaleString("vi-VN")} request mỗi phút`);
+  if (Number(plan.tpm) > 0) limitsText.push(`${Number(plan.tpm).toLocaleString("vi-VN")} token mỗi phút`);
   const methods = Array.isArray(offeredMethods) ? offeredMethods : [];
 
   return {

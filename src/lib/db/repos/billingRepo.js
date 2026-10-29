@@ -318,9 +318,17 @@ function rowToPlan(row) {
     sortOrder: row.sortOrder == null ? null : nano(row.sortOrder),
     // Per-window limits (empty array = none). Snapshotted into orders and grants.
     limits: parseLimits(row.limits),
+    rpm: row.rpm == null ? null : nano(row.rpm),
+    tpm: row.tpm == null ? null : nano(row.tpm),
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
   };
+}
+
+/** NULL or 0 = unlimited; otherwise a positive integer. */
+function normalizeRate(value) {
+  if (value == null || value === "" || Number(value) === 0) return null;
+  return nano(value);
 }
 
 /**
@@ -374,6 +382,14 @@ export function validatePlanInput(input = {}) {
   // plan-templates "Limit validation"). Rejected before anything is written.
   const limitsError = validatePlanLimits(input);
   if (limitsError) return limitsError;
+
+  // rpm / tpm: empty or 0 = unlimited, otherwise a positive integer.
+  for (const [field, label] of [["rpm", "RPM"], ["tpm", "TPM"]]) {
+    const raw = input[field];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) return `${label} phải là số nguyên không âm (0 hoặc để trống = không giới hạn)`;
+  }
 
   // purchaseLimitPerMonth: null/0 = unlimited, otherwise a positive integer.
   if (input.purchaseLimitPerMonth !== undefined && input.purchaseLimitPerMonth !== null) {
@@ -530,18 +546,20 @@ export async function createPlan(input = {}) {
     isFeatured: input.isFeatured === true,
     sortOrder: input.sortOrder == null ? null : nano(input.sortOrder),
     limits: serializeLimits(input.limits ?? []),
+    rpm: normalizeRate(input.rpm),
+    tpm: normalizeRate(input.tpm),
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
-      plan.sortOrder, plan.limits, plan.createdAt, plan.updatedAt,
+      plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
     ]
   );
   return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [plan.id]));
@@ -571,7 +589,7 @@ export function updatePlanSync(db, id, patch = {}) {
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
@@ -587,6 +605,7 @@ export function updatePlanSync(db, id, patch = {}) {
       merged.isFeatured ? 1 : 0,
       merged.sortOrder == null ? null : nano(merged.sortOrder),
       serializeLimits(merged.limits ?? []),
+      normalizeRate(merged.rpm), normalizeRate(merged.tpm),
       merged.updatedAt, id,
     ]
   );

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -312,6 +312,12 @@ export const TABLES = {
       // Snapshotted into the order and the granted purchase, so editing a plan
       // never rewrites what a customer already bought.
       limits: "TEXT",
+      // Request and token rate for every customer whose paying plan is this one
+      // (requests per minute / tokens per minute). NULL = unlimited. Read live from
+      // the plan, not snapshotted: unlike credit, a rate is not something the
+      // customer bought, so a corrected value should apply to everyone at once.
+      rpm: "INTEGER",
+      tpm: "INTEGER",
       // Highlighted card on the landing page ("most popular").
       isFeatured: "INTEGER DEFAULT 0",
       sortOrder: "INTEGER",

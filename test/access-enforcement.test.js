@@ -54,6 +54,7 @@ beforeEach(() => {
     "emailVerifications",
     "users",
     "keyGroups",
+    "plans",
     "settings",
   ]) {
     try { db.run(`DELETE FROM ${table}`); } catch { /* table may not exist */ }
@@ -93,12 +94,22 @@ function insertKey(id, { secret = `secret-${id}`, userId = null, isActive = 1, g
   return secret;
 }
 
-function insertGrant(userId, nanoUsd, { expiresAt = inDays(30) } = {}) {
+function insertPlan(id, { rpm = null, tpm = null } = {}) {
   const now = NOW();
   db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, createdAt)
-     VALUES(?, ?, NULL, NULL, 'admin', ?, ?, ?, ?, 'active', ?)`,
-    [`up-${userId}-${Math.random().toString(36).slice(2)}`, userId, nanoUsd, nanoUsd, now, expiresAt, now]
+    `INSERT INTO plans(id, code, name, priceNanoUsd, creditNanoUsd, durationDays, isActive, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, 0, ?, 30, 1, ?, ?, ?, ?)`,
+    [id, id, id, USD(100), rpm, tpm, now, now]
+  );
+}
+
+// A grant with no `planId` is an admin/gift credit: it pays, but no plan sets its rates.
+function insertGrant(userId, nanoUsd, { expiresAt = inDays(30), planId = null, priority = null } = {}) {
+  const now = NOW();
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, priority, createdAt)
+     VALUES(?, ?, ?, NULL, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    [`up-${userId}-${Math.random().toString(36).slice(2)}`, userId, planId, planId ? "purchase" : "admin", nanoUsd, nanoUsd, now, expiresAt, priority, now]
   );
 }
 
@@ -185,12 +196,13 @@ test("an inactive group counts as missing", async () => {
 
 // ── Customer keys: rate limits shared across keys ──────────────────────────
 
-test("two keys share one RPM allowance", async () => {
-  insertGroup("g10", { rpm: 10 });
+test("two keys share one RPM allowance, set by the paying plan", async () => {
+  insertGroup("g10");
+  insertPlan("p10", { rpm: 10 });
   insertUser("u1", { groupId: "g10" });
   const secret1 = insertKey("k1", { userId: "u1" });
   const secret2 = insertKey("k2", { userId: "u1" });
-  insertGrant("u1", USD(10));
+  insertGrant("u1", USD(10), { planId: "p10" });
 
   for (let i = 0; i < 6; i += 1) insertUsage("k1", { at: secondsAgo(5) });
   for (let i = 0; i < 4; i += 1) insertUsage("k2", { at: secondsAgo(5) });
@@ -205,10 +217,11 @@ test("two keys share one RPM allowance", async () => {
 });
 
 test("RPM counts only the trailing minute", async () => {
-  insertGroup("g2", { rpm: 2 });
+  insertGroup("g2");
+  insertPlan("p2", { rpm: 2 });
   insertUser("u1", { groupId: "g2" });
   const secret = insertKey("k1", { userId: "u1" });
-  insertGrant("u1", USD(10));
+  insertGrant("u1", USD(10), { planId: "p2" });
 
   insertUsage("k1", { at: secondsAgo(120) });
   insertUsage("k1", { at: secondsAgo(120) });
@@ -217,10 +230,11 @@ test("RPM counts only the trailing minute", async () => {
 });
 
 test("TPM is shared across keys and denies when the wait budget is zero", async () => {
-  insertGroup("gtpm", { tpm: 100 });
+  insertGroup("gtpm");
+  insertPlan("ptpm", { tpm: 100 });
   insertUser("u1", { groupId: "gtpm" });
   const secret1 = insertKey("k1", { userId: "u1" });
-  insertGrant("u1", USD(10));
+  insertGrant("u1", USD(10), { planId: "ptpm" });
   insertUsage("k1", { prompt: 60, completion: 60 });
 
   const result = await enforceKeyLimits(secret1, "model-a");
@@ -230,12 +244,78 @@ test("TPM is shared across keys and denies when the wait budget is zero", async 
   assert.match(result.message, /TPM/);
 });
 
+test("a group's legacy rpm/tpm no longer limits a customer", async () => {
+  // Rows written before rates moved to the plan may still carry values.
+  insertGroup("legacy", { rpm: 1, tpm: 1 });
+  insertPlan("free-rate");
+  insertUser("u1", { groupId: "legacy" });
+  const secret = insertKey("k1", { userId: "u1" });
+  insertGrant("u1", USD(10), { planId: "free-rate" });
+  insertUsage("k1", { at: secondsAgo(5), prompt: 500, completion: 500 });
+  insertUsage("k1", { at: secondsAgo(5) });
+
+  const result = await enforceKeyLimits(secret, "model-a");
+  assert.equal(result.ok, true, "the plan sets no rate, so nothing throttles");
+});
+
+test("the rate comes from the plan at the head of the queue", async () => {
+  insertGroup("g");
+  insertPlan("slow", { rpm: 1 });
+  insertPlan("fast", { rpm: 100 });
+  insertUser("u1", { groupId: "g" });
+  const secret = insertKey("k1", { userId: "u1" });
+  insertGrant("u1", USD(10), { planId: "slow", priority: 1 });
+  insertGrant("u1", USD(10), { planId: "fast", priority: 2 });
+  insertUsage("k1", { at: secondsAgo(5) });
+
+  const slowFirst = await enforceKeyLimits(secret, "model-a");
+  assert.equal(slowFirst.ok, false, "slow (1 RPM) pays first and is already used once");
+  assert.equal(slowFirst.code, "rate_limit");
+
+  db.run(`UPDATE userPlans SET priority = 3 WHERE planId = 'slow'`);
+  const fastFirst = await enforceKeyLimits(secret, "model-a");
+  assert.equal(fastFirst.ok, true, "reordering the queue changes which plan's rate applies");
+});
+
+test("editing a plan's rpm applies to existing holders immediately", async () => {
+  insertGroup("g");
+  insertPlan("p", { rpm: 1 });
+  insertUser("u1", { groupId: "g" });
+  const secret = insertKey("k1", { userId: "u1" });
+  insertGrant("u1", USD(10), { planId: "p" });
+  insertUsage("k1", { at: secondsAgo(5) });
+
+  assert.equal((await enforceKeyLimits(secret, "model-a")).ok, false);
+  db.run(`UPDATE plans SET rpm = 50 WHERE id = 'p'`);
+  assert.equal((await enforceKeyLimits(secret, "model-a")).ok, true);
+});
+
+test("an admin or gift credit has no plan, so it has no rate limit", async () => {
+  insertGroup("g");
+  insertUser("u1", { groupId: "g" });
+  const secret = insertKey("k1", { userId: "u1" });
+  insertGrant("u1", USD(10));
+  for (let i = 0; i < 20; i += 1) insertUsage("k1", { at: secondsAgo(5) });
+
+  assert.equal((await enforceKeyLimits(secret, "model-a")).ok, true);
+});
+
+test("with no credit the answer is 402, not a rate limit", async () => {
+  insertGroup("g");
+  insertUser("u1", { groupId: "g" });
+  const secret = insertKey("k1", { userId: "u1" });
+
+  const result = await enforceKeyLimits(secret, "model-a");
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 402);
+});
+
 // ── Admin keys ─────────────────────────────────────────────────────────────
 
-test("admin keys are counted per key, not per group", async () => {
-  insertGroup("admin-group", { rpm: 10 });
-  const a = insertKey("ka", { groupId: "admin-group" });
-  const b = insertKey("kb", { groupId: "admin-group" });
+test("admin keys are counted per key, each against its own rpm", async () => {
+  insertGroup("admin-group");
+  const a = insertKey("ka", { groupId: "admin-group", rpm: 10 });
+  const b = insertKey("kb", { groupId: "admin-group", rpm: 10 });
 
   for (let i = 0; i < 6; i += 1) insertUsage("ka", { at: secondsAgo(5) });
   for (let i = 0; i < 6; i += 1) insertUsage("kb", { at: secondsAgo(5) });

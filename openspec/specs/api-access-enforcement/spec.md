@@ -3,8 +3,8 @@
 ## Purpose
 Defines how the router authorizes an LLM API request made with an API key: which models and request rates apply, which accounts may call at all, how admin keys and customer keys differ, and the exact shape of every denial the router produces itself.
 ## Requirements
-### Requirement: Customer keys take their limits from the owner's current group
-A key owned by a user account ("customer key") SHALL take its model allow-list, RPM and TPM exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored. Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") keep today's behavior (key values narrow the key's own group).
+### Requirement: Customer keys take their model access from the owner's current group
+A key owned by a user account ("customer key") SHALL take its model allow-list exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored, and so SHALL any RPM, TPM, budget or reset-window stored on the group: a group decides only which models its members may call (and which plans they may buy). Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") are limited by their own values only: RPM, TPM, budget and reset-window come from the key, and the group still narrows the model list.
 
 #### Scenario: Group change applies to the next request
 - **WHEN** an admin moves a user from group A (allows `model-x`) to group B (does not allow `model-x`) and the user's key then requests `model-x`
@@ -15,8 +15,12 @@ A key owned by a user account ("customer key") SHALL take its model allow-list, 
 - **THEN** the request passes the model check
 
 #### Scenario: Stale key-level limits are ignored
-- **WHEN** a customer key row still carries `rpm = 1` from an earlier admin edit and the owner's group has no RPM limit
+- **WHEN** a customer key row still carries `rpm = 1` from an earlier admin edit and the paying plan sets no RPM
 - **THEN** no RPM limit is applied to that key
+
+#### Scenario: Legacy group rates are ignored
+- **WHEN** a group row still carries `rpm = 1` or `tpm = 1` from before rates moved to plans
+- **THEN** no rate limit is applied to its members because of it
 
 ### Requirement: Spending budgets do not apply to customer keys
 Group and key `budgetUsd`/`resetWindow` SHALL NOT be enforced for customer keys; customer spending is governed only by the plan queue (capability `plan-queue-billing`). Admin keys keep their existing budget enforcement and its 402 denial.
@@ -25,15 +29,27 @@ Group and key `budgetUsd`/`resetWindow` SHALL NOT be enforced for customer keys;
 - **WHEN** the owner's group has `budgetUsd = 1` and the customer has already spent $5 through plans this window
 - **THEN** the request is not rejected for budget reasons
 
-### Requirement: Customer request rates are counted per user
-For customer keys, RPM SHALL be the number of recorded requests across all keys of the same user in the trailing 60 seconds, and TPM the sum of prompt and completion tokens across all keys of that user in the trailing 60 seconds. When TPM is exceeded the request SHALL wait for room up to `TPM_MAX_WAIT_MS` (default 30000) with waiting serialized per user, then fail with 429 `rate_limit` if still over. Admin keys keep per-key counting.
+### Requirement: Customer request rates come from the paying plan and are counted per user
+For customer keys, the RPM and TPM limits SHALL be those of the plan (`plans.rpm` / `plans.tpm`, empty = unlimited) that the purchase at the head of the user's queue was bought from, read live on every request. A purchase with no plan (admin credit, gift credit) and a user with no purchase able to pay SHALL have no rate limit applied; the latter is then answered by plan admission (402 or 429). RPM SHALL be the number of recorded requests across all keys of the same user in the trailing 60 seconds, and TPM the sum of prompt and completion tokens across all keys of that user in the trailing 60 seconds. When TPM is exceeded the request SHALL wait for room up to `TPM_MAX_WAIT_MS` (default 30000) with waiting serialized per user, then fail with 429 `rate_limit` if still over. Admin keys keep per-key counting.
 
 #### Scenario: Two keys share one RPM allowance
-- **WHEN** the owner's group allows 10 RPM and the user has made 6 requests with key K1 and 4 with key K2 in the last 60 seconds
+- **WHEN** the paying plan allows 10 RPM and the user has made 6 requests with key K1 and 4 with key K2 in the last 60 seconds
 - **THEN** the next request with either key is rejected with HTTP 429, error code `rate_limit` and header `Retry-After: 60`
 
+#### Scenario: The head of the queue sets the rate
+- **WHEN** a user holds plan A (1 RPM) ahead of plan B (100 RPM) in the queue and has made 1 request in the last minute
+- **THEN** the next request is rejected with 429 `rate_limit`, and after the user moves plan B to the head it is accepted
+
+#### Scenario: Editing a plan applies at once
+- **WHEN** an admin raises a plan's RPM while customers hold purchases of it
+- **THEN** the new value applies to those customers' next request
+
+#### Scenario: Credit without a plan
+- **WHEN** a user pays from an admin or gift credit that has no plan and has made 20 requests in the last minute
+- **THEN** the request is not rejected for RPM
+
 #### Scenario: Admin keys unaffected
-- **WHEN** two admin keys in the same group each made 6 requests in the last minute and the group allows 10 RPM
+- **WHEN** two admin keys each made 6 requests in the last minute and each key has RPM 10
 - **THEN** neither key is rejected for RPM
 
 ### Requirement: Only active accounts may call the API

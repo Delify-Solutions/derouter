@@ -58,8 +58,8 @@ export function ensureCustomerGroupsSync(db) {
     const now = nowIso();
     const id = uuidv4();
     db.run(
-      `INSERT INTO keyGroups(id, name, isActive, rpm, tpm, budgetUsd, resetWindow, allowedModels, priceOverrides, createdAt, updatedAt)
-       VALUES(?, ?, 1, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+      `INSERT INTO keyGroups(id, name, isActive, allowedModels, priceOverrides, createdAt, updatedAt)
+       VALUES(?, ?, 1, NULL, NULL, ?, ?)`,
       [id, "Mặc định", now, now]
     );
     groups = [{ id }];

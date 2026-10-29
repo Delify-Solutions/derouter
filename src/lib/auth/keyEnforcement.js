@@ -9,7 +9,8 @@
 //     their plan-of-record?) is answered before the quota question, because
 //     "you are suspended" and "buy a plan" call for different actions from the
 //     customer. RPM/TPM are counted across all of the customer's keys, so minting
-//     a second key never widens the allowance.
+//     a second key never widens the allowance, and they come from the plan that is
+//     paying (not from the group, which only decides the models).
 //
 //   ADMIN KEY / no key
 //     Unchanged: per-key counters, per-key budget window, no admission check
@@ -99,6 +100,15 @@ function statusDenial(owner) {
   // not call" answer; naming it suspended would be a lie, so use the group message
   // only for a missing group and this generic one otherwise.
   return deny(403, "account_unverified", PLATFORM_MESSAGES.account_unverified);
+}
+
+/** RPM/TPM of the plan a purchase (`userPlans.id`) was bought from; nulls when none is set. */
+function planRates(db, userPlanId) {
+  const row = db.get(
+    `SELECT p.rpm AS rpm, p.tpm AS tpm FROM userPlans up JOIN plans p ON p.id = up.planId WHERE up.id = ?`,
+    [userPlanId]
+  );
+  return { rpm: row?.rpm ?? null, tpm: row?.tpm ?? null };
 }
 
 /**
@@ -198,8 +208,12 @@ export async function enforceKeyLimits(apiKey, model) {
       }
     }
 
-    // 4-5. RPM then TPM, per user.
-    const rate = await enforceRate({ kind: "user", userId: key.userId }, resolved);
+    // 4-5. RPM then TPM, per user, at the rates of the plan paying right now
+    //    (the head of the queue). With no plan able to pay there is no rate to
+    //    apply; the admission step below then explains why with 402/429.
+    const db = await getAdapter();
+    const paying = admitSync(db, key.userId);
+    const rate = await enforceRate({ kind: "user", userId: key.userId }, paying.ok ? planRates(db, paying.planId) : {});
     if (!rate.ok) return rate;
 
     // 6. Model allow-list from the owner's group. Skipped when no model was given
@@ -215,7 +229,9 @@ export async function enforceKeyLimits(apiKey, model) {
     //    Runs LAST so a request refused for an access reason reports that reason,
     //    not quota. A 429 names the instant the first plan reopens; a 402 means no
     //    queued plan has credit left.
-    const admitted = admitSync(await getAdapter(), key.userId);
+    //    Re-read after the rate step: a TPM wait can last seconds, and the queue may
+    //    have moved on in that time.
+    const admitted = admitSync(db, key.userId);
     if (!admitted.ok) {
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {

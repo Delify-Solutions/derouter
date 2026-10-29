@@ -56,3 +56,13 @@ The system SHALL NOT store or enforce per-model monthly ceilings. `/api/plans/[i
 - **WHEN** a customer opens `/account/quota`
 - **THEN** the browser is redirected to `/account/plans`
 
+### Requirement: Plan rates
+A plan SHALL carry an optional `rpm` (requests per minute) and `tpm` (tokens per minute), each empty/0 (stored NULL, unlimited) or a positive integer; a negative or fractional value SHALL be rejected with a Vietnamese message naming RPM or TPM. They SHALL NOT be snapshotted into orders or purchases: they are read from the plan on every request, so a changed value applies to every holder at once. The admin plan form SHALL offer both fields, the plan card SHALL show them, and the customer catalogue SHALL list them as "N request mỗi phút" / "N token mỗi phút" when set.
+
+#### Scenario: Setting rates
+- **WHEN** an admin saves a plan with RPM 60 and TPM 200000
+- **THEN** the plan stores both, and the landing and purchase cards list "60 request mỗi phút" and "200.000 token mỗi phút"
+
+#### Scenario: Clearing rates
+- **WHEN** an admin saves a plan with RPM and TPM left empty or 0
+- **THEN** both are stored as unlimited and no rate line is shown

@@ -204,12 +204,20 @@ export function toCatalogPlan(plan, blocker, methods = []) {
     priceVndText: plan.priceVnd ? formatVnd(nano(plan.priceVnd)) : null,
     creditUsd: usd(plan.creditNanoUsd),
     limits,
-    limitsText: limits.map(describeLimit),
+    limitsText: [...limits.map(describeLimit), ...describeRates(plan)],
     offeredMethods: methods,
     purchasable: !blocker,
     blockedReason: blocker?.reason ?? null,
     blockedCode: blocker?.code ?? null,
   };
+}
+
+/** Rate lines for a plan card: nothing when the plan sets no rate. */
+function describeRates(plan) {
+  const lines = [];
+  if (plan.rpm) lines.push(`${plan.rpm.toLocaleString("vi-VN")} request mỗi phút`);
+  if (plan.tpm) lines.push(`${plan.tpm.toLocaleString("vi-VN")} token mỗi phút`);
+  return lines;
 }
 
 /** "250.000đ" — the same format the checkout strings use (design D2). */

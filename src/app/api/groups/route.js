@@ -37,10 +37,6 @@ export async function POST(request) {
     const group = await createKeyGroup({
       name: body.name,
       isActive: toBool(body.isActive),
-      rpm: body.rpm ?? null,
-      tpm: body.tpm ?? null,
-      budgetUsd: body.budgetUsd ?? null,
-      resetWindow: body.resetWindow ?? null,
       allowedModels: body.allowedModels ?? null,
       priceOverrides: body.priceOverrides ?? null,
     });
