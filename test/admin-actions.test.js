@@ -95,8 +95,8 @@ function ledgerCount() {
 
 function auditRows(action = null) {
   return action
-    ? db.all(`SELECT * FROM userAuditLog WHERE action = ? ORDER BY id`, [action])
-    : db.all(`SELECT * FROM userAuditLog ORDER BY id`);
+    ? db.all(`SELECT * FROM userAuditLog WHERE action = ? ORDER BY createdAt, rowid`, [action])
+    : db.all(`SELECT * FROM userAuditLog ORDER BY createdAt, rowid`);
 }
 
 function purchases() {
@@ -524,6 +524,31 @@ test("resetPassword stores the hash, revokes sessions and never logs the passwor
   // Never the secret, in either hash.
   assert.equal(String(audit[0].details).includes("new-hash"), false);
   assert.equal(String(audit[0].details).includes("old-hash"), false);
+});
+
+test("password_reset audit reads the replaced hash from the database, not from the caller", () => {
+  user();
+  // The route holds the public user shape (no hash), so it passes no `before`.
+  db.transaction(() =>
+    actions.resetPasswordSync(db, "u1", { passwordHash: "next-hash", reason: "Khách quên mật khẩu", actor: ACTOR, now: at(T0) })
+  );
+  const details = JSON.parse(auditRows("password_reset")[0].details);
+  assert.equal(details.before.hasPassword, true);
+});
+
+test("the admin note is part of the user the admin API reads, and publicUser keeps it off nothing else", async () => {
+  user();
+  db.transaction(() => actions.setNoteSync(db, "u1", { adminNote: "Khách quen", actor: ACTOR, now: at(T0) }));
+  const { getUserById, publicUser } = await import("../src/lib/db/repos/userRepo.js");
+  const loaded = await getUserById("u1");
+  assert.equal(loaded.adminNote, "Khách quen");
+  // Editing again records the real previous note, which the route reads from here.
+  db.transaction(() =>
+    actions.setNoteSync(db, "u1", { adminNote: "Đã gọi điện", actor: ACTOR, before: loaded.adminNote, now: at(T0 + 1000) })
+  );
+  const last = auditRows("note_changed").pop();
+  assert.equal(JSON.parse(last.details).before.adminNote, "Khách quen");
+  assert.equal("passwordHash" in publicUser({ id: "u1", passwordHash: "x", adminNote: "n" }), false);
 });
 
 test("N1: resetPassword without a reason is refused and writes nothing", () => {

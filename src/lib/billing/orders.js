@@ -74,6 +74,36 @@ export function rowToOrder(row) {
   };
 }
 
+/**
+ * An order as its BUYER may see it: a whitelist, not a blacklist, so a column added
+ * to `rowToOrder` later stays private until someone decides it should not.
+ * Left out on purpose: `adminNote` and `approvedBy` (admin identity and internal
+ * notes), `paymentProviderId` / `paymentTransactionId` (which receiving account and
+ * which bank transaction), `userId`, the e-mail/name join and the limits snapshot.
+ * Accepts the `rowToOrder` shape and the leaner `readGatewayOrder` shape.
+ */
+export function toCustomerOrder(order) {
+  if (!order) return null;
+  return {
+    id: order.id,
+    planId: order.planId ?? null,
+    planCode: order.planCode ?? null,
+    planName: order.planName ?? null,
+    amountNanoUsd: order.amountNanoUsd,
+    creditNanoUsd: order.creditNanoUsd,
+    durationDays: order.durationDays,
+    status: order.status,
+    method: order.method ?? "manual",
+    paymentCode: order.paymentCode ?? null,
+    payCurrency: order.payCurrency ?? null,
+    payAmount: order.payAmount ?? null,
+    expiresAt: order.expiresAt ?? null,
+    payerNote: order.payerNote ?? null,
+    createdAt: order.createdAt ?? null,
+    paidAt: order.paidAt ?? null,
+  };
+}
+
 /** Read one order in the joined shape. `null` when it does not exist. */
 export function getOrderRowSync(db, orderId) {
   if (!orderId) return null;

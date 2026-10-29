@@ -75,7 +75,7 @@ function assertAbsent(result, secret, label) {
 
 test("sepay: webhook incoming normalizes id, direction, amount, content, time", () => {
   const tx = sepay.normalizeSepayTransaction(fixtures.sepay.webhookIncoming);
-  assert.equal(tx.externalId, "92704");
+  assert.equal(tx.externalId, "ref:FT24012345678:250000:2024-07-02T04:08:33.000Z");
   assert.equal(tx.direction, "in");
   assert.equal(tx.amount, 250000);
   assert.equal(tx.currency, "VND");
@@ -88,14 +88,14 @@ test("sepay: webhook incoming normalizes id, direction, amount, content, time", 
 
 test("sepay: webhook outgoing normalizes as out", () => {
   const tx = sepay.normalizeSepayTransaction(fixtures.sepay.webhookOutgoing);
-  assert.equal(tx.externalId, "92705");
+  assert.equal(tx.externalId, "ref:FT24012345679:50000:2024-07-02T04:09:00.000Z");
   assert.equal(tx.direction, "out");
   assert.equal(tx.amount, 50000);
 });
 
 test("sepay: v2 API row incoming uses amount_in and transaction_content", () => {
   const tx = sepay.normalizeSepayTransaction(fixtures.sepay.apiIncoming);
-  assert.equal(tx.externalId, "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+  assert.equal(tx.externalId, "ref:FT26069ABC:250000:2025-02-20T07:15:00.000Z");
   assert.equal(tx.direction, "in");
   assert.equal(tx.amount, 250000);
   assert.equal(tx.content, "DR8K3Q7MZP thanh toan");
@@ -131,7 +131,7 @@ test("sepay: verifyWebhookAuth accepts the right key, rejects wrong/missing/diff
   assert.equal(sepay.verifyWebhookAuth(`Apikey ${key}`, null), false);
 });
 
-test("sepay: poll namespaces API ids so a webhook row cannot collide", async () => {
+test("sepay: a webhook and an API poll of the same transfer share one externalId", async () => {
   const fetchImpl = async () =>
     jsonResponse({ status: "success", data: [fixtures.sepay.apiIncoming, fixtures.sepay.apiOutgoing] });
   const result = await sepay.fetchSepayTransactions({
@@ -140,13 +140,33 @@ test("sepay: poll namespaces API ids so a webhook row cannot collide", async () 
     fetchImpl,
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(
-    result.transactions.map((tx) => tx.externalId),
-    [
-      "sepay-api:a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "sepay-api:b1b2c3d4-e5f6-7890-abcd-ef1234567891",
-    ]
-  );
+  const polled = result.transactions[0];
+  // The same transfer as the webhook would deliver it: different id, same bank
+  // reference, amount and instant.
+  const webhook = sepay.normalizeSepayTransaction({
+    id: 555001,
+    transactionDate: "2025-02-20 14:15:00",
+    accountNumber: "1017588888",
+    content: "DR8K3Q7MZP thanh toan",
+    transferType: "in",
+    transferAmount: 250000,
+    referenceCode: "FT26069ABC",
+  });
+  assert.equal(webhook.externalId, polled.externalId);
+});
+
+test("sepay: a reused bank reference with another amount or time is a different transfer", () => {
+  const base = { id: 1, transactionDate: "2025-02-20 14:15:00", transferType: "in", transferAmount: 250000, referenceCode: "FT26069ABC" };
+  const a = sepay.normalizeSepayTransaction(base);
+  const b = sepay.normalizeSepayTransaction({ ...base, id: 2, transferAmount: 250001 });
+  const c = sepay.normalizeSepayTransaction({ ...base, id: 3, transactionDate: "2025-02-20 14:16:00" });
+  assert.notEqual(a.externalId, b.externalId);
+  assert.notEqual(a.externalId, c.externalId);
+});
+
+test("sepay: without a usable bank reference the source id is the key", () => {
+  const tx = sepay.normalizeSepayTransaction({ id: 777, transactionDate: "2025-02-20 14:15:00", transferType: "in", transferAmount: 1000, referenceCode: "" });
+  assert.equal(tx.externalId, "777");
 });
 
 test("sepay: no token means no polling, with a message that names no credential", async () => {

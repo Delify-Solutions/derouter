@@ -4,6 +4,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { createOrder, getOrderById, getPlanById, listOrders, planPurchaseBlocker } from "@/lib/db/repos/billingRepo.js";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 import { createGatewayOrderSync, offeredMethodsSync, MAX_PENDING_GATEWAY_ORDERS } from "@/lib/payments/checkout.js";
+import { toCustomerOrder } from "@/lib/billing/orders.js";
 import { fmtUsdNano } from "@/shared/utils/money.js";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +28,12 @@ async function notifyNewOrder(payload) {
 }
 
 function decorate(order) {
+  // Customer-facing: only the whitelisted fields (see `toCustomerOrder`).
+  const visible = toCustomerOrder(order);
   return {
-    ...order,
-    amountUsd: fmtUsdNano(order.amountNanoUsd),
-    creditUsd: fmtUsdNano(order.creditNanoUsd),
+    ...visible,
+    amountUsd: fmtUsdNano(visible.amountNanoUsd),
+    creditUsd: fmtUsdNano(visible.creditNanoUsd),
   };
 }
 

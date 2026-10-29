@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings, getKeyGroupById } from "@/lib/localDb";
+import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -135,6 +135,12 @@ export async function PATCH(request) {
     }
 
     const settings = await updateSettings(body);
+
+    // Switching verification off must also release accounts that signed up while it
+    // was on: their status was fixed at creation and nothing else would clear it.
+    if (body.requireEmailVerification === false) {
+      await activateUnverifiedUsers();
+    }
 
     // Apply outbound proxy settings immediately (no restart required)
     if (

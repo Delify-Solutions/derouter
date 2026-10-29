@@ -190,7 +190,6 @@ export async function PATCH(request, { params }) {
         passwordHash,
         reason: body.reason,
         actor,
-        before: existing.passwordHash,
       });
       if (!reset.ok) throw new ActionRefused(reset);
       results.passwordReset = true;

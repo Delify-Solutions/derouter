@@ -17,7 +17,7 @@ export {
   getKeyGroups, getKeyGroupById, getKeyGroupByName, createKeyGroup, updateKeyGroup, deleteKeyGroup,
   getGroupGuard, getGroupMemberCounts, describeGroupGuard, toBool,
   getUserById, getUserByEmail, getUserByEmailWithPassword, listUsers,
-  createUser, updateUser, deleteUser, resolveDefaultGroupId,
+  createUser, updateUser, deleteUser, activateUnverifiedUsers, resolveDefaultGroupId,
   createSession, getSessionByToken, revokeSession, revokeAllUserSessions, revokeOtherUserSessions, touchLastLogin,
   listUserSessions, revokeSessionById,
   createVerification, consumeVerification, getVerificationByToken, replaceVerification,

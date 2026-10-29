@@ -20,8 +20,9 @@
 //     than one signed figure;
 //   * `content` on the v2 API row is `transaction_content`, and the API's `id` is a
 //     UUID — the webhook's numeric `id` and the API's UUID are different values for
-//     the same transfer, which is why polling stores its own dedup key
-//     (`sepay-api:<id>`) while the webhook keeps `<id>`.
+//     the same transfer, so neither can be the dedup key. Both sources carry the
+//     bank's own reference (`referenceCode` / `reference_number`), and the dedup
+//     key is built from that (see `dedupKey`).
 //
 // Relative imports only: `node --test` loads this module directly.
 import crypto from "node:crypto";
@@ -90,8 +91,8 @@ function vndAmount(value) {
  * Normalize one SePay transaction — webhook body or v2 API row — to the shape in
  * design D3: `{ externalId, direction, amount, currency, content, occurredAt, raw }`.
  *
- * `externalId` is `String(id)` for both sources; the caller decides which prefix
- * (if any) keeps a webhook and an API poll from colliding on the same transfer.
+ * `externalId` is the same value for a webhook and an API poll of one transfer
+ * (`dedupKey`), so the second sighting is a duplicate instead of a second row.
  *
  * @param {object} payload
  * @returns {{externalId: string, direction: "in"|"out", amount: number, currency: "VND",
@@ -123,18 +124,43 @@ export function normalizeSepayTransaction(payload) {
   );
   const accountNumber = payload.accountNumber ?? payload.account_number ?? null;
 
+  const occurredAt = sepayDateToIso(
+    payload.transactionDate ?? payload.transaction_date ?? null
+  );
+
   return {
-    externalId: String(id).trim(),
+    externalId: dedupKey({
+      reference: payload.referenceCode ?? payload.reference_number,
+      amount,
+      occurredAt,
+      fallbackId: String(id).trim(),
+    }),
     direction,
     amount,
     currency: "VND",
     content,
-    occurredAt: sepayDateToIso(
-      payload.transactionDate ?? payload.transaction_date ?? null
-    ),
+    occurredAt,
     accountNumber: accountNumber == null ? null : String(accountNumber),
     raw: payload,
   };
+}
+
+/**
+ * The id a transfer is stored under.
+ *
+ * The webhook's numeric id and the v2 API's UUID name the same transfer
+ * differently, so keying on either stores a payment twice when a provider has both
+ * the webhook and an API token: the second copy meets an already-paid order and
+ * lands in "Cần kiểm tra". The bank reference is the one value both carry. It is
+ * combined with the amount and the instant so that a bank reusing a reference for
+ * two transfers (some print a constant) can never make a real payment look like a
+ * duplicate and be dropped. With no usable reference the source id is the key, as
+ * before — then a webhook and a poll can still double-record, but never merge.
+ */
+function dedupKey({ reference, amount, occurredAt, fallbackId }) {
+  const ref = reference == null ? "" : String(reference).trim();
+  if (ref.length < 4 || !occurredAt) return fallbackId;
+  return `ref:${ref}:${amount}:${occurredAt}`;
 }
 
 /**
@@ -206,9 +232,7 @@ export async function fetchSepayTransactions({
   for (const row of rows) {
     const tx = normalizeSepayTransaction(row);
     if (!tx) continue;
-    // API rows are namespaced so the same transfer seen through the webhook (a
-    // numeric id) and through polling (a UUID) cannot both be stored.
-    transactions.push({ ...tx, externalId: `sepay-api:${tx.externalId}` });
+    transactions.push(tx);
   }
   return { ok: true, transactions };
 }

@@ -549,6 +549,10 @@ export function resetPasswordSync(db, userId, { passwordHash, reason, actor = "a
   if (!cleanReason) return fail(400, "Lý do phải có từ 3 đến 500 ký tự");
 
   const at = now || nowIso();
+  // Read the state being replaced here, not from the caller: a caller holds the
+  // public user shape, which has no hash, so a caller-supplied value was always empty.
+  const previous = db.get(`SELECT passwordHash FROM users WHERE id = ?`, [userId]);
+  const hadPassword = previous ? Boolean(previous.passwordHash) : Boolean(before);
   db.run(`UPDATE users SET passwordHash = ?, updatedAt = ? WHERE id = ?`, [passwordHash, at, userId]);
   const res = db.run(
     `UPDATE userSessions SET revokedAt = ? WHERE userId = ? AND revokedAt IS NULL`,
@@ -562,7 +566,7 @@ export function resetPasswordSync(db, userId, { passwordHash, reason, actor = "a
     reason: cleanReason,
     details: {
       // Two booleans, not the credential: enough to prove the hash was replaced.
-      before: { hasPassword: Boolean(before), passwordChangedAt: null },
+      before: { hasPassword: hadPassword, passwordChangedAt: null },
       after: { hasPassword: true, passwordChangedAt: at },
       revokedSessions: res?.changes ?? 0,
     },

@@ -4,6 +4,7 @@ import { cancelOrder, getOrderById } from "@/lib/db/repos/billingRepo.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { buildPaymentBlock } from "@/lib/payments/orderPayment.js";
 import { parseJson } from "@/lib/db/helpers/jsonCol.js";
+import { toCustomerOrder } from "@/lib/billing/orders.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -40,7 +41,7 @@ export async function GET(request, { params }) {
 
     const provider = await loadProvider(order.paymentProviderId);
     return NextResponse.json(
-      { order, payment: buildPaymentBlock({ order, provider }) },
+      { order: toCustomerOrder(order), payment: buildPaymentBlock({ order, provider }) },
       { headers: NO_STORE }
     );
   } catch {
@@ -57,7 +58,7 @@ export async function DELETE(request, { params }) {
 
   try {
     const result = await cancelOrder(id, session.userId);
-    if (result.ok) return NextResponse.json({ success: true, order: result.order }, { headers: NO_STORE });
+    if (result.ok) return NextResponse.json({ success: true, order: toCustomerOrder(result.order) }, { headers: NO_STORE });
 
     // 404 for someone else's order too: a customer must not learn that an id exists.
     if (result.reason === "not_found" || result.reason === "forbidden") {

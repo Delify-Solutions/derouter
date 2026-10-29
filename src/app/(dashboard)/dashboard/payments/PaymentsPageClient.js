@@ -1534,14 +1534,40 @@ function ResolveModal({ state, onClose, onDone }) {
 
   useEffect(() => {
     if (!state || !isAssign) return;
-    // The admin-facing order search is the existing admin list; one page of
-    // pending orders is enough to pick from and avoids a new endpoint.
+    // `assign` accepts a pending OR an expired order (a late payment is the very
+    // case it exists for), so both lists are loaded. The order the transaction
+    // already points at is fetched on its own: it may be older than one page and
+    // is the right answer for `order_expired` / `order_not_pending` rows.
+    let cancelled = false;
+    const load = (url) => fetch(url, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
     setOrdersLoading(true);
-    fetch("/api/orders?status=pending", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : { orders: [] }))
-      .then((body) => setOrders(Array.isArray(body.orders) ? body.orders : []))
-      .catch(() => setOrders([]))
-      .finally(() => setOrdersLoading(false));
+    Promise.all([
+      load("/api/orders?status=pending"),
+      load("/api/orders?status=expired"),
+      state.tx.orderId ? load(`/api/orders/${encodeURIComponent(state.tx.orderId)}`) : null,
+    ]).then(([pending, expired, linked]) => {
+      if (cancelled) return;
+      const byId = new Map();
+      for (const body of [pending, expired]) {
+        for (const order of Array.isArray(body?.orders) ? body.orders : []) byId.set(order.id, order);
+      }
+      const suggested = linked?.order;
+      if (suggested && (suggested.status === "pending" || suggested.status === "expired")) {
+        byId.set(suggested.id, suggested);
+      }
+      const list = Array.from(byId.values()).sort((a, b) => {
+        if (a.id === state.tx.orderId) return -1;
+        if (b.id === state.tx.orderId) return 1;
+        return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+      });
+      setOrders(list);
+      if (suggested && byId.has(suggested.id)) setOrderId(suggested.id);
+    }).finally(() => {
+      if (!cancelled) setOrdersLoading(false);
+    });
+    return () => { cancelled = true; };
   }, [state, isAssign]);
 
   const submit = async () => {
@@ -1605,10 +1631,10 @@ function ResolveModal({ state, onClose, onDone }) {
             onChange={(event) => setOrderId(event.target.value)}
             disabled={ordersLoading}
             options={[
-              { value: "", label: ordersLoading ? "Đang tải…" : "Chọn đơn đang chờ" },
+              { value: "", label: ordersLoading ? "Đang tải…" : "Chọn đơn đang chờ hoặc đã hết hạn" },
               ...orders.map((order) => ({
                 value: order.id,
-                label: `${order.planName || order.planCode || order.planId} · ${order.userEmail || "—"} · ${order.id.slice(0, 8)}`,
+                label: `${order.status === "expired" ? "[hết hạn] " : ""}${order.planName || order.planCode || order.planId} · ${order.userEmail || "—"} · ${order.id.slice(0, 8)}`,
               })),
             ]}
             hint="Chỉ đơn đang chờ hoặc đã hết hạn mới gán được. Gán sẽ kích hoạt gói ngay."

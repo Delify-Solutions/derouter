@@ -1,10 +1,13 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import {
   clearAccountError,
+  enforceKeyAccess,
   getProviderCredentials,
   isValidApiKey,
   markAccountUnavailable,
 } from "@/sse/services/auth.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
+import { extractGeminiNativeUsage } from "@/lib/usage/geminiNativeUsage.js";
 import { getSettings } from "@/lib/localDb";
 import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS } from "open-sse/config/runtimeConfig.js";
@@ -226,6 +229,52 @@ function getSafeGeminiNativeErrorText(error) {
   return `${message} (${code})`;
 }
 
+// A native TTS answer is audio inside JSON (or SSE); a few MB is normal. Past this
+// the body is still forwarded untouched but can no longer be parsed for usage.
+const GEMINI_NATIVE_METER_LIMIT_CHARS = 64 * 1024 * 1024;
+
+/**
+ * Pass the upstream body through unchanged while collecting it, and record the
+ * request's token usage once the stream ends so a customer key is charged for it
+ * (spec plan-queue-billing "Charging"). Only a successful answer with a usable
+ * `usageMetadata` is recorded; a client that disconnects early records nothing,
+ * as on the translator path.
+ */
+function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint }) {
+  if (!body || !apiKey) return body;
+
+  const decoder = new TextDecoder();
+  let text = "";
+  let overflow = false;
+
+  return body.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      if (overflow) return;
+      text += decoder.decode(chunk, { stream: true });
+      if (text.length > GEMINI_NATIVE_METER_LIMIT_CHARS) {
+        overflow = true;
+        text = "";
+      }
+    },
+    flush() {
+      if (overflow) return;
+      text += decoder.decode();
+      const tokens = extractGeminiNativeUsage(text);
+      if (!tokens) return;
+      saveRequestUsage({
+        provider: "gemini",
+        model: modelId,
+        connectionId,
+        apiKey,
+        endpoint,
+        tokens,
+        status: "success",
+      }).catch(() => {});
+    },
+  }));
+}
+
 async function forwardGeminiNativeRequest(request, body, model, action) {
   const authError = await validateGeminiNativeClientKey(request);
   if (authError) return authError;
@@ -233,6 +282,15 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   const modelId = normalizeGeminiNativeModel(model);
   if (!GEMINI_NATIVE_MODEL_PATTERN.test(modelId)) {
     return Response.json({ error: { message: "Invalid model" } }, { status: 400 });
+  }
+
+  // This path calls Google directly instead of going through handleChat, so it
+  // must apply the same account/group/RPM/TPM/plan gate itself — otherwise a
+  // suspended, unverified or out-of-credit key could still spend provider quota.
+  const clientApiKey = extractGeminiClientApiKey(request);
+  if (clientApiKey) {
+    const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`);
+    if (denied) return denied;
   }
   const excludeConnectionIds = new Set();
   const bodyText = JSON.stringify(body);
@@ -314,11 +372,19 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
 
     if (upstreamResponse.ok) {
       await clearAccountError(credentials.connectionId, credentials, modelId);
-      return new Response(upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: corsHeadersFrom(upstreamResponse),
-      });
+      return new Response(
+        meterGeminiNativeBody(upstreamResponse.body, {
+          apiKey: clientApiKey,
+          connectionId: credentials.connectionId,
+          modelId,
+          endpoint: new URL(request.url).pathname,
+        }),
+        {
+          status: upstreamResponse.status,
+          statusText: upstreamResponse.statusText,
+          headers: corsHeadersFrom(upstreamResponse),
+        }
+      );
     }
 
     const errorText = await upstreamResponse.text();

@@ -48,6 +48,9 @@ function rowToUser(row) {
     groupId: row.groupId ?? null,
     status: row.status,
     overdraftNanoUsd: row.overdraftNanoUsd ?? 0,
+    // Operator-only. Customer routes build their `user` payload field by field, so
+    // this never reaches the account area; admin routes show and edit it.
+    adminNote: row.adminNote ?? null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
     lastLoginAt: row.lastLoginAt ?? null,
@@ -225,6 +228,23 @@ export async function updateUser(id, patch = {}) {
   db.run(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`, values);
   const updated = db.get(`SELECT * FROM users WHERE id = ?`, [id]);
   return publicUser(rowToUser(updated));
+}
+
+/**
+ * Activate every account still waiting for email verification.
+ *
+ * Verification is decided once, at signup. When the operator later switches the
+ * requirement off, accounts created while it was on would otherwise stay
+ * `unverified` and keep being refused at login and on their keys.
+ *
+ * @returns {Promise<number>} how many accounts were activated
+ */
+export async function activateUnverifiedUsers() {
+  const db = await getAdapter();
+  const count = Number(db.get(`SELECT COUNT(*) AS n FROM users WHERE status = 'unverified'`)?.n ?? 0);
+  if (count === 0) return 0;
+  db.run(`UPDATE users SET status = 'active', updatedAt = ? WHERE status = 'unverified'`, [new Date().toISOString()]);
+  return count;
 }
 
 /**
