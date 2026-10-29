@@ -22,7 +22,7 @@ A payment code SHALL be the setting `paymentCodePrefix` (default `DR`, 2–6 upp
 - **THEN** its code matches `^DR[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$` and no other order has the same code
 
 ### Requirement: Pending order limit
-A customer SHALL NOT hold more than 5 pending gateway orders at once; a sixth SHALL be refused with HTTP 429 and the message "Bạn đang có quá nhiều đơn chưa thanh toán — thanh toán hoặc huỷ bớt đơn cũ".
+A customer SHALL NOT hold more than 5 pending gateway orders at once; a sixth SHALL be refused with HTTP 429 and the message "Bạn đang có quá nhiều đơn chưa thanh toán — thanh toán hoặc hủy bớt đơn cũ".
 
 #### Scenario: Sixth pending order
 - **WHEN** a customer with 5 pending gateway orders creates another

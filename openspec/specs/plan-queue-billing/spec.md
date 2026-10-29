@@ -4,7 +4,7 @@
 Defines how a customer's purchased plans form a queue, which plan pays for each request, how per-plan time-window limits block and reopen a plan, and how credit is granted, charged, expired, carried as debt and back-charged — so that "pay $10, get $250 usable on any model, drained one plan at a time in the order I choose" holds exactly.
 ## Requirements
 ### Requirement: Each grant creates an independent purchased plan
-Every grant — approving an order, compensating a refunded order, redeeming a plan gift code, redeeming a credit gift code, an admin "grant plan" and an admin "grant credit" — SHALL create one purchased plan holding: total credit, remaining credit, start time, expiry (start + duration days), source (`purchase`, `refund`, `gift` or `admin`), status `active`, no priority, and a snapshot of time-window limits. Plan-based grants SHALL snapshot the limits from the order (approval, refund) or from the plan at grant time (gift, admin). Credit-only grants SHALL have no limits. Credit SHALL first repay any existing debt and only the rest SHALL become the plan's credit (existing rule). All money is integer nano-USD.
+Every grant — approving an order, redeeming a plan gift code, redeeming a credit gift code, an admin "grant plan" and an admin "grant credit" — SHALL create one purchased plan holding: total credit, remaining credit, start time, expiry (start + duration days), source (`purchase`, `gift` or `admin`; legacy rows may carry `refund`), status `active`, no priority, and a snapshot of time-window limits. Plan-based grants SHALL snapshot the limits from the order (approval) or from the plan at grant time (gift, admin). Credit-only grants SHALL have no limits. Credit SHALL first repay any existing debt and only the rest SHALL become the plan's credit (existing rule). All money is integer nano-USD.
 
 #### Scenario: Gift plan snapshots limits
 - **WHEN** a user redeems a gift code for plan "Go" whose limits are `[{5h, $20}, {168h, $80}]`
@@ -99,6 +99,24 @@ Each amount taken SHALL produce one ledger row of kind `charge` carrying the pla
 #### Scenario: Retried request
 - **WHEN** the same completed request is recorded twice
 - **THEN** exactly one set of ledger rows exists and window spent amounts increased once
+
+### Requirement: Refunding an order takes its credit back
+Refunding a paid order SHALL set the order to `refunded` and, for every `active` plan that order produced, set the plan to `refunded`, set its remaining credit to zero, delete its window state and record one ledger row of kind `revoke` with the negative forfeited amount; it SHALL NOT grant any plan or credit. Credit already spent SHALL stay spent. Refunding an already refunded order SHALL be a no-op, and an order that granted nothing SHALL only change status. A one-time start-up repair SHALL apply the same closing to plans of orders that were refunded before this rule (including the old compensation plans with source `refund`).
+
+#### Scenario: Refund with partly spent credit
+- **WHEN** an order granted $25, $5 has been spent, and the order is refunded
+- **THEN** the plan becomes `refunded` with $0 remaining, a `revoke` row of -$20 exists, and no new plan is created
+
+### Requirement: Image generation is priced per image
+A completed `POST /v1/images/generations` SHALL be recorded as a usage row and charged exactly like any other request, at `image` USD per generated image (a price field on per-model pricing and on combo pricing, resolved with the same combo-first order as token prices) times the number of images returned (at least 1). A customer key SHALL be refused with HTTP 403 before any upstream call when the resolved model has no positive image price; admin and local keys are not billed and SHALL NOT be refused. A custom OpenAI-compatible provider node SHALL be usable for image generation at `<baseUrl>/images/generations` with the request body forwarded as sent except for `model`, so model-specific fields (`condition_images`, `seed`, `num_inference_steps`, ...) reach the upstream; built-in provider adapters keep their field whitelists.
+
+#### Scenario: Two images at $0.04
+- **WHEN** a customer key generates 2 images on a model priced at $0.04 per image
+- **THEN** one `charge` of $0.08 is written against their plan queue
+
+#### Scenario: Unpriced image model
+- **WHEN** a customer key calls an image model with no image price
+- **THEN** the call is refused with 403 and nothing is charged or forwarded
 
 ### Requirement: Expiry
 A plan whose expiry has passed SHALL never be selected by admission or charged, even before the periodic sweep runs. The sweep, running at least every 5 minutes, SHALL mark such plans `expired`, set their remaining credit to zero, record a ledger row of kind `expire` with the forfeited amount, and delete window state belonging to plans that are no longer `active`.
