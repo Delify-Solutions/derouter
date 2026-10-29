@@ -122,6 +122,13 @@ async function runHeavyStartup() {
   import("@/lib/billing/expiry.js")
     .then(({ startBillingJanitor }) => startBillingJanitor())
     .catch((e) => console.error("[BillingJanitor] start failed:", e.message));
+
+  // Payment poller: expires stale gateway orders and pulls transactions from every
+  // active provider (web2m / ACB / Binance / SePay-with-token). Also idempotent and
+  // skipped during a build; DISABLE_PAYMENT_POLLER turns it off.
+  import("@/lib/payments/poller.js")
+    .then(({ startPaymentPoller }) => startPaymentPoller())
+    .catch((e) => console.error("[PaymentPoller] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

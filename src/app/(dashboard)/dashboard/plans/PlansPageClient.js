@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle } from "@/shared/components";
 import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
-import PlanModelLimits from "./components/PlanModelLimits";
+import { formatVnd } from "@/lib/payments/amounts.js";
+import { windowLabel } from "@/lib/billing/limits.js";
+import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 
@@ -12,6 +14,9 @@ const EMPTY_FORM = {
   name: "",
   description: "",
   priceUsd: "",
+  // VietQR price in integer đồng. Empty or 0 = not sold by bank transfer
+  // (spec plan-dual-pricing "Two prices per plan").
+  priceVnd: "",
   creditUsd: "",
   durationDays: "30",
   // Two separate switches: listed vs buyable. A plan can be advertised before
@@ -24,6 +29,10 @@ const EMPTY_FORM = {
   // "" = unlimited. Counted per calendar month over orders.
   purchaseLimitPerMonth: "",
   sortOrder: "",
+  // Per-window limits as draft rows (strings while typing).
+  limits: [],
+  // Only meaningful while editing: rewrite the ACTIVE purchases too.
+  applyToActive: false,
 };
 
 /**
@@ -40,6 +49,14 @@ function validateDraft(draft) {
 
   const price = Number(draft.priceUsd);
   if (!Number.isFinite(price) || price < 0) errors.priceUsd = "Price must be 0 or more";
+
+  // Integer đồng only: a fractional đồng is not a thing a bank can transfer.
+  if (String(draft.priceVnd ?? "").trim() !== "") {
+    const priceVnd = Number(draft.priceVnd);
+    if (!Number.isInteger(priceVnd) || priceVnd < 0) {
+      errors.priceVnd = "Giá VND phải là số nguyên không âm";
+    }
+  }
   const credit = Number(draft.creditUsd);
   if (!Number.isFinite(credit) || credit <= 0) errors.creditUsd = "Credit must be greater than 0";
 
@@ -49,6 +66,15 @@ function validateDraft(draft) {
   if (draft.sortOrder !== "" && !Number.isInteger(Number(draft.sortOrder))) {
     errors.sortOrder = "Sort order must be a whole number";
   }
+
+  // Same rules as the API (spec plan-templates "Limit validation"), evaluated
+  // against this draft's own credit and duration so the message names the limit.
+  const limitsError = draftLimitsError(draft.limits, {
+    creditUsd: draft.creditUsd,
+    durationDays: draft.durationDays,
+  });
+  if (limitsError) errors.limits = limitsError;
+
   return errors;
 }
 
@@ -58,6 +84,7 @@ function planToDraft(plan) {
     name: plan.name || "",
     description: plan.description || "",
     priceUsd: String(plan.priceNanoUsd / 1e9),
+    priceVnd: plan.priceVnd == null ? "" : String(plan.priceVnd),
     creditUsd: String(plan.creditNanoUsd / 1e9),
     durationDays: String(plan.durationDays ?? 30),
     isActive: plan.isActive !== false,
@@ -66,7 +93,16 @@ function planToDraft(plan) {
     allowedGroupIds: Array.isArray(plan.allowedGroupIds) ? plan.allowedGroupIds : [],
     purchaseLimitPerMonth: plan.purchaseLimitPerMonth == null ? "" : String(plan.purchaseLimitPerMonth),
     sortOrder: plan.sortOrder == null ? "" : String(plan.sortOrder),
+    limits: limitsToDraft(plan.limits),
+    applyToActive: false,
   };
+}
+
+/** Whether the two limit lists differ — decides whether to offer apply-to-active. */
+function limitsChanged(draftRows, originalLimits) {
+  const next = JSON.stringify(draftToLimits(draftRows) ?? []);
+  const before = JSON.stringify(Array.isArray(originalLimits) ? originalLimits : []);
+  return next !== before;
 }
 
 export default function PlansPageClient() {
@@ -142,6 +178,8 @@ export default function PlansPageClient() {
       name: draft.name.trim(),
       description: draft.description.trim() || null,
       priceNanoUsd: usdToNano(Number(draft.priceUsd)),
+      // 0 and "" both mean "not sold by VietQR"; the server normalises both to NULL.
+      priceVnd: String(draft.priceVnd ?? "").trim() === "" ? null : Number(draft.priceVnd),
       creditNanoUsd: usdToNano(Number(draft.creditUsd)),
       durationDays: Number(draft.durationDays),
       isActive: draft.isActive,
@@ -150,6 +188,9 @@ export default function PlansPageClient() {
       allowedGroupIds: draft.allowedGroupIds.length ? draft.allowedGroupIds : null,
       purchaseLimitPerMonth: draft.purchaseLimitPerMonth === "" ? null : Number(draft.purchaseLimitPerMonth),
       sortOrder: draft.sortOrder === "" ? null : Number(draft.sortOrder),
+      limits: draftToLimits(draft.limits) ?? [],
+      // Only sent when the admin ticked the box; the API ignores it otherwise.
+      ...(editing && draft.applyToActive ? { applyToActive: true } : {}),
     };
 
     try {
@@ -284,8 +325,14 @@ export default function PlansPageClient() {
 
               <dl className="grid grid-cols-2 lg:grid-cols-3 gap-px bg-border mx-6 my-5 border border-border">
                 <div className="bg-surface px-4 py-3">
-                  <dt className="meta text-text-subtle">Price</dt>
+                  <dt className="meta text-text-subtle">Giá USD</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">{fmtUsdNano(plan.priceNanoUsd)}</dd>
+                </div>
+                <div className="bg-surface px-4 py-3">
+                  <dt className="meta text-text-subtle">Giá VND</dt>
+                  <dd className="font-mono text-sm text-text-main mt-1">
+                    {plan.priceVnd ? formatVnd(plan.priceVnd) : "—"}
+                  </dd>
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Credit</dt>
@@ -314,6 +361,51 @@ export default function PlansPageClient() {
                   <dd className="font-mono text-sm text-text-main mt-1">
                     {plan.purchaseLimitPerMonth ? `${plan.purchaseLimitPerMonth} lần` : "Không"}
                   </dd>
+                </div>
+              </dl>
+
+              {/* Hạn mức theo cửa sổ: câu chữ đọc nhanh hơn bảng số. */}
+              <div className="px-6 pb-4">
+                <p className="meta text-text-subtle mb-1">Hạn mức</p>
+                {Array.isArray(plan.limits) && plan.limits.length ? (
+                  <ul className="flex flex-col gap-0.5">
+                    {plan.limits.map((limit) => (
+                      <li key={limit.hours} className="font-mono text-[12px] text-text-muted">
+                        {fmtUsdNano(limit.maxNanoUsd)} mỗi {windowLabel(limit.hours)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="font-mono text-[12px] text-text-muted">Không giới hạn theo cửa sổ</p>
+                )}
+              </div>
+
+              {/* Số liệu của spec plan-templates "Plan statistics" + doanh thu
+                  tách theo tiền tệ (spec plan-dual-pricing "Revenue per currency"). */}
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-border mx-6 mb-5 border border-border">
+                <div className="bg-surface px-3 py-2">
+                  <dt className="meta text-text-subtle">Gói chạy</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1">{plan.stats?.activeCount ?? 0}</dd>
+                </div>
+                <div className="bg-surface px-3 py-2">
+                  <dt className="meta text-text-subtle">Khách</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1">{plan.stats?.activeUsers ?? 0}</dd>
+                </div>
+                <div className="bg-surface px-3 py-2">
+                  <dt className="meta text-text-subtle">Thu VND</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1">
+                    {formatVnd(plan.stats?.revenueVnd ?? 0)}
+                  </dd>
+                </div>
+                <div className="bg-surface px-3 py-2">
+                  <dt className="meta text-text-subtle">Thu USD</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1">
+                    {fmtUsdNano(plan.stats?.revenueUsdNano ?? 0)}
+                  </dd>
+                </div>
+                <div className="bg-surface px-3 py-2">
+                  <dt className="meta text-text-subtle">Đã dùng</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1">{fmtUsdNano(plan.stats?.consumedNanoUsd ?? 0)}</dd>
                 </div>
               </dl>
 
@@ -396,19 +488,35 @@ export default function PlansPageClient() {
             placeholder="Credit for heavy months, expires after 30 days."
           />
 
+          {/* Two independent prices, no exchange rate between them: the admin
+              decides what 250.000đ and what $10 buy (spec plan-dual-pricing). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="Price (USD)"
+              label="Giá USD (Binance)"
               type="number"
               step="0.01"
               min="0"
               value={draft.priceUsd}
               onChange={(e) => setField("priceUsd", e.target.value)}
-              placeholder="20.00"
-              hint="What the customer transfers."
+              placeholder="10.00"
+              hint="Khách trả bằng USDT, 1 USDT = 1 USD. Để 0 = không bán bằng Binance."
               error={touched ? errors.priceUsd : ""}
-              required
             />
+            <Input
+              label="Giá VND (VietQR)"
+              type="number"
+              step="1"
+              min="0"
+              value={draft.priceVnd}
+              onChange={(e) => setField("priceVnd", e.target.value)}
+              placeholder="250000"
+              hint="Số nguyên đồng, khách chuyển khoản đúng số này. Để trống = không bán bằng VietQR."
+              error={touched ? errors.priceVnd : ""}
+              inputMode="numeric"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Credit (USD)"
               type="number"
@@ -534,9 +642,45 @@ export default function PlansPageClient() {
             </div>
           </div>
 
-          <div className="border-t border-border pt-4">
-            <h3 className="meta text-text-subtle mb-3">Hạn mức theo model</h3>
-            <PlanModelLimits planId={editing?.id ?? null} />
+          <div className="border-t border-border pt-4 flex flex-col gap-3">
+            <LimitsEditor
+              rows={draft.limits}
+              onChange={(rows) => setField("limits", rows)}
+              creditUsd={draft.creditUsd}
+              durationDays={draft.durationDays}
+              error={touched ? errors.limits : null}
+            />
+
+            {/* The price half of the spec's preview sentence: the editor renders
+                the credit/limits half, this line completes it. */}
+            <p className="text-xs text-text-muted">
+              Xem trước: Khách trả ${draft.priceUsd || "—"} → {draft.creditUsd ? `$${draft.creditUsd}` : "—"} dùng
+              chung mọi model trong {draft.durationDays || "—"} ngày
+              {draftToLimits(draft.limits)?.length
+                ? `; ${draftToLimits(draft.limits)
+                    .map((limit) => `tối đa $${limit.maxNanoUsd / 1e9} mỗi ${limit.hours === 5 ? "5 giờ" : limit.hours === 24 ? "1 ngày" : limit.hours === 168 ? "1 tuần" : `${limit.hours} giờ`}`)
+                    .join(", ")}`
+                : ""}
+              .
+            </p>
+
+            {editing && limitsChanged(draft.limits, editing.limits) && (
+              <label className="flex items-start gap-2 text-sm text-text-main">
+                <input
+                  type="checkbox"
+                  checked={draft.applyToActive}
+                  onChange={(event) => setField("applyToActive", event.target.checked)}
+                  className="mt-1 size-4"
+                />
+                <span>
+                  Áp dụng hạn mức mới cho {editing.stats?.activeCount ?? 0} gói đang chạy
+                  <span className="block text-xs text-text-muted">
+                    Credit và ngày hết hạn của các gói đã bán không đổi. Bỏ trống thì chỉ gói mua sau
+                    mới dùng hạn mức này.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
 
           {formError && (

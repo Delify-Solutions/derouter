@@ -34,6 +34,9 @@ const navItems = [
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
   { href: "/dashboard/gift-codes", label: "Gift codes", icon: "redeem" },
+  // Payment accounts + received transactions. The needs-review badge is the
+  // reason this item exists in the sidebar rather than buried in settings.
+  { href: "/dashboard/payments", label: "Thanh toán", icon: "account_balance", badge: "needsReview" },
   { href: "/dashboard/content", label: "Nội dung", icon: "article" },
 ];
 
@@ -56,6 +59,9 @@ export default function Sidebar({ onClose }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
   const [enableTranslator, setEnableTranslator] = useState(false);
+  // How many received transactions are waiting for an admin decision. Refreshed
+  // with the rest of the shell so a new needs-review row shows up without a reload.
+  const [needsReview, setNeedsReview] = useState(0);
   const { copied, copy } = useCopyToClipboard(2000);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
@@ -65,6 +71,28 @@ export default function Sidebar({ onClose }) {
       .then(res => res.json())
       .then(data => { if (data.enableTranslator) setEnableTranslator(true); })
       .catch(() => {});
+  }, []);
+
+  // Needs-review badge. 60 s is the admin's "no longer fresh" horizon: a payment
+  // sits in review until someone acts, so a faster poll would only add requests.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/payments/transactions?status=needs_review&page=1", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!cancelled && data && typeof data.needsReviewCount === "number") {
+            setNeedsReview(data.needsReviewCount);
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   // Lazy check for new npm version on mount
@@ -178,7 +206,17 @@ export default function Sidebar({ onClose }) {
               >
                 {item.icon}
               </span>
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {/* Never colour alone: the count is the signal, the tint only
+                  reinforces it (ui-dna §4). */}
+              {item.badge === "needsReview" && needsReview > 0 && (
+                <span
+                  className="min-w-5 border border-danger/30 bg-danger/10 px-1 text-center font-mono text-[10px] leading-4 text-danger"
+                  aria-label={`${needsReview} giao dịch cần kiểm tra`}
+                >
+                  {needsReview > 99 ? "99+" : needsReview}
+                </span>
+              )}
             </Link>
           ))}
 

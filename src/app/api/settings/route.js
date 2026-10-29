@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings } from "@/lib/localDb";
+import { getSettings, updateSettings, getKeyGroupById } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -42,6 +42,25 @@ export async function PATCH(request) {
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
 
+    // The default customer group must name an existing ACTIVE group. Accepting an
+    // unknown or inactive id would leave new signups unattached until the next boot
+    // repaired them, which looks like "registration silently ignored my setting".
+    if (Object.prototype.hasOwnProperty.call(body, "defaultUserGroupId")) {
+      const requested = typeof body.defaultUserGroupId === "string" ? body.defaultUserGroupId.trim() : "";
+      if (requested) {
+        const group = await getKeyGroupById(requested);
+        if (!group || !group.isActive) {
+          return NextResponse.json(
+            { error: "Nhóm mặc định phải là một nhóm đang hoạt động" },
+            { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+          );
+        }
+        body.defaultUserGroupId = requested;
+      } else {
+        body.defaultUserGroupId = "";
+      }
+    }
+
     // If updating password, hash it
     if (body.newPassword) {
       const settings = await getSettings();
@@ -78,6 +97,40 @@ export async function PATCH(request) {
     if (Object.prototype.hasOwnProperty.call(body, "oidcClientSecret")) {
       if (!body.oidcClientSecret || !String(body.oidcClientSecret).trim()) {
         delete body.oidcClientSecret;
+      }
+    }
+
+    // Payment settings (spec payment-provider-admin "Payment settings"). Validated
+    // here rather than only in the UI: the prefix ends up inside a UNIQUE index and
+    // a regex, so an invalid one would silently make every code unmatchable.
+    if (Object.prototype.hasOwnProperty.call(body, "paymentCodePrefix")) {
+      const prefix = typeof body.paymentCodePrefix === "string" ? body.paymentCodePrefix.trim().toUpperCase() : "";
+      if (!/^[A-Z]{2,6}$/.test(prefix)) {
+        return NextResponse.json(
+          { error: "Tiền tố mã thanh toán phải là 2–6 chữ cái in hoa" },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
+      }
+      body.paymentCodePrefix = prefix;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "paymentOrderTtlMinutes")) {
+      const ttl = Number(body.paymentOrderTtlMinutes);
+      if (!Number.isInteger(ttl) || ttl < 10 || ttl > 1440) {
+        return NextResponse.json(
+          { error: "Thời hạn đơn thanh toán phải là số nguyên từ 10 đến 1440 phút" },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
+      }
+      body.paymentOrderTtlMinutes = ttl;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "allowManualOrders")) {
+      if (typeof body.allowManualOrders !== "boolean") {
+        return NextResponse.json(
+          { error: "allowManualOrders phải là true hoặc false" },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
       }
     }
 
