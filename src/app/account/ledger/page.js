@@ -2,7 +2,7 @@ import { Page } from "@/app/account/components/ui";
 import LedgerTable from "./LedgerTable";
 
 export const metadata = {
-  title: "Sổ cái - derouter",
+  title: "Nhật ký credit - derouter",
 };
 
 export const dynamic = "force-dynamic";
@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
 export default function AccountLedgerPage() {
   return (
     <Page
-      title="Sổ cái"
-      description="Mọi thay đổi credit của bạn, mới nhất trước. Dòng “Trừ tiền” ghi model và số token mà khoản đó đã trả."
+      title="Nhật ký credit"
+      description="Mỗi lần credit của bạn được cấp, bị trừ, hết hạn hay điều chỉnh đều ghi ở đây, mới nhất trước. Dòng “Trừ credit” cho biết model và số token mà khoản đó đã trả."
     >
       <LedgerTable />
     </Page>

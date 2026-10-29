@@ -11,7 +11,7 @@ import { cn } from "@/shared/utils/cn";
 const NAV = [
   { href: "/account", label: "Tổng quan", icon: "dashboard" },
   { href: "/account/plans", label: "Gói của tôi", icon: "workspace_premium" },
-  { href: "/account/ledger", label: "Sổ cái", icon: "receipt_long" },
+  { href: "/account/ledger", label: "Nhật ký credit", icon: "receipt_long" },
   { href: "/account/gift", label: "Mã quà tặng", icon: "redeem" },
   { href: "/account/keys", label: "API key", icon: "key" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },

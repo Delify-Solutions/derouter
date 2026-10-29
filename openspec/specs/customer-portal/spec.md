@@ -32,11 +32,11 @@ The page SHALL show a card per active plan with price, "Nhận $<credit> dùng c
 - **THEN** the "Go" card is highlighted and in view
 
 ### Requirement: Ledger page
-`/account/ledger` SHALL list the customer's ledger newest first, 25 rows per page: time, kind label (`Trừ tiền`, `Cấp`, `Hết hạn`, `Điều chỉnh`, `Hoàn tiền`, `Thu hồi`), plan name, model and input/output tokens for charges, signed amount, and balance after. It SHALL filter by plan and by kind.
+`/account/ledger` SHALL list the customer's ledger newest first, 25 rows per page: time, kind label (`Trừ credit`, `Được cấp`, `Hết hạn`, `Điều chỉnh`, `Hoàn credit`, `Thu hồi`), plan name, model and input/output tokens for charges, signed amount, and balance after. It SHALL filter by plan and by kind.
 
 #### Scenario: Charge row shows the model
 - **WHEN** a request to `model-x` with 1,200 input and 300 output tokens is charged $0.004
-- **THEN** the ledger shows a `Trừ tiền` row with `model-x`, 1,200 / 300 tokens and -$0.004
+- **THEN** the ledger shows a `Trừ credit` row with `model-x`, 1,200 / 300 tokens and -$0.004
 
 ### Requirement: Overview page
 `/account` SHALL show: a "Gói đang trả" card (plan name, remaining credit, nearest window reset) or an empty state offering "Mua gói" and "Nhập mã quà tặng"; total available credit; the debt amount when debt exists; and the group name with the number of callable models and an expandable list of them.
@@ -46,7 +46,7 @@ The page SHALL show a card per active plan with price, "Nhận $<credit> dùng c
 - **THEN** the "Gói đang trả" card shows the empty state with both actions
 
 ### Requirement: Navigation and language
-The account navigation SHALL be, in order: `Tổng quan` (/account), `Gói của tôi` (/account/plans), `Sổ cái` (/account/ledger), `Mã quà tặng` (/account/gift), `API key` (/account/keys), `Lịch sử dùng` (/account/usage). Every account page SHALL be in Vietnamese.
+The account navigation SHALL be, in order: `Tổng quan` (/account), `Gói của tôi` (/account/plans), `Nhật ký credit` (/account/ledger), `Mã quà tặng` (/account/gift), `API key` (/account/keys), `Lịch sử dùng` (/account/usage). Every account page SHALL be in Vietnamese.
 
 #### Scenario: No English labels
 - **WHEN** a customer visits each account page
