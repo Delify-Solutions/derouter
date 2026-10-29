@@ -150,6 +150,22 @@ Content → sticky header → sidebar overlay → drawer/modal → toasts/overla
 - Colour-only status signalling.
 - Second typeface families, second spatial rhythm, or per-feature token overrides.
 
+## 8. Customer area (`/account/*`, `/login`, `/register`)
+
+The customer area follows the "studio" pattern of developer tools (reference: Command Code's studio): quiet, sentence-case chrome, mono only for headings and data. Sections 1–7 still apply; this section overrides them where they differ, for these routes only. Primitives live in `src/app/account/components/ui.js`.
+
+- **Frame** — 256px sidebar, 64px sticky header carrying the current page (icon + name) on the left and email, square initial and sign-out on the right. Below `lg` the sidebar becomes a row of tabs under the header.
+- **Navigation** is sentence case, sans 14px/500, with an outline icon; the active item is a `surface-2` fill, no side bar. (Overrides §3 "uppercase navigation" for this area.)
+- **Headings** are `// Title`: mono, 24px page / 16px section, with a muted `//` prefix. One per page, then one per section.
+- **Sections** are two columns at `lg`: heading + one muted paragraph on the left (280px), content on the right. One column below.
+- **Panels** are bordered surfaces with a 5px square at each corner. No shadow, no fill other than `surface`.
+- **Figures** — the number is the loudest element: sans 36px/600, its unit in muted mono beside it, its label as an 11px mono eyebrow above.
+- **Primary action** is solid `text-main` on `bg` (black in light, white in dark), mono 13px, sentence case. Green stays reserved for status and focus.
+- **Tags** are square, mono 11px uppercase, always carry a text label.
+- **List rows** are `surface-2` fills with a 1px border; identity in mono, detail in muted sans, actions at the right edge.
+- **Steps** are numbered `[01]` only where order is real (setup instructions); code is shown in a `$` box with a copy control and an accessible label.
+- Empty states use a dashed border and one action.
+
 ---
 
 UI/UX work must read `openspec/ui-dna.md` before any visual change.

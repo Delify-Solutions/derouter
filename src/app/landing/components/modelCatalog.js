@@ -1,11 +1,11 @@
 // Danh mục model của trang bán hàng, dựng từ dữ liệu thật của router.
 //
-// - Danh sách model: nhóm khách mặc định (setting `defaultUserGroupId`, fallback
-//   nhóm active cũ nhất) qua buildModelsList — đúng danh sách mà một khách vừa
-//   đăng ký gọi được. Nhóm không giới hạn thì lấy toàn bộ chat model; nhóm có
-//   allow-list thì chỉ những model đó. Không quảng cáo model mà khách sẽ bị 403.
-// - Giá token: bảng giá của router (bảng override trong DB trước, rồi
-//   open-sse/providers/pricing.js), đúng giá dùng để trừ credit.
+// - Danh sách model: CHỈ các combo đã cấu hình (đúng thứ /v1/models công khai trả
+//   về), lọc theo allow-list của nhóm khách mặc định (setting `defaultUserGroupId`,
+//   fallback nhóm active cũ nhất). Không liệt kê model thô của provider: khách gọi
+//   bằng tên combo, và quảng cáo model họ không gọi được là sai.
+// - Giá token: giá combo nếu admin đã đặt; nếu không thì giá của model đầu tiên
+//   trong combo, qua cùng chuỗi tra giá dùng để trừ credit.
 //
 // Không có hạn mức nào nằm ở đây: một gói là một pool credit dùng chung cho mọi
 // model người mua gọi được, cộng vài hạn mức theo cửa sổ thời gian trên chính
@@ -14,9 +14,8 @@
 // Chỉ server component được import file này (nó kéo cả registry provider vào
 // bundle); component phía client nhận dữ liệu đã dựng qua props.
 import { getPricingForModel } from "open-sse/providers/pricing.js";
-import { PROVIDER_ID } from "./salesData";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
-import { resolveDefaultGroupId, getKeyGroupById } from "@/lib/localDb";
+import { resolveDefaultGroupId, getKeyGroupById, getCombos } from "@/lib/localDb";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 
 // Bảng giá nội bộ chưa phủ hết mọi id. Model nào không tra được theo provider
@@ -25,7 +24,7 @@ import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 const RATE_FALLBACKS = [{ provider: "tokenrouter", vendor: "xiaomi" }];
 
 function resolveRate(modelId) {
-  const direct = getPricingForModel(PROVIDER_ID, modelId);
+  const direct = getPricingForModel("opencode-go", modelId);
   if (direct) return direct;
   for (const { provider, vendor } of RATE_FALLBACKS) {
     const rate = getPricingForModel(provider, `${vendor}/${modelId}`);
@@ -58,28 +57,44 @@ export async function buildModelListForGroup() {
     allowedModels = null;
   }
 
+  // No `skipDynamicFetch`: that flag switches ON the provider-pool listing used for
+  // cross-instance discovery. The default path returns combos only, with no network.
   let listed = [];
   try {
-    listed = await buildModelsList(["llm"], { allowedModels, skipDynamicFetch: true });
+    listed = await buildModelsList(["llm"], { allowedModels });
   } catch {
     listed = [];
+  }
+
+  let comboByName = new Map();
+  try {
+    comboByName = new Map((await getCombos()).map((combo) => [combo.name, combo]));
+  } catch {
+    comboByName = new Map();
   }
 
   return Promise.all(
     listed.map(async (model) => {
       const id = model.id;
+      // The combo's first pool model stands in for its price when the admin set no
+      // combo price: it is what the router serves first.
+      const first = comboByName.get(id)?.models?.[0];
+      const slash = typeof first === "string" ? first.indexOf("/") : -1;
+      const provider = slash > 0 ? first.slice(0, slash) : undefined;
+      const poolModel = typeof first === "string" ? (slash > 0 ? first.slice(slash + 1) : first) : id;
+
       let rate = null;
       try {
-        // resolvePrice returns { pricing, source } and already walks the DB
-        // overrides before the bundled table — the same chain calculateCostNano
-        // uses, so a displayed price is the price that gets charged.
-        const resolved = await resolvePrice({ provider: PROVIDER_ID, model: id, requestedModel: id });
+        // resolvePrice returns { pricing, source }: a combo price first (keyed by
+        // `requestedModel`), then the same chain calculateCostNano uses, so a
+        // displayed price is the price that gets charged.
+        const resolved = await resolvePrice({ provider, model: poolModel, requestedModel: id });
         rate = resolved?.pricing ?? null;
       } catch {
         rate = null;
       }
       if (!rate || (rate.input == null && rate.output == null)) {
-        rate = resolveRate(id);
+        rate = resolveRate(poolModel);
       }
       return {
         id,

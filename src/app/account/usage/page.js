@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { USER_COOKIE, verifyUserToken } from "@/lib/auth/userSession";
 import { getApiKeys, getKeyUsageSummary, getUsageHistory, getUserById } from "@/lib/db/index.js";
 import { fmtUsd } from "@/shared/utils/money";
+import { Empty, Page, ButtonLink } from "@/app/account/components/ui";
 import AccountUsageTable from "./AccountUsageTable";
 
 export const dynamic = "force-dynamic";
@@ -106,29 +107,17 @@ export default async function AccountUsagePage({ searchParams }) {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="meta text-text-muted">Lịch sử dùng</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Request và chi phí</h1>
-        <p className="text-sm text-text-muted">
-          Every request made with your keys, newest first. Billing is prepaid: each row debits the credit balance of
-          the plan it consumed.
-        </p>
-      </header>
-
+    <Page
+      title="Lịch sử dùng"
+      description="Mọi request gọi bằng key của bạn, mới nhất trước. Thanh toán trả trước: mỗi dòng trừ vào credit của gói đã dùng."
+    >
       {keysView.length === 0 ? (
-        <div className="border border-border p-6">
-          <p className="text-sm text-text-main">No keys yet.</p>
-          <p className="mt-1 text-sm text-text-muted">
-            Usage appears here once you create a key and send a request with it.
-          </p>
-          <a
-            href="/account/keys"
-            className="mt-4 inline-flex h-8 items-center border border-border px-4 font-mono text-[11px] uppercase tracking-[0.08em] text-text-main hover:bg-surface-2"
-          >
-            Create a key
-          </a>
-        </div>
+        <Empty
+          icon="monitoring"
+          title="Bạn chưa có API key"
+          body="Lịch sử xuất hiện ở đây sau khi bạn tạo key và gửi request đầu tiên."
+          action={<ButtonLink href="/account/keys" tone="solid">Tạo key</ButtonLink>}
+        />
       ) : (
         <AccountUsageTable
           keys={keysView}
@@ -140,6 +129,6 @@ export default async function AccountUsagePage({ searchParams }) {
           historyLimit={HISTORY_LIMIT}
         />
       )}
-    </div>
+    </Page>
   );
 }

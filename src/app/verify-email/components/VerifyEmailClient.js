@@ -48,7 +48,7 @@ export default function VerifyEmailClient({ token = "", next = null }) {
         <div className="flex flex-col gap-2">
           <Link
             href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}
-            className="text-brand-600 dark:text-brand-400 hover:underline"
+            className="font-medium text-text-main underline underline-offset-4"
           >
             Đăng nhập
           </Link>

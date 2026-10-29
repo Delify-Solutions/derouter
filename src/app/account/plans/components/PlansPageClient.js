@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, CardSkeleton } from "@/shared/components";
+import { CardSkeleton } from "@/shared/components";
+import { ActionButton, Page, Section, Stat } from "@/app/account/components/ui";
 import { PlanQueue } from "@/shared/components/billing";
 import { fmtUsdNano } from "@/shared/utils/money";
 import BuyPlans from "./BuyPlans";
@@ -181,29 +182,22 @@ export default function PlansPageClient() {
   );
 
   return (
-    <div className="flex min-w-0 flex-col gap-10">
-      <header className="flex flex-col gap-1.5">
-        <span className="meta text-text-muted">Tài khoản</span>
-        <h1 className="text-2xl font-semibold tracking-tight text-text-main">Gói của tôi</h1>
-        <p className="max-w-2xl text-sm text-text-muted">
-          Mỗi gói là một khoản credit dùng chung cho mọi model trong nhóm của bạn. Request trừ vào
-          gói đầu tiên còn credit và chưa chạm hạn mức — đổi thứ tự bên dưới để quyết định gói nào
-          trả trước.
-        </p>
-      </header>
-
+    <Page
+      title="Gói của tôi"
+      description="Mỗi gói là một khoản credit dùng chung cho mọi model trong nhóm của bạn. Request trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; đổi thứ tự bên dưới để quyết định gói nào trả trước."
+    >
       {loadError && (
-        <div role="alert" className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-4 py-3">
+        <div role="alert" className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-5 py-4">
           <span className="material-symbols-outlined text-[18px] text-danger" aria-hidden="true">error</span>
           <p className="flex-1 text-sm text-danger">{loadError}</p>
-          <Button variant="secondary" size="sm" onClick={() => { setLoading(true); load(); }}>Thử lại</Button>
+          <ActionButton size="sm" onClick={() => { setLoading(true); load(); }}>Thử lại</ActionButton>
         </div>
       )}
 
       {notice && (
         <div
           role="status"
-          className={`flex items-start gap-2 border px-4 py-3 ${
+          className={`flex items-start gap-2 border px-5 py-4 ${
             notice.type === "error"
               ? "border-danger/40 bg-danger/5 text-danger"
               : "border-brand-500/40 bg-brand-500/5 text-brand-700 dark:text-brand-400"
@@ -224,40 +218,29 @@ export default function PlansPageClient() {
         </div>
       )}
 
-      {/* Totals */}
-      <section className="grid gap-4 sm:grid-cols-2">
-        <div className="border border-border bg-surface p-6">
-          <p className="meta text-text-muted">Credit khả dụng</p>
-          <p className="mt-3 font-mono text-[32px] leading-none text-text-main">
-            {loading ? "…" : fmtUsdNano(data.availableNanoUsd)}
-          </p>
-          <p className="mt-2 text-xs text-text-muted">Tổng credit còn lại của các gói chưa hết hạn.</p>
+      <div className={`grid gap-px border border-border bg-border ${data.debtNanoUsd > 0 ? "sm:grid-cols-2" : ""}`}>
+        <div className="bg-surface p-6">
+          <Stat
+            label="Credit khả dụng"
+            value={loading ? "…" : fmtUsdNano(data.availableNanoUsd)}
+            hint="Tổng credit còn lại của các gói chưa hết hạn."
+          />
         </div>
         {data.debtNanoUsd > 0 && (
-          <div className="border border-amber-500/40 bg-amber-500/5 p-6">
-            <p className="meta text-amber-700 dark:text-amber-400">Đang nợ</p>
-            <p className="mt-3 font-mono text-[32px] leading-none text-amber-700 dark:text-amber-400">
-              {fmtUsdNano(data.debtNanoUsd)}
-            </p>
-            <p className="mt-2 text-xs text-text-muted">
-              Khoản này được trừ vào credit của gói tiếp theo bạn nhận.
-            </p>
+          <div className="bg-surface p-6">
+            <Stat
+              label="Đang nợ"
+              value={fmtUsdNano(data.debtNanoUsd)}
+              hint="Khoản này được trừ vào credit của gói tiếp theo bạn nhận."
+            />
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Queue */}
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <span className="meta text-text-muted">Hàng đợi</span>
-            <h2 className="mt-1 text-lg font-semibold text-text-main">Thứ tự trả tiền</h2>
-          </div>
-          <p className="text-xs text-text-muted">
-            Kéo thả hoặc dùng nút Lên/Xuống, rồi bấm Lưu thứ tự.
-          </p>
-        </div>
-
+      <Section
+        title="Hàng đợi"
+        description="Thứ tự trả tiền. Kéo thả hoặc dùng nút Lên/Xuống, rồi bấm Lưu thứ tự."
+      >
         {loading ? (
           <CardSkeleton />
         ) : (
@@ -269,9 +252,8 @@ export default function PlansPageClient() {
             error={queueError}
           />
         )}
-      </section>
+      </Section>
 
-      {/* Buy */}
       <BuyPlans
         plans={data.plans}
         loading={loading}
@@ -281,10 +263,8 @@ export default function PlansPageClient() {
         highlightRef={highlightRef}
       />
 
-      {/* Orders */}
       <MyOrders orders={orders} loading={ordersLoading} cancellingId={cancellingId} onCancel={cancel} />
 
-      {/* History, collapsed */}
       <PlanHistory history={data.history} loading={loading} />
 
       {highlightedPlan && !loading && (
@@ -292,6 +272,6 @@ export default function PlansPageClient() {
           Đã mở gói {highlightedPlan.name || highlightedPlan.code}
         </p>
       )}
-    </div>
+    </Page>
   );
 }

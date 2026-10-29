@@ -16,12 +16,12 @@ export default function CreditBar({ totalNanoUsd = 0, remainingNanoUsd = 0, labe
   const low = total > 0 && pct <= 10;
 
   return (
-    <div className={`flex flex-col gap-1.5 ${className}`}>
-      <div className="flex items-baseline justify-between gap-2 font-mono text-[12px]">
-        <span className="text-text-muted">{label}</span>
-        <span className="text-text-main">
-          {fmtUsdNano(remaining)}
-          <span className="text-text-subtle"> / {fmtUsdNano(total)}</span>
+    <div className={`flex flex-col gap-2 ${className}`}>
+      <div className="flex items-end justify-between gap-3">
+        <span className="text-sm text-text-muted">{label}</span>
+        <span className="flex items-baseline gap-1.5 text-text-main">
+          <span className="text-2xl font-semibold leading-none tracking-tight">{fmtUsdNano(remaining)}</span>
+          <span className="font-mono text-xs text-text-subtle">/ {fmtUsdNano(total)}</span>
         </span>
       </div>
       <div
@@ -31,10 +31,10 @@ export default function CreditBar({ totalNanoUsd = 0, remainingNanoUsd = 0, labe
         aria-valuemax={total}
         aria-valuenow={remaining}
         aria-valuetext={`${fmtUsdNano(remaining)} trên ${fmtUsdNano(total)}`}
-        className="h-1 w-full bg-border"
+        className="h-1.5 w-full bg-surface-2"
       >
         <div
-          className={`h-1 ${low ? "bg-amber-500" : "bg-brand-500"}`}
+          className={`h-1.5 ${low ? "bg-amber-500" : "bg-text-main"}`}
           style={{ width: `${pct}%` }}
         />
       </div>

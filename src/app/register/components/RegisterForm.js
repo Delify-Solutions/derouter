@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Input } from "@/shared/components";
+import { ActionButton } from "@/app/account/components/ui";
 import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice } from "@/app/login/components/AuthShell";
 
@@ -67,7 +68,7 @@ export default function RegisterForm() {
         footer={
           <Link
             href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
-            className="text-brand-600 dark:text-brand-400 hover:underline"
+            className="font-medium text-text-main underline underline-offset-4"
           >
             Go to sign in
           </Link>
@@ -79,8 +80,7 @@ export default function RegisterForm() {
             The link is single-use and expires in 24 hours. If no message arrives, check that
             the address is spelled correctly, then request another link from the sign-in page.
           </p>
-          <Button
-            variant="secondary"
+          <ActionButton
             onClick={() => {
               setDone("");
               router.refresh();
@@ -88,7 +88,7 @@ export default function RegisterForm() {
             fullWidth
           >
             Use a different address
-          </Button>
+          </ActionButton>
         </div>
       </AuthShell>
     );
@@ -104,7 +104,7 @@ export default function RegisterForm() {
           Already registered?{" "}
           <Link
             href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
-            className="text-brand-600 dark:text-brand-400 hover:underline"
+            className="font-medium text-text-main underline underline-offset-4"
           >
             Sign in
           </Link>
@@ -150,9 +150,9 @@ export default function RegisterForm() {
           autoComplete="new-password"
           required
         />
-        <Button type="submit" variant="primary" loading={pending} disabled={pending} fullWidth>
+        <ActionButton type="submit" tone="solid" loading={pending} fullWidth>
           Create account
-        </Button>
+        </ActionButton>
       </form>
     </AuthShell>
   );

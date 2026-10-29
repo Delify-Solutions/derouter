@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import Navigation from "./Navigation";
 import AnnouncementBanner from "./AnnouncementBanner";
 import HeroSection from "./HeroSection";
@@ -65,6 +65,21 @@ export default async function LandingPage({ copy }) {
   const visiblePlans = plans.filter((p) => p.creditUsd > 0);
   const featured = visiblePlans.find((p) => p.highlighted) ?? null;
 
+  // The address a customer points their client at: the configured public URL, else
+  // the origin this request arrived on.
+  let baseUrl = "";
+  const configured = typeof settings.publicBaseUrl === "string" ? settings.publicBaseUrl.trim() : "";
+  if (configured) {
+    baseUrl = `${configured.replace(/\/+$/, "")}/v1`;
+  } else {
+    const h = await headers();
+    const host = h.get("x-forwarded-host") || h.get("host") || "";
+    if (host) {
+      const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+      baseUrl = `${proto}://${host}/v1`;
+    }
+  }
+
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
       <Navigation session={session} />
@@ -75,11 +90,11 @@ export default async function LandingPage({ copy }) {
           href={copy.bannerHref}
           enabled={copy.bannerEnabled}
         />
-        <HeroSection models={MODELS} plans={visiblePlans} copy={copy} />
+        <HeroSection models={MODELS} plans={visiblePlans} copy={copy} baseUrl={baseUrl} />
         <PlansSection plans={visiblePlans} models={MODELS} copy={copy} signedIn={session === "customer"} />
         <ModelsSection models={MODELS} copy={copy} />
         <PricingSection plans={visiblePlans} models={MODELS} copy={copy} />
-        <GetStarted models={MODELS} plans={visiblePlans} text={copy} />
+        <GetStarted models={MODELS} plans={visiblePlans} text={copy} baseUrl={baseUrl} />
         <FaqSection plans={visiblePlans} models={MODELS} copy={copy} />
       </main>
 

@@ -7,7 +7,7 @@
 // and the request path cannot disagree about which plan is paying.
 
 const STATUS = {
-  paying: { label: "Đang trả", icon: "play_circle", cls: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400" },
+  paying: { label: "Đang trả", icon: "play_circle", cls: "border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-400" },
   waiting: { label: "Chờ", icon: "schedule", cls: "border-border bg-surface-2 text-text-muted" },
   blocked: { label: "Tạm khoá", icon: "lock", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
   exhausted: { label: "Hết credit", icon: "battery_alert", cls: "border-border bg-surface-2 text-text-muted" },
@@ -39,11 +39,11 @@ export default function StatusTag({ status, reopenAt = null, className = "" }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider whitespace-nowrap ${spec.cls} ${className}`}
+      className={`inline-flex h-6 items-center gap-1 border px-2 font-mono text-[11px] font-medium uppercase tracking-[0.08em] whitespace-nowrap ${spec.cls} ${className}`}
       title={label}
       data-status={status}
     >
-      <span className="material-symbols-outlined text-[13px]" aria-hidden="true">{spec.icon}</span>
+      <span className="material-symbols-outlined text-[14px]" aria-hidden="true">{spec.icon}</span>
       {label}
     </span>
   );

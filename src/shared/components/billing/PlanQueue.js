@@ -18,7 +18,6 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Button } from "@/shared/components";
 import QueueEntryCard from "./QueueEntryCard";
 
 /**
@@ -40,6 +39,21 @@ import QueueEntryCard from "./QueueEntryCard";
  * The component never computes eligibility: `entry.statusLabel` comes from the
  * server (queueViewSync), so the arrows and the request path agree.
  */
+function MoveButton({ icon, label, disabled, onClick, children }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex h-8 items-center gap-1.5 border border-border bg-surface px-3 font-mono text-xs font-medium text-text-main transition-colors duration-150 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{icon}</span>
+      {children}
+    </button>
+  );
+}
+
 function SortableCard({ entry, index, total, onMove, renderActions }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
   const name = entry.planName || entry.planCode || "gói";
@@ -56,7 +70,7 @@ function SortableCard({ entry, index, total, onMove, renderActions }) {
       {...attributes}
       {...listeners}
       aria-label={`Kéo để đổi thứ tự gói ${name}`}
-      className="mt-0.5 flex size-8 shrink-0 items-center justify-center border border-border text-text-muted hover:text-text-main hover:bg-surface-2 transition-colors duration-150 cursor-grab active:cursor-grabbing"
+      className="flex size-9 shrink-0 cursor-grab items-center justify-center border border-border bg-surface-2 text-text-muted transition-colors duration-150 hover:text-text-main active:cursor-grabbing"
     >
       <span className="material-symbols-outlined text-[18px]" aria-hidden="true">drag_indicator</span>
     </button>
@@ -66,32 +80,27 @@ function SortableCard({ entry, index, total, onMove, renderActions }) {
     <li ref={setNodeRef} style={style} className="list-none">
       <QueueEntryCard
         entry={entry}
+        position={index + 1}
         dragHandle={handle}
         renderActions={(item) => (
           <>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
+            <div className="flex items-center gap-1.5">
+              <MoveButton
                 icon="arrow_upward"
-                aria-label={`Đưa gói ${name} lên`}
+                label={`Đưa gói ${name} lên`}
                 disabled={index === 0}
                 onClick={() => onMove(index, index - 1)}
               >
                 Lên
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
+              </MoveButton>
+              <MoveButton
                 icon="arrow_downward"
-                aria-label={`Đưa gói ${name} xuống`}
+                label={`Đưa gói ${name} xuống`}
                 disabled={index === total - 1}
                 onClick={() => onMove(index, index + 1)}
               >
                 Xuống
-              </Button>
+              </MoveButton>
             </div>
             {renderActions ? renderActions(item) : null}
           </>
@@ -176,9 +185,9 @@ export default function PlanQueue({
 
   if (entries.length === 0) {
     return (
-      <div className={`border border-border bg-surface px-6 py-10 ${className}`}>
-        <p className="text-text-main font-medium">Hàng đợi đang trống</p>
-        <p className="mt-1 text-sm text-text-muted">
+      <div className={`flex flex-col gap-1 border border-dashed border-border px-6 py-10 ${className}`}>
+        <p className="text-sm font-medium text-text-main">Hàng đợi đang trống</p>
+        <p className="text-sm leading-6 text-text-muted">
           Mua một gói để bắt đầu. Credit của gói sẽ trả cho mọi model trong nhóm của bạn.
         </p>
       </div>
@@ -222,15 +231,27 @@ export default function PlanQueue({
 
       {/* Dirty-state bar: nothing is sent until the customer says so. */}
       {editable && dirty && (
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border border-brand-500/40 bg-surface px-4 py-3">
-          <p className="text-sm text-text-main">Thứ tự đã thay đổi</p>
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border border-text-main bg-surface px-4 py-3">
+          <p className="text-sm font-medium text-text-main">Thứ tự đã thay đổi</p>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={cancel} disabled={saving}>
+            <button
+              type="button"
+              onClick={cancel}
+              disabled={saving}
+              className="inline-flex h-8 items-center border border-transparent px-3 font-mono text-xs font-medium text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main disabled:opacity-50"
+            >
               Huỷ
-            </Button>
-            <Button size="sm" onClick={save} loading={saving} disabled={saving}>
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving}
+              aria-busy={saving || undefined}
+              className="inline-flex h-8 items-center gap-2 border border-text-main bg-text-main px-3 font-mono text-xs font-medium text-bg transition-colors duration-150 hover:bg-text-main/85 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving && <span className="material-symbols-outlined animate-spin text-[14px]" aria-hidden="true">progress_activity</span>}
               Lưu thứ tự
-            </Button>
+            </button>
           </div>
         </div>
       )}

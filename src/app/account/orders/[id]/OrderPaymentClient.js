@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { Button } from "@/shared/components";
+import { ActionButton, ButtonLink, Empty, Eyebrow, Heading, Panel, Tag } from "@/app/account/components/ui";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 /**
@@ -24,11 +23,11 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 const POLL_MS = 5000;
 
 const STATUS_TAG = {
-  pending: { label: "Chờ thanh toán", cls: "border-warning/30 bg-warning/10 text-warning" },
-  paid: { label: "Đã thanh toán", cls: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400" },
-  expired: { label: "Hết hạn", cls: "border-warning/30 bg-warning/10 text-warning" },
-  cancelled: { label: "Đã huỷ", cls: "border-border bg-surface-2 text-text-muted" },
-  refunded: { label: "Đã hoàn tiền", cls: "border-info/30 bg-info/10 text-info" },
+  pending: { label: "Chờ thanh toán", tone: "warning", icon: "schedule" },
+  paid: { label: "Đã thanh toán", tone: "success", icon: "check_circle" },
+  expired: { label: "Hết hạn", tone: "warning", icon: "timer_off" },
+  cancelled: { label: "Đã huỷ", tone: "neutral", icon: "block" },
+  refunded: { label: "Đã hoàn tiền", tone: "neutral", icon: "undo" },
 };
 
 function fmtCountdown(ms) {
@@ -54,11 +53,11 @@ function CopyField({ label, value, size = "md" }) {
   const { copied, copy } = useCopyToClipboard(1500);
   if (!value) return null;
   return (
-    <div className="flex flex-col gap-1">
-      <span className="meta text-text-subtle">{label}</span>
-      <div className="flex items-stretch border border-border">
+    <div className="flex flex-col gap-1.5">
+      <Eyebrow>{label}</Eyebrow>
+      <div className="flex items-stretch border border-border bg-surface-2">
         <code
-          className={`flex-1 min-w-0 px-3 ${size === "lg" ? "py-3 text-base" : "py-2 text-[13px]"} font-mono break-all text-text-main`}
+          className={`min-w-0 flex-1 break-all px-3 font-mono text-text-main ${size === "lg" ? "py-3 text-base" : "py-2 text-[13px]"}`}
         >
           {value}
         </code>
@@ -66,7 +65,7 @@ function CopyField({ label, value, size = "md" }) {
           type="button"
           onClick={() => copy(value)}
           aria-label={`Sao chép ${label}`}
-          className="shrink-0 border-l border-border px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-main focus-visible:outline-2 focus-visible:outline-brand-500"
+          className="shrink-0 border-l border-border px-3 font-mono text-xs font-medium text-text-muted transition-colors duration-150 hover:bg-surface hover:text-text-main"
         >
           {copied ? "Đã chép" : "Chép"}
         </button>
@@ -147,28 +146,21 @@ export default function OrderPaymentClient({ orderId }) {
 
   if (state.loading) {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="h-8 w-48 border border-border bg-surface-2/50" aria-hidden="true" />
-        <div className="h-64 border border-border bg-surface-2/50" aria-hidden="true" />
+      <div className="flex flex-col gap-4" aria-hidden="true">
+        <div className="h-8 w-48 border border-border bg-surface-2" />
+        <div className="h-64 border border-border bg-surface-2" />
       </div>
     );
   }
 
   if (state.notFound) {
     return (
-      <div className="flex flex-col items-center gap-3 border border-border px-6 py-16 text-center">
-        <span className="material-symbols-outlined text-[32px] text-text-subtle" aria-hidden="true">search_off</span>
-        <p className="font-medium text-text-main">Không tìm thấy đơn này</p>
-        <p className="max-w-md text-sm text-text-muted">
-          Đơn không tồn tại hoặc thuộc về tài khoản khác.
-        </p>
-        <Link
-          href="/account/plans"
-          className="mt-2 inline-flex h-10 items-center border border-border px-4 font-mono text-[11px] uppercase tracking-[0.12em] text-text-main transition-colors hover:bg-surface-2"
-        >
-          Về trang gói
-        </Link>
-      </div>
+      <Empty
+        icon="search_off"
+        title="Không tìm thấy đơn này"
+        body="Đơn không tồn tại hoặc thuộc về tài khoản khác."
+        action={<ButtonLink href="/account/plans">Về trang gói</ButtonLink>}
+      />
     );
   }
 
@@ -180,31 +172,26 @@ export default function OrderPaymentClient({ orderId }) {
   const isGateway = !!order?.paymentCode && order?.method !== "manual";
 
   return (
-    <div className="flex min-w-0 flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-8">
       {/* Live region: only status transitions are announced (design D9). */}
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
 
-      <header className="flex flex-col gap-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="meta text-text-muted">Đơn hàng</span>
-          <span className={`border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${tag.cls}`}>
-            {tag.label}
-          </span>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <Heading>{order?.planName || order?.planCode || "Đơn hàng"}</Heading>
+          <p className="text-sm text-text-muted">
+            Tạo lúc {fmtDate(order?.createdAt)}
+            {order?.paidAt ? ` · thanh toán lúc ${fmtDate(order.paidAt)}` : ""}
+          </p>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-text-main">
-          {order?.planName || order?.planCode || "Đơn hàng"}
-        </h1>
-        <p className="text-sm text-text-muted">
-          Tạo lúc {fmtDate(order?.createdAt)}
-          {order?.paidAt ? ` · thanh toán lúc ${fmtDate(order.paidAt)}` : ""}
-        </p>
+        <Tag tone={tag.tone} icon={tag.icon}>{tag.label}</Tag>
       </header>
 
       {state.error && (
         <div className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-4 py-3">
           <span className="material-symbols-outlined text-[18px] text-danger" aria-hidden="true">error</span>
           <p className="flex-1 text-sm text-danger">{state.error}</p>
-          <Button size="sm" variant="ghost" onClick={() => load({ silent: true })}>Thử lại</Button>
+          <ActionButton size="sm" onClick={() => load({ silent: true })}>Thử lại</ActionButton>
         </div>
       )}
 
@@ -220,12 +207,7 @@ export default function OrderPaymentClient({ orderId }) {
             Gói {order?.planName || order?.planCode} đã được kích hoạt và đang chờ tới lượt dùng.
           </p>
           <div>
-            <Link
-              href="/account/plans"
-              className="inline-flex h-10 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[11px] uppercase tracking-[0.12em] text-white transition-colors hover:bg-brand-600"
-            >
-              Xem hàng đợi gói
-            </Link>
+            <ButtonLink href="/account/plans" tone="solid">Xem hàng đợi gói</ButtonLink>
           </div>
         </section>
       )}
@@ -241,12 +223,7 @@ export default function OrderPaymentClient({ orderId }) {
               : "Đơn này không còn chờ thanh toán. Bạn có thể tạo đơn mới bất cứ lúc nào."}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link
-              href="/account/plans"
-              className="inline-flex h-10 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[11px] uppercase tracking-[0.12em] text-white transition-colors hover:bg-brand-600"
-            >
-              Tạo đơn mới
-            </Link>
+            <ButtonLink href="/account/plans" tone="solid">Tạo đơn mới</ButtonLink>
           </div>
         </section>
       )}
@@ -255,10 +232,8 @@ export default function OrderPaymentClient({ orderId }) {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
           {/* QR. The copyable fields below carry the same information, so a failed
               image is an inconvenience, not a blocker. */}
-          <section className="flex flex-col gap-3 border border-border bg-surface p-6">
-            <span className="meta text-text-subtle">
-              {payment.method === "vietqr" ? "Quét VietQR" : "Quét Binance Pay"}
-            </span>
+          <Panel as="section" className="flex flex-col gap-3 p-6">
+            <Eyebrow>{payment.method === "vietqr" ? "Quét VietQR" : "Quét Binance Pay"}</Eyebrow>
             {payment.qrUrl || payment.qrImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -287,12 +262,12 @@ export default function OrderPaymentClient({ orderId }) {
                 ? <>Còn <span className="text-text-main">{fmtCountdown(remaining)}</span> để thanh toán</>
                 : <>Hết hạn lúc {fmtDate(order.expiresAt)} — đang chờ hệ thống cập nhật</>}
             </p>
-          </section>
+          </Panel>
 
-          <section className="flex flex-col gap-4 border border-border bg-surface p-6">
+          <Panel as="section" className="flex flex-col gap-5 p-6">
             <div className="flex flex-col gap-1">
-              <span className="meta text-text-subtle">Số tiền cần chuyển</span>
-              <span className="font-mono text-2xl font-semibold text-text-main">
+              <Eyebrow>Số tiền cần chuyển</Eyebrow>
+              <span className="text-4xl font-semibold leading-none tracking-tight text-text-main">
                 {payment.amountText}
               </span>
               <span className="text-[12px] text-text-muted">
@@ -322,18 +297,16 @@ export default function OrderPaymentClient({ orderId }) {
               </div>
             )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-              <Button variant="secondary" onClick={() => load({ silent: true })}>
-                Kiểm tra lại
-              </Button>
-              <Button variant="ghost" onClick={cancel} loading={cancelling} disabled={!isPending}>
+            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-5">
+              <ActionButton onClick={() => load({ silent: true })}>Kiểm tra lại</ActionButton>
+              <ActionButton tone="ghost" onClick={cancel} loading={cancelling} disabled={!isPending}>
                 Huỷ đơn
-              </Button>
+              </ActionButton>
               <span className="font-mono text-[11px] text-text-subtle">
                 Trang tự cập nhật mỗi 5 giây
               </span>
             </div>
-          </section>
+          </Panel>
         </div>
       )}
 
@@ -346,13 +319,8 @@ export default function OrderPaymentClient({ orderId }) {
             xuất hiện trong hàng đợi của bạn.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link
-              href="/account/plans"
-              className="inline-flex h-10 items-center border border-border px-4 font-mono text-[11px] uppercase tracking-[0.12em] text-text-main transition-colors hover:bg-surface-2"
-            >
-              Về trang gói
-            </Link>
-            <Button variant="ghost" onClick={cancel} loading={cancelling}>Huỷ đơn</Button>
+            <ButtonLink href="/account/plans">Về trang gói</ButtonLink>
+            <ActionButton tone="ghost" onClick={cancel} loading={cancelling}>Huỷ đơn</ActionButton>
           </div>
         </section>
       )}

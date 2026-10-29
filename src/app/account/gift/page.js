@@ -1,7 +1,7 @@
 import GiftPageClient from "./components/GiftPageClient";
 
 export const metadata = {
-  title: "Redeem a gift code - derouter",
+  title: "Mã quà tặng - derouter",
 };
 
 export default function GiftPage() {

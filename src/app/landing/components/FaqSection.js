@@ -1,4 +1,5 @@
 import PropTypes from "prop-types";
+import SectionHeader from "./SectionHeader";
 import { fmtUsd } from "./salesData";
 
 // FAQ ngắn: chỉ trả lời những câu mà cơ chế trong repo thực sự quyết định, để
@@ -32,28 +33,36 @@ export default function FaqSection({ plans, models, copy }) {
   return (
     <section id="faq" className="border-b border-border">
       <div className="shell py-20">
-        <p className="meta text-text-muted">{copy.faqEyebrow}</p>
-        <h2 className="mt-3 text-2xl font-semibold tracking-tight md:text-3xl">
-          {copy.faqTitle}
-        </h2>
-        {copy.faqSubtitle ? (
-          <p className="mt-3 max-w-2xl text-text-muted">{copy.faqSubtitle}</p>
-        ) : null}
+        <SectionHeader eyebrow={copy.faqEyebrow} title={copy.faqTitle}>
+          {copy.faqSubtitle ? <p>{copy.faqSubtitle}</p> : null}
+        </SectionHeader>
 
-        <dl className="mt-10 grid grid-cols-1 gap-px border border-border bg-border lg:grid-cols-2">
-          {questions.map((item) => (
-            <div key={item.q} className="bg-surface p-6">
-              <dt className="text-base font-semibold text-text-main">{item.q}</dt>
-              <dd className="mt-2 text-sm text-text-muted">{item.a}</dd>
-            </div>
+        {/* Native <details>: keyboard-operable with no state, and the answers stay
+            in the page for anyone who reads without scripts. */}
+        <div className="mt-12 flex max-w-3xl flex-col border border-border bg-surface">
+          {questions.map((item, index) => (
+            <details key={item.q} className={`group ${index > 0 ? "border-t border-border" : ""}`}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-base font-semibold text-text-main hover:bg-surface-2">
+                {item.q}
+                <span
+                  className="material-symbols-outlined text-[20px] text-text-muted transition-transform duration-150 group-open:rotate-180"
+                  aria-hidden="true"
+                >
+                  expand_more
+                </span>
+              </summary>
+              <p className="px-6 pb-6 text-sm leading-7 text-text-muted">{item.a}</p>
+            </details>
           ))}
-        </dl>
+        </div>
 
-        <p className="mt-4 font-mono text-[11px] text-text-subtle">
-          {plans
-            .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
-            .join(" · ")}
-        </p>
+        {plans.length > 0 && (
+          <p className="mt-6 font-mono text-xs text-text-subtle">
+            {plans
+              .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
+              .join(" · ")}
+          </p>
+        )}
       </div>
     </section>
   );

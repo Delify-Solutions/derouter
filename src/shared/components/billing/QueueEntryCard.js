@@ -23,7 +23,7 @@ const SOURCE_LABEL = {
  * Both `/account/plans` and the admin user `Gói` tab render this component, so the
  * two screens stay identical.
  */
-export default function QueueEntryCard({ entry, renderActions = null, dragHandle = null, className = "" }) {
+export default function QueueEntryCard({ entry, renderActions = null, dragHandle = null, position = null, className = "" }) {
   if (!entry) return null;
 
   const daysLeft = (() => {
@@ -34,15 +34,20 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
   })();
 
   return (
-    <article className={`flex flex-col gap-4 border border-border bg-surface p-5 ${className}`}>
+    <article className={`flex flex-col gap-5 border border-border bg-surface p-5 ${className}`}>
       <header className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2">
+        <div className="flex min-w-0 items-start gap-3">
           {dragHandle}
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-text-main" title={entry.planName || entry.planCode || ""}>
-              {entry.planName || entry.planCode || "Gói"}
+            <h3 className="flex items-baseline gap-2 truncate text-base font-semibold text-text-main" title={entry.planName || entry.planCode || ""}>
+              {position != null && (
+                <span className="font-mono text-xs font-normal text-text-subtle" aria-label={`Vị trí ${position}`}>
+                  [{String(position).padStart(2, "0")}]
+                </span>
+              )}
+              <span className="truncate">{entry.planName || entry.planCode || "Gói"}</span>
             </h3>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] uppercase tracking-[0.08em] text-text-muted">
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
               <span>{SOURCE_LABEL[entry.source] || entry.source || "—"}</span>
               <span aria-hidden="true" className="text-text-subtle">·</span>
               <span>hết hạn {dateOf(entry.expiresAt)}</span>
@@ -65,7 +70,7 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
       />
 
       {Array.isArray(entry.windows) && entry.windows.length > 0 && (
-        <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
           {entry.windows.map((window) => (
             <LimitMeter key={window.hours} window={window} />
           ))}
@@ -73,7 +78,7 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
       )}
 
       {Array.isArray(entry.limits) && entry.limits.length > 0 && (!entry.windows || entry.windows.length === 0) && (
-        <ul className="flex flex-col gap-1 border-t border-border pt-3 font-mono text-[12px] text-text-muted">
+        <ul className="flex flex-col gap-1 border-t border-border pt-4 text-sm text-text-muted">
           {entry.limits.map((limit) => (
             <li key={limit.hours}>
               {limit.hours === 5 ? "5 giờ" : limit.hours === 24 ? "1 ngày" : limit.hours === 168 ? "1 tuần" : `${limit.hours} giờ`}: chưa dùng
@@ -82,7 +87,7 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
         </ul>
       )}
 
-      {renderActions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">{renderActions(entry)}</div>}
+      {renderActions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">{renderActions(entry)}</div>}
     </article>
   );
 }
@@ -91,5 +96,6 @@ QueueEntryCard.propTypes = {
   entry: PropTypes.object.isRequired,
   renderActions: PropTypes.func,
   dragHandle: PropTypes.node,
+  position: PropTypes.number,
   className: PropTypes.string,
 };

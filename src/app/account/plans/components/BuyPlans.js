@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { fmtUsdNano } from "@/shared/utils/money";
+import { ActionButton, Empty, Section } from "@/app/account/components/ui";
 
 /**
  * The shop on "Gói của tôi": every active plan as a card stating exactly what it
@@ -26,6 +27,10 @@ const METHOD_ICON = {
   manual: "receipt_long",
 };
 
+const SECTION_TITLE = "Mua thêm gói";
+const SECTION_HINT =
+  "Chọn cách trả. Chuyển khoản và Binance tạo đơn có mã riêng, tự kích hoạt khi tiền vào đúng số; đơn thủ công do admin duyệt.";
+
 export default function BuyPlans({ plans = [], loading = false, buyingId = null, onBuy, highlightCode = "", highlightRef = null }) {
   const localRef = useRef(null);
   const containerRef = highlightRef ?? localRef;
@@ -40,43 +45,29 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
 
   if (loading) {
     return (
-      <section className="flex flex-col gap-3">
-        <span className="meta text-text-muted">Mua thêm gói</span>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[300px] border border-border bg-surface-2/50" aria-hidden="true" />
-          ))}
+      <Section title={SECTION_TITLE} description={SECTION_HINT}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2" aria-hidden="true">
+          {[0, 1].map((i) => <div key={i} className="h-[320px] border border-border bg-surface-2" />)}
         </div>
-      </section>
+      </Section>
     );
   }
 
   if (!plans.length) {
     return (
-      <section className="flex flex-col gap-3">
-        <span className="meta text-text-muted">Mua thêm gói</span>
-        <div className="flex flex-col items-center gap-2 border border-border px-6 py-10 text-center">
-          <span className="material-symbols-outlined text-[28px] text-text-subtle" aria-hidden="true">sell</span>
-          <p className="text-sm font-medium text-text-main">Hiện chưa có gói nào được mở bán</p>
-          <p className="max-w-sm text-sm text-text-muted">
-            Mã quà tặng vẫn cộng credit vào tài khoản của bạn.
-          </p>
-        </div>
-      </section>
+      <Section title={SECTION_TITLE} description={SECTION_HINT}>
+        <Empty
+          icon="sell"
+          title="Hiện chưa có gói nào được mở bán"
+          body="Mã quà tặng vẫn cộng credit vào tài khoản của bạn."
+        />
+      </Section>
     );
   }
 
   return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <span className="meta text-text-muted">Mua thêm gói</span>
-        <p className="mt-1 text-xs text-text-muted">
-          Chọn cách trả. Chuyển khoản và Binance tạo đơn có mã riêng, tự kích hoạt khi tiền vào
-          đúng số; đơn thủ công do admin duyệt.
-        </p>
-      </div>
-
-      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <Section title={SECTION_TITLE} description={SECTION_HINT}>
+      <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {plans.map((plan) => {
           const highlighted = highlightCode && String(plan.code).toLowerCase() === highlightCode;
           const limits = Array.isArray(plan.limitsText) ? plan.limitsText : [];
@@ -85,85 +76,64 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
             ?? (plan.priceVndText || null);
           const usdText = methods.find((entry) => entry.method === "binance")?.amountText
             ?? fmtUsdNano(plan.priceNanoUsd);
+          // The headline is the price the customer is most likely to pay: VietQR
+          // when the plan has one, otherwise USD. The other sits underneath.
+          const headline = vndText || (plan.priceNanoUsd > 0 ? usdText : "Miễn phí");
+          const secondary = vndText && plan.priceNanoUsd > 0 ? usdText : null;
 
           return (
             <li
               key={plan.id}
               ref={highlighted ? containerRef : undefined}
-              className={`flex flex-col border bg-surface ${
-                highlighted ? "border-brand-500 ring-1 ring-brand-500/40" : "border-border"
+              className={`relative flex flex-col border bg-surface ${
+                highlighted ? "border-text-main" : "border-border"
               }`}
             >
-              <div className="flex flex-col gap-1 px-6 pt-6">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-subtle">
-                    {plan.code}
-                  </span>
-                  {highlighted && (
-                    <span className="border border-brand-500/30 bg-brand-500/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-brand-700 dark:text-brand-400">
-                      Đã chọn
-                    </span>
-                  )}
+              {(highlighted || plan.isFeatured) && (
+                <div className="flex h-8 items-center bg-text-main px-6 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-bg">
+                  {highlighted ? "Bạn đã chọn gói này" : "Nổi bật"}
                 </div>
+              )}
+
+              <div className="flex flex-col gap-1 px-6 pt-6">
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">{plan.code}</span>
                 <h3 className="text-base font-semibold text-text-main">{plan.name}</h3>
-                {plan.description && <p className="mt-1 text-sm text-text-muted">{plan.description}</p>}
+                {plan.description && <p className="text-sm leading-6 text-text-muted">{plan.description}</p>}
               </div>
 
-              {/* Both prices, each labelled with the rail it belongs to. A plan
-                  with only one price shows only that one. */}
-              <dl className="mt-4 flex flex-col gap-2 border-y border-border px-6 py-4">
-                {vndText && (
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-subtle">
-                      Chuyển khoản
-                    </dt>
-                    <dd className="font-mono text-xl font-semibold text-text-main">{vndText}</dd>
-                  </div>
-                )}
-                {plan.priceNanoUsd > 0 && (
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-subtle">
-                      Binance USDT
-                    </dt>
-                    <dd className="font-mono text-xl font-semibold text-text-main">{usdText}</dd>
-                  </div>
-                )}
-                <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-subtle">
-                    Credit nhận
-                  </dt>
-                  <dd className="font-mono text-[13px] text-text-main">
-                    {fmtUsdNano(plan.creditNanoUsd)}
-                  </dd>
-                </div>
-                <p className="text-[12px] text-text-muted">Dùng chung mọi model · {plan.durationDays} ngày</p>
-              </dl>
+              <div className="px-6 pt-5">
+                <p className="flex items-baseline gap-2 text-text-main">
+                  <span className="text-3xl font-semibold leading-none tracking-tight">{headline}</span>
+                  <span className="font-mono text-xs text-text-muted">/ {plan.durationDays} ngày</span>
+                </p>
+                {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
+                <p className="mt-3 text-sm font-medium text-text-main">
+                  Nhận {fmtUsdNano(plan.creditNanoUsd)} credit
+                  <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
+                </p>
+              </div>
 
               {limits.length > 0 && (
-                <ul className="mt-3 flex flex-col gap-0.5 px-6 font-mono text-[12px] text-text-muted">
+                <ul className="mt-4 flex flex-col gap-1.5 border-t border-border px-6 py-4">
                   {limits.map((line) => (
-                    <li key={line}>{line}</li>
+                    <li key={line} className="flex items-start gap-2 text-sm text-text-muted">
+                      <span className="material-symbols-outlined mt-0.5 text-[16px] text-text-subtle" aria-hidden="true">check</span>
+                      {line}
+                    </li>
                   ))}
                 </ul>
               )}
 
-              <div className="mt-auto flex flex-col gap-2 px-6 py-6">
+              <div className="mt-auto flex flex-col gap-2 border-t border-border px-6 py-5">
                 {!plan.purchasable && (
                   <>
-                    <button
-                      type="button"
-                      disabled
-                      aria-disabled="true"
-                      className="h-10 w-full cursor-not-allowed border border-border font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted opacity-50"
-                    >
-                      Chưa mở bán
-                    </button>
-                    {plan.blockedReason && <p className="text-[11px] text-text-muted">{plan.blockedReason}</p>}
+                    <ActionButton disabled fullWidth>Chưa mở bán</ActionButton>
+                    {plan.blockedReason && <p className="text-xs text-text-muted">{plan.blockedReason}</p>}
                   </>
                 )}
 
                 {plan.purchasable && methods.length === 0 && (
-                  <p className="text-[11px] text-text-muted">
+                  <p className="text-xs text-text-muted">
                     Gói này chưa có cách thanh toán nào được mở. Liên hệ admin để mua.
                   </p>
                 )}
@@ -175,33 +145,31 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                   // the quiet one, because it needs a human and should not compete.
                   const primary = entry.method !== "manual";
                   return (
-                    <button
+                    <ActionButton
                       key={entry.method}
-                      type="button"
+                      tone={primary ? "solid" : "outline"}
+                      fullWidth
+                      loading={busy}
                       onClick={() => onBuy(plan, entry.method)}
-                      disabled={buyingId === key}
-                      className={
-                        primary
-                          ? "flex h-10 w-full items-center justify-center gap-2 border border-brand-500 bg-brand-500 px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-white transition-colors duration-150 hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
-                          : "flex h-10 w-full items-center justify-center gap-2 border border-border px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-text-main transition-colors duration-150 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      }
                     >
-                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
-                        {METHOD_ICON[entry.method] || "payments"}
-                      </span>
+                      {!busy && (
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                          {METHOD_ICON[entry.method] || "payments"}
+                        </span>
+                      )}
                       {busy ? "Đang tạo đơn…" : `${entry.label} · ${entry.amountText}`}
-                    </button>
+                    </ActionButton>
                   );
                 })}
 
-                <p className="text-[11px] text-text-muted">
-                  Đơn chuyển khoản và Binance có mã riêng, hạn 30 phút.
-                </p>
+                {plan.purchasable && methods.length > 0 && (
+                  <p className="text-xs text-text-muted">Đơn chuyển khoản và Binance có mã riêng, hạn 30 phút.</p>
+                )}
               </div>
             </li>
           );
         })}
       </ul>
-    </section>
+    </Section>
   );
 }

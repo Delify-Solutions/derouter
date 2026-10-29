@@ -11,11 +11,19 @@ The landing page SHALL render one card per active plan in plan sort order, showi
 - **THEN** its card shows "$10", "Nhận $250 dùng chung mọi model", "Dùng 30 ngày", "Tối đa $20 mỗi 5 giờ" and "Tối đa $80 mỗi 1 tuần"
 
 ### Requirement: Sellable models and pricing explanation
-The model list SHALL contain exactly the models allowed by the default customer group — or every chat model the router lists for an unrestricted key when the group allows all — each with input, output and cached-input price per 1M tokens from the router's pricing. The pricing section SHALL state that credit is deducted at these token prices so more expensive models use credit faster, and SHALL show one worked example computed from a listed model's prices for 20,000 input and 2,000 output tokens.
+The model list SHALL contain exactly the configured combos (the names a customer sends as `model`, as listed by the public `/v1/models`) that the default customer group allows — every chat combo when the group has no allow-list — and SHALL NOT list raw provider models. Each entry SHALL show input, output and cached-input price per 1M tokens: the combo's own price when the admin set one, otherwise the price of the combo's first model, from the router's pricing. The pricing section SHALL state that credit is deducted at these token prices so more expensive models use credit faster, and SHALL show one worked example computed from a listed model's prices for 20,000 input and 2,000 output tokens.
 
 #### Scenario: Model outside the default group hidden
 - **WHEN** the default group allows `model-a` and `model-b` only
 - **THEN** the landing model list shows exactly `model-a` and `model-b`
+
+#### Scenario: Only configured combos are listed
+- **WHEN** the router has 600 provider models but the admin configured two combos
+- **THEN** the landing model list and the price table show exactly those two combos
+
+#### Scenario: Combo price
+- **WHEN** a combo has its own price set
+- **THEN** the table shows that price; without one it shows the price of the combo's first model
 
 ### Requirement: Plan selection entry flow
 The "Chọn <plan name>" control SHALL link a visitor without a customer session to `/register?next=/account/plans?plan=<code>` and a signed-in customer to `/account/plans?plan=<code>`.

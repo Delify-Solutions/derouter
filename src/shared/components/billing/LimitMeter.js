@@ -24,9 +24,9 @@ export default function LimitMeter({ window: limit, className = "" }) {
 
   if (!open) {
     return (
-      <div className={`flex items-baseline justify-between gap-3 font-mono text-[12px] ${className}`}>
+      <div className={`flex items-baseline justify-between gap-3 text-sm ${className}`}>
         <span className="text-text-muted">{label}</span>
-        <span className="text-text-subtle">chưa dùng</span>
+        <span className="font-mono text-xs text-text-subtle">chưa dùng</span>
       </div>
     );
   }
@@ -35,9 +35,9 @@ export default function LimitMeter({ window: limit, className = "" }) {
 
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="flex items-baseline justify-between gap-3 font-mono text-[12px]">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="text-text-muted">{label}</span>
-        <span className="text-text-main">
+        <span className="font-mono text-xs text-text-main">
           {fmtUsdNano(spent)}
           <span className="text-text-subtle"> / {fmtUsdNano(max)}</span>
           {limit.resetAt ? <span className="text-text-subtle"> · reset {timeOf(limit.resetAt)}</span> : null}
@@ -52,9 +52,9 @@ export default function LimitMeter({ window: limit, className = "" }) {
         aria-valuemax={max}
         aria-valuenow={spent}
         aria-valuetext={`${fmtUsdNano(spent)} trên ${fmtUsdNano(max)}${full ? ", đã đầy" : ""}`}
-        className="h-1 w-full bg-border"
+        className="h-1 w-full bg-surface-2"
       >
-        <div className={`h-1 ${full ? "bg-amber-500" : "bg-brand-500"}`} style={{ width: `${pct}%` }} />
+        <div className={`h-1 ${full ? "bg-amber-500" : "bg-text-main"}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );

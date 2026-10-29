@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, CardSkeleton, Pagination, Select } from "@/shared/components";
+import { CardSkeleton, Pagination, Select } from "@/shared/components";
+import { ActionButton, Empty, Eyebrow, Tag } from "@/app/account/components/ui";
 import { dateOf, timeOf } from "@/shared/components/billing";
 import { fmtUsdNano } from "@/shared/utils/money";
 
@@ -20,6 +21,16 @@ const KIND_OPTIONS = [
   { value: "", label: "Mọi loại" },
   ...Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label })),
 ];
+
+// Money in is quiet success, money out is neutral, loss of credit is a warning.
+const KIND_TONE = {
+  charge: "neutral",
+  grant: "success",
+  expire: "warning",
+  adjust: "neutral",
+  refund: "neutral",
+  revoke: "warning",
+};
 
 const PAGE_SIZE = 25;
 
@@ -73,10 +84,10 @@ export default function LedgerTable() {
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="ledger-plan" className="meta text-text-muted">Gói</label>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-col gap-2">
+          <label htmlFor="ledger-plan"><Eyebrow>Gói</Eyebrow></label>
           <Select
             id="ledger-plan"
             value={planId}
@@ -88,8 +99,8 @@ export default function LedgerTable() {
             selectClassName="h-9 py-0 text-[12px] font-mono"
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="ledger-kind" className="meta text-text-muted">Loại</label>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="ledger-kind"><Eyebrow>Loại</Eyebrow></label>
           <Select
             id="ledger-kind"
             value={kind}
@@ -99,9 +110,10 @@ export default function LedgerTable() {
           />
         </div>
         <div className="ml-auto self-end">
-          <Button variant="secondary" size="sm" icon="refresh" onClick={load} disabled={loading}>
+          <ActionButton onClick={load} disabled={loading}>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">refresh</span>
             Tải lại
-          </Button>
+          </ActionButton>
         </div>
       </div>
 
@@ -111,23 +123,21 @@ export default function LedgerTable() {
             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">error</span>
             {error}
           </span>
-          <Button variant="secondary" size="sm" onClick={load}>Thử lại</Button>
+          <ActionButton size="sm" onClick={load}>Thử lại</ActionButton>
         </div>
       ) : loading ? (
         <CardSkeleton />
       ) : data.entries.length === 0 ? (
-        <div className="flex flex-col items-start gap-2 border border-border bg-surface px-6 py-10">
-          <span className="material-symbols-outlined text-[28px] text-text-subtle" aria-hidden="true">receipt_long</span>
-          <p className="font-medium text-text-main">Chưa có giao dịch nào</p>
-          <p className="max-w-md text-sm text-text-muted">
-            Mỗi lần credit được cấp, bị trừ hay hết hạn đều xuất hiện ở đây.
-          </p>
-          {(planId || kind) && (
-            <Button variant="secondary" size="sm" onClick={() => { setPlanId(""); setKind(""); }}>
-              Bỏ bộ lọc
-            </Button>
-          )}
-        </div>
+        <Empty
+          icon="receipt_long"
+          title="Chưa có giao dịch nào"
+          body="Mỗi lần credit được cấp, bị trừ hay hết hạn đều xuất hiện ở đây."
+          action={
+            planId || kind ? (
+              <ActionButton size="sm" onClick={() => { setPlanId(""); setKind(""); }}>Bỏ bộ lọc</ActionButton>
+            ) : null
+          }
+        />
       ) : (
         <div className="overflow-x-auto border border-border bg-surface">
           <table className="w-full min-w-[760px] border-collapse text-left">
@@ -149,9 +159,7 @@ export default function LedgerTable() {
                     {dateOf(entry.createdAt)} {timeOf(entry.createdAt)}
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
-                    <span className="font-mono text-[12px] text-text-main">
-                      {KIND_LABEL[entry.kind] || entry.kind}
-                    </span>
+                    <Tag tone={KIND_TONE[entry.kind] || "neutral"}>{KIND_LABEL[entry.kind] || entry.kind}</Tag>
                     {entry.backfill && (
                       <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-text-subtle">
                         truy trừ

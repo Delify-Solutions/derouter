@@ -1,31 +1,27 @@
-import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccountSession } from "@/lib/auth/userSession";
-import { getApiKeys, getKeyGroupById } from "@/lib/localDb";
+import { getApiKeys, getKeyGroupById, getSettings } from "@/lib/localDb";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getQueueSync } from "@/lib/db/repos/accountPlansRepo.js";
 import { getDebtNanoSync } from "@/lib/billing/ledger.js";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
 import { fmtUsdNano } from "@/shared/utils/money";
+import { Page, Section, Panel, Stat, Tag, IconBox, ButtonLink, Eyebrow } from "./components/ui";
+import CopyBlock from "./components/CopyBlock";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Tổng quan - derouter" };
 
-const STATUS_LABEL = {
-  active: { label: "Đang hoạt động", cls: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400", icon: "check_circle" },
-  unverified: { label: "Chưa xác minh", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400", icon: "mark_email_unread" },
-  suspended: { label: "Đang bị khoá", cls: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400", icon: "block" },
+const STATUS_TAG = {
+  active: { label: "Đang hoạt động", tone: "success", icon: "check_circle" },
+  unverified: { label: "Chưa xác minh", tone: "warning", icon: "mark_email_unread" },
+  suspended: { label: "Đang bị khoá", tone: "danger", icon: "block" },
 };
 
-function StatusBadge({ status }) {
-  const spec = STATUS_LABEL[status] || { label: status || "—", cls: "border-border bg-surface-2 text-text-muted", icon: "help" };
-  return (
-    <span className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${spec.cls}`}>
-      <span className="material-symbols-outlined text-[13px]" aria-hidden="true">{spec.icon}</span>
-      {spec.label}
-    </span>
-  );
+function StatusTag({ status }) {
+  const spec = STATUS_TAG[status] || { label: status || "—", tone: "neutral", icon: "help" };
+  return <Tag tone={spec.tone} icon={spec.icon}>{spec.label}</Tag>;
 }
 
 function fmtDate(iso) {
@@ -40,6 +36,21 @@ function fmtTime(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Where a customer's client should point: the configured public URL, else this request's origin. */
+async function apiBaseUrl() {
+  try {
+    const settings = await getSettings();
+    const configured = typeof settings?.publicBaseUrl === "string" ? settings.publicBaseUrl.trim() : "";
+    if (configured) return `${configured.replace(/\/+$/, "")}/v1`;
+  } catch {
+    // fall through to the request origin
+  }
+  const h = await headers();
+  const host = h.get("x-forwarded-host") || h.get("host") || "localhost";
+  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}/v1`;
 }
 
 /**
@@ -77,18 +88,18 @@ export default async function AccountOverviewPage() {
   const myKeys = keys.filter((key) => key.userId === user.id);
   const liveKeys = myKeys.filter((key) => key.isActive);
 
-  // The models this account can actually call: the group's allow-list, resolved
-  // through the same builder /v1/models uses. skipDynamicFetch keeps the overview
-  // off the network; a customer with no group sees an empty list and is told why.
+  // The models this account can actually call: the configured combos the group's
+  // allow-list lets through, from the same builder /v1/models uses (which lists
+  // combos only and never touches the network). A customer with no group sees an
+  // empty list and is told why.
   let models = [];
   try {
-    models = await buildModelsList(["llm"], {
-      allowedModels: group?.allowedModels ?? null,
-      skipDynamicFetch: true,
-    });
+    models = await buildModelsList(["llm"], { allowedModels: group?.allowedModels ?? null });
   } catch {
     models = [];
   }
+
+  const baseUrl = await apiBaseUrl();
 
   const availableNanoUsd = queue.reduce((sum, entry) => sum + Math.max(0, entry.creditRemainingNanoUsd), 0);
   const nearestReset = paying
@@ -98,164 +109,140 @@ export default async function AccountOverviewPage() {
         .sort()[0] ?? null
     : null;
 
-  return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-2">
-        <p className="meta text-text-muted">Tài khoản</p>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-text-main">{user.displayName || user.email}</h1>
-          <StatusBadge status={user.status} />
-        </div>
-        <p className="break-all font-mono text-[12px] text-text-muted">{user.email}</p>
-      </header>
+  const firstName = user.displayName || user.email.split("@")[0];
 
+  return (
+    <Page
+      title={`Xin chào, ${firstName}`}
+      description="Tổng quan tài khoản: credit còn lại, gói đang trả và cách kết nối."
+      actions={<StatusTag status={user.status} />}
+    >
       {/* 1 + 2: the plan paying now and the total credit */}
-      <section className="grid gap-4 sm:grid-cols-2">
-        <div className="border border-border bg-surface p-6">
-          <p className="meta text-text-muted">Gói đang trả</p>
+      <div className="grid gap-px border border-border bg-border md:grid-cols-3">
+        <div className="bg-surface p-6">
+          <Stat
+            label="Credit khả dụng"
+            value={fmtUsdNano(availableNanoUsd)}
+            hint={`${queue.length} gói trong hàng đợi`}
+          />
+        </div>
+        <div className="bg-surface p-6">
           {paying ? (
-            <>
-              <p className="mt-3 text-lg font-semibold text-text-main">
-                {paying.planName || paying.planCode || "Gói"}
-              </p>
-              <p className="mt-2 font-mono text-[28px] leading-none text-text-main">
-                {fmtUsdNano(paying.creditRemainingNanoUsd)}
-              </p>
-              <p className="mt-2 text-xs text-text-muted">
-                còn lại trên {fmtUsdNano(paying.creditTotalNanoUsd)} · hết hạn {fmtDate(paying.expiresAt)}
-                {nearestReset ? ` · cửa sổ reset lúc ${fmtTime(nearestReset)}` : ""}
-              </p>
-              <Link href="/account/plans" className="mt-3 inline-block text-xs underline text-text-muted hover:text-text-main">
-                Xem hàng đợi gói
-              </Link>
-            </>
+            <Stat
+              label="Gói đang trả"
+              value={paying.planName || paying.planCode || "Gói"}
+              hint={`Còn ${fmtUsdNano(paying.creditRemainingNanoUsd)} / ${fmtUsdNano(paying.creditTotalNanoUsd)} · hết hạn ${fmtDate(paying.expiresAt)}${nearestReset ? ` · reset ${fmtTime(nearestReset)}` : ""}`}
+            />
           ) : (
-            <>
-              <p className="mt-3 text-sm text-text-main">Chưa có gói nào đang trả.</p>
-              <p className="mt-1 max-w-md text-sm text-text-muted">
-                Mua một gói để nhận credit dùng chung cho mọi model, hoặc nhập mã quà tặng nếu bạn
-                được tặng.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href="/account/plans"
-                  className="inline-flex h-9 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[11px] uppercase tracking-[0.08em] text-white hover:bg-brand-600 transition-colors duration-150"
-                >
-                  Mua gói
-                </Link>
-                <Link
-                  href="/account/gift"
-                  className="inline-flex h-9 items-center border border-border px-4 font-mono text-[11px] uppercase tracking-[0.08em] text-text-main hover:bg-surface-2 transition-colors duration-150"
-                >
-                  Nhập mã quà tặng
-                </Link>
-              </div>
-            </>
+            <Stat label="Gói đang trả" value="Chưa có" hint="Mua gói hoặc nhập mã quà tặng để nhận credit." />
           )}
         </div>
-
-        <div className="border border-border bg-surface p-6">
-          <p className="meta text-text-muted">Tổng credit khả dụng</p>
-          <p className="mt-3 font-mono text-[32px] leading-none text-text-main">{fmtUsdNano(availableNanoUsd)}</p>
-          <p className="mt-2 text-xs text-text-muted">
-            {queue.length} gói trong hàng đợi · {liveKeys.length}/{myKeys.length} API key đang dùng
-          </p>
-          <Link href="/account/ledger" className="mt-3 inline-block text-xs underline text-text-muted hover:text-text-main">
-            Xem sổ cái
-          </Link>
+        <div className="bg-surface p-6">
+          <Stat
+            label="API key"
+            value={`${liveKeys.length}`}
+            unit={`/ ${myKeys.length} đang dùng`}
+            hint="Key dùng để gọi API với credit của bạn."
+          />
         </div>
-      </section>
+      </div>
 
       {/* 3: debt, only when it exists */}
       {debtNanoUsd > 0 && (
-        <section className="flex items-start gap-2 border border-amber-500/40 bg-amber-500/5 px-4 py-3">
-          <span className="material-symbols-outlined text-[18px] text-amber-700 dark:text-amber-400" aria-hidden="true">
+        <div role="status" className="flex items-start gap-3 border border-amber-500/40 bg-amber-500/5 px-5 py-4">
+          <span className="material-symbols-outlined text-[20px] text-amber-700 dark:text-amber-400" aria-hidden="true">
             warning
           </span>
           <div>
-            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-              Đang nợ {fmtUsdNano(debtNanoUsd)}
-            </p>
-            <p className="text-xs text-text-muted">
-              Khoản này được trừ vào credit của gói tiếp theo bạn nhận.
-            </p>
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Đang nợ {fmtUsdNano(debtNanoUsd)}</p>
+            <p className="text-sm text-text-muted">Khoản này được trừ vào credit của gói tiếp theo bạn nhận.</p>
           </div>
-        </section>
+        </div>
       )}
 
-      {/* 4: group + models */}
-      <section className="border border-border bg-surface">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
-          <div>
-            <h2 className="meta text-text-main">Nhóm của bạn</h2>
-            <p className="mt-1 text-sm text-text-main">{group?.name || "Chưa được gán nhóm"}</p>
-          </div>
-          <p className="font-mono text-[12px] text-text-muted">{models.length} model gọi được</p>
+      {!paying && (
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/account/plans" tone="solid">Mua gói</ButtonLink>
+          <ButtonLink href="/account/gift">Nhập mã quà tặng</ButtonLink>
         </div>
+      )}
 
-        {models.length === 0 ? (
-          <div className="px-6 py-6">
-            <p className="text-sm text-text-muted">
+      <Section title="Bắt đầu" description="Ba bước để gọi API bằng credit của bạn. Base URL tương thích OpenAI và Anthropic.">
+        <Panel className="flex flex-col gap-6 p-6">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-main"><span className="mr-2 font-mono text-xs text-text-subtle">[01]</span>Tạo API key</p>
+            <p className="pl-8 text-sm text-text-muted">
+              Vào <a href="/account/keys" className="underline hover:text-text-main">API key</a> và tạo một key mới.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-main"><span className="mr-2 font-mono text-xs text-text-subtle">[02]</span>Trỏ client tới</p>
+            <CopyBlock prompt="url" value={baseUrl} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-main"><span className="mr-2 font-mono text-xs text-text-subtle">[03]</span>Gọi thử</p>
+            <CopyBlock value={`curl ${baseUrl}/models -H "Authorization: Bearer <API_KEY>"`} />
+          </div>
+        </Panel>
+      </Section>
+
+      {/* 4: group + models */}
+      <Section
+        title="Nhóm và model"
+        description="Nhóm quyết định model nào tài khoản được gọi. Admin có thể đổi nhóm của bạn."
+      >
+        <Panel>
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div className="flex items-center gap-3">
+              <IconBox icon="group" />
+              <div>
+                <Eyebrow>Nhóm của bạn</Eyebrow>
+                <p className="mt-1 text-sm font-medium text-text-main">{group?.name || "Chưa được gán nhóm"}</p>
+              </div>
+            </div>
+            <Tag>{models.length} model</Tag>
+          </div>
+
+          {models.length === 0 ? (
+            <p className="border-t border-border px-6 py-5 text-sm text-text-muted">
               {group
                 ? "Nhóm này chưa mở model nào. Liên hệ admin để được cấp quyền."
                 : "Tài khoản chưa được gán nhóm hợp lệ — liên hệ admin."}
             </p>
-          </div>
-        ) : (
-          <details className="px-6 py-4">
-            <summary className="cursor-pointer font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main">
-              Xem danh sách model
-            </summary>
-            <ul className="mt-3 grid grid-cols-1 gap-1 sm:grid-cols-2">
-              {models.map((model) => (
-                <li key={model.id} className="truncate font-mono text-[12px] text-text-main" title={model.id}>
-                  {model.id}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </section>
+          ) : (
+            <details className="border-t border-border px-6 py-4">
+              <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-text-main">
+                Xem danh sách model
+              </summary>
+              <ul className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                {models.map((model) => (
+                  <li key={model.id} className="truncate font-mono text-xs text-text-main" title={model.id}>
+                    {model.id}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </Panel>
+      </Section>
 
-      <section className="border border-border bg-surface">
-        <div className="flex h-14 items-center border-b border-border px-6">
-          <h2 className="meta text-text-main">Thông tin tài khoản</h2>
-        </div>
-        <dl className="divide-y divide-border">
-          <div className="flex items-center justify-between gap-4 px-6 py-3">
-            <dt className="text-sm text-text-muted">Nhóm</dt>
-            <dd className="font-mono text-[12px] text-text-main">{group?.name || "—"}</dd>
-          </div>
-          <div className="flex items-center justify-between gap-4 px-6 py-3">
-            <dt className="text-sm text-text-muted">Tham gia</dt>
-            <dd className="font-mono text-[12px] text-text-main">{fmtDate(user.createdAt)}</dd>
-          </div>
-          <div className="flex items-center justify-between gap-4 px-6 py-3">
-            <dt className="text-sm text-text-muted">Đăng nhập gần nhất</dt>
-            <dd className="font-mono text-[12px] text-text-main">
-              {user.lastLoginAt ? `${fmtDate(user.lastLoginAt)} ${fmtTime(user.lastLoginAt)}` : "—"}
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="grid gap-4 sm:grid-cols-3">
-        {[
-          { href: "/account/keys", label: "API key", body: "Tạo và thu hồi key", icon: "key" },
-          { href: "/account/usage", label: "Lịch sử dùng", body: "Request và chi phí", icon: "monitoring" },
-          { href: "/account/gift", label: "Mã quà tặng", body: "Nhập mã", icon: "redeem" },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="flex flex-col gap-2 border border-border bg-surface p-5 transition-colors duration-150 hover:bg-surface-2"
-          >
-            <span className="material-symbols-outlined text-[20px] text-text-muted" aria-hidden="true">{item.icon}</span>
-            <span className="meta text-text-main">{item.label}</span>
-            <span className="text-sm text-text-muted">{item.body}</span>
-          </Link>
-        ))}
-      </section>
-    </div>
+      <Section title="Tài khoản" description="Thông tin đăng ký của bạn.">
+        <Panel>
+          <dl className="divide-y divide-border">
+            {[
+              ["Email", user.email],
+              ["Nhóm", group?.name || "—"],
+              ["Tham gia", fmtDate(user.createdAt)],
+              ["Đăng nhập gần nhất", user.lastLoginAt ? `${fmtDate(user.lastLoginAt)} ${fmtTime(user.lastLoginAt)}` : "—"],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between gap-4 px-6 py-4">
+                <dt className="text-sm text-text-muted">{label}</dt>
+                <dd className="min-w-0 truncate font-mono text-xs text-text-main">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Panel>
+      </Section>
+    </Page>
   );
 }

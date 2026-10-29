@@ -2,6 +2,7 @@
 
 import { fmtUsdNano } from "@/shared/utils/money";
 import { dateOf } from "@/shared/components/billing";
+import { Section } from "@/app/account/components/ui";
 
 const STATUS_LABEL = {
   exhausted: "Hết credit",
@@ -30,44 +31,37 @@ export default function PlanHistory({ history = [], loading = false }) {
   if (!history.length) return null;
 
   return (
-    <details className="border border-border bg-surface">
-      <summary className="flex cursor-pointer items-center justify-between gap-3 px-5 py-4 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main">
-        <span>Lịch sử gói ({history.length})</span>
-        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">expand_more</span>
-      </summary>
+    <Section title="Lịch sử gói" description={`${history.length} gói đã hết credit, hết hạn hoặc bị thu hồi.`}>
+      <details className="border border-border bg-surface">
+        <summary className="flex cursor-pointer items-center justify-between gap-3 px-5 py-4 text-sm font-medium text-text-muted hover:text-text-main">
+          <span>Xem lịch sử ({history.length})</span>
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">expand_more</span>
+        </summary>
 
-      <div className="overflow-x-auto border-t border-border">
-        <table className="w-full min-w-[560px] text-left border-collapse">
-          <thead>
-            <tr className="border-b border-border">
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Gói</th>
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Nguồn</th>
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Bắt đầu</th>
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Hết hạn</th>
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Đã nhận</th>
-              <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Trạng thái</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-b-0">
-                <td className="px-4 py-2 text-sm text-text-main">{row.planName || row.planCode || "Gói"}</td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
-                  {SOURCE_LABEL[row.source] || row.source || "—"}
-                </td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(row.startsAt)}</td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(row.expiresAt)}</td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                  {fmtUsdNano(row.creditTotalNanoUsd)}
-                </td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
-                  {STATUS_LABEL[row.status] || row.status}
-                </td>
+        <div className="overflow-x-auto border-t border-border">
+          <table className="w-full min-w-[560px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-border bg-surface-2">
+                {["Gói", "Nguồn", "Bắt đầu", "Hết hạn", "Đã nhận", "Trạng thái"].map((h) => (
+                  <th key={h} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
+            </thead>
+            <tbody>
+              {history.map((row) => (
+                <tr key={row.id} className="border-b border-border last:border-b-0">
+                  <td className="px-4 py-3 text-sm text-text-main">{row.planName || row.planCode || "Gói"}</td>
+                  <td className="px-4 py-3 text-sm text-text-muted">{SOURCE_LABEL[row.source] || row.source || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-text-muted">{dateOf(row.startsAt)}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-text-muted">{dateOf(row.expiresAt)}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-text-main">{fmtUsdNano(row.creditTotalNanoUsd)}</td>
+                  <td className="px-4 py-3 text-sm text-text-muted">{STATUS_LABEL[row.status] || row.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </Section>
   );
 }

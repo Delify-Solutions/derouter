@@ -26,13 +26,10 @@ export default function Navigation({ session = null }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-bg/90 backdrop-blur-sm">
+    <header className="sticky top-0 z-50 border-b border-border bg-bg">
       <div className="shell flex h-16 items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-3">
-          <span className="flex size-8 items-center justify-center border border-border text-text-main">
-            <span className="material-symbols-outlined text-[18px]">hub</span>
-          </span>
-          <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
+        <Link href="/" className="font-mono text-base font-semibold tracking-tight text-text-main">
+          <span className="text-text-subtle" aria-hidden="true">{"//"}</span> derouter
         </Link>
 
         <nav aria-label="Chính" className="hidden items-center gap-6 md:flex">
@@ -40,7 +37,7 @@ export default function Navigation({ session = null }) {
             <a
               key={item.href}
               href={item.href}
-              className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+              className="text-sm font-medium text-text-muted transition-colors duration-150 hover:text-text-main"
             >
               {item.label}
             </a>
@@ -49,7 +46,7 @@ export default function Navigation({ session = null }) {
             href={DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main"
+            className="text-sm font-medium text-text-muted transition-colors duration-150 hover:text-text-main"
           >
             Tài liệu
           </a>
@@ -59,7 +56,7 @@ export default function Navigation({ session = null }) {
           {session === "customer" ? (
             <Link
               href="/account"
-              className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
+              className="hidden h-9 items-center border border-text-main bg-text-main px-4 font-mono text-[13px] font-medium text-bg transition-colors duration-150 hover:bg-text-main/85 sm:inline-flex"
             >
               Tài khoản của tôi
             </Link>
@@ -67,13 +64,13 @@ export default function Navigation({ session = null }) {
             <>
               <Link
                 href="/login"
-                className="hidden h-8 items-center px-3 font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted transition-colors duration-150 hover:text-text-main sm:inline-flex"
+                className="hidden h-9 items-center px-3 text-sm font-medium text-text-muted transition-colors duration-150 hover:text-text-main sm:inline-flex"
               >
                 Đăng nhập
               </Link>
               <Link
                 href={SIGNUP_URL}
-                className="hidden h-8 items-center border border-brand-500 bg-brand-500 px-4 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white transition-colors duration-150 hover:border-brand-600 hover:bg-brand-600 sm:inline-flex"
+                className="hidden h-9 items-center border border-text-main bg-text-main px-4 font-mono text-[13px] font-medium text-bg transition-colors duration-150 hover:bg-text-main/85 sm:inline-flex"
               >
                 Mua gói
               </Link>
@@ -81,7 +78,7 @@ export default function Navigation({ session = null }) {
           )}
           <button
             type="button"
-            className="flex size-8 items-center justify-center border border-border text-text-main md:hidden"
+            className="flex size-9 items-center justify-center border border-border text-text-main md:hidden"
             onClick={() => setMobileMenuOpen((open) => !open)}
             aria-expanded={mobileMenuOpen}
             aria-label={mobileMenuOpen ? "Đóng menu" : "Mở menu"}
@@ -101,7 +98,7 @@ export default function Navigation({ session = null }) {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex h-10 items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+                className="flex h-11 items-center text-sm font-medium text-text-muted hover:text-text-main"
               >
                 {item.label}
               </a>
@@ -111,7 +108,7 @@ export default function Navigation({ session = null }) {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileMenuOpen(false)}
-              className="flex h-10 items-center font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted hover:text-text-main"
+              className="flex h-11 items-center text-sm font-medium text-text-muted hover:text-text-main"
             >
               Tài liệu
             </a>
@@ -120,7 +117,7 @@ export default function Navigation({ session = null }) {
                 <Link
                   href="/account"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                  className="flex h-11 items-center justify-center border border-text-main bg-text-main font-mono text-[13px] font-medium text-bg"
                 >
                   Tài khoản của tôi
                 </Link>
@@ -129,14 +126,14 @@ export default function Navigation({ session = null }) {
                   <Link
                     href="/login"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="flex h-10 items-center justify-center border border-border font-mono text-[12px] uppercase tracking-[0.08em] text-text-main"
+                    className="flex h-11 items-center justify-center border border-border font-mono text-[13px] font-medium text-text-main"
                   >
                     Đăng nhập
                   </Link>
                   <Link
                     href={SIGNUP_URL}
                     onClick={() => setMobileMenuOpen(false)}
-                    className="flex h-10 items-center justify-center border border-brand-500 bg-brand-500 font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-white"
+                    className="flex h-11 items-center justify-center border border-text-main bg-text-main font-mono text-[13px] font-medium text-bg"
                   >
                     Mua gói
                   </Link>
