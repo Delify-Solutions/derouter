@@ -42,7 +42,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
     {
       number: "04",
       title: "Theo dõi hạn mức",
-      body: "Chạm trần một cửa sổ hạn mức sẽ nhận 429 kèm thời điểm mở lại; hết sạch credit sẽ nhận 402. Sổ cái trong tài khoản ghi từng khoản trừ.",
+      body: "Chạm trần một cửa sổ hạn mức sẽ nhận 429 kèm thời điểm mở lại; hết sạch credit sẽ nhận 402. Nhật ký credit trong tài khoản ghi từng khoản trừ.",
     },
   ];
 

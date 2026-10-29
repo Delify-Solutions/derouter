@@ -16,6 +16,7 @@ export default function Select({
   selectClassName,
   ...props
 }) {
+  const hasEmptyOption = options.some((option) => String(option.value) === "");
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
@@ -40,9 +41,14 @@ export default function Select({
           )}
           {...props}
         >
-          <option value="" disabled>
-            {placeholder}
-          </option>
+          {/* The placeholder is only for a select with no "empty" choice of its own.
+              With both, two options share value "" and the browser shows the
+              disabled placeholder instead of the real "All" option. */}
+          {!hasEmptyOption && (
+            <option value="" disabled>
+              {placeholder}
+            </option>
+          )}
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

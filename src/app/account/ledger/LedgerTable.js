@@ -1,19 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CardSkeleton, Pagination, Select } from "@/shared/components";
-import { ActionButton, Empty, Eyebrow, Tag } from "@/app/account/components/ui";
+import { CardSkeleton, Pagination } from "@/shared/components";
+import { ActionButton, Empty, SelectField, Tag } from "@/app/account/components/ui";
 import { dateOf, timeOf } from "@/shared/components/billing";
 import { fmtUsdNano } from "@/shared/utils/money";
 
 // Vietnamese kind labels (spec customer-portal "Ledger page"). A customer should
 // never see the raw ledger vocabulary.
 const KIND_LABEL = {
-  charge: "Trừ tiền",
-  grant: "Cấp",
+  charge: "Trừ credit",
+  grant: "Được cấp",
   expire: "Hết hạn",
   adjust: "Điều chỉnh",
-  refund: "Hoàn tiền",
+  refund: "Hoàn credit",
   revoke: "Thu hồi",
 };
 
@@ -60,7 +60,7 @@ export default function LedgerTable() {
 
       const res = await fetch(`/api/account/ledger?${params.toString()}`, { cache: "no-store" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Không tải được sổ cái");
+      if (!res.ok) throw new Error(body.error || "Không tải được nhật ký credit");
       setData({
         entries: Array.isArray(body.entries) ? body.entries : [],
         total: Number(body.total) || 0,
@@ -68,7 +68,7 @@ export default function LedgerTable() {
         planOptions: Array.isArray(body.planOptions) ? body.planOptions : [],
       });
     } catch (e) {
-      setError(e.message || "Không tải được sổ cái");
+      setError(e.message || "Không tải được nhật ký credit");
       setData({ entries: [], total: 0, page: 1, planOptions: [] });
     } finally {
       setLoading(false);
@@ -86,29 +86,25 @@ export default function LedgerTable() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="ledger-plan"><Eyebrow>Gói</Eyebrow></label>
-          <Select
-            id="ledger-plan"
-            value={planId}
-            onChange={(event) => setPlanId(event.target.value)}
-            options={[
-              { value: "", label: "Mọi gói" },
-              ...data.planOptions.map((option) => ({ value: option.planId, label: option.planName })),
-            ]}
-            selectClassName="h-9 py-0 text-[12px] font-mono"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <label htmlFor="ledger-kind"><Eyebrow>Loại</Eyebrow></label>
-          <Select
-            id="ledger-kind"
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
-            options={KIND_OPTIONS}
-            selectClassName="h-9 py-0 text-[12px] font-mono"
-          />
-        </div>
+        <SelectField
+          id="ledger-plan"
+          label="Gói"
+          value={planId}
+          onChange={(event) => setPlanId(event.target.value)}
+          options={[
+            { value: "", label: "Mọi gói" },
+            ...data.planOptions.map((option) => ({ value: option.planId, label: option.planName })),
+          ]}
+          className="w-52"
+        />
+        <SelectField
+          id="ledger-kind"
+          label="Loại"
+          value={kind}
+          onChange={(event) => setKind(event.target.value)}
+          options={KIND_OPTIONS}
+          className="w-44"
+        />
         <div className="ml-auto self-end">
           <ActionButton onClick={load} disabled={loading}>
             <span className="material-symbols-outlined text-[16px]" aria-hidden="true">refresh</span>

@@ -37,6 +37,6 @@ export async function GET(request) {
     );
   } catch (error) {
     console.error("[account/ledger] failed:", error?.message || error);
-    return NextResponse.json({ error: "Không tải được sổ cái" }, { status: 500, headers: NO_STORE });
+    return NextResponse.json({ error: "Không tải được nhật ký credit" }, { status: 500, headers: NO_STORE });
   }
 }

@@ -146,6 +146,44 @@ export function ActionButton({ tone, size, loading = false, fullWidth = false, d
   );
 }
 
+/** Shared look of a text input / select in the customer area. */
+export const fieldClass =
+  "h-10 w-full border border-border bg-surface px-3 text-sm text-text-main transition-colors duration-150 " +
+  "placeholder:text-text-subtle focus:border-text-main focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+
+/**
+ * Native select with the area's look: square, hairline, our own chevron. No
+ * placeholder option: every choice is a real one ("Mọi gói" is value "").
+ */
+export function SelectField({ id, label, value, onChange, options, className, ...rest }) {
+  return (
+    <div className={cn("flex flex-col gap-2", className)}>
+      {label ? (
+        <label htmlFor={id} className="meta text-text-muted">{label}</label>
+      ) : null}
+      <div className="relative">
+        <select
+          id={id}
+          value={value}
+          onChange={onChange}
+          className={cn(fieldClass, "cursor-pointer appearance-none pr-9")}
+          {...rest}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <span
+          className="material-symbols-outlined pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[18px] text-text-muted"
+          aria-hidden="true"
+        >
+          expand_more
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Icon in a bordered square: the only place a card carries an icon. */
 export function IconBox({ icon }) {
   return (

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eyebrow, Stat } from "@/app/account/components/ui";
+import { Eyebrow, SelectField, Stat, fieldClass } from "@/app/account/components/ui";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 
@@ -50,27 +50,21 @@ export default function AccountUsageTable({
     return `/account/usage${qs ? `?${qs}` : ""}`;
   };
 
-  const field = "h-9 border border-border bg-surface px-3 font-mono text-xs text-text-main focus:border-text-main focus:outline-none";
-
   return (
     <div className="flex flex-col gap-8">
       {/* Filters */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="account-usage-key"><Eyebrow>API key</Eyebrow></label>
-          <select
-            id="account-usage-key"
-            value={selectedKeyId || ""}
-            onChange={(event) => router.push(hrefFor({ key: event.target.value, period }))}
-            className={`${field} min-w-[240px]`}
-          >
-            {keys.map((key) => (
-              <option key={key.id} value={key.id}>
-                {key.name} · {key.keyPrefix}…{key.isActive ? "" : " (đã tắt)"}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="account-usage-key"
+          label="API key"
+          value={selectedKeyId || ""}
+          onChange={(event) => router.push(hrefFor({ key: event.target.value, period }))}
+          options={keys.map((key) => ({
+            value: key.id,
+            label: `${key.name} · ${key.keyPrefix}…${key.isActive ? "" : " (đã tắt)"}`,
+          }))}
+          className="min-w-[260px]"
+        />
 
         <div className="flex flex-col gap-2">
           <Eyebrow>Khoảng thời gian</Eyebrow>
@@ -129,19 +123,21 @@ export default function AccountUsageTable({
               onChange={(event) => setFilterModel(event.target.value)}
               placeholder="Lọc theo model"
               aria-label="Lọc theo model"
-              className={`${field} w-44`}
+              className={`${fieldClass} w-48`}
             />
-            <select
+            <SelectField
+              id="account-usage-status"
+              aria-label="Lọc theo trạng thái"
               value={filterStatus}
               onChange={(event) => setFilterStatus(event.target.value)}
-              aria-label="Lọc theo trạng thái"
-              className={field}
-            >
-              <option value="">Mọi trạng thái</option>
-              <option value="2">2xx</option>
-              <option value="4">4xx</option>
-              <option value="5">5xx</option>
-            </select>
+              options={[
+                { value: "", label: "Mọi trạng thái" },
+                { value: "2", label: "2xx" },
+                { value: "4", label: "4xx" },
+                { value: "5", label: "5xx" },
+              ]}
+              className="w-44"
+            />
             {(filterModel || filterStatus) && (
               <button
                 type="button"
@@ -149,7 +145,7 @@ export default function AccountUsageTable({
                   setFilterModel("");
                   setFilterStatus("");
                 }}
-                className="h-9 border border-border px-3 font-mono text-xs text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main"
+                className="h-10 border border-border px-3 font-mono text-xs text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main"
               >
                 Xoá lọc
               </button>

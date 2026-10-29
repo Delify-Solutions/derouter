@@ -18,7 +18,7 @@ export default function FaqSection({ plans, models, copy }) {
     },
     {
       q: "Credit còn lại khi gói hết hạn thì sao?",
-      a: "Credit chưa dùng hết sẽ mất khi gói hết hạn — đó là lý do gói được xếp theo ngày hết hạn, để phần sắp hết hạn được dùng trước. Sổ cái của bạn ghi lại đúng phần credit bị mất.",
+      a: "Credit chưa dùng hết sẽ mất khi gói hết hạn — đó là lý do gói được xếp theo ngày hết hạn, để phần sắp hết hạn được dùng trước. Nhật ký credit trong tài khoản ghi lại đúng phần credit bị mất.",
     },
     {
       q: "Tôi dùng được những model nào?",
