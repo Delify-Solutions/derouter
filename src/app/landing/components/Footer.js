@@ -12,7 +12,7 @@ const COLUMNS = [
   {
     title: "Gói thuê bao",
     links: [
-      { href: "#plans", label: "So sánh Go và Go Plus" },
+      { href: "#plans", label: "So sánh các gói" },
       { href: "#models", label: "Danh mục model" },
       { href: "#pricing", label: "Bảng giá chi tiết" },
       { href: "#faq", label: "Câu hỏi thường gặp" },
@@ -39,19 +39,16 @@ const COLUMNS = [
 
 export default function Footer({ modelCount, plans = [] }) {
   return (
-    <footer className="bg-bg">
+    <footer className="border-t border-border bg-bg">
       <div className="shell py-14">
         <div className="grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <div className="flex items-center gap-3">
-              <span className="flex size-8 items-center justify-center border border-border text-text-main">
-                <span className="material-symbols-outlined text-[18px]">hub</span>
-              </span>
-              <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
-            </div>
+            <p className="font-mono text-base font-semibold tracking-tight text-text-main">
+              <span className="text-text-subtle" aria-hidden="true">{"//"}</span> derouter
+            </p>
             <p className="mt-4 max-w-xs text-sm text-text-muted">
-              Thuê bao model lập trình theo tháng, hạn mức riêng cho từng model, dùng qua một
-              endpoint tương thích OpenAI.
+              Credit dùng chung cho mọi model trong nhóm của bạn, trừ theo giá token, dùng qua
+              một endpoint tương thích OpenAI.
             </p>
             <p className="mt-3 font-mono text-[11px] text-text-subtle">
               {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
@@ -61,7 +58,7 @@ export default function Footer({ modelCount, plans = [] }) {
 
           {COLUMNS.map((column) => (
             <div key={column.title}>
-              <p className="meta text-text-muted">{column.title}</p>
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{column.title}</p>
               <ul className="mt-4 flex flex-col gap-2.5">
                 {column.links.map((link) => (
                   <li key={`${column.title}-${link.label}`}>
@@ -90,14 +87,14 @@ export default function Footer({ modelCount, plans = [] }) {
         </div>
 
         <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">
+          <p className="font-mono text-xs text-text-subtle">
             © {new Date().getFullYear()} derouter
           </p>
           <a
             href={REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle transition-colors duration-150 hover:text-text-main"
+            className="inline-flex items-center gap-1.5 font-mono text-xs text-text-subtle transition-colors duration-150 hover:text-text-main"
           >
             <span className="material-symbols-outlined text-[14px]">code</span>
             Delify-Solutions/derouter

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CardSkeleton } from "@/shared/components";
+import { Empty } from "@/app/account/components/ui";
 import { fmtUsdNano } from "@/shared/utils/money";
 import { formatGiftCode } from "./formatCode";
 
@@ -9,9 +9,9 @@ function fmtWhen(value) {
   if (!value) return "—";
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleString(undefined, {
+  return new Date(ms).toLocaleString("vi-VN", {
     year: "numeric",
-    month: "short",
+    month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
@@ -29,12 +29,12 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
       const res = await fetch("/api/account/redeem");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Could not load your redemptions.");
+        setError(data.error || "Không tải được lịch sử nhập mã.");
         return;
       }
       setRows(Array.isArray(data.redemptions) ? data.redemptions : []);
     } catch {
-      setError("Could not reach the server.");
+      setError("Không kết nối được máy chủ.");
     } finally {
       setLoading(false);
     }
@@ -42,7 +42,7 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  if (loading) return <CardSkeleton />;
+  if (loading) return <div className="h-[120px] border border-border bg-surface-2" aria-hidden="true" />;
 
   if (error) {
     return (
@@ -54,21 +54,19 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
 
   if (rows.length === 0) {
     return (
-      <p className="border border-border px-4 py-6 text-sm text-text-muted">
-        Codes you redeem appear here with what they granted and when.
-      </p>
+      <Empty icon="redeem" title="Chưa nhập mã nào" body="Mã bạn nhập sẽ hiện ở đây cùng thứ nhận được và thời điểm nhập." />
     );
   }
 
   return (
-    <div className="overflow-x-auto border border-border">
+    <div className="overflow-x-auto border border-border bg-surface">
       <table className="w-full min-w-[540px] border-collapse text-left">
         <thead>
-          <tr className="border-b border-border">
-            <th className="meta px-4 py-3 text-text-muted">Code</th>
-            <th className="meta px-4 py-3 text-text-muted">Granted</th>
-            <th className="meta px-4 py-3 text-text-muted">Redeemed</th>
-            <th className="meta px-4 py-3 text-text-muted">Expires</th>
+          <tr className="border-b border-border bg-surface-2">
+            <th className="meta px-4 py-3 text-text-muted">Mã</th>
+            <th className="meta px-4 py-3 text-text-muted">Đã cấp</th>
+            <th className="meta px-4 py-3 text-text-muted">Nhập lúc</th>
+            <th className="meta px-4 py-3 text-text-muted">Hết hạn</th>
           </tr>
         </thead>
         <tbody>

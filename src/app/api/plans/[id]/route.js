@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { getPlanById, updatePlan, deletePlan } from "@/lib/db/repos/billingRepo.js";
-import { listPlanModelLimits } from "@/lib/db/repos/planLimitsRepo.js";
+import { getAdapter } from "@/lib/db/driver.js";
+import { getPlanById, updatePlanSync, deletePlan, validatePlanInput } from "@/lib/db/repos/billingRepo.js";
+import { applyLimitsToActiveSync } from "@/lib/billing/adminActions.js";
+import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { parseLimits } from "@/lib/billing/limits.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -10,15 +13,28 @@ export async function GET(request, { params }) {
     const { id } = await params;
     const plan = await getPlanById(id);
     if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
-    // Included here rather than behind a second call so the admin form loads a
-    // plan and its per-model ceilings in one round trip.
-    const modelLimits = await listPlanModelLimits(id);
-    return NextResponse.json({ plan: { ...plan, modelLimits } }, { headers: NO_STORE });
+    // `limits` is part of the plan object now; there is no per-model ceiling to
+    // return — that surface is gone with the per-model table.
+    return NextResponse.json({ plan }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "Failed to load plan" }, { status: 500, headers: NO_STORE });
   }
 }
 
+/**
+ * PATCH /api/plans/[id]
+ *
+ * Accepts `limits` (validated against this plan's credit and duration; 400 with a
+ * Vietnamese message naming the offending limit) and, when the limits actually
+ * changed, an optional `applyToActive: true` that also rewrites every ACTIVE
+ * purchase of the plan.
+ *
+ * The template write and the apply-to-active pass share ONE transaction: a customer
+ * must never sit on a plan whose template was saved but whose purchases were left
+ * with the old rules because the second write failed.
+ *
+ * Response: `{ plan, affectedCount }` — `affectedCount` only when the pass ran.
+ */
 export async function PATCH(request, { params }) {
   const { id } = await params;
   let body;
@@ -28,10 +44,55 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400, headers: NO_STORE });
   }
 
+  // applyToActive is a directive, not a plan column.
+  const patch = { ...(body || {}) };
+  delete patch.applyToActive;
+  const applyToActive = body?.applyToActive === true;
+
   try {
-    const plan = await updatePlan(id, body || {});
-    if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
-    return NextResponse.json({ plan }, { headers: NO_STORE });
+    const current = await getPlanById(id);
+    if (!current) return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
+
+    // Validate up front so a rejected limit writes nothing at all.
+    const merged = { ...current, ...patch, limits: patch.limits ?? current.limits };
+    const invalid = validatePlanInput(merged);
+    if (invalid) return NextResponse.json({ error: invalid }, { status: 400, headers: NO_STORE });
+
+    const limitsChanged =
+      JSON.stringify(parseLimits(merged.limits)) !== JSON.stringify(parseLimits(current.limits));
+    const shouldApply = applyToActive && limitsChanged;
+    const actor = shouldApply ? await getAdminActor(request) : null;
+
+    const db = await getAdapter();
+    const outcome = db.transaction(() => {
+      const next = updatePlanSync(db, id, patch);
+      if (!next) return { missing: true };
+
+      let affectedCount = null;
+      if (shouldApply) {
+        const applied = applyLimitsToActiveSync(db, id, parseLimits(next.limits), {
+          actor,
+          planCode: next.code,
+        });
+        if (applied?.ok === false) return { failed: applied };
+        affectedCount = applied.affectedCount;
+      }
+      return { plan: next, affectedCount };
+    });
+
+    if (outcome.missing) {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404, headers: NO_STORE });
+    }
+    if (outcome.failed) {
+      return NextResponse.json(
+        { error: outcome.failed.error },
+        { status: outcome.failed.status || 400, headers: NO_STORE }
+      );
+    }
+    if (outcome.affectedCount == null) {
+      return NextResponse.json({ plan: outcome.plan }, { headers: NO_STORE });
+    }
+    return NextResponse.json({ plan: outcome.plan, affectedCount: outcome.affectedCount }, { headers: NO_STORE });
   } catch (error) {
     const message = error?.message || "Failed to update plan";
     const status = /already exists/i.test(message) ? 409 : 400;

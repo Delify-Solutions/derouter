@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import Navigation from "./Navigation";
 import AnnouncementBanner from "./AnnouncementBanner";
 import HeroSection from "./HeroSection";
@@ -8,11 +8,13 @@ import PricingSection from "./PricingSection";
 import GetStarted from "./GetStarted";
 import FaqSection from "./FaqSection";
 import Footer from "./Footer";
-import { MODELS } from "./modelCatalog";
+import { buildModelListForGroup } from "./modelCatalog";
 import { toSalesPlan } from "./salesData";
 import { verifyUserToken, USER_COOKIE } from "@/lib/auth/userSession";
 import { listPlans } from "@/lib/db/repos/billingRepo.js";
-import { listPlanModelLimits } from "@/lib/db/repos/planLimitsRepo.js";
+import { offeredMethodsSync } from "@/lib/payments/checkout.js";
+import { getAdapter } from "@/lib/db/driver.js";
+import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 
 /**
  * The landing page renders for everyone. It is the customer-facing shop, so the
@@ -22,11 +24,12 @@ import { listPlanModelLimits } from "@/lib/db/repos/planLimitsRepo.js";
  * Plans are read from the database, not hardcoded. The page used to ship two
  * fixed Go/Go Plus cards, so editing a plan in /dashboard/plans changed nothing
  * here — the two screens could contradict each other. Now a plan appears here
- * because it is active in the admin list, its price and duration come from the
- * plan row, and its per-model limits come from planModelLimits.
+ * because it is active in the admin list, and its price, credit, duration and
+ * per-window limits all come from the plan row.
  *
- * The model catalogue still comes from the router's provider registry: it is a
- * statement about what the proxy can actually reach, not a marketing number.
+ * The model catalogue is the default customer group's allow-list priced from the
+ * router's own token rates: the page states what a registered customer can call, and
+ * at what price, not what the proxy happens to be able to reach.
  */
 export default async function LandingPage({ copy }) {
   const cookieStore = await cookies();
@@ -44,18 +47,38 @@ export default async function LandingPage({ copy }) {
   // isActive, and it must not leak onto the public page.
   const planRows = await listPlans({ onlyActive: true });
 
-  const plans = await Promise.all(
-    planRows.map(async (row) => {
-      const limits = await listPlanModelLimits(row.id);
-      return toSalesPlan(row, limits);
-    })
+  // The model list is what a NEWLY REGISTERED customer can actually call: the
+  // default group's allow-list (spec public-landing "Sellable models"). Advertising
+  // the whole registry would promise models the group will 403 on.
+  const MODELS = await buildModelListForGroup();
+
+  // Which methods each plan actually offers decides what its card advertises: a
+  // plan with no price or no receiving account must say "Chưa mở bán" instead of
+  // inviting a customer to buy something they cannot pay for.
+  const db = await getAdapter();
+  const settings = await getSettings();
+  const plans = planRows.map((row) =>
+    toSalesPlan(row, offeredMethodsSync(db, row, settings))
   );
 
-  // A plan that sells models but has no catalogue entries would render an empty
-  // price table; keep only the plans that are actually backed by limits, plus any
-  // plan with no per-model limits (a flat-credit plan legs into that shape).
-  const visiblePlans = plans.filter((p) => p.modelCount > 0 || p.creditUsd > 0);
+  // A plan with no credit grants nothing; it has no card worth showing.
+  const visiblePlans = plans.filter((p) => p.creditUsd > 0);
   const featured = visiblePlans.find((p) => p.highlighted) ?? null;
+
+  // The address a customer points their client at: the configured public URL, else
+  // the origin this request arrived on.
+  let baseUrl = "";
+  const configured = typeof settings.publicBaseUrl === "string" ? settings.publicBaseUrl.trim() : "";
+  if (configured) {
+    baseUrl = `${configured.replace(/\/+$/, "")}/v1`;
+  } else {
+    const h = await headers();
+    const host = h.get("x-forwarded-host") || h.get("host") || "";
+    if (host) {
+      const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+      baseUrl = `${proto}://${host}/v1`;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
@@ -67,11 +90,11 @@ export default async function LandingPage({ copy }) {
           href={copy.bannerHref}
           enabled={copy.bannerEnabled}
         />
-        <HeroSection models={MODELS} plans={visiblePlans} copy={copy} />
-        <PlansSection plans={visiblePlans} models={MODELS} copy={copy} />
+        <HeroSection models={MODELS} plans={visiblePlans} copy={copy} baseUrl={baseUrl} />
+        <PlansSection plans={visiblePlans} models={MODELS} copy={copy} signedIn={session === "customer"} />
         <ModelsSection models={MODELS} copy={copy} />
         <PricingSection plans={visiblePlans} models={MODELS} copy={copy} />
-        <GetStarted models={MODELS} plans={visiblePlans} text={copy} />
+        <GetStarted models={MODELS} plans={visiblePlans} text={copy} baseUrl={baseUrl} />
         <FaqSection plans={visiblePlans} models={MODELS} copy={copy} />
       </main>
 

@@ -1,0 +1,127 @@
+{
+  "_note": "Payloads shaped exactly like the providers' published responses (SePay webhook + v2 API, web2m history, Binance Pay history). Used by test/payment-providers.test.js both as input and as the source of expected normalized output.",
+  "sepay": {
+    "webhookIncoming": {
+      "id": 92704,
+      "gateway": "Vietcombank",
+      "transactionDate": "2024-07-02 11:08:33",
+      "accountNumber": "1017588888",
+      "subAccount": "",
+      "code": "SEVN63DC8E5C",
+      "content": "MBVCB.1234567.DR8K3Q7MZP.CT tu 0123 toi 9876",
+      "transferType": "in",
+      "description": "NGUYEN VAN A chuyen tien",
+      "transferAmount": 250000,
+      "accumulated": 105000000,
+      "referenceCode": "FT24012345678"
+    },
+    "webhookOutgoing": {
+      "id": 92705,
+      "gateway": "Vietcombank",
+      "transactionDate": "2024-07-02 11:09:00",
+      "accountNumber": "1017588888",
+      "subAccount": "",
+      "code": null,
+      "content": "chuyen tien di",
+      "transferType": "out",
+      "description": "",
+      "transferAmount": 50000,
+      "accumulated": 104950000,
+      "referenceCode": "FT24012345679"
+    },
+    "apiIncoming": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "transaction_date": "2025-02-20 14:15:00",
+      "account_number": "1017588888",
+      "va": "VA001",
+      "transfer_type": "in",
+      "amount_in": 250000,
+      "amount_out": 0,
+      "accumulated": 1500000,
+      "transaction_content": "DR8K3Q7MZP thanh toan",
+      "reference_number": "FT26069ABC",
+      "code": "DR8K3Q7MZP",
+      "bank_brand_name": "ACB",
+      "bank_account_id": "f9e8d7c6-b5a4-3210-fedc-ba0987654321",
+      "va_id": null,
+      "webhook_success": 0
+    },
+    "apiOutgoing": {
+      "id": "b1b2c3d4-e5f6-7890-abcd-ef1234567891",
+      "transaction_date": "2025-02-20 15:00:00",
+      "account_number": "1017588888",
+      "transfer_type": "out",
+      "amount_in": 0,
+      "amount_out": 120000,
+      "accumulated": 1380000,
+      "transaction_content": "phi dich vu",
+      "reference_number": "FT26069ABD",
+      "code": null,
+      "bank_brand_name": "ACB"
+    },
+    "apiResponse": {
+      "status": "success",
+      "data": [],
+      "meta": { "pagination": { "total": 2, "per_page": 20, "current_page": 1, "last_page": 1, "has_more": false } }
+    }
+  },
+  "web2m": {
+    "incoming": {
+      "transactionID": "FT24012 345678",
+      "type": "IN",
+      "amount": 250000,
+      "description": "MBVCB.DR8K3Q7MZP.CT tu 0123",
+      "transactionDate": "2024-07-02 11:08:33"
+    },
+    "outgoing": {
+      "transactionID": "FT24012 345679",
+      "type": "OUT",
+      "amount": 50000,
+      "description": "chuyen tien di",
+      "transactionDate": "2024-07-02 11:09:00"
+    },
+    "response": { "transactions": [] }
+  },
+  "binance": {
+    "incoming": {
+      "orderType": "C2C",
+      "transactionId": "M_P_71505104267788288",
+      "transactionTime": 1610090460133,
+      "amount": "10.5",
+      "currency": "USDT",
+      "walletType": 1,
+      "walletTypes": [1],
+      "fundsDetail": [{ "currency": "USDT", "amount": "10.5" }],
+      "payerInfo": { "name": "Jack", "type": "USER", "binanceId": "12345678" },
+      "receiverInfo": { "name": "Alan", "type": "MERCHANT", "binanceId": "34355667" }
+    },
+    "outgoing": {
+      "orderType": "PAY",
+      "transactionId": "M_P_71505104267788289",
+      "transactionTime": 1610090500000,
+      "amount": "-4.25",
+      "currency": "USDT",
+      "walletType": 1,
+      "fundsDetail": [],
+      "payerInfo": { "name": "Alan", "type": "MERCHANT", "binanceId": "34355667" },
+      "receiverInfo": { "name": "Bob", "type": "USER", "binanceId": "999" }
+    },
+    "nonUsdt": {
+      "orderType": "C2C",
+      "transactionId": "M_P_71505104267788290",
+      "transactionTime": 1610090600000,
+      "amount": "0.0001",
+      "currency": "BTC",
+      "fundsDetail": [{ "currency": "BTC", "amount": "0.0001" }]
+    },
+    "mixedAsset": {
+      "orderType": "PAY",
+      "transactionId": "M_P_71505104267788291",
+      "transactionTime": 1610090700000,
+      "amount": "0.0001",
+      "currency": "BTC",
+      "fundsDetail": [{ "currency": "BTC", "amount": "0.0001" }, { "currency": "USDT", "amount": "9.99" }]
+    },
+    "response": { "code": "000000", "message": "success", "success": true, "data": [] }
+  }
+}

@@ -77,6 +77,17 @@ const DEFAULT_SETTINGS = {
   smtpFrom: "no-reply@localhost",
   telegramBotToken: "",
   telegramChatId: "",
+
+  // ── Payments (design D1 / spec payment-provider-admin "Payment settings") ──
+  // Prefix of every order payment code written in the transfer content. 2–6
+  // uppercase letters so banks never alter it and `PREFIX[CODE]{8}` stays
+  // unambiguous inside a longer memo.
+  paymentCodePrefix: "DR",
+  // How long a pending gateway order stays payable. Short enough that a stale
+  // code cannot be paid by accident, long enough for a bank transfer.
+  paymentOrderTtlMinutes: 30,
+  // Manual (admin-approved) orders are the fallback when no provider is set up.
+  allowManualOrders: true,
 };
 
 async function readRaw() {

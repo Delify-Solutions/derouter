@@ -81,3 +81,41 @@ export async function notifyAdminNewOrder({ email, planName, amountNanoUsd, stat
   if (orderId) lines.push(`order: <code>${escapeHtml(orderId)}</code>`);
   return notifyAdmin(lines.join("\n"));
 }
+
+/**
+ * An automatic payment approval (spec payment-reconciliation "Matching rules and
+ * automatic approval"). Fire-and-forget: the order is already approved by the time
+ * this runs, so a Telegram outage must not surface as a payment failure.
+ */
+export async function notifyPaymentMatched({ email, planName, amountText, providerName, orderId } = {}) {
+  try {
+    const lines = ["<b>Đã nhận thanh toán</b>"];
+    if (amountText) lines.push(`số tiền: <code>${escapeHtml(amountText)}</code>`);
+    if (planName) lines.push(`gói: ${escapeHtml(planName)}`);
+    if (email) lines.push(`khách: <code>${escapeHtml(email)}</code>`);
+    if (providerName) lines.push(`nguồn: ${escapeHtml(providerName)}`);
+    if (orderId) lines.push(`đơn: <code>${escapeHtml(orderId)}</code>`);
+    return await notifyAdmin(lines.join("\n"));
+  } catch (error) {
+    console.error(`[notify] payment matched notification skipped: ${error?.message || "unknown error"}`);
+    return { ok: false, reason: "error" };
+  }
+}
+
+/**
+ * A payment that needs an admin decision. The reason is one of the reconciliation
+ * codes, so it is safe to print: it never carries a payload.
+ */
+export async function notifyPaymentNeedsReview({ amountText, content, reason, providerName } = {}) {
+  try {
+    const lines = ["<b>Cần kiểm tra thanh toán</b>"];
+    if (amountText) lines.push(`số tiền: <code>${escapeHtml(amountText)}</code>`);
+    if (reason) lines.push(`lý do: <code>${escapeHtml(reason)}</code>`);
+    if (content) lines.push(`nội dung: ${escapeHtml(String(content).slice(0, 200))}`);
+    if (providerName) lines.push(`nguồn: ${escapeHtml(providerName)}`);
+    return await notifyAdmin(lines.join("\n"));
+  } catch (error) {
+    console.error(`[notify] payment review notification skipped: ${error?.message || "unknown error"}`);
+    return { ok: false, reason: "error" };
+  }
+}

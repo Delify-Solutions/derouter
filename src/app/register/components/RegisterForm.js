@@ -1,13 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Input } from "@/shared/components";
+import { ActionButton } from "@/app/account/components/ui";
+import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice } from "@/app/login/components/AuthShell";
 
 export default function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Carried through signup → verification mail → verify-email page → login, so a
+  // visitor who clicked "Chọn Go" on the landing page ends on that plan. Dropped
+  // when invalid (open-redirect guard, design D17).
+  const nextTarget = safeNext(searchParams?.get?.("next"));
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -36,6 +43,8 @@ export default function RegisterForm() {
           email: email.trim(),
           password,
           displayName: displayName.trim() || undefined,
+          // The API validates it again and only the verification mail carries it.
+          ...(nextTarget ? { next: nextTarget } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -57,7 +66,10 @@ export default function RegisterForm() {
         eyebrow="Account"
         title="Check your inbox"
         footer={
-          <Link href="/login" className="text-brand-600 dark:text-brand-400 hover:underline">
+          <Link
+            href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
+            className="font-medium text-text-main underline underline-offset-4"
+          >
             Go to sign in
           </Link>
         }
@@ -68,8 +80,7 @@ export default function RegisterForm() {
             The link is single-use and expires in 24 hours. If no message arrives, check that
             the address is spelled correctly, then request another link from the sign-in page.
           </p>
-          <Button
-            variant="secondary"
+          <ActionButton
             onClick={() => {
               setDone("");
               router.refresh();
@@ -77,7 +88,7 @@ export default function RegisterForm() {
             fullWidth
           >
             Use a different address
-          </Button>
+          </ActionButton>
         </div>
       </AuthShell>
     );
@@ -91,7 +102,10 @@ export default function RegisterForm() {
       footer={
         <span>
           Already registered?{" "}
-          <Link href="/login" className="text-brand-600 dark:text-brand-400 hover:underline">
+          <Link
+            href={nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login"}
+            className="font-medium text-text-main underline underline-offset-4"
+          >
             Sign in
           </Link>
         </span>
@@ -136,9 +150,9 @@ export default function RegisterForm() {
           autoComplete="new-password"
           required
         />
-        <Button type="submit" variant="primary" loading={pending} disabled={pending} fullWidth>
+        <ActionButton type="submit" tone="solid" loading={pending} fullWidth>
           Create account
-        </Button>
+        </ActionButton>
       </form>
     </AuthShell>
   );

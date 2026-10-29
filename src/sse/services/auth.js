@@ -364,109 +364,37 @@ export async function isValidApiKey(apiKey) {
 }
 
 /**
- * Enforce advanced key limits (RPM/TPM/expiry/budget + model allow-list).
- * Returns null when access is allowed, or a NextResponse to send back when denied.
- * Call right after isValidApiKey() passes, with the requested model id.
+ * Enforce access for one LLM request (design D12).
+ *
+ * Returns null when the request may proceed, or a Response produced by
+ * platformErrorResponse (D11) when it may not. All limit checks live in
+ * enforceKeyLimits so the order — status, group, expiry, RPM, TPM, model, quota —
+ * is decided in ONE place and is testable without a Next.js runtime.
  */
 export async function enforceKeyAccess(apiKey, model) {
   if (!apiKey) return null;
-  const { enforceKeyLimits, isModelAllowed } = await import("@/lib/auth/keyEnforcement.js");
-  const { NextResponse } = await import("next/server");
-  const limit = await enforceKeyLimits(apiKey);
+  const { enforceKeyLimits } = await import("@/lib/auth/keyEnforcement.js");
+  const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
+
+  const limit = await enforceKeyLimits(apiKey, model);
   if (!limit.ok) {
-    // Record a platform-limit denial so the admin details tab can show WHY a
-    // request was rejected (RPM/TPM/budget/expiry) and so the public /usage page
-    // shows the rejected request among the key holder's history. These failures
-    // are produced by the proxy itself, not returned by the upstream API — tag
-    // errorSource "platform". Only valid keys reach here (isValidApiKey already
-    // passed in the caller), so logging is safe — it's the key holder's own limit.
-    try {
-      const { saveRequestDetail } = await import("@/lib/usageDb.js");
-      const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
-      const status = String(limit.status);
-      saveRequestDetail(buildRequestDetail({
-        provider: null,
-        model: model || null,
-        apiKey: apiKey,
-        status,
-        errorSource: "platform",
-        response: { error: limit.error, resetAt: limit.resetAt ?? undefined },
-      }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
-      saveUsageError({
-        provider: "platform",
-        model: model || "unknown",
-        apiKey,
-        requestedModel: model || null,
-        status,
-        errorSource: "platform",
-      }).catch(() => {});
-    } catch { /* usage logging must never break the deny path */ }
-    const headers = limit.retryAfter ? { "Retry-After": String(limit.retryAfter) } : {};
-    return NextResponse.json({ error: limit.error, resetAt: limit.resetAt ?? undefined }, { status: limit.status, headers });
-  }
-  if (model && !isModelAllowed(limit.auth, model)) {
-    try {
-      const { saveRequestDetail } = await import("@/lib/usageDb.js");
-      const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
-      const status = "403";
-      saveRequestDetail(buildRequestDetail({
-        provider: null,
-        model,
-        apiKey: apiKey,
-        status,
-        errorSource: "platform",
-        response: { error: "Model not allowed for this key" },
-      }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
-      saveUsageError({
-        provider: "platform",
-        model,
-        apiKey,
-        requestedModel: model,
-        status,
-        errorSource: "platform",
-      }).catch(() => {});
-    } catch { /* usage logging must never break the deny path */ }
-    return NextResponse.json({ error: "Model not allowed for this key" }, { status: 403 });
-  }
-
-  // Subscription allowance: per-model ceilings over 5h / week / month. Runs after
-  // the per-key checks because a key that is already denied should report the
-  // key-level reason, which the customer can act on by changing their key, not
-  // their plan. A user without a plan (credit-only grants) returns allowance:null
-  // and is unaffected.
-  if (model) {
-    const { checkPlanAllowance } = await import("@/lib/auth/planAllowance.js");
-    const allowance = await checkPlanAllowance(apiKey, model);
-    if (!allowance.ok) {
-      try {
-        const { saveRequestDetail } = await import("@/lib/usageDb.js");
-        const { buildRequestDetail, saveUsageError } = await import("open-sse/handlers/chatCore/requestDetail.js");
-        const status = String(allowance.status);
-        saveRequestDetail(buildRequestDetail({
-          provider: null,
-          model,
-          apiKey,
-          status,
-          errorSource: "platform",
-          response: { error: allowance.error, resetAt: allowance.resetAt ?? undefined },
-        }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
-        saveUsageError({
-          provider: "platform",
-          model,
-          apiKey,
-          requestedModel: model,
-          status,
-          errorSource: "platform",
-        }).catch(() => {});
-      } catch { /* usage logging must never break the deny path */ }
-
-      const headers = { ...(allowance.headers || {}) };
-      if (allowance.retryAfter) headers["Retry-After"] = String(allowance.retryAfter);
-      return NextResponse.json(
-        { error: allowance.error, resetAt: allowance.resetAt ?? undefined },
-        { status: allowance.status, headers }
-      );
-    }
+    // Record the denial so the admin details tab can show WHY a request was
+    // rejected and the key holder's history includes it. Only valid keys reach
+    // here (isValidApiKey already passed), so this is the key holder's own limit.
+    await logPlatformDenial({
+      apiKey,
+      model: model || null,
+      status: limit.status,
+      message: limit.message,
+      resetAt: limit.resetAt ?? null,
+    });
+    return platformErrorResponse({
+      status: limit.status,
+      code: limit.code,
+      message: limit.message,
+      resetAt: limit.resetAt ?? null,
+      retryAfterSec: limit.retryAfterSec ?? null,
+    });
   }
 
   return null;

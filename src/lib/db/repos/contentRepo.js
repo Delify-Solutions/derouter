@@ -192,23 +192,26 @@ export const LANDING_COPY_DEFAULTS = {
   bannerHref: "",
   bannerEnabled: false,
 
-  heroTitle: "Go và Go Plus: một thuê bao, mọi model lập trình",
+  // Copy describes ONE shared credit per purchase, per-window limits and the plan
+  // queue — never a per-model ceiling (spec public-landing "Default copy and FAQ"),
+  // because the system has none: a purchase is a single pool drained in queue order.
+  heroTitle: "Một khoản credit dùng chung mọi model lập trình",
   heroPrimaryCta: "Mua gói",
   heroSecondaryCta: "Đọc tài liệu",
 
-  plansEyebrow: "Hai gói",
-  plansTitle: "Cùng danh mục model, khác hạn mức",
+  plansEyebrow: "Các gói",
+  plansTitle: "Trả một lần, nhận credit dùng chung",
   plansSubtitle:
-    "Cả hai gói đều mở toàn bộ danh mục model bên dưới. Go Plus không mở thêm model nào — nó chỉ nâng hạn mức mỗi model lên gấp {multiplier} lần.",
+    "Mỗi gói cấp một khoản credit dùng cho mọi model trong nhóm của bạn, trong thời hạn của gói, có thể kèm hạn mức theo cửa sổ thời gian. Mua thêm gói thì gói mới xếp vào hàng đợi.",
   plansFootnote:
-    "Hạn mức tính bằng USD tiêu thụ theo bảng giá token bên dưới, không phải số request. Một request dài tốn nhiều hạn mức hơn một request ngắn.",
+    "Credit bị trừ theo bảng giá token bên dưới, nên model đắt dùng credit nhanh hơn. Request dài tốn nhiều credit hơn request ngắn.",
 
   modelsEyebrow: "Danh mục",
   modelsTitle: "Model bạn dùng được ngay",
   modelsSubtitle: "",
 
   pricingEyebrow: "Bảng giá",
-  pricingTitle: "Giá token và hạn mức từng model",
+  pricingTitle: "Giá token trừ vào credit của bạn",
   pricingSubtitle: "",
 
   getStartedEyebrow: "Bắt đầu",
@@ -216,8 +219,8 @@ export const LANDING_COPY_DEFAULTS = {
   getStartedSubtitle: "",
 
   faqEyebrow: "Câu hỏi thường gặp",
-  faqTitle: "Sáu câu hỏi trước khi mua",
-  faqSubtitle: "Giá gói tính bằng USD mỗi tháng. Hạn mức dừng khi gói hết hạn.",
+  faqTitle: "Năm câu hỏi trước khi mua",
+  faqSubtitle: "Credit còn lại giữ nguyên khi bạn mua thêm gói; hạn mức theo cửa sổ tính lại sau mỗi cửa sổ.",
 };
 
 /** Merge stored copy over defaults so a new field appears without a migration. */

@@ -1,13 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Input } from "@/shared/components";
+import { ActionButton } from "@/app/account/components/ui";
+import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice, ResetPasswordForm } from "./AuthShell";
 
 export default function LoginForm({ resetToken = "" }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Validated once, up front: the landing page sends `?next=/account/plans?plan=go`
+  // so a customer lands back on the plan they picked. An invalid value is ignored
+  // rather than forwarded (open-redirect guard, design D17).
+  const nextTarget = safeNext(searchParams?.get?.("next")) ?? "/account";
   const [mode, setMode] = useState("signin"); // signin | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,7 +63,7 @@ export default function LoginForm({ resetToken = "" }) {
         setError(data.error || "Could not sign in");
         return;
       }
-      router.replace("/account");
+      router.replace(nextTarget);
       router.refresh();
     } catch {
       setError("Could not reach the server. Try again.");
@@ -124,7 +131,7 @@ export default function LoginForm({ resetToken = "" }) {
           <div className="flex flex-col gap-2">
             <span>
               No account yet?{" "}
-              <Link href="/register" className="text-brand-600 dark:text-brand-400 hover:underline">
+              <Link href="/register" className="font-medium text-text-main underline underline-offset-4">
                 Create one
               </Link>
             </span>
@@ -135,7 +142,7 @@ export default function LoginForm({ resetToken = "" }) {
                 setError("");
                 setNotice("");
               }}
-              className="meta text-text-muted hover:text-text-main transition-colors self-start"
+              className="text-sm text-text-muted hover:text-text-main transition-colors self-start"
             >
               Forgot password
             </button>
@@ -148,7 +155,7 @@ export default function LoginForm({ resetToken = "" }) {
               setError("");
               setNotice("");
             }}
-            className="meta text-text-muted hover:text-text-main transition-colors"
+            className="text-sm text-text-muted hover:text-text-main transition-colors"
           >
             Back to sign in
           </button>
@@ -180,21 +187,20 @@ export default function LoginForm({ resetToken = "" }) {
             required
           />
         )}
-        <Button type="submit" variant="primary" loading={pending} disabled={pending} fullWidth>
+        <ActionButton type="submit" tone="solid" loading={pending} fullWidth>
           {mode === "signin" ? "Sign in" : "Send reset link"}
-        </Button>
+        </ActionButton>
         {mode === "signin" && (
-          <Button
+          <ActionButton
             type="button"
-            variant="ghost"
+            tone="ghost"
             size="sm"
             loading={resendPending}
-            disabled={resendPending}
             onClick={resendVerification}
             fullWidth
           >
             Resend verification email
-          </Button>
+          </ActionButton>
         )}
       </form>
     </AuthShell>

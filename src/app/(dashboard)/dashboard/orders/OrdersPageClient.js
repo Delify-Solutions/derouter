@@ -10,6 +10,7 @@ const FILTERS = [
   { value: "pending", label: "Pending" },
   { value: "paid", label: "Paid" },
   { value: "cancelled", label: "Cancelled" },
+  { value: "expired", label: "Expired" },
   { value: "refunded", label: "Refunded" },
 ];
 
@@ -17,6 +18,7 @@ const STATUS_STYLE = {
   pending: "border-warning/30 bg-warning/10 text-warning",
   paid: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400",
   cancelled: "border-border bg-surface-2 text-text-muted",
+  expired: "border-warning/30 bg-warning/10 text-warning",
   refunded: "border-info/30 bg-info/10 text-info",
 };
 

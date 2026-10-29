@@ -3,26 +3,27 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Input } from "@/shared/components";
+import { ActionButton, Heading, Panel } from "@/app/account/components/ui";
 
 // Square, hairline, mono-control styling per openspec/ui-dna.md. No gradient, no
 // blur, no rounded corner; the only motion is a 150ms colour transition.
 export default function AuthShell({ title, eyebrow, intro, children, footer }) {
   return (
     <div className="min-h-screen bg-bg flex flex-col">
-      <header className="h-16 border-b border-border flex items-center px-6">
-        <Link href="/" className="meta text-text-main hover:text-brand-600 transition-colors">
-          derouter
+      <header className="h-16 border-b border-border flex items-center px-6 lg:px-10">
+        <Link href="/" className="font-mono text-base font-semibold tracking-tight text-text-main">
+          <span className="text-text-subtle" aria-hidden="true">{"//"}</span> derouter
         </Link>
       </header>
 
-      <main className="flex-1 flex items-start justify-center px-4 py-16">
+      <main className="flex-1 flex items-start justify-center px-4 py-16 sm:py-24">
         <div className="w-full max-w-[420px]">
-          <p className="meta text-text-muted">{eyebrow}</p>
-          <h1 className="text-2xl font-semibold text-text-main mt-2">{title}</h1>
-          {intro && <p className="text-sm text-text-muted mt-2">{intro}</p>}
-          <div className="border border-border bg-surface p-6 mt-6">{children}</div>
-          {footer && <div className="mt-4 text-sm text-text-muted">{footer}</div>}
+          {eyebrow && <p className="meta text-text-muted mb-3">{eyebrow}</p>}
+          <Heading>{title}</Heading>
+          {intro && <p className="text-sm leading-6 text-text-muted mt-3">{intro}</p>}
+          <Panel className="p-6 mt-8">{children}</Panel>
+          {footer && <div className="mt-6 text-sm text-text-muted">{footer}</div>}
         </div>
       </main>
     </div>
@@ -126,9 +127,9 @@ export function ResetPasswordForm({ token, onDone }) {
         autoComplete="new-password"
         required
       />
-      <Button type="submit" variant="primary" loading={pending} disabled={pending} fullWidth>
+      <ActionButton type="submit" tone="solid" loading={pending} fullWidth>
         Set new password
-      </Button>
+      </ActionButton>
     </form>
   );
 }

@@ -54,23 +54,13 @@ function fmtPct(used, total) {
 
 export default function KeyUsageTable() {
   const [items, setItems] = useState([]);
-  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [search, setSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState("all");
   const [period, setPeriod] = useState("30d");
   const [expandedRow, setExpandedRow] = useState(null);
-
-  const loadGroups = useCallback(async () => {
-    try {
-      const res = await fetch("/api/groups");
-      const data = await res.json();
-      setGroups(Array.isArray(data.groups) ? data.groups : []);
-    } catch {}
-  }, []);
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
@@ -88,30 +78,21 @@ export default function KeyUsageTable() {
     }
   }, [period]);
 
-  useEffect(() => { loadGroups(); }, [loadGroups]);
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) => {
       if (q && !(it.name || "").toLowerCase().includes(q) && !(it.maskedKey || "").toLowerCase().includes(q)) return false;
-      if (groupFilter === "none" && it.groupId) return false;
-      if (groupFilter !== "all" && groupFilter !== "none" && it.groupId !== groupFilter) return false;
       return true;
     });
-  }, [items, search, groupFilter]);
+  }, [items, search]);
 
-  useEffect(() => { setPage(1); }, [search, groupFilter, period, pageSize]);
+  useEffect(() => { setPage(1); }, [search, period, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  const groupOptions = useMemo(() => [
-    { value: "all", label: "All groups" },
-    { value: "none", label: "Custom (no group)" },
-    ...groups.map((g) => ({ value: g.id, label: g.name })),
-  ], [groups]);
 
   const periodLabel = PERIOD_PRESETS.find((p) => p.value === period)?.label || period;
 
@@ -142,12 +123,6 @@ export default function KeyUsageTable() {
             onChange={(e) => setSearch(e.target.value)}
             icon="search"
             className="sm:flex-1"
-          />
-          <Select
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
-            options={groupOptions}
-            className="sm:w-56"
           />
         </div>
 

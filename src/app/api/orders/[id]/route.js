@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOrderById, approveOrder, refundOrder, updateOrderStatus } from "@/lib/db/repos/billingRepo.js";
-import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
+import { getAdminIdentity } from "@/lib/auth/adminIdentity";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -9,14 +9,9 @@ const NO_STORE = { "Cache-Control": "no-store" };
 // the owner-facing cancel lives on /api/account/orders/:id.
 const ACTIONS = ["approve", "cancel", "refund"];
 
-async function currentAdminId(request) {
-  try {
-    const session = await getDashboardAuthSession(request.cookies.get("auth_token")?.value);
-    return session?.oidcEmail || session?.samlEmail || session?.sub || "admin";
-  } catch {
-    return "admin";
-  }
-}
+// `approvedBy` stores the raw identity (no "admin:" prefix): it has always been a
+// display value on the order row, and the audit prefix belongs to the audit log.
+const currentAdminId = getAdminIdentity;
 
 export async function GET(request, { params }) {
   const { id } = await params;

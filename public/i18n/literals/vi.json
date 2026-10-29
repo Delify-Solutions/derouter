@@ -448,7 +448,7 @@
   "Create Cowork Combo": "Tạo kết hợp Cowork",
   "Create Key": "Tạo khóa",
   "Create model combos with fallback support": "Tạo kết hợp mô hình với hỗ trợ dự phòng",
-  "Create one": "Tạo một cái",
+  "Create one": "Tạo tài khoản",
   "Create Provider": "Tạo nhà cung cấp",
   "Create Token": "Tạo token",
   "Create your first API key to get started": "Tạo khóa API đầu tiên để bắt đầu",
@@ -1712,5 +1712,10 @@
   "Sort order": "Thứ tự sắp xếp",
   "What the customer transfers.": "Số tiền khách hàng chuyển khoản.",
   "Usable balance the plan grants.": "Số dư khả dụng mà gói cấp cho khách.",
-  "Shown to customers. Lowercase, immutable in spirit.": "Hiển thị cho khách hàng. Chữ thường; coi như không đổi sau khi tạo."
+  "Shown to customers. Lowercase, immutable in spirit.": "Hiển thị cho khách hàng. Chữ thường; coi như không đổi sau khi tạo.",
+  "Display name": "Tên hiển thị",
+  "Optional. Shown in your account only.": "Không bắt buộc. Chỉ hiển thị trong tài khoản của bạn.",
+  "Confirm password": "Nhập lại mật khẩu",
+  "At least 10 characters": "Tối thiểu 10 ký tự",
+  "One account holds your API keys, credit balance and plans.": "Một tài khoản chứa API key, số dư credit và các gói của bạn."
 }

@@ -58,6 +58,14 @@ async function initAdapter() {
 
   const { runMigrationOnce } = await import("./migrate.js");
   await runMigrationOnce(adapter);
+
+  // Post-sync repairs (customer groups, one-time data tasks). Deliberately not
+  // inside runMigrationOnce: that function returns early on the legacy-JSON
+  // import path, which would skip them. The module never throws — a data repair
+  // must not be able to stop the server from starting.
+  const { runPostSyncTasksSync } = await import("../billing/bootstrap.js");
+  runPostSyncTasksSync(adapter);
+
   return adapter;
 }
 

@@ -39,6 +39,10 @@ const PUBLIC_API_PATHS = [
   // Customer signup/login/verification. These authenticate themselves; the
   // /api/account/* surface behind them is NOT public.
   "/api/public",
+  // SePay webhook (design D7). It authenticates with the provider's own webhook key
+  // (constant-time compare) because SePay is not a browser session; every other
+  // /api/payments/* route stays behind the admin JWT.
+  "/api/payments/sepay/webhook",
 ];
 
 // Public pages for customer accounts. The admin entry point stays hidden at

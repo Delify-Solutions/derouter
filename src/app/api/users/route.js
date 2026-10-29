@@ -1,81 +1,54 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { getApiKeys, getKeyGroups, listUsers } from "@/lib/localDb";
-import { createUser, normalizeEmail } from "@/lib/db/repos/userRepo.js";
+import { getKeyGroups, getKeyGroupById } from "@/lib/db/repos/keyGroupsRepo.js";
+import { createUser, normalizeEmail, getUserByEmail } from "@/lib/db/repos/userRepo.js";
+import { listUsersAdmin } from "@/lib/db/repos/adminUsersRepo.js";
+import { validatePassword } from "@/lib/users/register";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
-async function readWallet(userId) {
-  try {
-    const mod = await import("@/lib/db/repos/billingRepo.js");
-    if (typeof mod?.walletSummary === "function") {
-      const summary = await mod.walletSummary(userId);
-      if (summary && typeof summary === "object") {
-        return {
-          availableNanoUsd: Number.isFinite(summary.availableNanoUsd) ? summary.availableNanoUsd : 0,
-          totalGrantedNanoUsd: Number.isFinite(summary.totalGrantedNanoUsd) ? summary.totalGrantedNanoUsd : 0,
-        };
-      }
-    }
-  } catch {
-    // Billing repo not present yet — report zeroes rather than failing the list.
-  }
-  return { availableNanoUsd: 0, totalGrantedNanoUsd: 0 };
-}
-
+/**
+ * GET /api/users — the admin users list (spec admin-user-management "Users list").
+ *
+ * Query: `q`, `groupId`, `status`, `planState`, `sort`, `dir`, `page`, `pageSize`.
+ * Returns `{ users, total, page, pageSize }`, where every user already carries the
+ * aggregates the table renders (queued plans, available credit, 30-day spend, last
+ * API use). All of them come from set-based sub-selects in the repo, never one query
+ * per row.
+ */
 export async function GET(request) {
   try {
-    const db = await getAdapter();
-    const [users, keys, groups] = await Promise.all([listUsers(), getApiKeys(), getKeyGroups()]);
+    const params = request.nextUrl.searchParams;
+    const result = await listUsersAdmin({
+      q: params.get("q") || "",
+      groupId: params.get("groupId") || "",
+      status: params.get("status") || "",
+      planState: params.get("planState") || "",
+      sort: params.get("sort") || "createdAt",
+      dir: params.get("dir") || "desc",
+      page: Number(params.get("page")) || 1,
+      pageSize: Number(params.get("pageSize")) || 50,
+    });
 
-    const groupNames = new Map(groups.map((group) => [group.id, group.name]));
-    const keyCounts = new Map();
-    for (const key of keys) {
-      if (!key.userId) continue;
-      keyCounts.set(key.userId, (keyCounts.get(key.userId) || 0) + 1);
-    }
-
-    // Session count is a cheap COUNT over an indexed column; a per-user await
-    // inside the map would issue one query per row.
-    const sessionCounts = new Map();
+    // Groups ship with the list so the filter and the create form have their
+    // options without a second round trip.
+    let groups = [];
     try {
-      const rows = db.all(
-        `SELECT userId, COUNT(*) AS n FROM userSessions WHERE revokedAt IS NULL AND expiresAt > ? GROUP BY userId`,
-        [new Date().toISOString()]
-      );
-      for (const row of rows) sessionCounts.set(row.userId, row.n);
+      groups = (await getKeyGroups()).map((group) => ({
+        id: group.id,
+        name: group.name,
+        isActive: group.isActive,
+      }));
     } catch {
-      // Sessions table missing on an old DB — the column just reads 0.
+      groups = [];
     }
 
-    const statusFilter = request.nextUrl.searchParams.get("status");
-    const filtered = statusFilter ? users.filter((user) => user.status === statusFilter) : users;
-
-    const enriched = await Promise.all(
-      filtered.map(async (user) => {
-        const wallet = await readWallet(user.id);
-        return {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          groupId: user.groupId,
-          groupName: user.groupId ? groupNames.get(user.groupId) ?? null : null,
-          status: user.status,
-          createdAt: user.createdAt,
-          lastLoginAt: user.lastLoginAt,
-          keyCount: keyCounts.get(user.id) || 0,
-          activeSessions: sessionCounts.get(user.id) || 0,
-          availableNanoUsd: wallet.availableNanoUsd,
-          totalGrantedNanoUsd: wallet.totalGrantedNanoUsd,
-        };
-      })
-    );
-
-    return NextResponse.json({ users: enriched }, { headers: NO_STORE });
-  } catch {
-    return NextResponse.json({ error: "Failed to load users" }, { status: 500, headers: NO_STORE });
+    return NextResponse.json({ ...result, groups }, { headers: NO_STORE });
+  } catch (error) {
+    console.error("[users] list failed:", error?.message || error);
+    return NextResponse.json({ error: "Không tải được danh sách người dùng" }, { status: 500, headers: NO_STORE });
   }
 }
 
@@ -84,9 +57,9 @@ export async function GET(request) {
  *
  * The public signup flow exists, but an operator needs to add a customer without
  * that customer receiving mail (no SMTP relay configured, or an account arranged
- * out of band). Creating one here skips verification and marks the account
- * active: the admin vouches for the address, and leaving it "unverified" would
- * lock the customer out until mail is set up.
+ * out of band). Creating one here skips verification and marks the account active:
+ * the admin vouches for the address, and leaving it "unverified" would lock the
+ * customer out until mail is set up.
  */
 export async function POST(request) {
   let body;
@@ -102,15 +75,32 @@ export async function POST(request) {
   }
 
   const password = typeof body?.password === "string" ? body.password : "";
-  // Same floor as the public signup form; a weaker password set by an admin would
-  // quietly become the weakest account in the system.
-  if (password.length < 8) {
-    return NextResponse.json({ error: "Mật khẩu phải có ít nhất 8 ký tự" }, { status: 400, headers: NO_STORE });
+  // The SAME policy as public signup (10–200 characters): a weaker password set by
+  // an admin would quietly become the weakest account in the system, and one rule
+  // in one place is the only way the two paths cannot drift apart.
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    // The validator owns the wording, so every path states the same rule.
+    return NextResponse.json({ error: passwordError }, { status: 400, headers: NO_STORE });
   }
 
-  const existing = (await listUsers()).find((u) => u.email === email);
+  const existing = await getUserByEmail(email);
   if (existing) {
     return NextResponse.json({ error: "Email này đã có tài khoản" }, { status: 409, headers: NO_STORE });
+  }
+
+  // The same rule PATCH enforces: a customer may only be created into an ACTIVE
+  // group. Accepting an unknown or inactive id here would produce an account whose
+  // keys resolve no group — every request 403 — until the next boot repaired it.
+  const requestedGroupId = typeof body?.groupId === "string" ? body.groupId.trim() : "";
+  if (requestedGroupId) {
+    const group = await getKeyGroupById(requestedGroupId);
+    if (!group || !group.isActive) {
+      return NextResponse.json(
+        { error: "Nhóm không tồn tại hoặc đã ngừng hoạt động" },
+        { status: 400, headers: NO_STORE }
+      );
+    }
   }
 
   try {
@@ -119,7 +109,7 @@ export async function POST(request) {
       email,
       passwordHash,
       displayName: typeof body?.displayName === "string" ? body.displayName.trim() || null : null,
-      groupId: typeof body?.groupId === "string" && body.groupId.trim() ? body.groupId.trim() : undefined,
+      groupId: requestedGroupId || undefined,
       // Verified by the admin's word, not by mail.
       status: "active",
     });

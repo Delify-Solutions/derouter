@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Eyebrow, Stat } from "@/app/account/components/ui";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 
@@ -49,43 +50,41 @@ export default function AccountUsageTable({
     return `/account/usage${qs ? `?${qs}` : ""}`;
   };
 
+  const field = "h-9 border border-border bg-surface px-3 font-mono text-xs text-text-main focus:border-text-main focus:outline-none";
+
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       {/* Filters */}
-      <div className="flex flex-col gap-3 border border-border p-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="account-usage-key"
-            className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted"
-          >
-            Key
-          </label>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <label htmlFor="account-usage-key"><Eyebrow>API key</Eyebrow></label>
           <select
             id="account-usage-key"
             value={selectedKeyId || ""}
             onChange={(event) => router.push(hrefFor({ key: event.target.value, period }))}
-            className="h-10 min-w-[220px] border border-border bg-surface px-3 font-mono text-xs text-text-main focus:border-brand-500 focus:outline-none"
+            className={`${field} min-w-[240px]`}
           >
             {keys.map((key) => (
               <option key={key.id} value={key.id}>
-                {key.name} · {key.keyPrefix}…{key.isActive ? "" : " (paused)"}
+                {key.name} · {key.keyPrefix}…{key.isActive ? "" : " (đã tắt)"}
               </option>
             ))}
           </select>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Period</span>
-          <div className="flex border border-border">
+        <div className="flex flex-col gap-2">
+          <Eyebrow>Khoảng thời gian</Eyebrow>
+          <div className="flex border border-border" role="group" aria-label="Khoảng thời gian">
             {periods.map((p, index) => (
               <Link
                 key={p.id}
                 href={hrefFor({ key: selectedKeyId, period: p.id })}
-                className={`h-10 flex items-center px-4 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-150 ${
+                aria-current={p.id === period ? "true" : undefined}
+                className={`flex h-9 items-center px-4 font-mono text-xs font-medium transition-colors duration-150 ${
                   index > 0 ? "border-l border-border" : ""
                 } ${
                   p.id === period
-                    ? "bg-brand-500 text-white"
+                    ? "bg-text-main text-bg"
                     : "text-text-muted hover:bg-surface-2 hover:text-text-main"
                 }`}
               >
@@ -97,33 +96,29 @@ export default function AccountUsageTable({
       </div>
 
       {/* Totals */}
-      <dl className="grid grid-cols-2 border border-border sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-px border border-border bg-border lg:grid-cols-4">
         {[
-          { label: "Requests", value: fmt(totals.requests) },
-          { label: "Tokens", value: fmt(totals.tokens) },
-          { label: "Input", value: fmt(totals.input) },
-          { label: "Cost", value: totals.costLabel },
-        ].map((item, index) => (
-          <div
-            key={item.label}
-            className={`px-4 py-3 ${index > 0 ? "border-l border-border" : ""} ${
-              index >= 2 ? "border-t border-border sm:border-t-0" : ""
-            }`}
-          >
-            <dt className="meta text-text-muted">{item.label}</dt>
-            <dd className="mt-1 font-mono text-sm text-text-main">{item.value}</dd>
+          { label: "Số request", value: fmt(totals.requests) },
+          { label: "Tổng token", value: fmt(totals.tokens) },
+          { label: "Token vào", value: fmt(totals.input) },
+          { label: "Chi phí", value: totals.costLabel },
+        ].map((item) => (
+          <div key={item.label} className="bg-surface p-5">
+            <Stat label={item.label} value={item.value} />
           </div>
         ))}
       </dl>
 
       {/* Receipts */}
-      <div className="border border-border">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Receipts</h2>
-            <span className="font-mono text-[11px] text-text-muted">
+      <div className="border border-border bg-surface">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <div className="flex items-center gap-3">
+            <h2 className="font-mono text-base font-semibold text-text-main">
+              <span className="mr-2 text-text-subtle" aria-hidden="true">{"//"}</span>Bản ghi
+            </h2>
+            <span className="font-mono text-xs text-text-muted">
               {filtered.length}
-              {rows.length >= historyLimit ? ` of the latest ${historyLimit}` : ""}
+              {rows.length >= historyLimit ? ` trong ${historyLimit} gần nhất` : ""}
             </span>
           </div>
 
@@ -132,15 +127,17 @@ export default function AccountUsageTable({
               type="text"
               value={filterModel}
               onChange={(event) => setFilterModel(event.target.value)}
-              placeholder="Filter by model"
-              className="h-8 w-44 border border-border bg-surface px-2 font-mono text-[11px] text-text-main focus:border-brand-500 focus:outline-none"
+              placeholder="Lọc theo model"
+              aria-label="Lọc theo model"
+              className={`${field} w-44`}
             />
             <select
               value={filterStatus}
               onChange={(event) => setFilterStatus(event.target.value)}
-              className="h-8 border border-border bg-surface px-2 font-mono text-[11px] text-text-main focus:border-brand-500 focus:outline-none"
+              aria-label="Lọc theo trạng thái"
+              className={field}
             >
-              <option value="">All statuses</option>
+              <option value="">Mọi trạng thái</option>
               <option value="2">2xx</option>
               <option value="4">4xx</option>
               <option value="5">5xx</option>
@@ -152,65 +149,59 @@ export default function AccountUsageTable({
                   setFilterModel("");
                   setFilterStatus("");
                 }}
-                className="h-8 border border-border px-2 font-mono text-[11px] uppercase tracking-[0.08em] text-text-muted hover:bg-surface-2"
+                className="h-9 border border-border px-3 font-mono text-xs text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main"
               >
-                Clear
+                Xoá lọc
               </button>
             )}
           </div>
         </div>
 
         {filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-text-muted">
+          <p className="px-5 py-12 text-center text-sm text-text-muted">
             {rows.length === 0
-              ? "No requests in this period."
-              : "No requests match the current filters."}
+              ? "Chưa có request nào trong khoảng thời gian này."
+              : "Không có request nào khớp bộ lọc."}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-surface-2">
                 <tr className="border-b border-border text-text-muted">
-                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Time</th>
-                  <th className="px-3 py-2 text-left font-medium">Model</th>
-                  <th className="px-3 py-2 text-center font-medium">Status</th>
-                  <th className="px-3 py-2 text-right font-medium">Latency</th>
-                  <th className="px-3 py-2 text-right font-medium">Input</th>
-                  <th className="px-3 py-2 text-right font-medium">Output</th>
-                  <th className="px-3 py-2 text-right font-medium">Tok</th>
-                  <th className="px-3 py-2 text-right font-medium">Cache R</th>
-                  <th className="px-3 py-2 text-right font-medium">Cache W</th>
-                  <th className="px-3 py-2 text-right font-medium">Cost</th>
+                  <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Thời điểm</th>
+                  <th className="px-4 py-3 text-left font-medium">Model</th>
+                  <th className="px-4 py-3 text-center font-medium">Trạng thái</th>
+                  <th className="px-4 py-3 text-right font-medium">Độ trễ</th>
+                  <th className="px-4 py-3 text-right font-medium">Vào</th>
+                  <th className="px-4 py-3 text-right font-medium">Ra</th>
+                  <th className="px-4 py-3 text-right font-medium">Tổng</th>
+                  <th className="px-4 py-3 text-right font-medium">Cache đọc</th>
+                  <th className="px-4 py-3 text-right font-medium">Cache ghi</th>
+                  <th className="px-4 py-3 text-right font-medium">Chi phí</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((row, index) => (
-                  <tr key={`${row.timestamp}-${index}`} className="border-b border-border/60 last:border-b-0">
-                    <td className="px-3 py-2 whitespace-nowrap text-text-muted">
-                      {row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}
+                  <tr key={`${row.timestamp}-${index}`} className="border-b border-border last:border-b-0">
+                    <td className="whitespace-nowrap px-4 py-3 text-text-muted">
+                      {row.timestamp ? new Date(row.timestamp).toLocaleString("vi-VN") : "—"}
                     </td>
-                    <td className="px-3 py-2 font-mono max-w-[200px] truncate" title={row.model}>
+                    <td className="max-w-[200px] truncate px-4 py-3 font-mono" title={row.model}>
                       {row.model}
                     </td>
-                    <td className={`px-3 py-2 text-center font-mono ${statusClass(row.status)}`}>
-                      {row.status}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-text-muted">
+                    <td className={`px-4 py-3 text-center font-mono ${statusClass(row.status)}`}>{row.status}</td>
+                    <td className="px-4 py-3 text-right font-mono text-text-muted">
                       {row.latencyMs != null ? `${row.latencyMs} ms` : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt(row.input)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt(row.output)}</td>
-                    <td className="px-3 py-2 text-right font-mono">
+                    <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
+                    <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>
+                    <td className="px-4 py-3 text-right font-mono">
                       {fmt(row.tok)}
-                      {row.tokS != null && (
-                        <span className="ml-1 text-[10px] text-text-subtle">{row.tokS} t/s</span>
-                      )}
+                      {row.tokS != null && <span className="ml-1 text-[10px] text-text-subtle">{row.tokS} t/s</span>}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt(row.cacheRead)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt(row.cacheCreation)}</td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      {row.costLabel}
-                    </td>
+                    <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheRead)}</td>
+                    <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheCreation)}</td>
+                    <td className="px-4 py-3 text-right font-mono">{row.costLabel}</td>
                   </tr>
                 ))}
               </tbody>

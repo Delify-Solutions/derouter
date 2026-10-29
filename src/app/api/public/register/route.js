@@ -6,6 +6,7 @@ import {
   normalizeEmail,
 } from "@/lib/localDb";
 import { notifyAdminNewUser } from "@/lib/notify/telegram";
+import { checkLimits, getClientIp } from "@/lib/auth/actionLimiter.js";
 import {
   loadAccountSettings,
   sendVerificationEmail,
@@ -17,11 +18,25 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 const GENERIC_DUPLICATE = "Registration unavailable for this address";
 
+// 5 signups per hour per client IP. Generous for a shared office, tight enough
+// that a script cannot farm accounts.
+const REGISTER_LIMIT = { limit: 5, windowMs: 60 * 60 * 1000 };
+
 function fail(message, status, extra = {}) {
   return NextResponse.json({ error: message, ...extra }, { status, headers: NO_STORE });
 }
 
 export async function POST(request) {
+  // Rate limit BEFORE any work: an over-limit attempt must not create a user, hash
+  // a password or send mail.
+  const gate = checkLimits([{ bucket: `register:ip:${getClientIp(request)}`, ...REGISTER_LIMIT }]);
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { error: `Bạn đã thử đăng ký quá nhiều lần. Vui lòng thử lại sau ${Math.ceil(gate.retryAfterSec / 60)} phút.` },
+      { status: 429, headers: { ...NO_STORE, "Retry-After": String(gate.retryAfterSec) } }
+    );
+  }
+
   let body;
   try {
     body = await request.json();
@@ -70,7 +85,9 @@ export async function POST(request) {
 
   const needsVerification = user.status === "unverified";
   if (needsVerification) {
-    await sendVerificationEmail({ user, request, settings });
+    // `next` is optional and validated downstream; an invalid value is simply not
+    // carried into the mail.
+    await sendVerificationEmail({ user, request, settings, next: body?.next ?? null });
   }
 
   notifyAdminNewUser({

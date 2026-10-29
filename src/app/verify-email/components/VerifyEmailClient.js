@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AuthShell, { FormError } from "@/app/login/components/AuthShell";
 
-export default function VerifyEmailClient({ token = "" }) {
+export default function VerifyEmailClient({ token = "", next = null }) {
   const [state, setState] = useState(token ? "pending" : "missing");
   const [message, setMessage] = useState("");
 
@@ -19,15 +19,15 @@ export default function VerifyEmailClient({ token = "" }) {
         if (cancelled) return;
         if (res.ok) {
           setState("ok");
-          setMessage(data.email ? `${data.email} is verified.` : "Your address is verified.");
+          setMessage(data.email ? `${data.email} đã được xác minh.` : "Email của bạn đã được xác minh.");
         } else {
           setState("failed");
-          setMessage(data.error || "This link is invalid or has expired.");
+          setMessage(data.error || "Liên kết không hợp lệ hoặc đã hết hạn.");
         }
       } catch {
         if (!cancelled) {
           setState("failed");
-          setMessage("Could not reach the server. Reload the page to try again.");
+          setMessage("Không kết nối được máy chủ. Tải lại trang để thử lại.");
         }
       }
     })();
@@ -38,19 +38,22 @@ export default function VerifyEmailClient({ token = "" }) {
   }, [token]);
 
   const title =
-    state === "ok" ? "Email verified" : state === "failed" ? "Link not accepted" : "Verifying your email";
+    state === "ok" ? "Đã xác minh email" : state === "failed" ? "Liên kết không dùng được" : "Đang xác minh email";
 
   return (
     <AuthShell
-      eyebrow="Account"
+      eyebrow="Tài khoản"
       title={title}
       footer={
         <div className="flex flex-col gap-2">
-          <Link href="/login" className="text-brand-600 dark:text-brand-400 hover:underline">
-            Go to sign in
+          <Link
+            href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}
+            className="font-medium text-text-main underline underline-offset-4"
+          >
+            Đăng nhập
           </Link>
           <span className="text-xs">
-            Need a new link? Open the sign-in page and use “Resend verification email”.
+            Cần liên kết mới? Mở trang đăng nhập và dùng “Gửi lại email xác minh”.
           </span>
         </div>
       }

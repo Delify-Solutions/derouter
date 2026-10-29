@@ -2,7 +2,8 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
-import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys } from "@/lib/localDb";
+import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys, ensureDefaultAdminKey } from "@/lib/localDb";
+import { getConsistentMachineId } from "@/shared/utils/machineId";
 import {
   enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
@@ -81,6 +82,8 @@ export async function initializeApp() {
 
 async function runHeavyStartup() {
   await cleanupProviderConnections();
+  // The one admin key tools and examples point at (there is no screen to make more).
+  try { await ensureDefaultAdminKey(await getConsistentMachineId()); } catch (e) { console.error("[InitApp] default key failed:", e.message); }
   const settings = await getSettings();
 
   // Auto-resume tunnel (once per process)
@@ -122,6 +125,13 @@ async function runHeavyStartup() {
   import("@/lib/billing/expiry.js")
     .then(({ startBillingJanitor }) => startBillingJanitor())
     .catch((e) => console.error("[BillingJanitor] start failed:", e.message));
+
+  // Payment poller: expires stale gateway orders and pulls transactions from every
+  // active provider (web2m / ACB / Binance / SePay-with-token). Also idempotent and
+  // skipped during a build; DISABLE_PAYMENT_POLLER turns it off.
+  import("@/lib/payments/poller.js")
+    .then(({ startPaymentPoller }) => startPaymentPoller())
+    .catch((e) => console.error("[PaymentPoller] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

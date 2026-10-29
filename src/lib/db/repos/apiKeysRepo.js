@@ -70,43 +70,11 @@ export async function getApiKeyByKey(key) {
   return rowToKey(row);
 }
 
-// Validate that a key's limits narrow its group's limits (rpm ≤ group.rpm, models ⊆ group.models, etc.).
-// Returns { ok: true } or { ok: false, error }.
-function validateNarrowing(keyData, group) {
-  if (!group) return { ok: true };
-  if (keyData.rpm != null && group.rpm != null && keyData.rpm > group.rpm) {
-    return { ok: false, error: `Key RPM (${keyData.rpm}) cannot exceed group RPM (${group.rpm})` };
-  }
-  if (keyData.tpm != null && group.tpm != null && keyData.tpm > group.tpm) {
-    return { ok: false, error: `Key TPM (${keyData.tpm}) cannot exceed group TPM (${group.tpm})` };
-  }
-  if (keyData.budgetUsd != null && group.budgetUsd != null && keyData.budgetUsd > group.budgetUsd) {
-    return { ok: false, error: `Key budget ($${keyData.budgetUsd}) cannot exceed group budget ($${group.budgetUsd})` };
-  }
-  if (keyData.allowedModels && group.allowedModels) {
-    const outside = keyData.allowedModels.filter((m) => !group.allowedModels.includes(m));
-    if (outside.length) {
-      return { ok: false, error: `Key allows models not in group: ${outside.join(", ")}` };
-    }
-  }
-  return { ok: true };
-}
-
 export async function createApiKey(name, machineId, options = {}) {
-  if (!machineId && !options.groupId) throw new Error("machineId is required");
+  if (!machineId) throw new Error("machineId is required");
   const db = await getAdapter();
-  const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
+  const { generateApiKeyWithMachine } = await import("../../../shared/utils/apiKey.js");
   const result = generateApiKeyWithMachine(machineId || "custom");
-
-  // If grouped, validate narrowing against the group.
-  let group = null;
-  if (options.groupId) {
-    group = await getKeyGroupById(options.groupId);
-    if (!group) throw new Error("Group not found");
-    if (group.isActive === false) throw new Error("Group is inactive");
-  }
-  const narrowing = validateNarrowing(options, group);
-  if (!narrowing.ok) throw new Error(narrowing.error);
 
   const now = new Date().toISOString();
   const apiKey = {
@@ -116,7 +84,8 @@ export async function createApiKey(name, machineId, options = {}) {
     machineId: machineId || null,
     isActive: true,
     createdAt: now,
-    groupId: options.groupId ?? null,
+    // Keys carry no group: a group is a customer concept (models + plan access).
+    groupId: null,
     rpm: options.rpm ?? null,
     tpm: options.tpm ?? null,
     budgetUsd: options.budgetUsd ?? null,
@@ -149,17 +118,10 @@ export async function updateApiKey(id, data) {
   if (!row) return null;
   const current = rowToKey(row);
 
-  // If updating limits and key is grouped, re-validate narrowing against group.
-  // (better-sqlite3 transactions must be synchronous, so resolve the group first.)
-  if (current.groupId && (data.rpm != null || data.tpm != null || data.budgetUsd != null || data.allowedModels)) {
-    const group = await getKeyGroupById(current.groupId);
-    const narrowing = validateNarrowing({ ...current, ...data }, group);
-    if (!narrowing.ok) throw new Error(narrowing.error);
-  }
-
   const merged = {
     ...current,
     ...data,
+    groupId: null,
     allowedModels: data.allowedModels !== undefined ? data.allowedModels : current.allowedModels,
     updatedAt: new Date().toISOString(),
   };
@@ -201,25 +163,71 @@ export async function validateApiKey(key) {
   return true;
 }
 
-// Resolve the effective limits for a key, merging with its group (key narrows group).
-// Returns { key: rowToKey(row), group, resolved: { rpm, tpm, budgetUsd, resetWindow, allowedModels, expiresAt } }
+/**
+ * Resolve the effective limits for a request's API key (design D6).
+ *
+ * Two surfaces, deliberately different:
+ *
+ *   * CUSTOMER KEY (`userId` set) — the limits belong to the ACCOUNT, not the key.
+ *     The group (`users.groupId`, read on every request) decides the models;
+ *     rates come from the paying plan (see keyEnforcement). An admin moving the
+ *     customer to another group takes effect on the next call without touching any key. Every
+ *     limit column stored on the key itself (group, rpm, tpm, budget, reset window,
+ *     allowed models) is ignored: key-level limits accumulated from earlier admin
+ *     edits are stale by definition, and honoring them would let a customer whose
+ *     key once had `rpm = 1` stay throttled forever. Only `isActive` and `expiresAt`
+ *     still describe the key itself.
+ *     Budget/reset are null because customer spending is governed by the plan queue
+ *     (see capability plan-queue-billing), never by a per-key dollar cap.
+ *
+ *   * ADMIN KEY (no `userId`) — only its own values apply: rpm, tpm, budget, reset
+ *     window, expiry and model list. A group never applies to an admin key.
+ *
+ * @returns {null|{key:object, group:object|null, owner:object|null, resolved:object}}
+ */
 export async function getApiKeyForAuth(key) {
   const k = await getApiKeyByKey(key);
   if (!k) return null;
-  let group = null;
-  if (k.groupId) group = await getKeyGroupById(k.groupId);
 
-  // Resolve: take key's value if set, else group's value, else null (unlimited).
-  const resolve = (keyVal, groupVal) => (keyVal != null ? keyVal : groupVal ?? null);
+  if (k.userId) {
+    const db = await getAdapter();
+    const user = db.get(`SELECT id, status, groupId FROM users WHERE id = ?`, [k.userId]);
+    const owner = user
+      ? { id: user.id, status: user.status, groupId: user.groupId ?? null }
+      : { id: k.userId, status: "deleted", groupId: null };
+    // An inactive group is as good as absent for enforcement: its limits describe
+    // a group the admin has retired. Callers deny when `group` is null.
+    const group = owner.groupId ? await getKeyGroupById(owner.groupId) : null;
+    const liveGroup = group && group.isActive !== false ? group : null;
+
+    return {
+      key: k,
+      group: liveGroup,
+      owner,
+      resolved: {
+        // Rates belong to the plan paying right now, which only the enforcement
+        // layer knows (it reads the queue); null here means "not decided yet".
+        rpm: null,
+        tpm: null,
+        budgetUsd: null,
+        resetWindow: null,
+        allowedModels: liveGroup?.allowedModels ?? null,
+        expiresAt: k.expiresAt,
+      },
+    };
+  }
+
+  // Rates, budget and models are all the key's own; a group never applies to an
+  // admin key. null = unlimited.
   const resolved = {
-    rpm: resolve(k.rpm, group?.rpm),
-    tpm: resolve(k.tpm, group?.tpm),
-    budgetUsd: resolve(k.budgetUsd, group?.budgetUsd),
-    resetWindow: resolve(k.resetWindow, group?.resetWindow),
-    allowedModels: k.allowedModels ?? group?.allowedModels ?? null,
+    rpm: k.rpm ?? null,
+    tpm: k.tpm ?? null,
+    budgetUsd: k.budgetUsd ?? null,
+    resetWindow: k.resetWindow ?? null,
+    allowedModels: k.allowedModels ?? null,
     expiresAt: k.expiresAt, // expiry is per-key only
   };
-  return { key: k, group, resolved };
+  return { key: k, group: null, owner: null, resolved };
 }
 
 // Reset the cost window on a key (set windowStartedAt = now, windowCostUsd = 0).
@@ -233,4 +241,29 @@ export async function resetKeyWindow(id) {
 export async function setKeyWindowCost(id, cost) {
   const db = await getAdapter();
   db.run(`UPDATE apiKeys SET windowCostUsd = ?, updatedAt = ? WHERE id = ?`, [cost, new Date().toISOString(), id]);
+}
+
+let ensuring = null;
+
+/**
+ * Make sure the operator has one admin key to point tools at (CLI configs, usage
+ * examples, the dashboard's model test). There is no screen to manage admin keys,
+ * so the server keeps exactly this one. Idempotent and safe under concurrent calls.
+ *
+ * @param {string} machineId
+ * @returns {Promise<object|null>} the key it created, or null when one existed
+ */
+export async function ensureDefaultAdminKey(machineId) {
+  if (ensuring) return ensuring;
+  ensuring = (async () => {
+    try {
+      const db = await getAdapter();
+      const existing = db.get(`SELECT id FROM apiKeys WHERE userId IS NULL LIMIT 1`);
+      if (existing) return null;
+      return await createApiKey("Default Key", machineId);
+    } finally {
+      ensuring = null;
+    }
+  })();
+  return ensuring;
 }

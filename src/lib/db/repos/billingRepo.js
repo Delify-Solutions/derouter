@@ -26,113 +26,54 @@ import { getAdapter } from "../driver.js";
 import { stringifyJson, parseJson } from "../helpers/jsonCol.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 import { fmtUsdNano } from "../../../shared/utils/money.js";
+import {
+  insertLedgerSync,
+  bookBalanceNanoSync,
+  getDebtNanoSync,
+  setDebtNanoSync,
+  nano,
+} from "../../billing/ledger.js";
+import { grantUserPlan, NO_PLAN_ID } from "../../billing/grants.js";
+import {
+  ORDER_SELECT,
+  approveOrderSync,
+  getOrderRowSync,
+  orderLimits,
+  rowToOrder,
+} from "../../billing/orders.js";
+import { chargeSync } from "../../billing/planQueue.js";
+import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
+
+// Re-exported so every existing importer (giftRepo, localDb, db/index, tests)
+// keeps working unchanged after the move to src/lib/billing/ (design D13).
+export { grantUserPlan, NO_PLAN_ID };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PLAN_CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
-
-// Placeholder written into userPlans.planId while the schema still declares that
-// column NOT NULL, for a credit-only grant that genuinely has no plan (a gift
-// code with grantKind='credit'). "" is never a real plans.id, so every join
-// misses it and the plan reads as absent — same presentation as a NULL. Once the
-// column is nullable (migration 003), the probe below inserts real NULLs and this
-// value stops being written.
-export const NO_PLAN_ID = "";
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-// Integer nanoUSD from anything numeric. Never returns NaN, never returns a float.
-function nano(value) {
-  const n = Math.round(Number(value));
-  return Number.isFinite(n) ? n : 0;
+/**
+ * `priceVnd` as stored: integer đồng, or NULL when the plan is not sold by VietQR.
+ * Zero is stored as NULL because both mean the same thing ("no VND price") and one
+ * representation keeps `priceVnd > 0` the single test for offering the method.
+ */
+function normalizePriceVnd(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
-// Does userPlans.planId allow NULL? Probed once per adapter and cached: the
-// column definition cannot change under a live connection except via a migration,
-// and a migration replaces the process's DB anyway. Reading the constraint beats
-// guessing, because the INSERT is inside a caller's transaction — an exception
-// there would poison their work.
-const planIdNullableByAdapter = new WeakMap();
+// ── Wallet ────────────────────────────────────────────────────────────────
 
-function planIdIsNullable(db) {
-  const cached = planIdNullableByAdapter.get(db);
-  if (cached !== undefined) return cached;
-  let nullable = true;
-  try {
-    const cols = db.all(`PRAGMA table_info(userPlans)`);
-    const col = cols.find((c) => c.name === "planId");
-    // No table/column (fresh DB before sync) → let the INSERT decide.
-    nullable = !col || !col.notnull;
-  } catch {
-    nullable = true;
-  }
-  planIdNullableByAdapter.set(db, nullable);
-  return nullable;
-}
-
-/** `null` when the value means "no plan", whichever placeholder the schema forces. */
+/** `null` when the value means "no plan", whichever placeholder the schema forced. */
 function planIdOrNull(value) {
   if (value === null || value === undefined || value === NO_PLAN_ID) return null;
   return value;
 }
-
-function isoPlusDays(days, from = Date.now()) {
-  const d = Math.max(1, Math.floor(Number(days) || 0));
-  return new Date(from + d * DAY_MS).toISOString();
-}
-
-// ── Credit on book (the ledger's running balance) ──────────────────────────
-// One round trip: the two sub-selects share a single statement. Scoped by
-// userId, and idx_up_user covers the plan side.
-function bookBalanceNano(db, userId) {
-  const row = db.get(
-    `SELECT
-       COALESCE((SELECT SUM(creditRemainingNanoUsd) FROM userPlans
-                  WHERE userId = ? AND status = 'active'), 0) AS credit,
-       COALESCE((SELECT overdraftNanoUsd FROM users WHERE id = ?), 0) AS overdraft`,
-    [userId, userId]
-  );
-  return nano(row?.credit) - nano(row?.overdraft);
-}
-
-function getUserOverdraftNano(db, userId) {
-  const row = db.get(`SELECT COALESCE(overdraftNanoUsd, 0) AS o FROM users WHERE id = ?`, [userId]);
-  return nano(row?.o);
-}
-
-function setUserOverdraftNano(db, userId, value) {
-  db.run(`UPDATE users SET overdraftNanoUsd = ? WHERE id = ?`, [Math.max(0, nano(value)), userId]);
-}
-
-/**
- * Insert one ledger row. `requestKey` stays NULL unless the caller passes one;
- * SQLite allows many NULLs under a UNIQUE index, which is what non-idempotent
- * grant/adjust/expire rows want.
- */
-function insertLedger(db, entry) {
-  const createdAt = entry.createdAt || nowIso();
-  const balance = entry.balanceAfterNanoUsd != null
-    ? nano(entry.balanceAfterNanoUsd)
-    : bookBalanceNano(db, entry.userId);
-  db.run(
-    `INSERT INTO creditLedger(userId, userPlanId, apiKeyId, requestKey, deltaNanoUsd, balanceAfterNanoUsd, kind, meta, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      entry.userId,
-      entry.userPlanId ?? null,
-      entry.apiKeyId ?? null,
-      entry.requestKey ?? null,
-      nano(entry.deltaNanoUsd),
-      balance,
-      entry.kind,
-      entry.meta == null ? null : stringifyJson(entry.meta),
-      createdAt,
-    ]
-  );
-}
-
-// ── Wallet ────────────────────────────────────────────────────────────────
 
 function rowToUserPlan(row) {
   if (!row) return null;
@@ -172,7 +113,7 @@ export async function walletSummary(userId) {
 
   const rows = db.all(`${USER_PLAN_SELECT} WHERE up.userId = ? ORDER BY up.createdAt DESC, up.id DESC`, [userId]);
   const plans = rows.map(rowToUserPlan);
-  const overdraftNanoUsd = getUserOverdraftNano(db, userId);
+  const overdraftNanoUsd = getDebtNanoSync(db, userId);
 
   let liveCredit = 0;
   let totalGrantedNanoUsd = 0;
@@ -207,194 +148,44 @@ export async function getAvailableNanoUsd(userId) {
 
 // ── Grant ─────────────────────────────────────────────────────────────────
 
-/**
- * Create a userPlans row for a purchase/gift/admin grant.
- * SYNCHRONOUS — call inside an existing db.transaction. The granted credit first
- * repays whatever the account owes (users.overdraftNanoUsd); only the remainder
- * lands on the new plan, so a grant can never leave a user both funded and in
- * debt.
- *
- * @returns {{ userPlan: object, appliedToOverdraftNanoUsd: number }}
- */
-export function grantUserPlan(db, {
-  userId,
-  planId = null,
-  orderId = null,
-  source,
-  creditNanoUsd,
-  durationDays,
-  meta = null,
-  now = null,
-  // Ledger kind for the credit entry. A refund is still a grant of credit, but it
-  // has to be auditable as its own event, not as a second 'grant'.
-  ledgerKind = "grant",
-} = {}) {
-  if (!db) throw new Error("grantUserPlan requires the db adapter");
-  if (!userId) throw new Error("grantUserPlan requires a userId");
-  if (!source) throw new Error("grantUserPlan requires a source");
-
-  const credit = Math.max(0, nano(creditNanoUsd));
-  const startsAt = now || nowIso();
-  const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
-
-  // 1. Repay overdraft out of the granted credit.
-  const overdraftBefore = getUserOverdraftNano(db, userId);
-  const paydown = Math.min(credit, overdraftBefore);
-  if (paydown > 0) {
-    setUserOverdraftNano(db, userId, overdraftBefore - paydown);
-    insertLedger(db, {
-      userId,
-      userPlanId: null,
-      deltaNanoUsd: paydown,
-      kind: "adjust",
-      meta: { reason: "overdraft_paydown", source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
-      createdAt: startsAt,
-    });
-  }
-
-  // 2. The remainder becomes the plan's credit.
-  const planCredit = credit - paydown;
-  const planIdValue = planId != null && planId !== NO_PLAN_ID
-    ? planId
-    : planIdIsNullable(db) ? null : NO_PLAN_ID;
-  const userPlan = {
-    id: uuidv4(),
-    userId,
-    planId: planIdValue,
-    orderId,
-    source,
-    creditTotalNanoUsd: planCredit,
-    creditRemainingNanoUsd: planCredit,
-    startsAt,
-    expiresAt,
-    status: "active",
-    createdAt: startsAt,
-  };
-
-  db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source,
-      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
-      userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.createdAt,
-    ]
-  );
-
-  insertLedger(db, {
-    userId,
-    userPlanId: userPlan.id,
-    deltaNanoUsd: planCredit,
-    kind: ledgerKind,
-    meta: meta && typeof meta === "object"
-      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown }
-      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
-    createdAt: startsAt,
-  });
-
-  return { userPlan, appliedToOverdraftNanoUsd: paydown };
-}
-
 // ── Charge ────────────────────────────────────────────────────────────────
 
 /**
- * Charge one request's cost against the customer's credit, FEFO (first expiring,
- * first out). SYNCHRONOUS — must run inside the caller's db.transaction.
+ * Charge one request's cost against the customer's plan queue.
+ * SYNCHRONOUS — must run inside the caller's db.transaction.
  *
- * Idempotent on `requestKey`: the first ledger row of a charge carries the exact
- * key, follow-up rows carry `key#2`, `key#3`, ... (the UNIQUE index permits only
- * one row per key, but a charge that spans three plans must still be auditable
- * per plan). Because the base row is written in the same transaction as every
- * sibling, its presence is a sound "this request was already billed" marker.
+ * A thin wrapper over the engine's chargeSync so existing callers and tests keep
+ * working: the ordering, two-pass split and window bookkeeping all live in
+ * src/lib/billing/planQueue.js (one implementation for admission, charging, the
+ * UIs and admin actions).
  *
- * A cost of 0 writes nothing: there is nothing to double-bill, and a zero-value
- * row would only add noise to the customer's ledger.
+ * `now` is the legacy argument name; `usageId` is new.
+ *
+ * @returns {{ charged:number, alreadyCharged:boolean, parts:Array, fromPlans:Array, overdraftNanoUsd:number }}
  */
 export function chargeCreditsSync(db, {
   userId,
   apiKeyId = null,
+  usageId = null,
   requestKey,
   costNanoUsd = 0,
   now = null,
 } = {}) {
-  if (!db) throw new Error("chargeCreditsSync requires the db adapter");
-  if (!userId) throw new Error("chargeCreditsSync requires a userId");
-
-  const existing = requestKey
-    ? db.get(`SELECT id FROM creditLedger WHERE requestKey = ?`, [requestKey])
-    : null;
-  if (existing) {
-    return { charged: 0, alreadyCharged: true, fromPlans: [], overdraftNanoUsd: getUserOverdraftNano(db, userId) };
-  }
-
-  const cost = Math.max(0, nano(costNanoUsd));
-  if (cost === 0) {
-    return { charged: 0, alreadyCharged: false, fromPlans: [], overdraftNanoUsd: getUserOverdraftNano(db, userId) };
-  }
-
-  const at = now || nowIso();
-  const plans = db.all(
-    `SELECT id, creditRemainingNanoUsd, expiresAt
-       FROM userPlans
-      WHERE userId = ? AND status = 'active' AND expiresAt > ? AND creditRemainingNanoUsd > 0
-      ORDER BY expiresAt ASC, createdAt ASC`,
-    [userId, at]
-  );
-
-  const fromPlans = [];
-  let remaining = cost;
-  let ledgerRows = 0;
-
-  for (const plan of plans) {
-    if (remaining <= 0) break;
-    const available = nano(plan.creditRemainingNanoUsd);
-    if (available <= 0) continue;
-
-    const take = Math.min(available, remaining);
-    const left = available - take;
-    if (left === 0) {
-      db.run(`UPDATE userPlans SET creditRemainingNanoUsd = 0, status = 'exhausted' WHERE id = ?`, [plan.id]);
-    } else {
-      db.run(`UPDATE userPlans SET creditRemainingNanoUsd = ? WHERE id = ?`, [left, plan.id]);
-    }
-
-    insertLedger(db, {
-      userId,
-      userPlanId: plan.id,
-      apiKeyId,
-      requestKey: ledgerRows === 0 ? requestKey ?? null : `${requestKey}#${ledgerRows + 1}`,
-      deltaNanoUsd: -take,
-      kind: "charge",
-      createdAt: at,
-    });
-    ledgerRows += 1;
-    remaining -= take;
-    fromPlans.push({ userPlanId: plan.id, amount: take });
-  }
-
-  // Cost exceeded every plan: the tail becomes overdraft debt.
-  if (remaining > 0) {
-    const overdraftBefore = getUserOverdraftNano(db, userId);
-    setUserOverdraftNano(db, userId, overdraftBefore + remaining);
-    insertLedger(db, {
-      userId,
-      userPlanId: null,
-      apiKeyId,
-      requestKey: ledgerRows === 0 ? requestKey ?? null : `${requestKey}#${ledgerRows + 1}`,
-      deltaNanoUsd: -remaining,
-      kind: "charge",
-      meta: { overdraft: true },
-      createdAt: at,
-    });
-    ledgerRows += 1;
-    remaining = 0;
-  }
-
+  const result = chargeSync(db, {
+    userId,
+    apiKeyId,
+    usageId,
+    requestKey,
+    costNanoUsd,
+    nowIso: now,
+  });
   return {
-    charged: cost,
-    alreadyCharged: false,
-    fromPlans,
-    overdraftNanoUsd: getUserOverdraftNano(db, userId),
+    charged: result.charged,
+    alreadyCharged: result.alreadyCharged,
+    parts: result.parts,
+    // Legacy shape: [{ userPlanId, amount }] across both passes.
+    fromPlans: result.parts.map((part) => ({ userPlanId: part.userPlanId, amount: part.amountNanoUsd })),
+    overdraftNanoUsd: result.debtNanoUsd,
   };
 }
 
@@ -422,7 +213,7 @@ export function expireStalePlans(db, now = nowIso()) {
   for (const row of rows) {
     const remaining = nano(row.creditRemainingNanoUsd);
     db.run(`UPDATE userPlans SET status = 'expired', creditRemainingNanoUsd = 0 WHERE id = ?`, [row.id]);
-    insertLedger(db, {
+    insertLedgerSync(db, {
       userId: row.userId,
       userPlanId: row.id,
       deltaNanoUsd: -remaining,
@@ -432,6 +223,15 @@ export function expireStalePlans(db, now = nowIso()) {
     });
     if (remaining > 0) forfeitedNanoUsd += remaining;
   }
+
+  // Window state belongs to an active purchase only. Leaving rows behind after a
+  // sweep would keep counting spend against a plan nobody can pay with, and a
+  // later re-grant of the same row (an admin adjust back above zero on a plan that
+  // is still `exhausted`) would inherit a stale window.
+  db.run(
+    `DELETE FROM userPlanWindows
+      WHERE userPlanId IN (SELECT id FROM userPlans WHERE status <> 'active')`
+  );
 
   return { expired: rows.length, forfeitedNanoUsd };
 }
@@ -506,6 +306,8 @@ function rowToPlan(row) {
     name: row.name ?? null,
     description: row.description ?? null,
     priceNanoUsd: nano(row.priceNanoUsd),
+    // Integer đồng, NULL when the plan is not sold by bank transfer.
+    priceVnd: row.priceVnd == null ? null : nano(row.priceVnd),
     creditNanoUsd: nano(row.creditNanoUsd),
     durationDays: nano(row.durationDays),
     isActive: row.isActive === 1 || row.isActive === true,
@@ -514,9 +316,30 @@ function rowToPlan(row) {
     purchaseLimitPerMonth: row.purchaseLimitPerMonth == null ? null : nano(row.purchaseLimitPerMonth),
     isFeatured: row.isFeatured === 1 || row.isFeatured === true,
     sortOrder: row.sortOrder == null ? null : nano(row.sortOrder),
+    // Per-window limits (empty array = none). Snapshotted into orders and grants.
+    limits: parseLimits(row.limits),
+    rpm: row.rpm == null ? null : nano(row.rpm),
+    tpm: row.tpm == null ? null : nano(row.tpm),
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
   };
+}
+
+/** NULL or 0 = unlimited; otherwise a positive integer. */
+function normalizeRate(value) {
+  if (value == null || value === "" || Number(value) === 0) return null;
+  return nano(value);
+}
+
+/**
+ * Vietnamese error for the limits part of a plan input, or null. Shared by
+ * createPlan/updatePlan and by the admin route so the message matches the rule.
+ */
+export function validatePlanLimits(input = {}) {
+  return validateLimits(input.limits ?? [], {
+    creditNanoUsd: nano(input.creditNanoUsd),
+    durationDays: nano(input.durationDays),
+  });
 }
 
 /** Validation shared by the API route and any admin caller. Returns null when valid. */
@@ -528,6 +351,15 @@ export function validatePlanInput(input = {}) {
   if (!String(input.name ?? "").trim()) return "name is required";
   const price = Number(input.priceNanoUsd);
   if (!Number.isInteger(price) || price < 0) return "priceNanoUsd must be an integer >= 0";
+  // priceVnd (spec plan-dual-pricing "Two prices per plan"): integer đồng, 0 or
+  // empty when the plan is not sold by VietQR. A negative or fractional value is
+  // refused here so the API answers 400 before anything is written.
+  if (input.priceVnd !== undefined && input.priceVnd !== null && input.priceVnd !== "") {
+    const priceVnd = Number(input.priceVnd);
+    if (!Number.isInteger(priceVnd) || priceVnd < 0) {
+      return "priceVnd must be a non-negative integer (đồng)";
+    }
+  }
   const credit = Number(input.creditNanoUsd);
   if (!Number.isInteger(credit) || credit <= 0) return "creditNanoUsd must be an integer > 0";
   const days = Number(input.durationDays);
@@ -546,6 +378,19 @@ export function validatePlanInput(input = {}) {
     }
   }
 
+  // limits: validated against this plan's own credit and duration (spec
+  // plan-templates "Limit validation"). Rejected before anything is written.
+  const limitsError = validatePlanLimits(input);
+  if (limitsError) return limitsError;
+
+  // rpm / tpm: empty or 0 = unlimited, otherwise a positive integer.
+  for (const [field, label] of [["rpm", "RPM"], ["tpm", "TPM"]]) {
+    const raw = input[field];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) return `${label} phải là số nguyên không âm (0 hoặc để trống = không giới hạn)`;
+  }
+
   // purchaseLimitPerMonth: null/0 = unlimited, otherwise a positive integer.
   if (input.purchaseLimitPerMonth !== undefined && input.purchaseLimitPerMonth !== null) {
     const limit = Number(input.purchaseLimitPerMonth);
@@ -554,6 +399,101 @@ export function validatePlanInput(input = {}) {
     }
   }
   return null;
+}
+
+/**
+ * Per-plan figures for the admin table (spec plan-templates "Plan statistics" and
+ * spec plan-dual-pricing "Revenue per currency").
+ *
+ * Three grouped queries over the whole set, never one per plan:
+ *   activeCount / activeUsers   over userPlans rows with status 'active'
+ *   revenueVnd                  sum of payAmount of paid orders paid in VND (đồng)
+ *   revenueUsdNano              sum of paid orders paid in USDT or approved manually,
+ *                               in nano-USD (1 USDT = 1 USD, no rate involved)
+ *   revenueNanoUsd              the two USD-ish halves combined, kept for the
+ *                               figures that predate the split
+ *   consumedNanoUsd             sum of what was charged to the plan's purchases
+ *
+ * Refunded and every other non-paid status is excluded from both revenue figures.
+ *
+ * @returns {Map<string, {activeCount:number, activeUsers:number, revenueVnd:number,
+ *          revenueUsdNano:number, revenueNanoUsd:number, consumedNanoUsd:number}>}
+ */
+export async function planStats() {
+  const db = await getAdapter();
+  const stats = new Map();
+  const ensure = (planId) => {
+    if (!stats.has(planId)) {
+      stats.set(planId, {
+        activeCount: 0,
+        activeUsers: 0,
+        revenueVnd: 0,
+        revenueUsdNano: 0,
+        revenueNanoUsd: 0,
+        consumedNanoUsd: 0,
+      });
+    }
+    return stats.get(planId);
+  };
+
+  // 1. Active purchases, and the distinct users holding them.
+  const activeRows = db.all(
+    `SELECT planId, COUNT(*) AS count, COUNT(DISTINCT userId) AS users
+       FROM userPlans
+      WHERE status = 'active' AND planId IS NOT NULL
+      GROUP BY planId`
+  );
+  for (const row of activeRows) {
+    const entry = ensure(row.planId);
+    entry.activeCount = Number(row.count) || 0;
+    entry.activeUsers = Number(row.users) || 0;
+  }
+
+  // 2. Revenue, split by the currency the customer actually paid in.
+  //
+  // One row per (plan, currency). `payCurrency` is snapshotted on the order, so a
+  // later change to the plan's prices cannot rewrite what was collected. Orders
+  // created before the split have a NULL payCurrency; they were all manual orders
+  // priced in USD, which is why NULL falls into the USD bucket.
+  //
+  //   VND              → revenueVnd, in đồng (payAmount)
+  //   USDT / USD / NULL → revenueUsdNano, in nano-USD (payAmount for USDT and USD
+  //                      alike; amountNanoUsd as the fallback for a pre-split row)
+  const revenueRows = db.all(
+    `SELECT planId,
+            CASE WHEN payCurrency = 'VND' THEN 'VND' ELSE 'USD' END AS bucket,
+            COALESCE(SUM(
+              CASE WHEN payCurrency = 'VND' THEN COALESCE(payAmount, 0)
+                   ELSE COALESCE(payAmount, amountNanoUsd, 0)
+              END
+            ), 0) AS total
+       FROM orders
+      WHERE status = 'paid'
+      GROUP BY planId, bucket`
+  );
+  for (const row of revenueRows) {
+    const entry = ensure(row.planId);
+    if (row.bucket === "VND") entry.revenueVnd = nano(row.total);
+    else entry.revenueUsdNano = nano(row.total);
+  }
+  for (const entry of stats.values()) {
+    entry.revenueNanoUsd = nano(entry.revenueUsdNano);
+  }
+
+  // 3. Consumed: everything charged against the plan's purchases, including
+  //    expired ones — that credit was still delivered and spent.
+  const consumedRows = db.all(
+    `SELECT up.planId AS planId, COALESCE(SUM(-cl.deltaNanoUsd), 0) AS total
+       FROM creditLedger cl
+       JOIN userPlans up ON up.id = cl.userPlanId
+      WHERE cl.kind = 'charge' AND up.planId IS NOT NULL
+      GROUP BY up.planId`
+  );
+  for (const row of consumedRows) {
+    ensure(row.planId).consumedNanoUsd = nano(row.total);
+  }
+
+  return stats;
 }
 
 /** Admin list: every plan, ordered for display. `onlyActive` filters the shop view. */
@@ -592,6 +532,7 @@ export async function createPlan(input = {}) {
     name: String(input.name).trim(),
     description: input.description == null ? null : String(input.description),
     priceNanoUsd: nano(input.priceNanoUsd),
+    priceVnd: normalizePriceVnd(input.priceVnd),
     creditNanoUsd: nano(input.creditNanoUsd),
     durationDays: nano(input.durationDays),
     isActive: input.isActive !== false,
@@ -604,25 +545,38 @@ export async function createPlan(input = {}) {
       : nano(input.purchaseLimitPerMonth),
     isFeatured: input.isFeatured === true,
     sortOrder: input.sortOrder == null ? null : nano(input.sortOrder),
+    limits: serializeLimits(input.limits ?? []),
+    rpm: normalizeRate(input.rpm),
+    tpm: normalizeRate(input.tpm),
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.creditNanoUsd,
+      plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
-      plan.sortOrder, plan.createdAt, plan.updatedAt,
+      plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
     ]
   );
   return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [plan.id]));
 }
 
-export async function updatePlan(id, patch = {}) {
-  const db = await getAdapter();
+/**
+ * Plan update, split so a caller can run it INSIDE its own transaction.
+ *
+ * `updatePlanSync` does the validation and the write with no awaits, which is what
+ * PATCH /api/plans/[id] needs to keep the template edit and the apply-to-active
+ * pass atomic. `updatePlan` is the adapter-resolving wrapper every other caller
+ * uses.
+ *
+ * @returns {null|object} the updated plan, or null when the plan is gone
+ * @throws when the merged input is invalid
+ */
+export function updatePlanSync(db, id, patch = {}) {
   const current = rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [id]));
   if (!current) return null;
 
@@ -635,11 +589,12 @@ export async function updatePlan(id, patch = {}) {
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
-      nano(merged.priceNanoUsd), nano(merged.creditNanoUsd), nano(merged.durationDays),
+      nano(merged.priceNanoUsd), normalizePriceVnd(merged.priceVnd),
+      nano(merged.creditNanoUsd), nano(merged.durationDays),
       merged.isActive ? 1 : 0, merged.isPurchasable ? 1 : 0,
       Array.isArray(merged.allowedGroupIds) && merged.allowedGroupIds.length > 0
         ? stringifyJson(merged.allowedGroupIds.map((g) => String(g).trim()))
@@ -649,10 +604,17 @@ export async function updatePlan(id, patch = {}) {
         : nano(merged.purchaseLimitPerMonth),
       merged.isFeatured ? 1 : 0,
       merged.sortOrder == null ? null : nano(merged.sortOrder),
+      serializeLimits(merged.limits ?? []),
+      normalizeRate(merged.rpm), normalizeRate(merged.tpm),
       merged.updatedAt, id,
     ]
   );
   return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [id]));
+}
+
+export async function updatePlan(id, patch = {}) {
+  const db = await getAdapter();
+  return updatePlanSync(db, id, patch);
 }
 
 /** Soft delete: existing orders and userPlans keep pointing at the row. */
@@ -664,35 +626,12 @@ export async function deletePlan(id) {
 
 // ── Orders ────────────────────────────────────────────────────────────────
 
-const ORDER_SELECT = `
-  SELECT o.*, u.email AS userEmail, u.displayName AS userDisplayName,
-         p.code AS planCode, p.name AS planName
-    FROM orders o
-    LEFT JOIN users u ON u.id = o.userId
-    LEFT JOIN plans p ON p.id = o.planId`;
-
-function rowToOrder(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    userId: row.userId,
-    planId: row.planId,
-    amountNanoUsd: nano(row.amountNanoUsd),
-    creditNanoUsd: nano(row.creditNanoUsd),
-    durationDays: nano(row.durationDays),
-    status: row.status,
-    method: row.method ?? "manual",
-    payerNote: row.payerNote ?? null,
-    adminNote: row.adminNote ?? null,
-    approvedBy: row.approvedBy ?? null,
-    createdAt: row.createdAt ?? null,
-    paidAt: row.paidAt ?? null,
-    userEmail: row.userEmail ?? null,
-    userDisplayName: row.userDisplayName ?? null,
-    planCode: row.planCode ?? null,
-    planName: row.planName ?? null,
-  };
-}
+// userEmail reads through to the account while it exists and falls back to the
+// ORDER_SELECT, orderLimits and rowToOrder moved to src/lib/billing/orders.js
+// (task 4.1) so the driver-free reconciliation engine can read an order without
+// importing this adapter-resolving repo. Re-exported here because the existing
+// importers and tests reach them through this module.
+export { ORDER_SELECT, orderLimits, rowToOrder };
 
 export async function listOrders({ status = null, userId = null, limit = 200, offset = 0 } = {}) {
   const db = await getAdapter();
@@ -755,8 +694,10 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
     // is what the admin wrote and what a customer can reason about.
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
     const row = db.get(
+      // A cancelled or expired order never paid, so it must not consume the
+      // month's slot (spec payment-checkout "Cancel and expiry").
       `SELECT COUNT(*) AS n FROM orders
-        WHERE userId = ? AND planId = ? AND createdAt >= ? AND status <> 'cancelled'`,
+        WHERE userId = ? AND planId = ? AND createdAt >= ? AND status NOT IN ('cancelled', 'expired')`,
       [user.id, plan.id, start]
     );
     const used = Number(row?.n ?? 0);
@@ -783,7 +724,7 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
 
   // Buyability is decided in one place so the catalogue, the checkout button and
   // this call can never disagree about whether a plan may be bought.
-  const user = db.get(`SELECT id, groupId FROM users WHERE id = ?`, [userId]);
+  const user = db.get(`SELECT id, email, groupId FROM users WHERE id = ?`, [userId]);
   const blocker = await planPurchaseBlocker(db, plan, user);
   if (blocker) throw new Error(blocker.reason);
 
@@ -797,14 +738,21 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     status: "pending",
     method: method || "manual",
     payerNote: payerNote == null || String(payerNote).trim() === "" ? null : String(payerNote).trim(),
+    // The buyer's email at purchase time. Orders outlive the account (cascade
+    // delete keeps them), so the address must live on the order too.
+    emailSnapshot: user?.email ?? null,
+    // Snapshot of the plan's limits: editing the plan afterwards must not rewrite
+    // what the customer agreed to (spec plan-templates "Orders snapshot limits").
+    limits: serializeLimits(plan.limits ?? []),
     createdAt: nowIso(),
   };
   db.run(
-    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, durationDays, status, method, payerNote, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, durationDays, status, method, payerNote, emailSnapshot, limits, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.durationDays, order.status, order.method, order.payerNote, order.createdAt,
+      order.durationDays, order.status, order.method, order.payerNote, order.emailSnapshot,
+      order.limits, order.createdAt,
     ]
   );
   return getOrderById(order.id);
@@ -825,43 +773,16 @@ export async function updateOrderStatus(id, { status, approvedBy = null, adminNo
 /**
  * Mark an order paid and grant its credit, atomically. Idempotent: a second call
  * on an already-paid order reports it and grants nothing.
+ *
+ * The body moved to `src/lib/billing/orders.js` (task 4.1) so the payment
+ * reconciliation engine can call it inside its own transaction; this wrapper only
+ * resolves the adapter and opens the transaction.
  */
 export async function approveOrder(id, adminId = null) {
   const db = await getAdapter();
-  return db.transaction(() => {
-    const row = db.get(`SELECT * FROM orders WHERE id = ?`, [id]);
-    if (!row) return null;
-    if (row.status === "paid" || row.status === "refunded") {
-      return { alreadyApproved: true, order: rowToOrder(row), userPlan: null, appliedToOverdraftNanoUsd: 0 };
-    }
-    if (row.status !== "pending") {
-      throw new Error(`Cannot approve an order in status "${row.status}"`);
-    }
-
-    const paidAt = nowIso();
-    db.run(
-      `UPDATE orders SET status = 'paid', paidAt = ?, approvedBy = COALESCE(?, approvedBy) WHERE id = ?`,
-      [paidAt, adminId, id]
-    );
-
-    const granted = grantUserPlan(db, {
-      userId: row.userId,
-      planId: row.planId,
-      orderId: id,
-      source: "purchase",
-      creditNanoUsd: nano(row.creditNanoUsd),
-      durationDays: nano(row.durationDays),
-      meta: { orderId: id, amountNanoUsd: nano(row.amountNanoUsd) },
-      now: paidAt,
-    });
-
-    return {
-      alreadyApproved: false,
-      order: rowToOrder(db.get(`${ORDER_SELECT} WHERE o.id = ?`, [id])),
-      userPlan: granted.userPlan,
-      appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
-    };
-  });
+  return db.transaction(() =>
+    approveOrderSync(db, id, { approvedBy: adminId, now: nowIso() })
+  );
 }
 
 /** Owner-only cancellation, pending orders only. */
@@ -923,6 +844,7 @@ export async function refundOrder(id, { adminId = null, adminNote = null } = {})
         source: "refund",
         creditNanoUsd: nano(row.creditNanoUsd),
         durationDays: nano(row.durationDays),
+        limits: orderLimits(db, row),
         meta: { refundedOrderStatus: "paid", adminId, adminNote: adminNote ?? null },
         now: at,
         ledgerKind: "refund",

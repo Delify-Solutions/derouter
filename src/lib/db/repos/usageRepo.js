@@ -3,7 +3,8 @@ import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import { costFromTokensNano, nanoToUsd } from "../../../shared/utils/money.js";
-import { chargeCreditsSync, resolveApiKeyOwner } from "./billingRepo.js";
+import { resolveApiKeyOwner } from "./billingRepo.js";
+import { chargeSync } from "../../billing/planQueue.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 
 // Money is stored as integer nanoUSD. `costNanoUsd` is authoritative; the legacy
@@ -435,44 +436,24 @@ export async function saveRequestUsage(entry) {
         ]
       );
 
-      // Charge the owner's wallet in the SAME transaction as the usage row, keyed
-      // on that row's id so a retry is idempotent. Failures are logged, never
-      // thrown: a billing problem must not discard recorded usage.
+      // Charge the owner from their plan queue in the SAME transaction as the usage
+      // row, keyed on that row's id so a retry is idempotent. Failures are logged,
+      // never thrown: a billing problem must not discard recorded usage.
       //
-      // A customer on a subscription is NOT charged: their plan is a per-model
-      // allowance that refills on its own windows, and the usage row above is the
-      // only record needed to meter it (planAllowance sums it per model). Taking
-      // credit from them as well would charge the same request twice — once
-      // against the plan ceiling, once against the wallet — and the wallet figure
-      // was never spendable anyway, since the ceiling always ran out first.
-      //
-      // Credit is the fallback for traffic no plan covers: pay-as-you-go grants
-      // (gift codes, admin adjustments) and customers between subscriptions.
-      if (entry.apiKey) {
+      // The charge engine re-evaluates the queue at charge time (design D4) rather
+      // than pinning whatever admission picked, and a request admitted on a plan
+      // that has since filled up is still paid (pass 2), with anything uncovered
+      // becoming debt. Admin keys have no owner and are never charged.
+      if (entry.apiKey && owner) {
         try {
-          if (owner) {
-            const nowIso2 = entry.timestamp || new Date().toISOString();
-            const onPlan = db.get(
-              `SELECT 1 AS hit
-                 FROM userPlans up
-                 JOIN plans p ON p.id = up.planId
-                WHERE up.userId = ?
-                  AND up.status = 'active'
-                  AND up.expiresAt > ?
-                  AND p.id IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM planModelLimits pml WHERE pml.planId = p.id)
-                LIMIT 1`,
-              [owner.userId, nowIso2]
-            );
-            if (!onPlan) {
-              chargeCreditsSync(db, {
-                userId: owner.userId,
-                apiKeyId: owner.apiKeyId,
-                requestKey: "usage:" + insertedUsage.lastInsertRowid,
-                costNanoUsd: entry.costNanoUsd || 0,
-              });
-            }
-          }
+          chargeSync(db, {
+            userId: owner.userId,
+            apiKeyId: owner.apiKeyId,
+            usageId: insertedUsage.lastInsertRowid,
+            requestKey: "usage:" + insertedUsage.lastInsertRowid,
+            costNanoUsd: entry.costNanoUsd || 0,
+            nowIso: entry.timestamp || new Date().toISOString(),
+          });
         } catch (e) {
           console.error("[billing] charge failed", e.message);
         }
@@ -1253,6 +1234,51 @@ export async function getProviderRateUsage(windowMs = 60000) {
     };
   }
   return out;
+}
+
+/**
+ * Requests and tokens over the last `windowMs` across EVERY key owned by a user
+ * (design D7).
+ *
+ * Customer RPM/TPM are per customer, not per key: creating a second key must not
+ * hand out a second allowance. The join is over `apiKeys.userId`, so a key created
+ * after this request is counted from its first use, and a deleted key's historical
+ * rows stop counting (which is what "the customer's current traffic" means).
+ * idx_uh_apikeyid_ts covers the per-key side of the join.
+ *
+ * @returns {{ requests: number, tokens: number }}
+ */
+export async function getUserRateUsage(userId, windowMs = 60000) {
+  if (!userId) return { requests: 0, tokens: 0 };
+  const db = await getAdapter();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const row = db.get(
+    `SELECT COUNT(*) AS requests,
+            COALESCE(SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)), 0) AS tokens
+       FROM usageHistory
+      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
+        AND timestamp >= ?`,
+    [userId, since]
+  );
+  return { requests: row?.requests ?? 0, tokens: row?.tokens ?? 0 };
+}
+
+/**
+ * Oldest usage timestamp in the rolling window across every key of a user — the
+ * TPM wait-loop sleeps until that request falls out of the minute.
+ */
+export async function getUserOldestTokenAt(userId, windowMs = 60000) {
+  if (!userId) return null;
+  const db = await getAdapter();
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const row = db.get(
+    `SELECT MIN(timestamp) AS oldest
+       FROM usageHistory
+      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
+        AND timestamp >= ?`,
+    [userId, since]
+  );
+  return row?.oldest ?? null;
 }
 
 // Timestamp (ISO) of the oldest usage row in the rolling window for an apiKey.
