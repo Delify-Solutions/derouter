@@ -50,8 +50,8 @@ export default function Footer({ modelCount, plans = [] }) {
               <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.14em]">derouter</span>
             </div>
             <p className="mt-4 max-w-xs text-sm text-text-muted">
-              Thuê bao model lập trình theo tháng, hạn mức riêng cho từng model, dùng qua một
-              endpoint tương thích OpenAI.
+              Credit dùng chung cho mọi model trong nhóm của bạn, trừ theo giá token, dùng qua
+              một endpoint tương thích OpenAI.
             </p>
             <p className="mt-3 font-mono text-[11px] text-text-subtle">
               {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}

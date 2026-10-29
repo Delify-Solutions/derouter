@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { FORMAT_LABELS, USAGE_WINDOWS, interpolate } from "./salesData";
+import { FORMAT_LABELS, interpolate } from "./salesData";
 
 export default function ModelsSection({ models, copy }) {
   return (
@@ -38,8 +38,8 @@ export default function ModelsSection({ models, copy }) {
         </div>
 
         <p className="mt-4 font-mono text-[11px] text-text-subtle">
-          Mỗi model có hạn mức riêng, chia theo {USAGE_WINDOWS.map((w) => w.label).join(" / ")}. Số
-          tiền cụ thể ở bảng giá bên dưới.
+          Credit của gói bị trừ theo giá token của từng model, nên model đắt dùng credit nhanh
+          hơn. Giá cụ thể ở bảng bên dưới.
         </p>
       </div>
     </section>

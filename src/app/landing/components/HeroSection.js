@@ -1,6 +1,6 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
-import { USAGE_WINDOWS, fmtUsd, windowLimitFor, interpolate } from "./salesData";
+import { fmtUsd, interpolate } from "./salesData";
 
 // Server component. Every string comes from `copy` (operator-editable) and every
 // number from the plans rows passed in — so changing the words never means
@@ -18,10 +18,12 @@ export default function HeroSection({ plans, models, copy }) {
       ? { label: "Giá từ", value: `${fmtUsd(cheapest.priceUsd)}/tháng` }
       : null,
     { label: "Danh mục", value: `${models.length} model lập trình` },
-    {
-      label: "Cửa sổ hạn mức",
-      value: USAGE_WINDOWS.map((w) => `${Math.round(w.fraction * 100)}% · ${w.label}`).join("  "),
-    },
+    cheapest
+      ? {
+          label: "Credit",
+          value: `Nhận ${fmtUsd(cheapest.creditUsd)} dùng chung mọi model`,
+        }
+      : null,
     { label: "Endpoint", value: "POST /v1/chat/completions" },
   ].filter(Boolean);
 

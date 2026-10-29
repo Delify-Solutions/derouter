@@ -1,41 +1,31 @@
 import PropTypes from "prop-types";
-import { USAGE_WINDOWS, fmtUsd } from "./salesData";
+import { fmtUsd } from "./salesData";
 
 // FAQ ngắn: chỉ trả lời những câu mà cơ chế trong repo thực sự quyết định, để
-// trang không hứa điều hệ thống không làm.
+// trang không hứa điều hệ thống không làm. Năm câu hỏi của spec public-landing:
+// mua nhiều gói, hạn mức 5 giờ, credit còn lại khi hết hạn, model nào dùng được,
+// và gói bị tạm khoá.
 export default function FaqSection({ plans, models, copy }) {
   const questions = [
     {
-      q: "Hạn mức tính theo số request hay theo token?",
-      a: "Theo chi phí. Mỗi model có một hạn mức tháng bằng USD trong bảng giá; mỗi request trừ vào hạn mức đó theo lượng token vào, ra và cached nhân với giá token của model. Request dài tốn nhiều hơn request ngắn.",
+      q: "Mua nhiều gói thì dùng thế nào?",
+      a: "Mỗi gói là một khoản credit riêng, xếp thành hàng đợi. Request được trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; khi gói đó tạm khoá, hệ thống tự chuyển sang gói kế tiếp. Bạn đổi được thứ tự trong trang Gói của tôi.",
     },
     {
-      q: "Ba cửa sổ hoạt động thế nào?",
-      a: `Cả ba cùng được kiểm tra trên mọi request. Với một model có hạn mức tháng là X, bạn được dùng tối đa ${Math.round(
-        USAGE_WINDOWS[0].fraction * 100
-      )}% của X trong 5 giờ, ${Math.round(
-        USAGE_WINDOWS[1].fraction * 100
-      )}% trong 1 tuần và 100% trong 1 tháng. Cửa sổ ngắn không cộng dồn vào cửa sổ dài — chúng chặn song song.`,
+      q: "Hạn mức 5 giờ nghĩa là gì?",
+      a: "Lần đầu gói được trừ tiền, một cửa sổ 5 giờ mở ra. Trong 5 giờ đó bạn chỉ dùng tối đa mức tiền mà gói quy định cho cửa sổ này (ví dụ $20). Hết 5 giờ, cửa sổ đóng và lần trừ tiền tiếp theo mở cửa sổ mới, tính lại từ đầu.",
     },
     {
-      q: "Các gói khác nhau ở đâu?",
-      a: plans.length > 1
-        ? `Cùng danh mục model, khác hạn mức mỗi model. ${plans
-            .map((p) => `${p.name} ${fmtUsd(p.priceUsd)}/tháng`)
-            .join(", ")}.`
-        : "Hiện chỉ có một gói đang mở bán.",
+      q: "Credit còn lại khi gói hết hạn thì sao?",
+      a: "Credit chưa dùng hết sẽ mất khi gói hết hạn — đó là lý do gói được xếp theo ngày hết hạn, để phần sắp hết hạn được dùng trước. Sổ cái của bạn ghi lại đúng phần credit bị mất.",
     },
     {
-      q: "Dùng hết hạn mức thì sao?",
-      a: "Request bị từ chối với 429 và header Retry-After chỉ ra thời điểm cửa sổ đang chặn nạp lại. Gọi model khác vẫn được nếu model đó còn hạn mức, vì mỗi model có hạn mức riêng.",
+      q: "Tôi dùng được những model nào?",
+      a: `Mọi model mà nhóm tài khoản của bạn cho phép — credit dùng chung cho tất cả, không chia theo model. Danh mục hiện có ${models.length} model; gọi model ngoài nhóm sẽ bị từ chối với lỗi 403.`,
     },
     {
-      q: "Gói thuê bao có thay thế số dư credit không?",
-      a: "Không. Gói cấp hạn mức theo từng model trong thời hạn của gói. Số dư credit vẫn là nguồn trả tiền cho lưu lượng không thuộc gói.",
-    },
-    {
-      q: "Có cần đổi code client không?",
-      a: "Chỉ cần đổi base URL và API Key. Giao thức vẫn là OpenAI chat completions, nên SDK và công cụ hiện có chạy nguyên xi.",
+      q: "Gói bị tạm khoá thì sao?",
+      a: "Khi một cửa sổ đã dùng hết mức, gói đó tạm khoá cho tới khi cửa sổ đóng. Nếu còn gói khác trong hàng đợi, request vẫn chạy bình thường trên gói đó. Nếu tất cả đều khoá, bạn nhận lỗi 429 kèm thời điểm mở lại gần nhất.",
     },
   ];
 
@@ -60,7 +50,9 @@ export default function FaqSection({ plans, models, copy }) {
         </dl>
 
         <p className="mt-4 font-mono text-[11px] text-text-subtle">
-          {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
+          {plans
+            .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
+            .join(" · ")}
         </p>
       </div>
     </section>
