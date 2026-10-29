@@ -9,6 +9,10 @@ import { safeEqual } from "./internalHeaders.js";
 
 const DEFAULT_PASSWORD = "123456";
 
+// The token and the cookie share one lifetime. Without `maxAge` the cookie is a
+// browser-session cookie and the admin is signed out whenever the browser closes.
+export const DASHBOARD_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
 function loadJwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
   const file = path.join(DATA_DIR, "jwt-secret");
@@ -34,7 +38,7 @@ export async function createDashboardAuthToken(claims = {}) {
   return new SignJWT({ authenticated: true, ...claims })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("24h")
+    .setExpirationTime(`${DASHBOARD_TOKEN_TTL_SECONDS}s`)
     .sign(SECRET);
 }
 
@@ -65,6 +69,7 @@ export async function setDashboardAuthCookie(cookieStore, request, claims = {}) 
     secure: shouldUseSecureCookie(request),
     sameSite: "lax",
     path: "/",
+    maxAge: DASHBOARD_TOKEN_TTL_SECONDS,
   });
 }
 
