@@ -121,6 +121,24 @@ function bootstrapCustomerKeysSync(db) {
 }
 
 /**
+ * One-time: admin keys no longer belong to a group (a group decides models and
+ * plan access for CUSTOMERS). A key that inherited its model list from a group
+ * keeps that restriction by copying the list onto the key itself; without this,
+ * dropping the group would silently widen what the key may call.
+ */
+function bootstrapAdminKeyGroupsSync(db) {
+  db.run(
+    `UPDATE apiKeys
+        SET allowedModels = (SELECT g.allowedModels FROM keyGroups g WHERE g.id = apiKeys.groupId)
+      WHERE userId IS NULL
+        AND groupId IS NOT NULL
+        AND allowedModels IS NULL
+        AND (SELECT g.allowedModels FROM keyGroups g WHERE g.id = apiKeys.groupId) IS NOT NULL`
+  );
+  db.run(`UPDATE apiKeys SET groupId = NULL WHERE userId IS NULL AND groupId IS NOT NULL`);
+}
+
+/**
  * One-time: copy each buyer's email onto their orders, so an order stays readable
  * after the account is deleted (design D10 step 3).
  */
@@ -193,6 +211,9 @@ export function runPostSyncTasksSync(db) {
   // 2-4. One-time data repairs.
   if (runOnce(db, "bootstrap.customerKeys.v1", "customerKeys", () => bootstrapCustomerKeysSync(db))) {
     ran.push("customerKeys");
+  }
+  if (runOnce(db, "bootstrap.adminKeyGroups.v1", "adminKeyGroups", () => bootstrapAdminKeyGroupsSync(db))) {
+    ran.push("adminKeyGroups");
   }
   if (runOnce(db, "bootstrap.orderEmails.v1", "orderEmails", () => bootstrapOrderEmailsSync(db))) {
     ran.push("orderEmails");

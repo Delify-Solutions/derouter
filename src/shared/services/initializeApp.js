@@ -2,7 +2,8 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
-import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys } from "@/lib/localDb";
+import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys, ensureDefaultAdminKey } from "@/lib/localDb";
+import { getConsistentMachineId } from "@/shared/utils/machineId";
 import {
   enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
@@ -81,6 +82,8 @@ export async function initializeApp() {
 
 async function runHeavyStartup() {
   await cleanupProviderConnections();
+  // The one admin key tools and examples point at (there is no screen to make more).
+  try { await ensureDefaultAdminKey(await getConsistentMachineId()); } catch (e) { console.error("[InitApp] default key failed:", e.message); }
   const settings = await getSettings();
 
   // Auto-resume tunnel (once per process)

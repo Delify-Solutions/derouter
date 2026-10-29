@@ -47,7 +47,7 @@ function wipe() {
   ]) {
     try { db.run(`DELETE FROM ${table}`); } catch { /* partial schema */ }
   }
-  for (const marker of ["bootstrap.customerKeys.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"]) {
+  for (const marker of ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"]) {
     db.run(`DELETE FROM _meta WHERE key = ?`, [marker]);
   }
 }
@@ -119,7 +119,7 @@ test("a user pointing at an inactive group is moved to the default", () => {
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM userAuditLog WHERE action = 'group_auto_assigned'`)?.n, 1);
 });
 
-test("customer keys lose their key-level limits, admin keys keep theirs", () => {
+test("customer keys lose their key-level limits, admin keys keep theirs (but not a group)", () => {
   wipe();
   db.run(
     `INSERT INTO keyGroups(id, name, isActive, createdAt, updatedAt) VALUES('g1', 'G', 1, ?, ?)`,
@@ -154,7 +154,38 @@ test("customer keys lose their key-level limits, admin keys keep theirs", () => 
   assert.equal(admin.rpm, 9);
   assert.equal(admin.budgetUsd, 9.5);
   assert.equal(admin.allowedModels, '["b"]');
-  assert.equal(admin.groupId, "g1");
+  assert.equal(admin.groupId, null, "an admin key no longer belongs to a group");
+});
+
+test("an admin key inherits its group's model list before losing the group", () => {
+  wipe();
+  db.run(
+    `INSERT INTO keyGroups(id, name, isActive, allowedModels, createdAt, updatedAt) VALUES('g1', 'G', 1, '["glm-5","kimi"]', ?, ?)`,
+    [NOW(), NOW()]
+  );
+  // Inherits the group's list: must keep that restriction as its own.
+  db.run(
+    `INSERT INTO apiKeys(id, key, name, isActive, createdAt, groupId, allowedModels, userId)
+     VALUES('inherits', 'k-inherits', 'a', 1, ?, 'g1', NULL, NULL)`, [NOW()]
+  );
+  // Has its own list: kept as is.
+  db.run(
+    `INSERT INTO apiKeys(id, key, name, isActive, createdAt, groupId, allowedModels, userId)
+     VALUES('own', 'k-own', 'b', 1, ?, 'g1', '["glm-5"]', NULL)`, [NOW()]
+  );
+  // Group without a list: the key stays unrestricted.
+  db.run(`INSERT INTO keyGroups(id, name, isActive, createdAt, updatedAt) VALUES('g2', 'Open', 1, ?, ?)`, [NOW(), NOW()]);
+  db.run(
+    `INSERT INTO apiKeys(id, key, name, isActive, createdAt, groupId, allowedModels, userId)
+     VALUES('open', 'k-open', 'c', 1, ?, 'g2', NULL, NULL)`, [NOW()]
+  );
+
+  runPostSyncTasksSync(db);
+
+  const row = (id) => db.get(`SELECT groupId, allowedModels FROM apiKeys WHERE id = ?`, [id]);
+  assert.deepEqual(row("inherits"), { groupId: null, allowedModels: '["glm-5","kimi"]' });
+  assert.deepEqual(row("own"), { groupId: null, allowedModels: '["glm-5"]' });
+  assert.deepEqual(row("open"), { groupId: null, allowedModels: null });
 });
 
 test("orders get an email snapshot from the buyer", () => {
@@ -190,14 +221,14 @@ test("a second run changes nothing", () => {
   );
 
   const first = runPostSyncTasksSync(db);
-  assert.deepEqual(first.ran.sort(), ["backfill", "customerKeys", "orderEmails"]);
+  assert.deepEqual(first.ran.sort(), ["adminKeyGroups", "backfill", "customerKeys", "orderEmails"]);
 
   const snapshot = () => ({
     groups: db.all(`SELECT * FROM keyGroups ORDER BY id`),
     users: db.all(`SELECT id, groupId FROM users ORDER BY id`),
     keys: db.all(`SELECT id, groupId, rpm FROM apiKeys ORDER BY id`),
     audits: db.all(`SELECT * FROM userAuditLog ORDER BY id`),
-    markers: ["bootstrap.customerKeys.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"].map((k) => getMetaSync(db, k, null)),
+    markers: ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"].map((k) => getMetaSync(db, k, null)),
     settings: rawSettings(),
   });
 

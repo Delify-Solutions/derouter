@@ -40,7 +40,6 @@ export async function PUT(request, { params }) {
     const updateData = {};
     if (body.isActive !== undefined) updateData.isActive = body.isActive;
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.groupId !== undefined) updateData.groupId = body.groupId;
     if (body.rpm !== undefined) updateData.rpm = body.rpm;
     if (body.tpm !== undefined) updateData.tpm = body.tpm;
     if (body.budgetUsd !== undefined) updateData.budgetUsd = body.budgetUsd;

@@ -4,7 +4,7 @@
 Defines how the router authorizes an LLM API request made with an API key: which models and request rates apply, which accounts may call at all, how admin keys and customer keys differ, and the exact shape of every denial the router produces itself.
 ## Requirements
 ### Requirement: Customer keys take their model access from the owner's current group
-A key owned by a user account ("customer key") SHALL take its model allow-list exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored, and so SHALL any RPM, TPM, budget or reset-window stored on the group: a group decides only which models its members may call (and which plans they may buy). Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") are limited by their own values only: RPM, TPM, budget and reset-window come from the key, and the group still narrows the model list.
+A key owned by a user account ("customer key") SHALL take its model allow-list exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored, and so SHALL any RPM, TPM, budget or reset-window stored on the group: a group decides only which models its members may call (and which plans they may buy). Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") are limited by their own values only — RPM, TPM, budget, reset-window, expiry and model list — and SHALL NOT belong to a group: a group value stored on an admin key SHALL be ignored, and creating or updating an admin key SHALL store no group.
 
 #### Scenario: Group change applies to the next request
 - **WHEN** an admin moves a user from group A (allows `model-x`) to group B (does not allow `model-x`) and the user's key then requests `model-x`
@@ -21,6 +21,17 @@ A key owned by a user account ("customer key") SHALL take its model allow-list e
 #### Scenario: Legacy group rates are ignored
 - **WHEN** a group row still carries `rpm = 1` or `tpm = 1` from before rates moved to plans
 - **THEN** no rate limit is applied to its members because of it
+
+### Requirement: One default admin key is kept by the server
+The dashboard SHALL NOT offer screens to create, edit or delete admin keys. The server SHALL guarantee that at least one admin key (named `Default Key`, no group, no limits) exists, creating it at start-up and whenever the admin key list is read and none exists, so that CLI configuration, usage examples and the dashboard's model test always have a key to use. Creating it SHALL be idempotent, including under concurrent calls. On upgrade, an admin key that inherited its model list from a group SHALL receive that list as its own before the group is removed, so no key gains access it did not have.
+
+#### Scenario: Fresh install
+- **WHEN** the admin key list is read and no admin key exists
+- **THEN** one `Default Key` is created and returned, and a second read creates no further key
+
+#### Scenario: Group list carried over
+- **WHEN** an upgraded database has an admin key with no model list whose group allows `glm-5` and `kimi`
+- **THEN** the key afterwards allows exactly `glm-5` and `kimi` and has no group
 
 ### Requirement: Spending budgets do not apply to customer keys
 Group and key `budgetUsd`/`resetWindow` SHALL NOT be enforced for customer keys; customer spending is governed only by the plan queue (capability `plan-queue-billing`). Admin keys keep their existing budget enforcement and its 402 denial.

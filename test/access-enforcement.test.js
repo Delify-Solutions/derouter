@@ -310,6 +310,26 @@ test("with no credit the answer is 402, not a rate limit", async () => {
   assert.equal(result.status, 402);
 });
 
+// ── Admin keys: no group ─
+
+test("a group never applies to an admin key, even a legacy row that still points at one", async () => {
+  insertGroup("legacy", { rpm: 1, tpm: 1, allowedModels: ["only-this"] });
+  const secret = insertKey("ak", { groupId: "legacy" });
+  insertUsage("ak", { at: secondsAgo(5), prompt: 500, completion: 500 });
+  insertUsage("ak", { at: secondsAgo(5) });
+
+  const result = await enforceKeyLimits(secret, "some-other-model");
+  assert.equal(result.ok, true, "the group's rpm, tpm and model list are not applied");
+});
+
+test("an admin key is limited by its own model list", async () => {
+  const secret = insertKey("ak2", { allowedModels: ["model-a"] });
+  assert.equal((await enforceKeyLimits(secret, "model-a")).ok, true);
+  const denied = await enforceKeyLimits(secret, "model-b");
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, "model_not_allowed");
+});
+
 // ── Admin keys ─────────────────────────────────────────────────────────────
 
 test("admin keys are counted per key, each against its own rpm", async () => {

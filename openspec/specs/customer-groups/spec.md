@@ -4,7 +4,7 @@
 Guarantees that every customer account belongs to exactly one active group at all times, defines how the default group for new accounts is chosen, and prevents the admin from deleting or disabling a group that customers still depend on.
 ## Requirements
 ### Requirement: A group decides models and plan access only
-A group SHALL carry a name, an active flag and an optional model allow-list, and SHALL decide exactly two things: which models its members may call, and (through `plans.allowedGroupIds`) which plans its members may buy. A group SHALL NOT carry RPM, TPM, budget or reset-window settings; the admin group form SHALL NOT offer them and the API SHALL ignore them.
+A group SHALL carry a name, an active flag and an optional model allow-list, and SHALL decide exactly two things: which models its members may call, and (through `plans.allowedGroupIds`) which plans its members may buy. A group SHALL NOT carry RPM, TPM, budget or reset-window settings; the admin group form SHALL NOT offer them and the API SHALL ignore them. A group SHALL apply to customer accounts only, never to an admin key.
 
 #### Scenario: Group form
 - **WHEN** an admin opens the group form

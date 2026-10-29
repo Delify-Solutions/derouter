@@ -12,7 +12,7 @@ export {
   createProviderNode, updateProviderNode, deleteProviderNode,
   getProxyPools, getProxyPoolById,
   createProxyPool, updateProxyPool, deleteProxyPool,
-  getApiKeys, getApiKeyById, getApiKeyByKey, createApiKey, updateApiKey, deleteApiKey,
+  getApiKeys, getApiKeyById, getApiKeyByKey, createApiKey, ensureDefaultAdminKey, updateApiKey, deleteApiKey,
   validateApiKey, getApiKeyForAuth, resetKeyWindow, setKeyWindowCost, hashApiKey,
   getKeyGroups, getKeyGroupById, getKeyGroupByName, createKeyGroup, updateKeyGroup, deleteKeyGroup,
   getGroupGuard, getGroupMemberCounts, describeGroupGuard, toBool,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getApiKeys, createApiKey } from "@/lib/localDb";
+import { getApiKeys, createApiKey, ensureDefaultAdminKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +9,12 @@ export const dynamic = "force-dynamic";
 // Customer keys (any row with a userId) are excluded: they belong to an account,
 // are managed on that account's page, and their secrets must never appear in an
 // admin listing. The count is reported so the operator knows they exist.
+//
+// The dashboard has no screen to create admin keys, so the server guarantees one
+// exists: tools and examples read this list to pick the key they show.
 export async function GET() {
   try {
+    await ensureDefaultAdminKey(await getConsistentMachineId());
     const all = await getApiKeys();
     const keys = all.filter((key) => key.userId == null);
     const customerKeyCount = all.length - keys.length;
@@ -20,7 +24,8 @@ export async function GET() {
   }
 }
 
-// POST /api/keys - Create new API key (optionally with limits/group)
+// POST /api/keys - Create an admin API key (optionally with limits). Admin keys
+// carry no group: a group is a customer concept.
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -33,7 +38,6 @@ export async function POST(request) {
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
     const apiKey = await createApiKey(name, machineId, {
-      groupId: body.groupId ?? null,
       rpm: body.rpm ?? null,
       tpm: body.tpm ?? null,
       budgetUsd: body.budgetUsd ?? null,
@@ -47,7 +51,6 @@ export async function POST(request) {
       name: apiKey.name,
       id: apiKey.id,
       machineId: apiKey.machineId,
-      groupId: apiKey.groupId,
       rpm: apiKey.rpm,
       tpm: apiKey.tpm,
       budgetUsd: apiKey.budgetUsd,
