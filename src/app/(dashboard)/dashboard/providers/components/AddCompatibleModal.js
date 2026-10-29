@@ -32,6 +32,7 @@ const VARIANT_CONFIG = {
 const API_TYPE_OPTIONS = [
   { value: "chat", label: "Chat Completions" },
   { value: "responses", label: "Responses API" },
+  { value: "images", label: "Image Generation" },
 ];
 
 function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
@@ -65,6 +66,10 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
     // baseUrl whenever the modal reopens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
+
+  // An image gateway has no /models or chat endpoint to probe, so the key check and
+  // model id are hidden: they would fail for a perfectly good node.
+  const isImages = config.hasApiType && formData.apiType === "images";
 
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
@@ -168,8 +173,14 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           value={formData.baseUrl}
           onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
           placeholder={config.defaultBaseUrl}
-          hint={config.baseUrlHint}
+          hint={isImages ? "Base URL of the gateway (ending in /v1). Requests go to <Base URL>/images/generations." : config.baseUrlHint}
         />
+        {isImages ? (
+          <p className="text-sm text-text-muted">
+            Image nodes are not checked here. After creating, add the API key on the provider card, then create an Image combo with the model as prefix/model-name and set its price.
+          </p>
+        ) : (
+        <>
         <Input
           label="API Key (for Check)"
           type="password"
@@ -194,6 +205,8 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           </Button>
           {renderValidationResult()}
         </div>
+        </>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleSubmit}

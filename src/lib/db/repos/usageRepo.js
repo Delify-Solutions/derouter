@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
-import { costFromTokensNano, nanoToUsd } from "../../../shared/utils/money.js";
+import { costFromTokensNano, costFromImagesNano, nanoToUsd } from "../../../shared/utils/money.js";
 import { resolveApiKeyOwner } from "./billingRepo.js";
 import { chargeSync } from "../../billing/planQueue.js";
 import { hashApiKey } from "./apiKeysRepo.js";
@@ -256,12 +256,14 @@ async function ensureRingInitialized() {
 // to let a combo-level price override take precedence for bare combo names, so
 // budgets for key-holders (who consume combos) are charged at the combo price
 // the admin set, not the internal pool model's price.
-async function calculateCostNano(provider, model, tokens, requestedModel) {
-  if (!tokens) return 0;
+async function calculateCostNano(provider, model, tokens, requestedModel, imageCount = 0) {
+  if (!tokens && !(imageCount > 0)) return 0;
   try {
     const { resolvePrice } = await import("./pricingRepo.js");
     const { pricing } = await resolvePrice({ provider, model, requestedModel });
     if (!pricing) return 0;
+    // An image request is priced per image; it carries no token counts.
+    if (imageCount > 0) return costFromImagesNano(imageCount, pricing);
     return costFromTokensNano(tokens, pricing);
   } catch (e) {
     console.error("Error calculating cost:", e);
@@ -365,7 +367,9 @@ export async function saveRequestUsage(entry) {
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
     // Authoritative integer nanoUSD; legacy float `cost` is derived from it so
     // the two columns can never disagree.
-    entry.costNanoUsd = await calculateCostNano(entry.provider, entry.model, entry.tokens, entry.requestedModel);
+    const imageCount = Number(entry.imageCount) > 0 ? Math.floor(Number(entry.imageCount)) : 0;
+    if (imageCount > 0) entry.tokens = { ...(entry.tokens || {}), image_count: imageCount };
+    entry.costNanoUsd = await calculateCostNano(entry.provider, entry.model, entry.tokens, entry.requestedModel, imageCount);
     entry.cost = nanoToUsd(entry.costNanoUsd);
 
     const tokens = entry.tokens || {};
@@ -398,7 +402,10 @@ export async function saveRequestUsage(entry) {
         ? "(apiKeyId = ? OR apiKey = ?)"
         : "COALESCE(apiKey, '') = COALESCE(?, '')";
       const keyParams = apiKeyId ? [apiKeyId, entry.apiKey || null] : [entry.apiKey || null];
-      const existing = db.get(
+      // Image rows all carry 0/0 tokens, so the token-based match below would merge two
+      // genuine image requests that land in the same millisecond. Each image request is
+      // saved exactly once, so it is never deduped.
+      const existing = imageCount > 0 ? null : db.get(
         `SELECT id, endpoint FROM usageHistory
          WHERE timestamp = ?
            AND COALESCE(provider, '') = COALESCE(?, '')

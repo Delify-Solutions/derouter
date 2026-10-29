@@ -4,6 +4,28 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 
 const CLI_TOKEN_SALT = "dr-cli-auth";
 
+// An image model routinely needs tens of seconds (denoising steps); a text model
+// answering "hi" should not. One shared budget would fail one kind or hang the other.
+const TEXT_TIMEOUT_MS = 30_000;
+const IMAGE_TIMEOUT_MS = 120_000;
+
+// Preview an image result in the admin UI without shipping megabytes: a URL as is, or
+// base64 only while it stays small.
+const MAX_PREVIEW_CHARS = 1_500_000;
+
+function imagePreview(first) {
+  if (!first || typeof first !== "object") return null;
+  if (typeof first.url === "string" && first.url.length < 2048) return first.url;
+  if (typeof first.b64_json === "string" && first.b64_json.length <= MAX_PREVIEW_CHARS) {
+    return `data:image/png;base64,${first.b64_json}`;
+  }
+  return null;
+}
+
+function isTimeout(error) {
+  return error?.name === "TimeoutError" || error?.name === "AbortError";
+}
+
 function createSilentWavFile() {
   const sampleRate = 16000;
   const channels = 1;
@@ -63,8 +85,21 @@ async function getInternalHeaders() {
 }
 
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
-  const headers = await getInternalHeaders();
   const start = Date.now();
+  try {
+    return await pingOnce(model, kind, baseUrl, start);
+  } catch (error) {
+    const latencyMs = Date.now() - start;
+    if (isTimeout(error)) {
+      const budget = kind === "image" ? IMAGE_TIMEOUT_MS : TEXT_TIMEOUT_MS;
+      return { ok: false, latencyMs, error: `No response within ${Math.round(budget / 1000)}s` };
+    }
+    return { ok: false, latencyMs, error: String(error?.message || error).slice(0, 240) };
+  }
+}
+
+async function pingOnce(model, kind, baseUrl, start) {
+  const headers = await getInternalHeaders();
 
   if (kind === "embedding") {
     const res = await fetch(`${baseUrl}/api/v1/embeddings`, {
@@ -93,8 +128,9 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     const res = await fetch(`${baseUrl}/api/v1/images/generations`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, prompt: "test" }),
-      signal: AbortSignal.timeout(15000),
+      // One small image: the cheapest request that still proves the model generates.
+      body: JSON.stringify({ model, prompt: "a small red circle on a white background", n: 1 }),
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
     });
     const latencyMs = Date.now() - start;
     const rawText = await res.text().catch(() => "");
@@ -110,7 +146,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     if (!hasImages) {
       return { ok: false, latencyMs, status: res.status, error: "Provider returned no image data for this model" };
     }
-    return { ok: true, latencyMs, error: null, status: res.status };
+    return { ok: true, latencyMs, error: null, status: res.status, preview: imagePreview(parsed.data[0]) };
   }
 
   if (kind === "stt") {
@@ -152,7 +188,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     method: "POST",
     headers,
     body: chatBody,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(TEXT_TIMEOUT_MS),
   });
   const latencyMs = Date.now() - start;
 

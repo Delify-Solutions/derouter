@@ -473,6 +473,13 @@ async function fetchWithConnectionProxy(url, options = {}, effectiveProxy = null
 }
 
 async function testApiKeyConnection(connection, effectiveProxy = null) {
+  // Image nodes (apiType "images") expose neither /models nor a chat endpoint, and the
+  // only real check is generating an image, which costs money. The connection is not
+  // probed; a model's test button does the check on demand.
+  if (isOpenAICompatibleProvider(connection.provider) && connection.providerSpecificData?.apiType === "images") {
+    if (!connection.apiKey) return { valid: false, error: "Missing API key" };
+    return { valid: true, error: null, note: "Image node: not probed. Use a model's test button to generate a test image." };
+  }
   if (isOpenAICompatibleProvider(connection.provider)) {
     const modelsBase = connection.providerSpecificData?.baseUrl;
     if (!modelsBase) return { valid: false, error: "Missing base URL" };

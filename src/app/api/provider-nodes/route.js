@@ -45,7 +45,7 @@ export async function POST(request) {
     const nodeType = type || "openai-compatible";
 
     if (nodeType === "openai-compatible") {
-      if (!apiType || !["chat", "responses"].includes(apiType)) {
+      if (!apiType || !["chat", "responses", "images"].includes(apiType)) {
         return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
       }
 

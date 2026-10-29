@@ -882,7 +882,9 @@ function ApiKeyProviderCard({
                       <Badge variant="default" size="sm">
                         {provider.apiType === "responses"
                           ? "Responses"
-                          : "Chat"}
+                          : provider.apiType === "images"
+                            ? "Images"
+                            : "Chat"}
                       </Badge>
                     )}
                     {isAnthropicCompatible && (

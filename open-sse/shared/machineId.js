@@ -1,5 +1,9 @@
-import { machineIdSync } from "node-machine-id";
+import * as machineIdModule from "node-machine-id";
 import crypto from "node:crypto";
+
+// CommonJS package: the Next bundler exposes it as a named export, plain Node (tests)
+// only on `default`.
+const machineIdSync = machineIdModule.machineIdSync ?? machineIdModule.default?.machineIdSync;
 
 let cachedRawId = null;
 

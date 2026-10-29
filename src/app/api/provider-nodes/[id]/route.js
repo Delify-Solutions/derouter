@@ -22,7 +22,7 @@ export async function PUT(request, { params }) {
     }
 
     // Only validate apiType for OpenAI Compatible nodes
-    if (node.type === "openai-compatible" && (!apiType || !["chat", "responses"].includes(apiType))) {
+    if (node.type === "openai-compatible" && (!apiType || !["chat", "responses", "images"].includes(apiType))) {
       return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
     }
 

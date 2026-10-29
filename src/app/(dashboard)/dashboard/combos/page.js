@@ -6,6 +6,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
+import PreviewThumb from "@/shared/components/PreviewThumb";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
@@ -59,6 +60,7 @@ export default function CombosPage() {
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const [testState, setTestState] = useState(null); // { comboName, loading, result }
+  const [tab, setTab] = useState("llm"); // "llm" | "image"
   const { copied, copy } = useCopyToClipboard();
 
   useEffect(() => {
@@ -78,8 +80,9 @@ export default function CombosPage() {
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
 
-      // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
-      if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
+      // Text (llm) and image combos live here, on separate tabs. webSearch/webFetch
+      // combos belong to media-providers/web.
+      if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm" || c.kind === "image"));
       if (poolPricingRes.ok) setPoolPricing(await poolPricingRes.json().catch(() => ({})));
       if (comboPricingRes.ok) setComboPricing(await comboPricingRes.json().catch(() => ({})));
       if (providersRes.ok) {
@@ -171,19 +174,23 @@ export default function CombosPage() {
   // Test a combo by sending a proxied chat completion with model = combo.name.
   // Reuses the existing /api/models/test endpoint (pingModelByKind), which resolves
   // an internal unrestricted key and POSTs to /api/v1/chat/completions internally.
-  const handleTestCombo = async (comboName) => {
+  const handleTestCombo = async (combo) => {
     if (testState?.loading) return;
-    setTestState({ comboName, loading: true, result: null });
+    const kind = combo.kind === "image" ? "image" : "llm";
+    // An image test generates one real image on the upstream account, so ask first.
+    if (kind === "image" && !window.confirm("This test generates one real image and uses your upstream quota. Continue?")) return;
+    const comboName = combo.name;
+    setTestState({ comboName, kind, loading: true, result: null });
     try {
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: comboName, kind: "llm" }),
+        body: JSON.stringify({ model: comboName, kind }),
       });
       const data = await res.json().catch(() => ({ ok: false, error: "Invalid response from test endpoint" }));
-      setTestState({ comboName, loading: false, result: data });
+      setTestState({ comboName, kind, loading: false, result: data });
     } catch (error) {
-      setTestState({ comboName, loading: false, result: { ok: false, error: error.message || "Network error" } });
+      setTestState({ comboName, kind, loading: false, result: { ok: false, error: error.message || "Network error" } });
     }
   };
 
@@ -221,10 +228,46 @@ export default function CombosPage() {
     );
   }
 
+  const textCombos = combos.filter((c) => !c.kind || c.kind === "llm");
+  const imageCombos = combos.filter((c) => c.kind === "image");
+  const visibleCombos = tab === "image" ? imageCombos : textCombos;
+
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+      {/* Text / Image */}
+      <div role="tablist" aria-label="Combo type" className="flex border-b border-border">
+        {[
+          { id: "llm", label: "Text", count: textCombos.length },
+          { id: "image", label: "Image", count: imageCombos.length },
+        ].map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.id}
+            onClick={() => setTab(item.id)}
+            className={`-mb-px flex h-10 items-center gap-2 border-b-2 px-4 text-sm font-medium transition-colors ${
+              tab === item.id ? "border-primary text-text-main" : "border-transparent text-text-muted hover:text-text-main"
+            }`}
+          >
+            {item.label}
+            <span className="rounded border border-border px-1.5 text-[11px] text-text-muted">{item.count}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {tab === "image" ? (
+          <div className="min-w-0">
+            <p className="text-sm text-text-muted mt-1">
+              An image combo is the model name customers send to the image endpoint. It tries its models in order and is charged per image: set the price on the combo. A combo with no price is refused for customer keys.
+            </p>
+            <p className="text-sm text-text-muted mt-2">
+              Add the gateway first (Provider → Add OpenAI Compatible, API type Image Generation, or add image models to any compatible node), then pick its image models here.
+            </p>
+          </div>
+        ) : (
         <div className="min-w-0">
           <p className="text-sm text-text-muted mt-1">
             Group models under one name, then pick a strategy per combo:
@@ -235,20 +278,21 @@ export default function CombosPage() {
             <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
           </ul>
         </div>
+        )}
         <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto whitespace-nowrap">
           Create Combo
         </Button>
       </div>
 
       {/* Combos List */}
-      {combos.length === 0 ? (
+      {visibleCombos.length === 0 ? (
         <Card>
           <div className="text-center py-12">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
-              <span className="material-symbols-outlined text-[32px]">layers</span>
+              <span className="material-symbols-outlined text-[32px]">{tab === "image" ? "image" : "layers"}</span>
             </div>
-            <p className="text-text-main font-medium mb-1">No combos yet</p>
-            <p className="text-sm text-text-muted mb-4">Create model combos with fallback support</p>
+            <p className="text-text-main font-medium mb-1">{tab === "image" ? "No image combos yet" : "No combos yet"}</p>
+            <p className="text-sm text-text-muted mb-4">{tab === "image" ? "Create an image combo and set its price per image" : "Create model combos with fallback support"}</p>
             <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
               Create Combo
             </Button>
@@ -256,7 +300,7 @@ export default function CombosPage() {
         </Card>
       ) : (
         <div className="flex flex-col gap-4">
-          {combos.map((combo) => (
+          {visibleCombos.map((combo) => (
             <ComboCard
               key={combo.id}
               combo={combo}
@@ -266,9 +310,10 @@ export default function CombosPage() {
               onCopy={copy}
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
-              onTest={() => handleTestCombo(combo.name)}
+              onTest={() => handleTestCombo(combo)}
               strategy={comboStrategies[combo.name] || {}}
               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
+              imagePrice={Number(comboPricing[combo.name]?.image) || 0}
             />
           ))}
         </div>
@@ -289,6 +334,8 @@ export default function CombosPage() {
           isOpen={showCreateModal}
           onClose={() => setShowCreateModal(false)}
           onSave={handleCreate}
+          kind={tab}
+          kindFilter={tab === "image" ? "image" : null}
           activeProviders={activeProviders}
           poolPricing={poolPricing}
           comboPricing={comboPricing}
@@ -302,6 +349,8 @@ export default function CombosPage() {
           combo={editingCombo}
           onClose={() => setEditingCombo(null)}
           onSave={(data) => handleUpdate(editingCombo.id, data)}
+          kind={editingCombo.kind === "image" ? "image" : "llm"}
+          kindFilter={editingCombo.kind === "image" ? "image" : null}
           activeProviders={activeProviders}
           poolPricing={poolPricing}
           comboPricing={comboPricing}
@@ -349,7 +398,7 @@ function TestComboModal({ testState, onClose }) {
             <span className="material-symbols-outlined text-[20px]" style={{ animation: "spin 1s linear infinite" }}>
               progress_activity
             </span>
-            Testing combo…
+            {testState?.kind === "image" ? "Generating a test image… this can take up to a minute" : "Testing combo…"}
           </div>
         ) : result ? (
           <>
@@ -376,6 +425,15 @@ function TestComboModal({ testState, onClose }) {
               </div>
             )}
 
+            {/* Generated test image */}
+            {ok && result.kind === "image" && (
+              result.preview ? (
+                <PreviewThumb src={result.preview} className="max-h-[320px] rounded-lg border border-border object-contain" />
+              ) : (
+                <div className="text-sm text-text-muted">An image was generated, but it is too large to preview here.</div>
+              )
+            )}
+
             {/* Reply content */}
             {ok && content && (
               <div>
@@ -398,7 +456,7 @@ function TestComboModal({ testState, onClose }) {
             )}
 
             {/* Empty success with no content/note */}
-            {ok && !content && !note && (
+            {ok && !content && !note && result.kind !== "image" && (
               <div className="text-sm text-text-muted">
                 Combo responded, but no reply content was returned.
               </div>
@@ -420,11 +478,13 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onTest, strategy = {}, onSetStrategy }) {
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onTest, strategy = {}, onSetStrategy, imagePrice = 0 }) {
+  const isImage = combo.kind === "image";
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
-  const isFusion = current === "fusion";
+  // Fusion needs a judge model answering in text: it does not apply to image combos.
+  const isFusion = !isImage && current === "fusion";
 
   return (
     <Card padding="sm" className="group">
@@ -448,6 +508,16 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               )}
               {combo.models.length > 3 && (
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
+              )}
+              {isImage && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
+                    imagePrice > 0 ? "border-green-500/40 text-green-600 dark:text-green-400" : "border-red-500/40 text-red-500"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">{imagePrice > 0 ? "sell" : "warning"}</span>
+                  {imagePrice > 0 ? `$${imagePrice} / image` : "No price: refused for customers"}
+                </span>
               )}
             </div>
             {/* Fusion: judge picker (Auto = first model) */}
@@ -481,7 +551,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           {/* Strategy selector — always visible */}
           <div className="w-full sm:w-[200px]">
             <Select
-              options={STRATEGY_OPTIONS}
+              options={isImage ? STRATEGY_OPTIONS.filter((option) => option.value !== "fusion") : STRATEGY_OPTIONS}
               value={current}
               onChange={(e) => onSetStrategy({ fallbackStrategy: e.target.value })}
               selectClassName="py-1.5 text-xs"
@@ -491,8 +561,9 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           <div className="grid grid-cols-4 gap-1 sm:flex">
             <button
               onClick={(e) => { e.stopPropagation(); onTest?.(combo.name); }}
+              
               className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
-              title="Test combo"
+              title={isImage ? "Test combo (generates 1 image)" : "Test combo"}
               disabled={combo.models.length === 0}
             >
               <span className="material-symbols-outlined text-[18px]">science</span>
@@ -785,7 +856,8 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, poolPricing = {}, comboPricing = {} }) {
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind = "llm", kindFilter = null, poolPricing = {}, comboPricing = {} }) {
+  const isImage = kind === "image";
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
   const [models, setModels] = useState(combo?.models || []);
@@ -876,7 +948,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   // admin hasn't manually edited the pricing fields. Picks the last-added model's pool
   // price (exact (provider, model) match first, fuzzy fallback). Suggestion only.
   useEffect(() => {
-    if (pricingTouched) return;
+    if (pricingTouched || isImage) return;
     if (!models.length || !poolPricing || Object.keys(poolPricing).length === 0) return;
     const last = models[models.length - 1];
     const slash = last.indexOf("/");
@@ -956,6 +1028,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     if (!validateName(name)) return;
     setSaving(true);
     const payload = { name: name.trim(), models };
+    if (!combo && isImage) payload.kind = "image";
     // Include pricing only if the admin touched the fields (set or edited a custom price).
     // Untouched auto-fill suggestions are not persisted unless the admin commits to them.
     if (pricingTouched) {
@@ -986,7 +1059,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={isEdit ? "Edit Combo" : "Create Combo"}
+        title={isEdit ? (isImage ? "Edit Image Combo" : "Edit Combo") : (isImage ? "Create Image Combo" : "Create Combo")}
       >
         <div className="flex flex-col gap-3">
           {/* Name */}
@@ -1049,6 +1122,28 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
             </button>
           </div>
 
+          {/* Image combos are priced per generated image, not per token. A combo with
+              no price is refused for customer keys, so say that next to the field. */}
+          {isImage ? (
+            <div>
+              <label className="text-sm font-medium block mb-1.5">Price per image (USD)</label>
+              <Input
+                type="number"
+                step="0.001"
+                min="0"
+                value={pricing.image}
+                onChange={(e) => handlePricingFieldChange("image", e.target.value)}
+                placeholder="0.04"
+              />
+              <p className="text-[11px] text-text-muted flex items-center gap-1 mt-1.5">
+                <span className="material-symbols-outlined text-[12px]">info</span>
+                {Number(pricing.image) > 0
+                  ? "Charged to a customer for every image this combo returns."
+                  : "No price yet: customer keys are refused until you set one (admin keys still work)."}
+              </p>
+            </div>
+          ) : (
+          <>
           {/* Pricing — one 5-field price per combo (applied to every request to this
               combo regardless of which pool model routes). Auto-fills from the closest
               pool model price as a suggestion; admin can override. */}
@@ -1078,7 +1173,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               </p>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {PRICING_FIELDS.map((f) => (
+              {PRICING_FIELDS.filter((f) => f.key !== "image").map((f) => (
                 <Input
                   key={f.key}
                   label={f.label}
@@ -1091,18 +1186,22 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               ))}
             </div>
           </div>
+          </>
+          )}
 
           {/* Capabilities — 14 OpenRouter-style fields advertised by /v1/models
               for this combo. Auto-fills from the combo's first model so the
               advertised context window / reasoning / vision flags stay accurate
               without manual entry. Admin can override any field. */}
-          <CapabilitiesSection
-            caps={caps}
-            touched={capsTouched}
-            hasModels={models.length > 0}
-            onChange={handleCapChange}
-            onAutofill={autofillCaps}
-          />
+          {!isImage && (
+            <CapabilitiesSection
+              caps={caps}
+              touched={capsTouched}
+              hasModels={models.length > 0}
+              onChange={handleCapChange}
+              onAutofill={autofillCaps}
+            />
+          )}
 
           {/* Actions */}
           <div className="flex flex-col gap-2 pt-1 sm:flex-row">

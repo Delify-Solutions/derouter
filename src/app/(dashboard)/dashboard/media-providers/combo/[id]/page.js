@@ -61,6 +61,8 @@ export default function ComboDetailPage() {
   const [apiKey, setApiKey] = useState("");
   const [connections, setConnections] = useState([]);
   const [modelAliases, setModelAliases] = useState({});
+  const [imagePrice, setImagePrice] = useState("");
+  const [priceStatus, setPriceStatus] = useState(null);
 
   const fetchAll = async () => {
     try {
@@ -83,6 +85,12 @@ export default function ComboDetailPage() {
       setCombo(c);
       setName(c.name);
       setProviders(c.models || []);
+      if (c.kind === "image") {
+        const priceRes = await fetch("/api/pricing?combo=1", { cache: "no-store" });
+        const prices = priceRes.ok ? await priceRes.json() : {};
+        const current = Number(prices?.[c.name]?.image);
+        setImagePrice(Number.isFinite(current) && current > 0 ? String(current) : "");
+      }
       const s = settingsRes.ok ? await settingsRes.json() : {};
       setRoundRobin(s.comboStrategies?.[c.name]?.fallbackStrategy === "round-robin");
       const allLogs = logsRes.ok ? await logsRes.json() : [];
@@ -111,10 +119,25 @@ export default function ComboDetailPage() {
     return true;
   };
 
+  // Customers pay per generated image; a combo with no price here is refused for
+  // customer keys (admin keys are never billed).
+  const handleSaveImagePrice = async () => {
+    const value = imagePrice.trim() === "" ? 0 : Number(imagePrice);
+    if (!Number.isFinite(value) || value < 0) {
+      setPriceStatus({ type: "error", message: "Price must be a non-negative number" });
+      return;
+    }
+    const ok = await saveCombo({ pricing: { image: value } });
+    setPriceStatus(ok ? { type: "success", message: value > 0 ? "Price saved" : "Price cleared: customers cannot use this combo" } : null);
+  };
+
   const handleSaveName = async () => {
     if (!validateName(name)) return;
     if (name === combo.name) return;
-    const ok = await saveCombo({ name });
+    // Combo prices are keyed by name, so a rename has to carry the image price along.
+    const price = Number(imagePrice);
+    const carryPrice = combo.kind === "image" && Number.isFinite(price) && price > 0;
+    const ok = await saveCombo(carryPrice ? { name, pricing: { image: price } } : { name });
     if (ok) await fetchAll();
   };
 
@@ -281,6 +304,24 @@ export default function ComboDetailPage() {
           </div>
         </div>
       </Card>
+
+      {combo.kind === "image" && (
+        <Card>
+          <h2 className="text-lg font-semibold mb-1">Price per image</h2>
+          <p className="text-xs text-text-muted mb-3">
+            USD charged to a customer for each image this combo returns. Leave empty or 0 to keep it unavailable to customers.
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="sm:w-56">
+              <Input label="USD / image" inputMode="decimal" value={imagePrice} onChange={(e) => { setImagePrice(e.target.value); setPriceStatus(null); }} placeholder="0.04" />
+            </div>
+            <Button size="sm" onClick={handleSaveImagePrice}>Save price</Button>
+            {priceStatus && (
+              <span role="status" className={`text-xs ${priceStatus.type === "error" ? "text-red-500" : "text-green-600"}`}>{priceStatus.message}</span>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Providers Card */}
       <Card>
