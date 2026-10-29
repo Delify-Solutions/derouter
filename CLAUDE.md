@@ -2,9 +2,11 @@
 
 # derouter
 
-Hosted AI proxy sold as OpenCode Go–style plans. Product description (Vietnamese, owner-approved): `openspec/PRODUCT.md`. Planned work lives in OpenSpec changes:
-- `openspec/changes/billing-v2-plan-queue/` — GĐ0–GĐ4 (plan queue billing, groups, customer portal, admin, landing)
-- `openspec/changes/payment-gateways/` — GĐ5 (VietQR via SePay/web2m/ACB, Binance USDT); implement only after billing-v2-plan-queue
+Hosted AI proxy sold as OpenCode Go–style plans. Product description (Vietnamese, owner-approved): `openspec/PRODUCT.md`. The shipped behaviour is specified in `openspec/specs/` — 12 capabilities, 71 requirements:
+- GĐ0 (foundation) and GĐ1–GĐ4 (`billing-v2-plan-queue`): plan queue billing, groups, customer portal, admin, landing
+- GĐ5 (`payment-gateways`): VietQR via SePay/web2m/ACB, Binance USDT
+
+Both changes are archived under `openspec/changes/archive/`; their deltas were merged into `openspec/specs/`. New work starts as a fresh change directory in `openspec/changes/`.
 
 Talk to the owner in Vietnamese. Write code, comments, commit messages and OpenSpec artifacts in English; user-facing UI text in Vietnamese.
 

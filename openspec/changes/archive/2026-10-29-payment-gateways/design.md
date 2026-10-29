@@ -72,6 +72,36 @@ Every `fetch*` function takes `fetchImpl` (default global `fetch`) so tests inje
 Repos (may import the driver and `secrets.js`): `src/lib/db/repos/paymentProvidersRepo.js` (CRUD; encrypt on write; `getProviderWithSecrets(id)` decrypts for internal use only; `toPublicProvider(row)` returns `secretsSet: { key: { set, last4 } }`), `src/lib/db/repos/paymentTransactionsRepo.js` (list with filters/pagination, count needing review).
 
 ### D3 — Normalized transaction
+
+> **Verified during implementation (task 1.3, 2026-10-29).** Field names below were checked against
+> the vendors' current public docs and corrected where they differed:
+>
+> * **SePay** — webhook body confirmed exactly as assumed
+>   (`developer.sepay.vn/en/sepay-webhooks/tich-hop-webhook`: `id`, `gateway`, `transactionDate`,
+>   `accountNumber`, `subAccount`, `code`, `content`, `transferType`, `description`,
+>   `transferAmount`, `accumulated`, `referenceCode`), and the `Authorization: Apikey <key>` webhook
+>   mode confirmed (`.../sepay-webhooks/xac-thuc`), so `verifyWebhookAuth` is unchanged.
+>   The **transactions API is v2**, not the `status/transactions` v1 shape the design implied:
+>   `GET https://userapi.sepay.vn/v2/transactions` → `{ status, data: [...] }` rows carrying
+>   `id` (**a UUID**), `transaction_date`, `account_number`, `transfer_type`, `amount_in`,
+>   `amount_out`, `transaction_content`, `reference_number`, `code`, `bank_brand_name`.
+>   Consequences recorded in `sepay.js`: direction comes from `transfer_type`; the amount is split per
+>   direction (`amount_in`/`amount_out`) instead of one signed figure; content is
+>   `transaction_content`; and because the webhook's numeric `id` and the API's UUID are different
+>   values for the same transfer, polled rows get the dedup key `sepay-api:<uuid>` while webhook rows
+>   keep `String(id)` — otherwise one transfer would be stored twice.
+> * **web2m** — no public documentation exists. Nothing changed: the normalizer implements exactly
+>   the URL styles and row shape consumed by `reference/topsubre-php/processing/payment/bank.php`
+>   (`${apiBase}/${token}` and `${apiBase}/${password}/${accountNumber}/${token}`;
+>   `{ transactions: [{ transactionID, type, amount, description, transactionDate? }] }`).
+> * **Binance Pay** — `GET /sapi/v1/pay/transactions` confirmed unchanged
+>   (`developers.binance.com/legacy-docs/pay/rest-api`): `{ code: "000000", data: [{ orderType,
+>   transactionId, transactionTime (ms), amount (signed decimal string), currency, fundsDetail,
+>   payerInfo, receiverInfo }] }`. No field renames. A non-USDT row (and a mixed-asset row, priced
+>   from its `fundsDetail` USDT line) is dropped, as topsubre already does.
+> * **ACB** — no public docs; `acb-lib.php` was read in full and ported as written, including the
+>   three token-expiry shapes (`exp` key, `message === "Unauthorized"`, bare 401 with a non-JSON body)
+>   and the notifications fallback with account filtering.
 `{ externalId: string, direction: "in" | "out", amount: integer, currency: "VND" | "USDT", content: string, occurredAt: ISO | null, raw: object }`.
 - **SePay** (webhook body and API rows; field names to be confirmed against the SePay docs when implementing): `externalId = String(id)`, `direction = transferType === "in" ? "in" : "out"`, `amount = transferAmount` (integer đồng), `content = content || description`, `occurredAt` from `transactionDate` (`YYYY-MM-DD HH:mm:ss`, Asia/Ho_Chi_Minh → ISO UTC). Webhook payloads whose `accountNumber` differs from the provider's account number are stored as `needs_review` with reason `wrong_provider`.
 - **web2m** (as consumed by topsubre `bank.php`): response `{ transactions: [...] }`; per item `externalId = transactionID` with spaces removed, `direction = type === "IN" ? "in" : "out"`, `amount = integer of amount`, `content = description`, `occurredAt` from `transactionDate` when present. URL: style `token` → `${apiBase}/${token}`; style `password_account_token` → `${apiBase}/${password}/${accountNumber}/${token}`.
@@ -112,6 +142,29 @@ Add `"/api/payments/sepay/webhook"` to `PUBLIC_API_PATHS` in `src/dashboardGuard
 - Settings: `paymentCodePrefix`, `paymentOrderTtlMinutes`, `allowManualOrders` validated in `src/app/api/settings/route.js` PATCH.
 
 ### D9 — UI
+
+> **Implementation note (2026-10-29).** Two additions beyond the original text:
+> * the SePay webhook decision logic moved out of the route into
+>   `src/lib/payments/webhook.js` (`handleSepayWebhook`), because `next/server` cannot
+>   be imported by a plain `node --test` process — the four answers (401/400/413/200)
+>   are now covered by `test/payment-webhook-e2e.test.js` with the exact bytes SePay
+>   sends. The route is a thin adapter that supplies the adapter, the active sepay
+>   providers with decrypted secrets, and the notifier.
+> * **Secrets are redacted by VALUE first, labels second** (`sanitizeMessage({secrets})`
+>   in `providers/http.js`). A label-based pass alone cannot see `key=ABC`,
+>   `auth=undefined key=ABC` or a JSON body quoting the key, because the credential
+>   is not preceded by a word the patterns know. Every fetcher therefore passes the
+>   plaintext credentials it holds (`secretValues(secrets)`), and the exact value —
+>   plus its URL-encoded form — is replaced before the label pass runs. Order
+>   matters: label-first can consume part of a value and defeat the exact match.
+> * the payment settings have a UI panel on `/dashboard/payments` (prefix, TTL,
+>   manual orders) with the same rules the PATCH validates, and a note that order
+>   expiry depends on the poller.
+> * `planStats` reports `revenueVnd` and `revenueUsdNano` from one grouped query over
+>   `(planId, payCurrency bucket)`; `revenueNanoUsd` is kept as their USD-ish sum so
+>   pre-existing readers are unchanged. Orders with a NULL `payCurrency` (created
+>   before the split) count as USD, which is what they were.
+
 - `/dashboard/payments` (`src/app/(dashboard)/dashboard/payments/page.js` + `PaymentsPageClient.js`): tabs "Nguồn nhận tiền" and "Giao dịch"; provider form per kind (D1 fields), SePay webhook URL/key copy box, "Chạy thử" result table, transactions table with filters, raw-payload `Drawer`, resolve modal with required reason; sidebar entry "Thanh toán" with a needs-review count badge (`src/shared/components/Sidebar.js`).
 - `/account/orders/[id]` (`src/app/account/orders/[id]/page.js` + `OrderPaymentClient.js`): spec `payment-checkout` "Order page"; countdown with `aria-live="polite"` announcements only on status change (not every second).
 - `/account/plans` purchase card: one button per offered method ("Chuyển khoản VietQR · 250.000đ", "Binance USDT · $10", "Thủ công") → POST → navigate to the order page.
