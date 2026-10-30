@@ -58,6 +58,17 @@ export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_M
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
 
+// Time to response headers grows with the prompt (the upstream prefills it first), so the
+// connect timeout grows with the request body: base + per-KB, capped. A fixed 60s cut a
+// ~770 KB prompt, resent it three times and failed it after 249s.
+export const FETCH_CONNECT_TIMEOUT_PER_KB_MS = envMs("FETCH_CONNECT_TIMEOUT_PER_KB_MS", 100);
+export const FETCH_CONNECT_TIMEOUT_MAX_MS = envMs("FETCH_CONNECT_TIMEOUT_MAX_MS", 5 * 60 * 1000);
+
+export function connectTimeoutForBody(bodyBytes, baseMs = FETCH_CONNECT_TIMEOUT_MS) {
+  const scaled = baseMs + Math.ceil(bodyBytes / 1024) * FETCH_CONNECT_TIMEOUT_PER_KB_MS;
+  return Math.min(scaled, Math.max(FETCH_CONNECT_TIMEOUT_MAX_MS, baseMs));
+}
+
 // Gemini native TTS fetch timeout: abort if Google does not return response headers in time.
 export const GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS = envMs("GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS", 45 * 1000);
 
