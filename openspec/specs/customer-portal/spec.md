@@ -11,14 +11,20 @@ Defines the signed-in customer's self-service area: creating and revoking API ke
 - **THEN** the list shows only the 8-character prefix and no way to reveal the secret
 
 ### Requirement: Plan queue page
-`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar, expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khoá đến <HH:MM>`. Times SHALL be shown in the browser's local time.
+`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar, expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. Times SHALL be shown in the browser's local time.
+
+The plans SHALL be split into two tabs, `Đang hoạt động` (the queue above) and `Không hoạt động`, each showing its count. The inactive tab SHALL list every purchase that is not `active`, newest first, with its plan name, source, start and expiry, total credit received and a status label: `Hết credit` (exhausted), `Hết hạn` (expired), `Đã hủy` (revoked) or `Đã hoàn tiền` (refunded). A plan SHALL appear on exactly one tab. The tabs SHALL follow the WAI-ARIA tabs pattern (arrow keys move between them).
+
+#### Scenario: Refunded plan leaves the queue
+- **WHEN** an admin refunds an order whose plan was in the queue
+- **THEN** the plan is absent from `Đang hoạt động` and appears on `Không hoạt động` as "Đã hoàn tiền"
 
 #### Scenario: Statuses for a blocked first plan
 - **WHEN** plan 1 is window-blocked until 15:30 and plan 2 is eligible
-- **THEN** plan 1 shows "Tạm khoá đến 15:30" and plan 2 shows "Đang trả"
+- **THEN** plan 1 shows "Tạm khóa đến 15:30" and plan 2 shows "Đang trả"
 
 ### Requirement: Reordering from the page
-The customer SHALL be able to move plans with a drag handle or with "↑"/"↓" buttons. Any unsaved change SHALL reveal "Lưu thứ tự" and "Huỷ". Saving SHALL submit the full order; on success a one-line confirmation SHALL appear; on HTTP 409 the page SHALL show "Danh sách gói đã thay đổi — đã tải lại" and reload the queue; "Huỷ" SHALL restore the saved order.
+The customer SHALL be able to move plans with a drag handle or with "↑"/"↓" buttons. Any unsaved change SHALL reveal "Lưu thứ tự" and "Hủy". Saving SHALL submit the full order; on success a one-line confirmation SHALL appear; on HTTP 409 the page SHALL show "Danh sách gói đã thay đổi — đã tải lại" and reload the queue; "Hủy" SHALL restore the saved order.
 
 #### Scenario: Save new order
 - **WHEN** the customer moves plan 2 above plan 1 and presses "Lưu thứ tự"
@@ -65,4 +71,11 @@ Every data region SHALL have a static skeleton while loading, an empty state of 
 #### Scenario: Another user's plan id
 - **WHEN** a customer submits an order list containing another user's plan id
 - **THEN** the response is HTTP 409 `queue_changed` and nothing changes
+
+### Requirement: Chat page
+`/account/chat` ("Chat") SHALL let a signed-in customer chat with a text model (streamed) and generate images with an image model, choosing from the models their group allows (configured combos of kind llm and image respectively). The page SHALL call `POST /api/account/chat`, which forwards to the same `/v1/chat/completions` and `/v1/images/generations` handlers using a key owned by the customer (a normal key named "Web chat", created on first use), so group, limits, expiry, admission and credit charging are identical to an API request. The route SHALL forward only whitelisted fields, cap images at 4 per request and never store message or image content. Errors from those handlers (no credit, model not allowed, limit reached, unpriced image model) SHALL be shown in the page.
+
+#### Scenario: Chat charges like an API call
+- **WHEN** a customer sends a message in the chat
+- **THEN** the reply streams in and a `charge` is written to their plan queue for the tokens used
 

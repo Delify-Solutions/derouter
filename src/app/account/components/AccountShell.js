@@ -10,6 +10,7 @@ import { cn } from "@/shared/utils/cn";
 // was gifted, how do I connect, what did I use.
 const NAV = [
   { href: "/account", label: "Tổng quan", icon: "dashboard" },
+  { href: "/account/chat", label: "Chat", icon: "chat" },
   { href: "/account/plans", label: "Gói của tôi", icon: "workspace_premium" },
   { href: "/account/ledger", label: "Nhật ký credit", icon: "receipt_long" },
   { href: "/account/gift", label: "Mã quà tặng", icon: "redeem" },

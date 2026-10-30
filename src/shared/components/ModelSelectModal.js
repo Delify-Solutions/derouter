@@ -38,6 +38,9 @@ export default function ModelSelectModal({
   const filteredActiveProviders = useMemo(() => {
     if (!kindFilter) return activeProviders;
     return activeProviders.filter((p) => {
+      // An OpenAI-compatible gateway can serve image models next to text ones; which
+      // models it offers is decided per model below, from the type recorded on each.
+      if (kindFilter === "image" && isOpenAICompatibleProvider(p.provider)) return true;
       const info = AI_PROVIDERS[p.provider];
       const kinds = info?.serviceKinds || ["llm"];
       return kinds.includes(kindFilter);
@@ -274,8 +277,11 @@ export default function ModelSelectModal({
           };
         }
       } else if (isCustomProvider) {
-        // Custom (openai/anthropic-compatible) providers are LLM-only — skip for typed media kinds
-        if (kindFilter && TYPED_KINDS.has(kindFilter)) return;
+        // Custom compatible providers carry text models, plus image models when the
+        // admin recorded them with type "image". Other typed media kinds do not apply.
+        const wantsImage = kindFilter === "image";
+        if (kindFilter && TYPED_KINDS.has(kindFilter) && !wantsImage) return;
+        if (wantsImage && !isOpenAICompatibleProvider(providerId)) return;
         // Find connection object to get prefix synchronously without waiting for providerNodes fetch
         const connection = activeProviders.find(p => p.provider === providerId);
         const matchedNode = providerNodes.find(node => node.id === providerId);
@@ -300,10 +306,17 @@ export default function ModelSelectModal({
             id: m.id,
             name: m.name || m.id,
             value: `${nodePrefix}/${m.id}`,
+            kind: getModelKind(m),
             isCustom: true,
           }));
         const seen = new Set(nodeModels.map((m) => m.value));
-        const mergedModels = [...nodeModels, ...registeredCustom.filter((m) => !seen.has(m.value))];
+        let mergedModels = [...nodeModels, ...registeredCustom.filter((m) => !seen.has(m.value))];
+        // The image picker lists only models recorded as images; the text picker never
+        // offers them (an image model cannot answer a chat request).
+        mergedModels = wantsImage
+          ? mergedModels.filter((m) => m.kind === "image")
+          : mergedModels.filter((m) => m.kind !== "image");
+        if (wantsImage && mergedModels.length === 0) return;
 
         // Always show compatible providers that are connected, even with no aliases.
         // When no aliases exist, show a placeholder so users know it's available.

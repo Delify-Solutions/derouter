@@ -1,7 +1,7 @@
 import { makeKv } from "../helpers/kvStore.js";
 
 // Combo-level pricing overrides. Stored in the kv table under scope "comboPricing",
-// keyed by combo name, value = { input, output, cached, reasoning, cache_creation } ($/1M tokens).
+// keyed by combo name, value = { input, output, cached, reasoning, cache_creation } ($/1M tokens) plus `image` ($ per generated image).
 // Mirrors pricingRepo.js but flat (combo name -> pricing) instead of provider -> model -> pricing.
 //
 // Cost resolution order (see usageRepo.calculateCostNano → pricingRepo.resolvePrice):
@@ -36,7 +36,7 @@ export async function getPricingForCombo(comboName) {
 
 // pricingData: { comboName: { input, output, cached, reasoning, cache_creation } }
 // (validates keys; numeric fields only, non-negative)
-const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation"];
+const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation", "image"];
 
 export async function updateComboPricing(pricingData) {
   const cleaned = {};

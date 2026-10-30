@@ -490,7 +490,7 @@ test("resolve writes an audit entry on the order owner when an order is involved
   db.transaction(() => reconcile.resolveTransactionSync(db, {
     transactionId: review.transactionId,
     action: "resolve",
-    reason: "Sai số tiền, khách đồng ý huỷ",
+    reason: "Sai số tiền, khách đồng ý hủy",
     actor: "admin:ops",
   }));
 

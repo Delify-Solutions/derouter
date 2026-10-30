@@ -47,7 +47,7 @@ function wipe() {
   ]) {
     try { db.run(`DELETE FROM ${table}`); } catch { /* partial schema */ }
   }
-  for (const marker of ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"]) {
+  for (const marker of ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.refundedPlans.v1", "bootstrap.backfill.v1"]) {
     db.run(`DELETE FROM _meta WHERE key = ?`, [marker]);
   }
 }
@@ -221,14 +221,14 @@ test("a second run changes nothing", () => {
   );
 
   const first = runPostSyncTasksSync(db);
-  assert.deepEqual(first.ran.sort(), ["adminKeyGroups", "backfill", "customerKeys", "orderEmails"]);
+  assert.deepEqual(first.ran.sort(), ["adminKeyGroups", "backfill", "customerKeys", "orderEmails", "refundedPlans"]);
 
   const snapshot = () => ({
     groups: db.all(`SELECT * FROM keyGroups ORDER BY id`),
     users: db.all(`SELECT id, groupId FROM users ORDER BY id`),
     keys: db.all(`SELECT id, groupId, rpm FROM apiKeys ORDER BY id`),
     audits: db.all(`SELECT * FROM userAuditLog ORDER BY id`),
-    markers: ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.backfill.v1"].map((k) => getMetaSync(db, k, null)),
+    markers: ["bootstrap.customerKeys.v1", "bootstrap.adminKeyGroups.v1", "bootstrap.orderEmails.v1", "bootstrap.refundedPlans.v1", "bootstrap.backfill.v1"].map((k) => getMetaSync(db, k, null)),
     settings: rawSettings(),
   });
 
@@ -273,4 +273,31 @@ test("ensureCustomerGroupsSync repairs a settings value that names an inactive g
   const result = ensureCustomerGroupsSync(db);
   assert.equal(result.defaultGroupId, "live");
   assert.equal(rawSettings().defaultUserGroupId, "live");
+});
+
+test("refundedPlans: a refunded order's original and compensation plans are closed once", () => {
+  wipe();
+  insertUser("ur");
+  db.run(
+    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, durationDays, status, method, createdAt)
+     VALUES('o-ref', 'ur', 'p-x', 10000000000, 25000000000, 30, 'refunded', 'manual', ?)`,
+    [NOW()]
+  );
+  const insertPlan = (id, source) => db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, createdAt)
+     VALUES(?, 'ur', NULL, 'o-ref', ?, 25000000000, 25000000000, ?, ?, 'active', ?)`,
+    [id, source, NOW(), new Date(Date.now() + 86_400_000).toISOString(), NOW()]
+  );
+  insertPlan("up-original", "purchase");
+  insertPlan("up-compensation", "refund");
+
+  const run = runPostSyncTasksSync(db);
+  assert.ok(run.ran.includes("refundedPlans"));
+
+  const rows = db.all(`SELECT id, status, creditRemainingNanoUsd FROM userPlans ORDER BY id`);
+  assert.deepEqual(rows.map((r) => [r.id, r.status, r.creditRemainingNanoUsd]), [
+    ["up-compensation", "refunded", 0],
+    ["up-original", "refunded", 0],
+  ]);
+  assert.equal(db.all(`SELECT * FROM creditLedger WHERE kind = 'revoke'`).length, 2);
 });

@@ -42,7 +42,7 @@ const KIND_DESCRIPTION = {
 };
 
 const ACB_WARNING =
-  "Dùng API app ACB không chính thức — ACB có thể thay đổi hoặc khoá truy cập; nên dùng tài khoản riêng cho việc nhận tiền.";
+  "Dùng API app ACB không chính thức — ACB có thể thay đổi hoặc khóa truy cập; nên dùng tài khoản riêng cho việc nhận tiền.";
 
 const STATUS_LABEL = {
   matched: "Đã khớp",
@@ -60,7 +60,7 @@ const REASON_LABEL = {
   no_code: "Không tìm thấy mã trong nội dung",
   order_not_found: "Mã không thuộc đơn nào",
   wrong_provider: "Sai nguồn nhận tiền",
-  order_not_pending: "Đơn đã thanh toán / đã huỷ",
+  order_not_pending: "Đơn đã thanh toán / đã hủy",
   order_expired: "Đơn đã hết hạn",
   amount_mismatch: "Sai số tiền",
   underpaid: "Chuyển thiếu",
@@ -405,9 +405,9 @@ export default function PaymentsPageClient() {
 
   const removeProvider = (provider) => {
     setConfirmState({
-      title: "Xoá nguồn nhận tiền",
-      message: `Xoá "${provider.name}"? Chỉ xoá được khi chưa có đơn hay giao dịch nào; nếu đã có, hãy tắt thay vì xoá.`,
-      confirmText: "Xoá",
+      title: "Xóa nguồn nhận tiền",
+      message: `Xóa "${provider.name}"? Chỉ xóa được khi chưa có đơn hay giao dịch nào; nếu đã có, hãy tắt thay vì xóa.`,
+      confirmText: "Xóa",
       variant: "danger",
       onConfirm: async () => {
         setConfirmState(null);
@@ -415,9 +415,9 @@ export default function PaymentsPageClient() {
         try {
           const res = await fetch(`/api/payments/providers/${provider.id}`, { method: "DELETE" });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || "Không xoá được nguồn nhận tiền");
+          if (!res.ok) throw new Error(data.error || "Không xóa được nguồn nhận tiền");
           await loadProviders();
-          setNotice({ type: "success", message: "Đã xoá nguồn nhận tiền" });
+          setNotice({ type: "success", message: "Đã xóa nguồn nhận tiền" });
         } catch (error) {
           setNotice({ type: "error", message: error.message });
         } finally {
@@ -566,7 +566,7 @@ export default function PaymentsPageClient() {
         size="full"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setShowForm(false)} disabled={saving}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => setShowForm(false)} disabled={saving}>Hủy</Button>
             <Button onClick={submitForm} loading={saving}>
               {editing ? "Lưu" : "Thêm nguồn"}
             </Button>
@@ -700,7 +700,7 @@ function PaymentSettingsPanel({ settings, errors, error, dirty, saving, onChange
       <p className="border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
         Hết hạn đơn và việc dò giao dịch đều chạy trong tiến trình nền. Nếu bạn đặt{" "}
         <code className="font-mono text-text-main">DISABLE_PAYMENT_POLLER</code>, đơn chưa thanh toán sẽ
-        không tự chuyển sang &quot;hết hạn&quot; và không có giao dịch nào được dò — khi đó phải tự huỷ đơn
+        không tự chuyển sang &quot;hết hạn&quot; và không có giao dịch nào được dò — khi đó phải tự hủy đơn
         hoặc bật lại tiến trình.
       </p>
 
@@ -839,7 +839,7 @@ function ProvidersTab({
                     {provider.isActive ? "Tắt" : "Bật"}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => onDelete(provider)} disabled={busyId === provider.id}>
-                    Xoá
+                    Xóa
                   </Button>
                 </div>
               </div>
@@ -1173,7 +1173,7 @@ function ProviderForm({ draft, editing, error, onField, onConfig, onSecret }) {
       )}
 
       <div className="flex flex-col gap-3 border-t border-border pt-4">
-        <p className="meta text-text-subtle">Khoá bí mật</p>
+        <p className="meta text-text-subtle">Khóa bí mật</p>
         {kind === "sepay" && !editing && (
           <p className="text-[12px] text-text-muted">
             Webhook key được tạo tự động khi bạn bấm Thêm nguồn và hiện đúng một lần.
@@ -1209,7 +1209,7 @@ function ProviderForm({ draft, editing, error, onField, onConfig, onSecret }) {
           })}
         </div>
         <p className="text-[11px] text-text-muted">
-          Khoá được mã hoá khi lưu và không bao giờ trả lại qua API — chỉ hiện 4 ký tự cuối.
+          Khóa được mã hoá khi lưu và không bao giờ trả lại qua API — chỉ hiện 4 ký tự cuối.
         </p>
       </div>
 
@@ -1606,7 +1606,7 @@ function ResolveModal({ state, onClose, onDone }) {
       size="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Huỷ</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Hủy</Button>
           <Button onClick={submit} loading={saving}>
             {isAssign ? "Gán và kích hoạt" : "Đánh dấu đã xử lý"}
           </Button>

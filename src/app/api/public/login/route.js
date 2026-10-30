@@ -7,7 +7,6 @@ import {
   touchLastLogin,
 } from "@/lib/localDb";
 import { setUserCookie, USER_TOKEN_TTL_SECONDS } from "@/lib/auth/userSession";
-import { clearDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
 
 export const dynamic = "force-dynamic";
@@ -89,10 +88,6 @@ export async function POST(request) {
   recordSuccess(ip);
 
   const cookieStore = await cookies();
-  // Symmetric to admin login: one browser holds one identity. A customer signing
-  // in on a machine that still has an admin session drops the admin session
-  // rather than keeping two cookies that every page would then have to arbitrate.
-  clearDashboardAuthCookie(cookieStore);
   const token = await setUserCookie(cookieStore, request, { userId: user.id, email: user.email });
 
   // Persist the session so logout and password reset can revoke it, and so the

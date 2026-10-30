@@ -6,14 +6,14 @@ import { DATA_DIR } from "@/lib/dataDir";
 import { shouldUseSecureCookie } from "./dashboardSession.js";
 
 // Customer session tokens. Deliberately a SEPARATE signing key from the admin
-// dashboard (dashboardSession.js uses DATA_DIR/jwt-secret): a 7-day customer
-// token must never be replayable as an admin token, and the short admin token
-// must never grant a customer account. Two key files makes that structural
+// dashboard (dashboardSession.js uses DATA_DIR/jwt-secret): a 30-day customer
+// token must never be replayable as an admin token, and an admin token must never
+// grant a customer account. Two key files makes that structural
 // rather than a claim-shape check. `kind: "user"` is checked as well, so a
 // token signed by this key that was minted for some other purpose still fails.
 
 export const USER_COOKIE = "user_token";
-export const USER_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const USER_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 function loadUserJwtSecret() {
   if (process.env.USER_JWT_SECRET) return process.env.USER_JWT_SECRET;

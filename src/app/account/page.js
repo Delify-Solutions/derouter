@@ -16,7 +16,7 @@ export const metadata = { title: "Tổng quan - derouter" };
 const STATUS_TAG = {
   active: { label: "Đang hoạt động", tone: "success", icon: "check_circle" },
   unverified: { label: "Chưa xác minh", tone: "warning", icon: "mark_email_unread" },
-  suspended: { label: "Đang bị khoá", tone: "danger", icon: "block" },
+  suspended: { label: "Đang bị khóa", tone: "danger", icon: "block" },
 };
 
 function StatusTag({ status }) {
@@ -167,7 +167,7 @@ export default async function AccountOverviewPage() {
         </div>
       )}
 
-      <Section title="Bắt đầu" description="Ba bước để gọi API bằng credit của bạn. Base URL tương thích OpenAI và Anthropic.">
+      <Section title="Bắt đầu" description="Ba bước để gọi API bằng credit của bạn. Base URL dùng được với cả giao thức OpenAI và Claude.">
         <Panel className="flex flex-col gap-6 p-6">
           <div className="flex flex-col gap-2">
             <p className="text-sm text-text-main"><span className="mr-2 font-mono text-xs text-text-subtle">[01]</span>Tạo API key</p>

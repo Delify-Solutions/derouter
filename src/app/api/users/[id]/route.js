@@ -236,7 +236,7 @@ export async function DELETE(request, { params }) {
     body = await request.json();
   } catch {
     return NextResponse.json(
-      { error: "Nhập lại email của tài khoản để xác nhận xoá" },
+      { error: "Nhập lại email của tài khoản để xác nhận xóa" },
       { status: 400, headers: NO_STORE }
     );
   }
@@ -244,7 +244,7 @@ export async function DELETE(request, { params }) {
   const confirmEmail = normalizeEmail(body?.confirmEmail);
   if (!confirmEmail || confirmEmail !== normalizeEmail(existing.email)) {
     return NextResponse.json(
-      { error: "Email nhập vào không khớp với tài khoản cần xoá" },
+      { error: "Email nhập vào không khớp với tài khoản cần xóa" },
       { status: 400, headers: NO_STORE }
     );
   }

@@ -12,7 +12,7 @@ import { insertAuditSync } from "../../billing/audit.js";
 // ever returned once, at creation, and the DB stores sha256 hex of it. Lookups hash
 // the presented token first, so a DB leak cannot be replayed as a login.
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const SESSION_TTL = SESSION_TTL_MS;
 

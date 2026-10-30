@@ -3,7 +3,6 @@ import { getSettings } from "@/lib/localDb";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
-import { clearUserCookie } from "@/lib/auth/userSession";
 import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
@@ -89,11 +88,9 @@ export async function POST(request) {
       }
 
       const cookieStore = await cookies();
-      // Admin and customer sessions are separate identities and must never be
-      // held at once: with both cookies present every page had to pick a winner,
-      // and the two could disagree about who the caller is. Signing in as admin
-      // therefore drops any customer session on this browser.
-      clearUserCookie(cookieStore);
+      // The admin and customer sessions are independent cookies signed with
+      // different keys, and every route reads exactly one of them, so signing in as
+      // admin leaves a customer session on this browser untouched.
       await setDashboardAuthCookie(cookieStore, request);
 
       return NextResponse.json({ success: true, mustChangePassword: false }, { headers: NO_STORE_HEADERS });

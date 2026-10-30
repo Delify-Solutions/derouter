@@ -76,6 +76,18 @@ function rate(v) {
  * @param {object} pricing - USD per 1M tokens: { input, output, cached, reasoning, cache_creation }
  * @returns {number} integer nanoUSD
  */
+/**
+ * Cost of `count` generated images at `pricing.image` USD per image. Image models
+ * are priced per image, not per token (the upstream reports no token usage), so a
+ * missing or non-positive price is 0 and the caller decides whether that is allowed.
+ */
+export function costFromImagesNano(count, pricing) {
+  const images = Math.floor(Number(count));
+  const price = Number(pricing?.image);
+  if (!Number.isFinite(images) || images <= 0 || !Number.isFinite(price) || price <= 0) return 0;
+  return usdToNano(price) * images;
+}
+
 export function costFromTokensNano(tokens, pricing) {
   if (!tokens || !pricing) return 0;
 

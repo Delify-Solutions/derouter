@@ -65,7 +65,7 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: "Order not found" }, { status: 404, headers: NO_STORE });
     }
     return NextResponse.json(
-      { error: "Chỉ huỷ được đơn đang chờ thanh toán" },
+      { error: "Chỉ hủy được đơn đang chờ thanh toán" },
       { status: 409, headers: NO_STORE }
     );
   } catch {

@@ -14,9 +14,50 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
+import { getAdapter } from "@/lib/db/driver.js";
+import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
+import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
+import { costFromImagesNano } from "@/shared/utils/money";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
+
+const IMAGE_ENDPOINT = "/v1/images/generations";
+
+/**
+ * Customer keys pay per image, so a model with no per-image price must not be
+ * served: the request would be recorded at $0 and cost the customer nothing.
+ * Admin and local keys (no owning customer) are not billed and are never refused.
+ * Returns an error Response, or null when the call may proceed.
+ */
+async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) {
+  if (!apiKey) return null;
+  const db = await getAdapter();
+  if (!resolveApiKeyOwner(db, apiKey)) return null;
+  const { pricing } = await resolvePrice({ provider, model, requestedModel });
+  if (costFromImagesNano(1, pricing) > 0) return null;
+  return errorResponse(
+    HTTP_STATUS.FORBIDDEN,
+    `Image model "${requestedModel || model}" has no per-image price, so it is not available on this key`
+  );
+}
+
+/** Record a finished image request so it is priced and charged like any other. */
+function recordImageUsage({ provider, model, connectionId = null, apiKey, requestedModel, result }) {
+  if (!apiKey) return;
+  saveRequestUsage({
+    provider,
+    model,
+    connectionId,
+    apiKey,
+    endpoint: IMAGE_ENDPOINT,
+    tokens: {},
+    imageCount: Math.max(1, Number(result?.imageCount) || 0),
+    status: "success",
+    requestedModel,
+  }).catch(() => {});
+}
 
 /**
  * Handle image generation request
@@ -63,7 +104,7 @@ export async function handleImageGeneration(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, requestedModel: modelStr }),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -71,14 +112,23 @@ export async function handleImageGeneration(request) {
     });
   }
 
-  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId });
+  return handleSingleModelImage(body, modelStr, {
+    wantsStream,
+    binaryOutput,
+    preferredConnectionId,
+    apiKey,
+    requestedModel: modelStr.includes("/") ? null : modelStr,
+  });
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId } = {}) {
+async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey = null, requestedModel = null } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
   const { provider, model } = modelInfo;
+
+  const unpriced = await refuseUnpricedImage(apiKey, { provider, model, requestedModel });
+  if (unpriced) return unpriced;
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
@@ -88,7 +138,10 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       credentials: null,
       binaryOutput,
     });
-    if (result.success) return result.response;
+    if (result.success) {
+      recordImageUsage({ provider, model, apiKey, requestedModel, result });
+      return result.response;
+    }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
   }
 
@@ -133,7 +186,10 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      recordImageUsage({ provider, model, connectionId: credentials.connectionId, apiKey, requestedModel, result });
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
 

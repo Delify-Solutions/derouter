@@ -13,7 +13,7 @@ function isOverrideRow(merged, defaults, provider, model) {
   const d = defaults?.[provider]?.[model];
   if (!d) return true; // not in built-in → user-added
   const m = merged?.[provider]?.[model];
-  for (const f of ["input", "output", "cached", "reasoning", "cache_creation"]) {
+  for (const f of ["input", "output", "cached", "reasoning", "cache_creation", "image"]) {
     if (Number(m?.[f] ?? 0) !== Number(d[f] ?? 0)) return true;
   }
   return false;
@@ -32,6 +32,7 @@ function flatten(merged, defaults) {
         cached: pricing?.cached ?? 0,
         reasoning: pricing?.reasoning ?? 0,
         cache_creation: pricing?.cache_creation ?? 0,
+        image: pricing?.image ?? 0,
         isOverride: isOverrideRow(merged, defaults, provider, model),
       });
     }
@@ -115,6 +116,7 @@ export default function PricingPageClient() {
       cached: String(row.cached ?? ""),
       reasoning: String(row.reasoning ?? ""),
       cache_creation: String(row.cache_creation ?? ""),
+      image: String(row.image ?? ""),
     });
     setStatus(null);
   };

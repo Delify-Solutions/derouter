@@ -101,7 +101,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
         setKeys((prev) => prev.filter((key) => key.id !== deleteTarget.id));
       } else {
         const data = await res.json().catch(() => ({}));
-        setLoadError(data.error || "Không xoá được key");
+        setLoadError(data.error || "Không xóa được key");
       }
     } catch {
       setLoadError("Không kết nối được máy chủ");
@@ -119,7 +119,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
       description="Dùng key này để gọi model trong nhóm của bạn. Key chỉ hiển thị một lần khi tạo."
       actions={createAction}
     >
-      <Section title="Kết nối" description="Trỏ client tương thích OpenAI hoặc Anthropic tới địa chỉ này.">
+      <Section title="Kết nối" description="Trỏ client OpenAI hoặc Claude tới địa chỉ này.">
         <div className="flex flex-col gap-3">
           <CopyBlock prompt="url" value={baseUrl} label="Sao chép địa chỉ API" />
           <CopyBlock value={`curl ${baseUrl}/models -H "Authorization: Bearer <key>"`} label="Sao chép lệnh thử" />
@@ -161,8 +161,8 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
                 actions={
                   <button
                     type="button"
-                    aria-label={`Xoá key ${key.name || key.keyPrefix || ""}`}
-                    title="Xoá key"
+                    aria-label={`Xóa key ${key.name || key.keyPrefix || ""}`}
+                    title="Xóa key"
                     onClick={() => setDeleteTarget(key)}
                     className="flex size-9 items-center justify-center border border-border bg-surface text-text-muted transition-colors duration-150 hover:bg-red-500/10 hover:text-red-600"
                   >
@@ -182,7 +182,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
         title="Tạo API key"
         footer={
           <>
-            <ActionButton tone="ghost" onClick={() => { setCreateOpen(false); setFormError(""); }} disabled={saving}>Huỷ</ActionButton>
+            <ActionButton tone="ghost" onClick={() => { setCreateOpen(false); setFormError(""); }} disabled={saving}>Hủy</ActionButton>
             <ActionButton tone="solid" onClick={submitCreate} loading={saving} disabled={!name.trim()}>Tạo</ActionButton>
           </>
         }
@@ -226,16 +226,16 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
       <Modal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Xoá API key"
+        title="Xóa API key"
         footer={
           <>
-            <ActionButton tone="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>Huỷ</ActionButton>
-            <ActionButton tone="solid" onClick={submitDelete} loading={deleting} className="border-red-600 bg-red-600 text-white hover:bg-red-700">Xoá key</ActionButton>
+            <ActionButton tone="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>Hủy</ActionButton>
+            <ActionButton tone="solid" onClick={submitDelete} loading={deleting} className="border-red-600 bg-red-600 text-white hover:bg-red-700">Xóa key</ActionButton>
           </>
         }
       >
         <p className="text-sm text-text-main">
-          Xoá key <span className="font-mono">{deleteTarget?.name || deleteTarget?.keyPrefix}</span>?
+          Xóa key <span className="font-mono">{deleteTarget?.name || deleteTarget?.keyPrefix}</span>?
           Mọi ứng dụng đang dùng key này sẽ ngừng gọi được ngay. Không thể hoàn tác.
         </p>
       </Modal>

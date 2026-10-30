@@ -5,16 +5,16 @@ import { fmtUsd } from "./salesData";
 // FAQ ngắn: chỉ trả lời những câu mà cơ chế trong repo thực sự quyết định, để
 // trang không hứa điều hệ thống không làm. Năm câu hỏi của spec public-landing:
 // mua nhiều gói, hạn mức 5 giờ, credit còn lại khi hết hạn, model nào dùng được,
-// và gói bị tạm khoá.
+// và gói bị tạm khóa.
 export default function FaqSection({ plans, models, copy }) {
   const questions = [
     {
       q: "Mua nhiều gói thì dùng thế nào?",
-      a: "Mỗi gói là một khoản credit riêng, xếp thành hàng đợi. Request được trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; khi gói đó tạm khoá, hệ thống tự chuyển sang gói kế tiếp. Bạn đổi được thứ tự trong trang Gói của tôi.",
+      a: "Mỗi gói là một khoản credit riêng, xếp thành hàng đợi. Request được trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; khi gói đó tạm khóa, hệ thống tự chuyển sang gói kế tiếp. Bạn đổi được thứ tự trong trang Gói của tôi.",
     },
     {
       q: "Hạn mức 5 giờ nghĩa là gì?",
-      a: "Lần đầu gói được trừ tiền, một cửa sổ 5 giờ mở ra. Trong 5 giờ đó bạn chỉ dùng tối đa mức tiền mà gói quy định cho cửa sổ này (ví dụ $20). Hết 5 giờ, cửa sổ đóng và lần trừ tiền tiếp theo mở cửa sổ mới, tính lại từ đầu.",
+      a: "Lần đầu gói được trừ tiền, một khung 5 giờ mở ra. Trong 5 giờ đó bạn chỉ dùng tối đa mức tiền mà gói quy định cho khung này (ví dụ $20). Hết 5 giờ, khung đóng và lần trừ tiền tiếp theo mở khung giờ mới, tính lại từ đầu.",
     },
     {
       q: "Credit còn lại khi gói hết hạn thì sao?",
@@ -25,8 +25,8 @@ export default function FaqSection({ plans, models, copy }) {
       a: `Mọi model mà nhóm tài khoản của bạn cho phép — credit dùng chung cho tất cả, không chia theo model. Danh mục hiện có ${models.length} model; gọi model ngoài nhóm sẽ bị từ chối với lỗi 403.`,
     },
     {
-      q: "Gói bị tạm khoá thì sao?",
-      a: "Khi một cửa sổ đã dùng hết mức, gói đó tạm khoá cho tới khi cửa sổ đóng. Nếu còn gói khác trong hàng đợi, request vẫn chạy bình thường trên gói đó. Nếu tất cả đều khoá, bạn nhận lỗi 429 kèm thời điểm mở lại gần nhất.",
+      q: "Gói bị tạm khóa thì sao?",
+      a: "Khi một khung giờ đã dùng hết mức, gói đó tạm khóa cho tới khi khung giờ đóng. Nếu còn gói khác trong hàng đợi, request vẫn chạy bình thường trên gói đó. Nếu tất cả đều khóa, bạn nhận lỗi 429 kèm thời điểm mở lại gần nhất.",
     },
   ];
 

@@ -5,6 +5,11 @@ import { getExecutor } from "../executors/index.js";
 import { getImageAdapter } from "./imageProviders/index.js";
 import { urlToBase64 } from "./imageProviders/_base.js";
 
+/** Number of images in an OpenAI-shaped response (0 when none could be counted). */
+function countImages(responseBody) {
+  return Array.isArray(responseBody?.data) ? responseBody.data.length : 0;
+}
+
 function serializeRequestBody(requestBody) {
   if (typeof FormData !== "undefined" && requestBody instanceof FormData) return requestBody;
   if (typeof requestBody === "string") return requestBody;
@@ -71,6 +76,7 @@ export async function handleImageGenerationCore({
           const mime = fmt === "jpeg" || fmt === "jpg" ? "image/jpeg" : fmt === "webp" ? "image/webp" : "image/png";
           return {
             success: true,
+            imageCount: Math.max(1, countImages(finalBody)),
             response: new Response(buf, {
               headers: { "Content-Type": mime, "Content-Disposition": `inline; filename="image.${fmt === "jpeg" ? "jpg" : fmt}"`, "Access-Control-Allow-Origin": "*" },
             }),
@@ -80,6 +86,7 @@ export async function handleImageGenerationCore({
 
       return {
         success: true,
+        imageCount: countImages(finalBody),
         response: new Response(JSON.stringify(finalBody), {
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
         }),
@@ -127,7 +134,7 @@ export async function handleImageGenerationCore({
       providerResponse.status === HTTP_STATUS.FORBIDDEN)
   ) {
     const newCredentials = await refreshWithRetry(
-      () => executor.refreshCredentials(credentials, log),
+      () => (typeof executor?.refreshCredentials === "function" ? executor.refreshCredentials(credentials, log) : null),
       3,
       log
     );
@@ -207,6 +214,7 @@ export async function handleImageGenerationCore({
       const mime = fmt === "jpeg" || fmt === "jpg" ? "image/jpeg" : fmt === "webp" ? "image/webp" : "image/png";
       return {
         success: true,
+        imageCount: Math.max(1, countImages(finalBody)),
         response: new Response(buf, {
           headers: {
             "Content-Type": mime,
@@ -220,6 +228,7 @@ export async function handleImageGenerationCore({
 
   return {
     success: true,
+    imageCount: countImages(finalBody),
     response: new Response(JSON.stringify(finalBody), {
       headers: {
         "Content-Type": "application/json",

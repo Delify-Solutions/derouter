@@ -39,13 +39,13 @@ Trang bán gói dùng AI kiểu OpenCode Go. Khách đăng ký, mua gói, lấy 
 - Tổng quan: gói đang trả, credit còn, group và model được dùng.
 - Gói của tôi: hàng đợi, mua thêm, đơn hàng, lịch sử gói.
 - Nhật ký sử dụng: từng request trừ bao nhiêu, từ gói nào, model nào.
-- Mã quà tặng, API key (tạo key, secret chỉ hiện một lần, xoá), lịch sử dùng.
+- Mã quà tặng, API key (tạo key, secret chỉ hiện một lần, xóa), lịch sử dùng.
 
 ## Phía admin
 
 - **Gói:** giá VND, giá USD, credit, thời hạn, RPM/TPM,hạn mức; group nào được mua, số lần mua mỗi tháng, ẩn/hiện, chưa mở bán, nổi bật. Thống kê: số gói đang chạy, người dùng, doanh thu VND/USD, credit đã tiêu. Sửa gói chỉ áp cho lần mua sau, trừ khi tick "áp dụng cho các gói đang chạy".
-- **Group:** model được dùng,  group mặc định. Không xoá được group còn người dùng.
-- **Người dùng:** tìm, lọc, xem chi tiết (gói, đơn hàng, sổ cái, usage, key, phiên đăng nhập, mã quà tặng, nhật ký). Thao tác: tặng gói/credit, gia hạn, cộng/trừ credit, sửa hạn mức, thu hồi gói, đổi thứ tự, khoá key, khoá tài khoản (chặn API ngay), đổi group, đặt lại mật khẩu, xoá. Mọi thao tác phải ghi lý do và vào nhật ký.
+- **Group:** model được dùng,  group mặc định. Không xóa được group còn người dùng.
+- **Người dùng:** tìm, lọc, xem chi tiết (gói, đơn hàng, sổ cái, usage, key, phiên đăng nhập, mã quà tặng, nhật ký). Thao tác: tặng gói/credit, gia hạn, cộng/trừ credit, sửa hạn mức, thu hồi gói, đổi thứ tự, khóa key, khóa tài khoản (chặn API ngay), đổi group, đặt lại mật khẩu, xóa. Mọi thao tác phải ghi lý do và vào nhật ký.
 - **Mã quà tặng:** tặng gói hoặc credit; giới hạn tổng lượt, lượt mỗi người, thời gian hiệu lực.
 - **Thanh toán:** cấu hình nguồn nhận tiền (SePay, web2m, ACB, Binance), "Chạy thử" không ghi DB, danh sách giao dịch. Giao dịch sai tiền, chuyển muộn hoặc thiếu mã vào "Cần kiểm tra" để admin gán vào đơn hoặc đánh dấu đã xử lý. Báo qua Telegram.
 - **Nội dung:** nội dung landing, banner thông báo, trang hướng dẫn `/docs`.

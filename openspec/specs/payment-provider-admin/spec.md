@@ -10,7 +10,7 @@ Gives the admin one place to configure the accounts that receive money (SePay, w
 - `acb`: name, account number, account holder, ACB internet-banking username, password, optional HTTP proxy URL, optional overrides of the app identity (client id, app api key, device id, app version — defaults come from the environment variables `ACB_CLIENT_ID`, `ACB_API_KEY`, `ACB_DEVICE_ID`, `ACB_APP_VERSION`), poll interval (minimum 30 seconds for this kind);
 - `binance`: name, Binance Pay UID, account name, optional QR image URL, API key, API secret, poll interval.
 
-The `acb` form SHALL show the warning "Dùng API app ACB không chính thức — ACB có thể thay đổi hoặc khoá truy cập; nên dùng tài khoản riêng cho việc nhận tiền."
+The `acb` form SHALL show the warning "Dùng API app ACB không chính thức — ACB có thể thay đổi hoặc khóa truy cập; nên dùng tài khoản riêng cho việc nhận tiền."
 
 Secrets (webhook key, API token, web2m token and password, ACB password and its cached token, proxy credentials, Binance API key and secret) SHALL be encrypted at rest with the existing secret encryption and SHALL never be returned by the API after saving — the API returns only whether each is set and its last 4 characters. A provider with orders or transactions SHALL NOT be deletable (HTTP 409); it can be disabled. Provider order (sort) decides which provider a new order uses.
 

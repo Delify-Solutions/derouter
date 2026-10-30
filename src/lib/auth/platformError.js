@@ -88,7 +88,7 @@ export function relativeWaitVi(ms) {
 export const PLATFORM_MESSAGES = {
   invalid_api_key: "API key không hợp lệ hoặc đã bị tắt.",
   key_expired: "API key đã hết hạn.",
-  account_suspended: "Tài khoản đang bị khoá — liên hệ admin.",
+  account_suspended: "Tài khoản đang bị khóa — liên hệ admin.",
   account_unverified: "Tài khoản chưa xác minh email.",
   group_missing: "Tài khoản chưa được gán nhóm hợp lệ — liên hệ admin.",
   rate_limit_rpm: "Vượt giới hạn RPM của nhóm, thử lại sau 60 giây.",

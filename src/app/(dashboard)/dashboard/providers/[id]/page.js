@@ -1063,7 +1063,12 @@ export default function ProviderDetailPage() {
         // matches compatible nodes by `node.prefix`, not `node.id`. The storage
         // alias is the node id (e.g. openai-compatible-chat-<uuid>) which the
         // router cannot resolve, so the test ping would fail with "no provider".
-        body: JSON.stringify({ model: `${providerDisplayAlias}/${modelId}` }),
+        // An image node has no chat endpoint: ping it with an image request, otherwise
+        // the test reports the chat 403 of a perfectly good image model.
+        body: JSON.stringify({
+          model: `${providerDisplayAlias}/${modelId}`,
+          ...(providerNode?.apiType === "images" ? { kind: "image" } : {}),
+        }),
       });
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
@@ -1088,8 +1093,8 @@ export default function ProviderDetailPage() {
           onCopy={copy}
           onSetAlias={handleSetAlias}
           onDeleteAlias={handleDeleteAlias}
-          onAddCustomModel={(modelId) => handleAddCustomModel(modelId, "llm", providerStorageAlias)}
-          onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
+          onAddCustomModel={(modelId, type = "llm") => handleAddCustomModel(modelId, type, providerStorageAlias)}
+          onDeleteCustomModel={(modelId, type = "llm") => handleDeleteCustomModel(modelId, type, providerStorageAlias)}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
         />
@@ -1367,8 +1372,8 @@ export default function ProviderDetailPage() {
             <div className="min-w-0">
               <h2 className="text-lg font-semibold">{isAnthropicCompatible ? "Anthropic Compatible Details" : "OpenAI Compatible Details"}</h2>
               <p className="break-all text-sm text-text-muted">
-                {isAnthropicCompatible ? "Messages API" : (providerNode.apiType === "responses" ? "Responses API" : "Chat Completions")} · {(providerNode.baseUrl || "").replace(/\/$/, "")}/
-                {isAnthropicCompatible ? "messages" : (providerNode.apiType === "responses" ? "responses" : "chat/completions")}
+                {isAnthropicCompatible ? "Messages API" : (providerNode.apiType === "responses" ? "Responses API" : providerNode.apiType === "images" ? "Image Generation" : "Chat Completions")} · {(providerNode.baseUrl || "").replace(/\/$/, "")}/
+                {isAnthropicCompatible ? "messages" : (providerNode.apiType === "responses" ? "responses" : providerNode.apiType === "images" ? "images/generations" : "chat/completions")}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">

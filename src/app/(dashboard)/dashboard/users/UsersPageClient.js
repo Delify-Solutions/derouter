@@ -10,7 +10,7 @@ const STATUS_FILTERS = [
   { id: "", label: "Mọi trạng thái" },
   { id: "active", label: "Đang hoạt động" },
   { id: "unverified", label: "Chưa xác minh" },
-  { id: "suspended", label: "Đang khoá" },
+  { id: "suspended", label: "Đang khóa" },
 ];
 
 const PLAN_FILTERS = [
@@ -26,7 +26,7 @@ const STATUS_STYLES = {
   suspended: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
 };
 
-const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khoá" };
+const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khóa" };
 
 const PAGE_SIZE = 50;
 
@@ -272,7 +272,7 @@ export default function UsersPageClient() {
               size="sm"
               onClick={() => { setQ(""); setGroupFilter(""); setStatusFilter(""); setPlanFilter(""); }}
             >
-              Xoá bộ lọc
+              Xóa bộ lọc
             </Button>
           )}
         </div>
@@ -365,7 +365,7 @@ export default function UsersPageClient() {
         footer={
           <>
             <Button variant="ghost" onClick={() => { setCreateOpen(false); setCreateError(""); }} disabled={creating}>
-              Huỷ
+              Hủy
             </Button>
             <Button onClick={submitCreate} loading={creating}>Tạo</Button>
           </>

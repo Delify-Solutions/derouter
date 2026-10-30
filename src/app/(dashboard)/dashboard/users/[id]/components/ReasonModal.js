@@ -63,7 +63,7 @@ export default function ReasonModal({
       title={title}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Huỷ</Button>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Hủy</Button>
           <Button onClick={submit} loading={busy} disabled={!reasonOk || !extraValid}>{confirmLabel}</Button>
         </>
       }

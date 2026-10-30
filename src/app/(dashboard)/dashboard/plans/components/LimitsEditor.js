@@ -71,7 +71,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="meta text-text-subtle">Hạn mức theo cửa sổ</h3>
+        <h3 className="meta text-text-subtle">Hạn mức theo khung giờ</h3>
         <Button
           type="button"
           variant="secondary"
@@ -85,7 +85,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
       </div>
 
       <p className="text-xs text-text-muted">
-        Mỗi hạn mức giới hạn số tiền một gói được dùng trong một cửa sổ thời gian. Cửa sổ mở ở lần
+        Mỗi hạn mức giới hạn số tiền một gói được dùng trong một khung giờ. Khung giờ mở ở lần
         trừ tiền đầu tiên và tính lại sau đúng độ dài đó.
       </p>
 
@@ -102,7 +102,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
           <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
             <div className="flex flex-col gap-1.5">
               <label className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
-                Cửa sổ
+                Khung giờ
               </label>
               <Select
                 value={windowValue}
@@ -116,7 +116,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
                   { value: CUSTOM, label: "Tuỳ chỉnh" },
                 ]}
                 selectClassName="h-10"
-                aria-label={`Cửa sổ của hạn mức ${index + 1}`}
+                aria-label={`Khung giờ của hạn mức ${index + 1}`}
               />
             </div>
 
@@ -155,7 +155,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
                 size="sm"
                 icon="delete"
                 onClick={() => remove(index)}
-                aria-label={`Xoá hạn mức ${index + 1}`}
+                aria-label={`Xóa hạn mức ${index + 1}`}
                 className="text-red-600 hover:bg-red-500/10 mb-1"
               />
             </div>

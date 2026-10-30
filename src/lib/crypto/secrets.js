@@ -1,8 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { machineIdSync } from "node-machine-id";
-import { DATA_DIR } from "@/lib/dataDir";
+import * as machineIdModule from "node-machine-id";
+import { DATA_DIR } from "../dataDir.js";
+
+// CommonJS package: the Next bundler exposes the function as a named export, plain
+// Node (tests) only on `default`. Reading either keeps this module loadable in both.
+const machineIdSync = machineIdModule.machineIdSync ?? machineIdModule.default?.machineIdSync;
 
 // Provider credentials (OAuth tokens, API keys, session cookies) live in the SQLite
 // file, which gets copied around for backups. Encrypting them at rest means a leaked

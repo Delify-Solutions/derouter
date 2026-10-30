@@ -207,7 +207,7 @@ export default function ContentPageClient() {
     try {
       const res = await fetch(`/api/docs/${doc.id}`, { method: "DELETE" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Không xoá được trang");
+      if (!res.ok) throw new Error(data?.error || "Không xóa được trang");
       await loadDocs();
     } catch (e) {
       setDocsError(e.message);
@@ -391,11 +391,11 @@ export default function ContentPageClient() {
                     <button
                       type="button"
                       onClick={() => setConfirm({
-                        title: "Xoá trang",
-                        message: `Xoá "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động.`,
+                        title: "Xóa trang",
+                        message: `Xóa "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động.`,
                         onConfirm: () => { setConfirm(null); removeDoc(doc); },
                       })}
-                      aria-label={`Xoá ${doc.title}`}
+                      aria-label={`Xóa ${doc.title}`}
                       className="size-8 flex items-center justify-center border border-border text-danger hover:border-danger transition-colors"
                     >
                       <span className="material-symbols-outlined text-[18px]">delete</span>
@@ -415,7 +415,7 @@ export default function ContentPageClient() {
         size="lg"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={saving}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</Button>
             <Button onClick={submitDoc} loading={saving}>
               {editingId ? "Lưu trang" : "Tạo trang"}
             </Button>
@@ -521,7 +521,7 @@ export default function ContentPageClient() {
         onConfirm={confirm?.onConfirm}
         title={confirm?.title || "Xác nhận"}
         message={confirm?.message}
-        confirmText="Xoá"
+        confirmText="Xóa"
         variant="danger"
       />
     </div>

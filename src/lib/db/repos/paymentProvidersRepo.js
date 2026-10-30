@@ -280,8 +280,10 @@ export async function updateProvider(id, patch = {}) {
   // Merge BEFORE encrypting so a kept value stays exactly the ciphertext it was;
   // re-encrypting it would change nothing functionally but would churn the row.
   const nextSecrets = { ...storedSecrets };
+  const allowedSecrets = SECRET_KEYS[kind] ?? { required: [], optional: [] };
+  const allowedKeys = new Set([...allowedSecrets.required, ...allowedSecrets.optional]);
   for (const [key, value] of Object.entries(incoming)) {
-    if (!Object.prototype.hasOwnProperty.call(SECRET_KEYS[kind] ?? {}, key)) {
+    if (!allowedKeys.has(key)) {
       // Not a documented secret for this kind: refuse rather than store an
       // unexpected ciphertext nobody will ever read.
       continue;

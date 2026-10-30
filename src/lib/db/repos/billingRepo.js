@@ -33,7 +33,8 @@ import {
   setDebtNanoSync,
   nano,
 } from "../../billing/ledger.js";
-import { grantUserPlan, NO_PLAN_ID } from "../../billing/grants.js";
+import { grantUserPlan, closeUserPlanSync, NO_PLAN_ID } from "../../billing/grants.js";
+import { insertAuditSync } from "../../billing/audit.js";
 import {
   ORDER_SELECT,
   approveOrderSync,
@@ -797,16 +798,14 @@ export async function cancelOrder(id, userId) {
 }
 
 /**
- * Refund a paid order: status becomes 'refunded', and — only if the order really
- * did grant a plan — the order's snapshotted credit is granted again on a fresh
- * window, recorded in the ledger as kind='refund' with a POSITIVE delta against
- * the same order.
+ * Refund a paid order: status becomes 'refunded' and the credit it bought is taken
+ * back. Every still-active plan the order produced is closed with status
+ * 'refunded', its unspent credit is forfeited and one negative 'revoke' ledger
+ * row records the amount. Credit the customer already spent is not clawed back.
  *
- * Note the direction: this returns credit to the customer. It is a credit
- * compensation attached to the order, not a clawback, so credit the customer has
- * already spent is restored rather than deducted. That is the requested
- * behaviour; an accounting reversal would instead post a negative delta for the
- * unconsumed remainder.
+ * (Before this, a refund granted the order's credit AGAIN as a compensation plan,
+ * so the customer ended up with more credit than before; the owner confirmed a
+ * refund must remove it.)
  */
 export async function refundOrder(id, { adminId = null, adminNote = null } = {}) {
   const db = await getAdapter();
@@ -820,10 +819,6 @@ export async function refundOrder(id, { adminId = null, adminNote = null } = {})
       throw new Error(`Cannot refund an order in status "${row.status}"`);
     }
 
-    const granted = db.get(
-      `SELECT id FROM userPlans WHERE orderId = ? ORDER BY createdAt ASC LIMIT 1`,
-      [id]
-    );
     const at = nowIso();
 
     db.run(
@@ -831,37 +826,37 @@ export async function refundOrder(id, { adminId = null, adminNote = null } = {})
       [adminNote, id]
     );
 
-    // No userPlans row for this order means nothing was ever granted, so there is
-    // no credit to compensate: the status change alone is the correct outcome.
-    let userPlan = null;
+    // A refund returns the customer's money, so the credit that money bought goes
+    // away: every still-active plan this order produced is closed as `refunded`
+    // and whatever was left of it is forfeited. Credit already spent stays spent.
+    // An order that never granted anything has nothing to take back.
+    const plans = db.all(`SELECT * FROM userPlans WHERE orderId = ?`, [id]);
     let refundedNanoUsd = 0;
-    let appliedToOverdraftNanoUsd = 0;
-    if (granted) {
-      const result = grantUserPlan(db, {
-        userId: row.userId,
-        planId: row.planId,
-        orderId: id,
-        source: "refund",
-        creditNanoUsd: nano(row.creditNanoUsd),
-        durationDays: nano(row.durationDays),
-        limits: orderLimits(db, row),
-        meta: { refundedOrderStatus: "paid", adminId, adminNote: adminNote ?? null },
+    for (const plan of plans) {
+      refundedNanoUsd += closeUserPlanSync(db, plan, {
+        status: "refunded",
+        reason: "order_refunded",
+        meta: { orderId: id, adminId, adminNote: adminNote ?? null },
         now: at,
-        ledgerKind: "refund",
       });
-      userPlan = result.userPlan;
-      // The order's credit is what was compensated; the overdraft slice of it
-      // never became spendable credit, so both figures are reported.
-      refundedNanoUsd = nano(row.creditNanoUsd);
-      appliedToOverdraftNanoUsd = result.appliedToOverdraftNanoUsd;
+    }
+
+    if (row.userId) {
+      insertAuditSync(db, {
+        userId: row.userId,
+        actor: adminId ? `admin:${adminId}` : "admin",
+        action: "order_refunded",
+        reason: adminNote ?? null,
+        details: { orderId: id, revokedNanoUsd: refundedNanoUsd, planIds: plans.map((plan) => plan.id) },
+        now: at,
+      });
     }
 
     return {
       alreadyRefunded: false,
       order: rowToOrder(db.get(`${ORDER_SELECT} WHERE o.id = ?`, [id])),
-      userPlan,
+      userPlan: null,
       refundedNanoUsd,
-      appliedToOverdraftNanoUsd,
     };
   });
 }

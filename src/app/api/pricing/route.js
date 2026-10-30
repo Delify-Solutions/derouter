@@ -5,7 +5,7 @@ import {
 } from "@/lib/localDb.js";
 import { getDefaultPricing } from "open-sse/providers/pricing.js";
 
-const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation"];
+const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation", "image"];
 
 function validatePricingFields(pricing, label) {
   if (typeof pricing !== "object" || pricing === null) {
@@ -45,7 +45,7 @@ export async function GET(request) {
 
 /**
  * PATCH /api/pricing
- * Combo-level pricing: body = { combo: { <comboName>: { input, output, cached, reasoning, cache_creation } } }
+ * Combo-level pricing: body = { combo: { <comboName>: { input, output, cached, reasoning, cache_creation, image } } }
  * Per-pool pricing (legacy): body = { provider: { model: { ... } } }
  * The combo field is mutually exclusive with provider fields.
  */

@@ -121,7 +121,7 @@ export default function OrdersPageClient() {
       },
       refund: {
         title: "Refund order",
-        message: `Refund ${fmtUsdNano(order.amountNanoUsd)}? The order becomes refunded and ${fmtUsdNano(order.creditNanoUsd)} of credit is re-granted as a compensating refund plan.`,
+        message: `Refund ${fmtUsdNano(order.amountNanoUsd)}? The order becomes refunded and the unspent credit from this order is taken back from the customer.`,
         confirmText: "Refund",
         variant: "danger",
       },
@@ -151,7 +151,7 @@ export default function OrdersPageClient() {
           <span className="meta text-text-subtle">Billing</span>
           <h1 className="text-2xl font-semibold text-text-main">Orders</h1>
           <p className="text-sm text-text-muted max-w-xl">
-            Manual transfers. Approving an order grants its snapshotted credit; refunding compensates it.
+            Manual transfers. Approving an order grants its snapshotted credit; refunding takes that credit back.
           </p>
         </div>
         <Button

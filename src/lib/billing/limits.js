@@ -158,7 +158,7 @@ export function validateLimits(raw, { creditNanoUsd = 0, durationDays = 0 } = {}
 
     // 3. One limit per window length.
     if (seen.has(limit.hours)) {
-      return `Có hai hạn mức cùng dùng cửa sổ ${label}`;
+      return `Có hai hạn mức cùng dùng khung ${label}`;
     }
     seen.add(limit.hours);
   }

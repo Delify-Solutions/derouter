@@ -53,6 +53,35 @@ export function planIdIsNullable(db) {
 }
 
 /**
+ * Close an ACTIVE purchase without spending it: status becomes `status`
+ * (`refunded`, `revoked`), the unspent credit is zeroed, its window counters go,
+ * and the forfeited amount is written as one negative `revoke` ledger row so the
+ * money stays accounted for. A plan that is not active is left alone.
+ *
+ * @returns {number} nano-USD removed (0 when nothing was left or the plan was closed)
+ */
+export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = null } = {}) {
+  if (!plan || plan.status !== "active") return 0;
+  const at = now || nowIso();
+  const remaining = nano(plan.creditRemainingNanoUsd);
+
+  db.run(`UPDATE userPlans SET status = ?, creditRemainingNanoUsd = 0 WHERE id = ?`, [status, plan.id]);
+  db.run(`DELETE FROM userPlanWindows WHERE userPlanId = ?`, [plan.id]);
+
+  if (remaining > 0) {
+    insertLedgerSync(db, {
+      userId: plan.userId,
+      userPlanId: plan.id,
+      deltaNanoUsd: -remaining,
+      kind: "revoke",
+      meta: { reason, ...meta },
+      createdAt: at,
+    });
+  }
+  return remaining;
+}
+
+/**
  * Create a userPlans row for a purchase/gift/admin grant.
  * SYNCHRONOUS — call inside an existing db.transaction.
  *

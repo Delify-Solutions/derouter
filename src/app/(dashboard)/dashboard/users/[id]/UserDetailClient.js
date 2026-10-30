@@ -30,7 +30,7 @@ const TABS = [
   { id: "audit", label: "Nhật ký" },
 ];
 
-const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khoá" };
+const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khóa" };
 
 /**
  * `/dashboard/users/[id]` — everything about one customer, on nine tabs.
@@ -101,7 +101,7 @@ export default function UserDetailClient() {
         <span className="material-symbols-outlined text-[28px] text-text-muted" aria-hidden="true">person_off</span>
         <p className="font-medium text-text-main">Không tìm thấy người dùng này</p>
         <p className="max-w-md text-sm text-text-muted">
-          Tài khoản có thể đã bị xoá. Nhật ký của tài khoản đã xoá vẫn xem được ở tab Nhật ký nếu bạn
+          Tài khoản có thể đã bị xóa. Nhật ký của tài khoản đã xóa vẫn xem được ở tab Nhật ký nếu bạn
           còn id.
         </p>
         <Link

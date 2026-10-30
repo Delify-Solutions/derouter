@@ -147,7 +147,7 @@ export default function AccountUsageTable({
                 }}
                 className="h-10 border border-border px-3 font-mono text-xs text-text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text-main"
               >
-                Xoá lọc
+                Xóa lọc
               </button>
             )}
           </div>

@@ -1,7 +1,7 @@
 // Shared pricing constants + helpers used by the combos page (combo pricing auto-fill)
-// and the pricing page (pool pricing table). Keeps the 5-field schema in one place.
+// and the pricing page (pool pricing table). Keeps the pricing schema in one place (token rates per 1M, plus a per-image price).
 
-export const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation"];
+export const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation", "image"];
 
 export const PRICING_FIELDS = [
   { key: "input", label: "Input ($/1M)" },
@@ -9,6 +9,7 @@ export const PRICING_FIELDS = [
   { key: "cache_creation", label: "Cache write ($/1M)" },
   { key: "output", label: "Output ($/1M)" },
   { key: "reasoning", label: "Reasoning ($/1M)" },
+  { key: "image", label: "Image ($/image)" },
 ];
 
 export const EMPTY_PRICING = {
@@ -17,6 +18,7 @@ export const EMPTY_PRICING = {
   cached: "",
   reasoning: "",
   cache_creation: "",
+  image: "",
 };
 
 // Validate a pricing object's fields. Returns an error string or null.
