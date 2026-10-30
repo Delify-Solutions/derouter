@@ -334,6 +334,12 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       } catch {
         // Ignore JSON parse errors
       }
+      // unavailableResponse() reports the wait only in the Retry-After header, so the
+      // body check above misses it and the combo's final 503 would carry no hint.
+      if (!retryAfter) {
+        const headerSec = Number(result.headers?.get?.("retry-after"));
+        if (Number.isFinite(headerSec) && headerSec > 0) retryAfter = new Date(Date.now() + headerSec * 1000).toISOString();
+      }
 
       // Track earliest retryAfter across all combo models
       if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) {
@@ -384,12 +390,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
   if (earliestRetryAfter) {
     const retryHuman = formatRetryAfter(earliestRetryAfter);
-    log.warn("COMBO", `All models failed | ${msg} (${retryHuman})`);
+    // A locked model's own message already ends with its "(reset after ...)" hint.
+    const baseMsg = msg.replace(/\s*\(reset after [^)]*\)\s*$/, "");
+    log.warn("COMBO", `All models failed | ${baseMsg} (${retryHuman})`);
     // Same shape as unavailableResponse(), plus the cycle guard state so a
     // skipped-model / depth-abort can be told apart from plain unavailability.
     const retryAfterSec = Math.max(Math.ceil((new Date(earliestRetryAfter).getTime() - Date.now()) / 1000), 1);
     return new Response(
-      JSON.stringify({ error: { message: `${msg} (${retryHuman})` }, cycleGuard: { depth, visited: [...visited] } }),
+      JSON.stringify({ error: { message: `${baseMsg} (${retryHuman})` }, cycleGuard: { depth, visited: [...visited] } }),
       {
         status,
         headers: {
