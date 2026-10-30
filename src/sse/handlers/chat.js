@@ -25,20 +25,26 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { noteClientBody } from "open-sse/utils/errorTrace.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 /**
  * Handle chat completion request
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
  */
-export async function handleChat(request, clientRawRequest = null) {
+async function handleChatRequest(request, clientRawRequest = null) {
   let body;
+  let rawBody;
   try {
-    body = await request.json();
+    rawBody = await request.text();
+    body = JSON.parse(rawBody);
   } catch {
     log.warn("CHAT", "Invalid JSON body");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
   }
+  // For the error log: the request exactly as received (the engine rewrites `body` in place).
+  noteClientBody(body, rawBody);
 
   // Build clientRawRequest for logging (if not provided)
   if (!clientRawRequest) {
@@ -166,6 +172,9 @@ export async function handleChat(request, clientRawRequest = null) {
 
   return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
 }
+
+// Every failed chat request is kept in the error log (spec error-log).
+export const handleChat = withErrorLog(handleChatRequest);
 
 /**
  * Handle single model chat request

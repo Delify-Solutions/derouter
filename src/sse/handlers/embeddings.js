@@ -14,6 +14,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -30,7 +31,7 @@ function exactEmbeddingUsage(raw) {
  *
  * @param {Request} request
  */
-export async function handleEmbeddings(request) {
+async function handleEmbeddingsRequest(request) {
   let body;
   try {
     body = await request.json();
@@ -173,3 +174,6 @@ export async function handleEmbeddings(request) {
     return result.response;
   }
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleEmbeddings = withErrorLog(handleEmbeddingsRequest, { cloneBody: true });

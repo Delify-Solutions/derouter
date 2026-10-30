@@ -204,7 +204,9 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     stallTimer = setTimeout(() => {
       stallTimer = null;
       dbg(tag, `STALL TIMEOUT ${stallTimeoutMs}ms | chunks=${chunkCount} | bytes=${totalBytes} | sinceLast=${Date.now() - lastChunkAt}ms`);
-      streamController.handleError?.(new Error("stream stall timeout"));
+      const stall = new Error("stream stall timeout");
+      stall.streamStats = { chunks: chunkCount, bytes: totalBytes };
+      streamController.handleError?.(stall);
       streamController.abort?.();
     }, stallTimeoutMs);
   };
@@ -217,7 +219,13 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     startTime: streamController.startTime,
     isConnected: () => streamController.isConnected(),
     handleComplete: () => { dbg(tag, `complete | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleComplete(); },
-    handleError: (e) => { dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleError(e); },
+    handleError: (e) => {
+      dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`);
+      clearStall();
+      // Lets the error log say how far the stream got.
+      if (e && typeof e === "object" && !e.streamStats) e.streamStats = { chunks: chunkCount, bytes: totalBytes };
+      streamController.handleError(e);
+    },
     handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleDisconnect(r); },
     abort: () => { clearStall(); streamController.abort(); }
   };

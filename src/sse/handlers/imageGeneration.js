@@ -19,6 +19,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 import { costFromImagesNano } from "@/shared/utils/money";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -63,7 +64,7 @@ function recordImageUsage({ provider, model, connectionId = null, apiKey, reques
  * Handle image generation request
  * @param {Request} request
  */
-export async function handleImageGeneration(request) {
+async function handleImageGenerationRequest(request) {
   let body;
   try {
     body = await request.json();
@@ -203,3 +204,6 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
     return result.response;
   }
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleImageGeneration = withErrorLog(handleImageGenerationRequest, { cloneBody: true });

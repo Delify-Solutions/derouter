@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -206,6 +206,43 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
       "CREATE INDEX IF NOT EXISTS idx_rd_apikey_ts ON requestDetails(apiKey, timestamp DESC)",
+    ],
+  },
+
+  // Failed requests kept for debugging (admin "Nhật ký lỗi" page). One row per failed
+  // request: the error, what was asked and which upstream attempts failed. Never holds
+  // a raw API key — only apiKeyId plus an owner label snapshot. Pruned by age and count.
+  errorLogs: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      timestamp: "TEXT NOT NULL",
+      // upstream | platform | request | router | stream
+      source: "TEXT NOT NULL",
+      // Final HTTP status the client saw; 200 for a stream that failed after it started.
+      status: "INTEGER DEFAULT 0",
+      endpoint: "TEXT",
+      requestedModel: "TEXT",
+      provider: "TEXT",
+      model: "TEXT",
+      connectionId: "TEXT",
+      connectionName: "TEXT",
+      apiKeyId: "TEXT",
+      owner: "TEXT",
+      errorCode: "TEXT",
+      message: "TEXT",
+      stream: "INTEGER DEFAULT 0",
+      bodyBytes: "INTEGER DEFAULT 0",
+      estTokens: "INTEGER DEFAULT 0",
+      messageCount: "INTEGER DEFAULT 0",
+      latencyMs: "INTEGER DEFAULT 0",
+      // JSON: { request, upstreamRequest, response, attempts, preview, truncated, userAgent }
+      data: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_el_ts ON errorLogs(timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_el_source_ts ON errorLogs(source, timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_el_status_ts ON errorLogs(status, timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_el_model ON errorLogs(requestedModel)",
     ],
   },
 

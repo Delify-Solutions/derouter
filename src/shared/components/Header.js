@@ -162,6 +162,13 @@ const getPageInfo = (pathname) => {
       icon: "translate",
       breadcrumbs: [],
     };
+  if (pathname.includes("/dashboard/errors"))
+    return {
+      title: "Nhật ký lỗi",
+      description: "Request lỗi kèm báo lỗi, các lần gọi upstream và prompt đã gửi",
+      icon: "error",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/console-log"))
     return {
       title: "Console Log",

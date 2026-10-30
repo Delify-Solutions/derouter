@@ -4,6 +4,7 @@ import { applyThinking, extractThinking, stripThinkingSuffix } from "../translat
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
+import { getTrace, noteUpstreamBody, reportStreamError, bodyText } from "../utils/errorTrace.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
@@ -318,12 +319,22 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const msgCount = translatedBody.messages?.length || translatedBody.input?.length || translatedBody.contents?.length || translatedBody.request?.contents?.length || 0;
   log?.debug?.("REQUEST", `${provider.toUpperCase()} | ${model} | ${msgCount} msgs`);
 
+  // Captured now: a stream ends long after the handler returned.
+  const errorTrace = getTrace();
   const streamController = createStreamController({
     onDisconnect: (reason) => {
       trackPendingRequest(model, provider, connectionId, false);
       if (onDisconnect) onDisconnect(reason);
     },
-    onError: () => trackPendingRequest(model, provider, connectionId, false),
+    onError: (err) => {
+      trackPendingRequest(model, provider, connectionId, false);
+      // A stream that dies after its headers went out is invisible to the status code.
+      reportStreamError(errorTrace, {
+        message: err?.message || String(err), provider, model, connectionId,
+        upstreamText: errorTrace ? bodyText(finalBody ?? translatedBody) : null,
+        chunks: err?.streamStats?.chunks, bytes: err?.streamStats?.bytes,
+      });
+    },
     log, provider, model, reqTag
   });
 
@@ -393,6 +404,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     bodyTimeoutMs = result.bodyTimeoutMs;
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
   } catch (error) {
+    if (error.name !== "AbortError") noteUpstreamBody(translatedBody); // an abort is not logged: skip the serialisation
     trackPendingRequest(model, provider, connectionId, false, true);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
@@ -469,6 +481,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Provider returned error
   if (!providerResponse.ok) {
+    // markAccountUnavailable() attaches this to the failed attempt for the error log.
+    noteUpstreamBody(finalBody ?? translatedBody);
     trackPendingRequest(model, provider, connectionId, false, true);
     const { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
