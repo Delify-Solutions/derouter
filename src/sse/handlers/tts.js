@@ -10,6 +10,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
 const CREDENTIALED_PROVIDERS = new Set(
@@ -18,7 +19,7 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
-export async function handleTts(request) {
+async function handleTtsRequest(request) {
   let body;
   try {
     body = await request.json();
@@ -121,3 +122,6 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
     return result.response || errorResponse(result.status, result.error);
   }
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleTts = withErrorLog(handleTtsRequest, { cloneBody: true });

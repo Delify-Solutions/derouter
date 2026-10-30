@@ -14,6 +14,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -21,7 +22,7 @@ import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo
  *
  * @param {Request} request
  */
-export async function handleSearch(request) {
+async function handleSearchRequest(request) {
   let body;
   try {
     body = await request.json();
@@ -236,3 +237,6 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
     return result.response;
   }
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleSearch = withErrorLog(handleSearchRequest, { cloneBody: true });
