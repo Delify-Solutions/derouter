@@ -14,6 +14,17 @@ Defines how a customer pays for one plan directly: the order created for a chose
 - **WHEN** a customer requests method `binance` for a plan with USD price 0
 - **THEN** the response is HTTP 400 and no order is created
 
+### Requirement: Custom-amount top-up
+A plan MAY be flagged `allowCustomAmount`, which requires a VND price and a finite credit (an unlimited-credit plan SHALL be refused) and takes optional bounds `customMinVnd` (default: the plan's VND price) and `customMaxVnd` (default 50,000,000đ), minimum not above maximum. `POST /api/account/orders` MAY then carry `amountVnd`, a positive integer number of đồng within the bounds; any other value, or an amount for a plan without the flag, SHALL be refused with HTTP 400 before anything is written. The order SHALL be priced at the plan's own rate: credit = floor(amountVnd × plan credit ÷ plan VND price), and USD price = amountVnd × plan USD price ÷ plan VND price rounded up to a whole cent. For `vietqr` `payAmount` is `amountVnd`; for `binance` and `manual` it is that USD price. Credit, USD price, duration and limits are snapshotted into the order, and approving it SHALL grant exactly that credit as a normal purchase that expires after the plan's `durationDays`. Without `amountVnd` a top-up plan sells its fixed price as before. The purchase card of such a plan SHALL show an amount field (digits only) that previews the credit and the price per method with the same arithmetic, and SHALL disable the buttons while the amount is invalid.
+
+#### Scenario: Start plan at 10.000đ = $10
+- **WHEN** a customer orders the Start plan (10,000đ, $10 credit, $0.40) with method `vietqr` and `amountVnd` 50000
+- **THEN** the order has `payAmount` 50000, credit $50 and USD price $2.00, and approving it grants a $50 purchase
+
+#### Scenario: Amount below the minimum
+- **WHEN** the amount is 5000 for a plan whose minimum is 10,000đ
+- **THEN** the response is HTTP 400 naming the minimum and no order exists
+
 ### Requirement: Payment code
 A payment code SHALL be the setting `paymentCodePrefix` (default `DR`, 2–6 uppercase letters) followed by 8 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, unique across all orders. It SHALL contain only letters and digits so banks do not alter it.
 
