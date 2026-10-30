@@ -4,14 +4,14 @@
 Lets the admin define the plans that are sold — price, total credit usable on any model, duration and per-window spending limits — and see how each plan performs, without silently rewriting what existing buyers already hold.
 ## Requirements
 ### Requirement: Plan definition
-A plan SHALL have: `code` (2–32 characters of a–z, 0–9, `_` or `-`, starting with a letter or digit, unique), `name` (required), `description`, `price` (integer nano-USD ≥ 0), `credit` (integer nano-USD > 0, usable on every model the buyer's group allows), `durationDays` (integer ≥ 1), `limits` (0 to 5 entries), and the existing `isActive`, `isPurchasable`, `allowedGroupIds`, `purchaseLimitPerMonth`, `isFeatured` and `sortOrder` with their current meaning. `POST /api/plans` and `PATCH /api/plans/[id]` SHALL accept and return `limits`.
+A plan SHALL have: `code` (2–32 characters of a–z, 0–9, `_` or `-`, starting with a letter or digit, unique), `name` (required), `description`, `price` (integer nano-USD ≥ 0), `credit` (integer nano-USD > 0, usable on every model the buyer's group allows — or `unlimitedCredit`, which stores 0 and removes the ceiling, see plan-queue-billing "Unlimited-credit plans"), `durationDays` (integer ≥ 1), `limits` (0 to 5 entries), and the existing `isActive`, `isPurchasable`, `allowedGroupIds`, `purchaseLimitPerMonth`, `isFeatured` and `sortOrder` with their current meaning. `POST /api/plans` and `PATCH /api/plans/[id]` SHALL accept and return `limits`.
 
 #### Scenario: Go plan
 - **WHEN** an admin creates code `go`, price $10, credit $250, 30 days, limits `[{hours: 5, max: $20}, {hours: 168, max: $80}]`
 - **THEN** the plan is stored and `GET /api/plans` returns it with those values
 
 ### Requirement: Limit validation
-Each limit SHALL have an integer `hours` between 1 and `durationDays × 24` and a maximum greater than zero and strictly less than the plan's credit. Two limits SHALL NOT share the same `hours`. For any two limits with `hours` a < b, the maximum of a SHALL NOT exceed the maximum of b. A plan SHALL have at most 5 limits. A violation SHALL be rejected with HTTP 400 and a Vietnamese message naming the offending limit; nothing is saved.
+Each limit SHALL have an integer `hours` between 1 and `durationDays × 24` and a maximum greater than zero and strictly less than the plan's credit (an unlimited-credit plan has no credit to compare with, so only the other rules apply). Two limits SHALL NOT share the same `hours`. For any two limits with `hours` a < b, the maximum of a SHALL NOT exceed the maximum of b. A plan SHALL have at most 5 limits. A violation SHALL be rejected with HTTP 400 and a Vietnamese message naming the offending limit; nothing is saved.
 
 #### Scenario: Shorter window with a larger maximum
 - **WHEN** an admin saves limits `[{5h, $50}, {168h, $40}]`

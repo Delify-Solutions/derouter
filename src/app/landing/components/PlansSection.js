@@ -75,7 +75,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                     <p className="mt-2 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>
                   ) : null}
                   <p className="mt-4 text-sm font-medium text-text-main">
-                    Nhận {fmtUsd(plan.creditUsd)} credit
+                    {plan.unlimitedCredit ? "Credit không giới hạn" : `Nhận ${fmtUsd(plan.creditUsd)} credit`}
                     <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
                   </p>
                 </div>

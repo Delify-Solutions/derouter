@@ -44,6 +44,11 @@ const QUEUE_ORDER = `
            up.createdAt ASC,
            up.id ASC`;
 
+/** Can this plan still pay? An unlimited plan always can; a finite one while it has credit. */
+function hasCredit(entry) {
+  return entry.unlimitedCredit === true || nano(entry.creditRemainingNanoUsd) > 0;
+}
+
 function rowToEntry(row, windowsByPlan) {
   const limits = parseLimits(row.limits);
   const stored = windowsByPlan.get(row.id) ?? new Map();
@@ -61,6 +66,8 @@ function rowToEntry(row, windowsByPlan) {
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
+    // No credit ceiling: the plan pays for any request its windows allow.
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
     expiresAt: row.expiresAt,
     priority: row.priority == null ? null : nano(row.priority),
@@ -165,7 +172,7 @@ export function evaluatePlan(entry, nowMs) {
 
   const expiresMs = new Date(entry.expiresAt).getTime();
   return {
-    eligible: nano(entry.creditRemainingNanoUsd) > 0 && Number.isFinite(expiresMs) && expiresMs > now && !blocked,
+    eligible: hasCredit(entry) && Number.isFinite(expiresMs) && expiresMs > now && !blocked,
     blocked,
     reopenAt: reopenMs == null ? null : isoOf(reopenMs),
     roomNanoUsd,
@@ -193,7 +200,7 @@ export function admitSync(db, userId, nowIsoArg = null) {
     const state = evaluatePlan(entry, nowMs);
     if (state.eligible) return { ok: true, planId: entry.id };
     // "Only blocked" = has credit and is unexpired, but a window is full.
-    if (nano(entry.creditRemainingNanoUsd) > 0 && state.blocked) {
+    if (hasCredit(entry) && state.blocked) {
       anyOnlyBlocked = true;
       const reopenMs = state.reopenAt ? new Date(state.reopenAt).getTime() : null;
       if (reopenMs != null && (earliestReopenMs == null || reopenMs < earliestReopenMs)) {
@@ -232,14 +239,20 @@ export function admitSync(db, userId, nowIsoArg = null) {
  * @returns {number} the plan's remaining credit AFTER this take
  */
 function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass }) {
-  const left = Math.max(0, nano(entry.creditRemainingNanoUsd) - amount);
-  if (left <= 0) {
-    db.run(`UPDATE userPlans SET creditRemainingNanoUsd = 0, status = 'exhausted' WHERE id = ?`, [entry.id]);
-  } else {
-    db.run(`UPDATE userPlans SET creditRemainingNanoUsd = ? WHERE id = ?`, [left, entry.id]);
+  // An unlimited plan has no credit to draw down and can never run dry, so its
+  // balance and status stay as they are. The ledger row below is still written:
+  // the windows are rebuilt from charge rows and the per-plan spend figure sums
+  // them. It is tagged so nobody reads it as a change of the book balance.
+  if (!entry.unlimitedCredit) {
+    const left = Math.max(0, nano(entry.creditRemainingNanoUsd) - amount);
+    if (left <= 0) {
+      db.run(`UPDATE userPlans SET creditRemainingNanoUsd = 0, status = 'exhausted' WHERE id = ?`, [entry.id]);
+    } else {
+      db.run(`UPDATE userPlans SET creditRemainingNanoUsd = ? WHERE id = ?`, [left, entry.id]);
+    }
+    // Keep the in-memory entry authoritative for any later take in THIS charge.
+    entry.creditRemainingNanoUsd = left;
   }
-  // Keep the in-memory entry authoritative for any later take in THIS charge.
-  entry.creditRemainingNanoUsd = left;
 
   insertLedgerSync(db, {
     userId: entry.userId,
@@ -249,7 +262,7 @@ function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass 
     requestKey,
     deltaNanoUsd: -amount,
     kind: "charge",
-    meta: { pass },
+    meta: entry.unlimitedCredit ? { pass, unlimited: true } : { pass },
     createdAt: at,
   });
 
@@ -343,11 +356,12 @@ export function chargeSync(db, {
   // ── Pass 1: respect windows ───────────────────────────────────────────────
   for (const entry of queue) {
     if (remaining <= 0) break;
-    if (nano(entry.creditRemainingNanoUsd) <= 0) continue;
+    if (!hasCredit(entry)) continue;
     const state = evaluatePlan(entry, nowMs);
     const room = state.roomNanoUsd; // null = unlimited
     const capacity = room == null ? remaining : Math.min(remaining, room);
-    const take = Math.min(capacity, nano(entry.creditRemainingNanoUsd));
+    // Only a finite plan is also bounded by what it has left.
+    const take = entry.unlimitedCredit ? capacity : Math.min(capacity, nano(entry.creditRemainingNanoUsd));
     if (take <= 0) continue;
 
     applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 1 });
@@ -364,7 +378,9 @@ export function chargeSync(db, {
       // this is the LIVE remainder. Subtracting pass 1 again here (as an earlier
       // version did) double-counted it — pass 1 was deducted twice from a base
       // that also still included it.
-      const available = Math.max(0, nano(entry.creditRemainingNanoUsd));
+      // An unlimited plan absorbs whatever is left, so no debt arises while one
+      // is in the queue.
+      const available = entry.unlimitedCredit ? remaining : Math.max(0, nano(entry.creditRemainingNanoUsd));
       if (available <= 0) continue;
 
       const take = Math.min(available, remaining);

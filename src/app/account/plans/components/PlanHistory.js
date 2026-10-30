@@ -1,6 +1,6 @@
 "use client";
 
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { dateOf } from "@/shared/components/billing";
 import { Empty, Tag } from "@/app/account/components/ui";
 
@@ -55,8 +55,8 @@ export default function PlanHistory({ history = [], loading = false }) {
               </p>
             </div>
             <div className="text-right">
-              <p className="font-mono text-sm text-text-main">{fmtUsdNano(row.creditTotalNanoUsd)}</p>
-              <p className="text-xs text-text-subtle">credit đã nhận</p>
+              <p className="font-mono text-sm text-text-main">{row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(row.creditTotalNanoUsd)}</p>
+              <p className="text-xs text-text-subtle">{row.unlimitedCredit ? "credit" : "credit đã nhận"}</p>
             </div>
           </li>
         );

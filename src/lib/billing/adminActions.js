@@ -89,6 +89,7 @@ export function grantPlanSync(db, userId, { planId, reason, actor = "admin", now
     orderId: null,
     source: "admin",
     creditNanoUsd: nano(plan.creditNanoUsd),
+    unlimitedCredit: Number(plan.unlimitedCredit) === 1,
     durationDays: nano(plan.durationDays),
     limits: parseLimits(plan.limits),
     meta: { adminActor: actor },
@@ -105,6 +106,7 @@ export function grantPlanSync(db, userId, { planId, reason, actor = "admin", now
       planId: plan.id,
       planCode: plan.code,
       creditNanoUsd: granted.userPlan.creditTotalNanoUsd,
+      unlimitedCredit: granted.userPlan.unlimitedCredit === 1,
       durationDays: nano(plan.durationDays),
       appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
     },
@@ -233,6 +235,11 @@ export function adjustCreditSync(db, userId, userPlanId, { deltaNanoUsd, reason,
   const purchase = loadPurchase(db, userId, userPlanId);
   if (!purchase) return fail(404, "Không tìm thấy gói của người dùng này");
   if (!isEditable(purchase)) return fail(409, "Chỉ điều chỉnh được gói đang chạy hoặc đã hết credit");
+  // An unlimited purchase has no credit to move. Adding some would turn it into a
+  // finite one with a made-up balance, so it is refused instead of interpreted.
+  if (Number(purchase.unlimitedCredit) === 1) {
+    return fail(409, "Gói không giới hạn credit nên không có credit để điều chỉnh");
+  }
 
   const delta = nano(deltaNanoUsd);
   if (!Number.isFinite(delta) || delta === 0) return fail(400, "Số credit điều chỉnh phải khác 0");
@@ -300,6 +307,17 @@ export function setPurchaseLimitsSync(db, userId, userPlanId, { limits, reason, 
     normalized = normalizeLimits(limits ?? []);
   } catch (error) {
     return fail(400, error.message);
+  }
+
+  // An unlimited purchase is bounded only by its limits and its plan's RPM/TPM,
+  // so it may not be left with neither.
+  if (Number(purchase.unlimitedCredit) === 1 && normalized.length === 0) {
+    const rates = purchase.planId
+      ? db.get(`SELECT rpm, tpm FROM plans WHERE id = ?`, [purchase.planId])
+      : null;
+    if (!(nano(rates?.rpm) > 0 || nano(rates?.tpm) > 0)) {
+      return fail(400, "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM");
+    }
   }
 
   const remainingDays = Math.max(
@@ -406,7 +424,7 @@ export function applyLimitsToActiveSync(db, planId, limits, { actor, planCode = 
     return { ok: false, status: 400, error: error.message, affectedCount: 0 };
   }
 
-  const plan = db.get(`SELECT code, creditNanoUsd, durationDays FROM plans WHERE id = ?`, [planId]);
+  const plan = db.get(`SELECT code, creditNanoUsd, unlimitedCredit, durationDays, rpm, tpm FROM plans WHERE id = ?`, [planId]);
   const code = planCode ?? plan?.code ?? planId;
   const invalid = validateLimits(normalized, {
     creditNanoUsd: plan?.creditNanoUsd ?? 0,
@@ -414,10 +432,14 @@ export function applyLimitsToActiveSync(db, planId, limits, { actor, planCode = 
   });
   if (invalid) return { ok: false, status: 400, error: invalid, affectedCount: 0 };
 
+  // An unlimited purchase must keep some bound. When the new limits are empty and
+  // the plan has no RPM/TPM to stand in for them, those purchases keep what they
+  // had instead of being left unbounded.
+  const planHasRate = nano(plan?.rpm) > 0 || nano(plan?.tpm) > 0;
   const rows = db.all(
-    `SELECT id, userId, limits FROM userPlans WHERE planId = ? AND status = 'active'`,
+    `SELECT id, userId, limits, unlimitedCredit FROM userPlans WHERE planId = ? AND status = 'active'`,
     [planId]
-  );
+  ).filter((row) => !(Number(row.unlimitedCredit) === 1 && normalized.length === 0 && !planHasRate));
   if (rows.length === 0) return { ok: true, affectedCount: 0 };
 
   const serialized = serializeLimits(normalized);

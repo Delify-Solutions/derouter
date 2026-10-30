@@ -50,6 +50,7 @@ export function rowToOrder(row) {
     planId: row.planId,
     amountNanoUsd: nano(row.amountNanoUsd),
     creditNanoUsd: nano(row.creditNanoUsd),
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
     status: row.status,
     method: row.method ?? "manual",
@@ -91,6 +92,7 @@ export function toCustomerOrder(order) {
     planName: order.planName ?? null,
     amountNanoUsd: order.amountNanoUsd,
     creditNanoUsd: order.creditNanoUsd,
+    unlimitedCredit: order.unlimitedCredit === true,
     durationDays: order.durationDays,
     status: order.status,
     method: order.method ?? "manual",
@@ -179,6 +181,7 @@ export function approveOrderSync(db, orderId, {
     orderId,
     source: "purchase",
     creditNanoUsd: nano(row.creditNanoUsd),
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
     // The snapshot taken at order time; an order created before GĐ1 has none and
     // falls back to the plan's current limits, which is the only thing it could
@@ -206,6 +209,7 @@ export function orderSnapshot(plan) {
   return {
     amountNanoUsd: nano(plan.priceNanoUsd),
     creditNanoUsd: nano(plan.creditNanoUsd),
+    unlimitedCredit: Number(plan.unlimitedCredit) === 1 || plan.unlimitedCredit === true ? 1 : 0,
     durationDays: nano(plan.durationDays),
     limits: serializeLimits(plan.limits ?? []),
   };

@@ -42,6 +42,18 @@ export function fmtUsdNano(nano) {
   return `${usd < 0 ? "-" : ""}$${abs.toFixed(digits)}`;
 }
 
+/** What a credit figure reads as on a plan that has no credit ceiling. */
+export const UNLIMITED_CREDIT_LABEL = "Không giới hạn";
+
+/**
+ * Credit for display: the label above for an unlimited plan, otherwise the
+ * adaptive dollar format. Every screen that shows a plan's credit goes through
+ * here so an unlimited plan can never render as "$0".
+ */
+export function fmtCreditNano(nano, unlimited = false) {
+  return unlimited ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(nano);
+}
+
 /** Format a legacy USD float through the same adaptive rules as fmtUsdNano. */
 export function fmtUsd(usd) {
   return fmtUsdNano(usdToNano(usd));

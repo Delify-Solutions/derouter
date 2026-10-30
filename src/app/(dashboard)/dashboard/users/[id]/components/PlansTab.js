@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, CardSkeleton, Input, Select } from "@/shared/components";
 import { PlanQueue } from "@/shared/components/billing";
-import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import ReasonModal from "./ReasonModal";
 
 const WINDOW_OPTIONS = [
@@ -133,7 +133,10 @@ export default function PlansTab({ userId, onChanged }) {
   const renderActions = (entry) => (
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="secondary" onClick={() => openAction("extend", entry)}>Gia hạn</Button>
-      <Button size="sm" variant="secondary" onClick={() => openAction("adjust", entry)}>Điều chỉnh credit</Button>
+      {/* An unlimited purchase has no credit to move; the API refuses it too. */}
+      {!entry.unlimitedCredit && (
+        <Button size="sm" variant="secondary" onClick={() => openAction("adjust", entry)}>Điều chỉnh credit</Button>
+      )}
       <Button size="sm" variant="secondary" onClick={() => openAction("limits", entry)}>Sửa hạn mức</Button>
       <Button size="sm" variant="ghost" className="text-danger hover:bg-red-500/10" onClick={() => openAction("revoke", entry)}>
         Thu hồi
@@ -199,7 +202,7 @@ export default function PlansTab({ userId, onChanged }) {
                   <tr key={row.id} className="border-b border-border last:border-b-0">
                     <td className="px-4 py-2 text-sm text-text-main">{row.planName || row.planCode || "Gói"}</td>
                     <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.source}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-main">{fmtUsdNano(row.creditTotalNanoUsd)}</td>
+                    <td className="px-4 py-2 font-mono text-[12px] text-text-main">{fmtCreditNano(row.creditTotalNanoUsd, row.unlimitedCredit)}</td>
                     <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
                       {row.expiresAt ? new Date(row.expiresAt).toLocaleDateString("vi-VN") : "—"}
                     </td>
@@ -227,7 +230,7 @@ export default function PlansTab({ userId, onChanged }) {
             label="Gói"
             value={draft.planId}
             onChange={(event) => setDraft((d) => ({ ...d, planId: event.target.value }))}
-            options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${fmtUsdNano(plan.creditNanoUsd)}` }))}
+            options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}` }))}
           />
         )}
       />

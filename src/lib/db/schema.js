@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -291,6 +291,12 @@ export const TABLES = {
       // admin can price 250.000đ independently of $10.
       priceVnd: "INTEGER",
       creditNanoUsd: "INTEGER NOT NULL",
+      // 1 = the plan has no credit ceiling: requests are never refused for lack of
+      // credit and only the per-window limits / RPM / TPM bound the spend.
+      // creditNanoUsd is 0 for such a plan. A flag rather than a huge credit
+      // number so no SUM(creditRemainingNanoUsd) or credit display has to know
+      // about a fake amount.
+      unlimitedCredit: "INTEGER DEFAULT 0",
       durationDays: "INTEGER NOT NULL",
       // Visibility vs purchasability are two separate switches on purpose:
       //   isActive     listed on the public pricing page at all
@@ -379,6 +385,8 @@ export const TABLES = {
       limits: "TEXT",
       amountNanoUsd: "INTEGER",
       creditNanoUsd: "INTEGER",
+      // Snapshot of plans.unlimitedCredit at order creation, like the limits above.
+      unlimitedCredit: "INTEGER DEFAULT 0",
       durationDays: "INTEGER",
       status: "TEXT NOT NULL",
       method: "TEXT DEFAULT 'manual'",
@@ -489,6 +497,9 @@ export const TABLES = {
       source: "TEXT NOT NULL",
       creditTotalNanoUsd: "INTEGER NOT NULL",
       creditRemainingNanoUsd: "INTEGER NOT NULL",
+      // 1 = no credit ceiling (both credit columns stay 0 and are never spent
+      // down); charges are still ledgered and still counted by the windows.
+      unlimitedCredit: "INTEGER DEFAULT 0",
       startsAt: "TEXT NOT NULL",
       expiresAt: "TEXT NOT NULL",
       status: "TEXT NOT NULL",

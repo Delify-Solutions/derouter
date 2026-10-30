@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Modal, Pagination, Select, CardSkeleton } from "@/shared/components";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 const STATUS_FILTERS = [
   { id: "", label: "Mọi trạng thái" },
@@ -329,7 +329,7 @@ export default function UsersPageClient() {
                   <td className="px-4 py-3"><StatusBadge status={user.status} /></td>
                   <td className="px-4 py-3 font-mono text-[12px] text-text-main">{user.queuedPlans}</td>
                   <td className="px-4 py-3 text-right font-mono text-[12px] text-text-main">
-                    {fmtUsdNano(user.availableNanoUsd)}
+                    {user.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(user.availableNanoUsd)}
                     {user.debtNanoUsd > 0 && (
                       <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">
                         nợ {fmtUsdNano(user.debtNanoUsd)}

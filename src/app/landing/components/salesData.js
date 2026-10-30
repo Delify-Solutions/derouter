@@ -140,6 +140,8 @@ export function toSalesPlan(plan, offeredMethods = []) {
     offeredMethods: methods,
     soldOut: methods.length === 0,
     creditUsd,
+    // No credit ceiling: the card says so instead of showing "$0".
+    unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: Number(plan.durationDays) || 0,
     // `isFeatured` in the admin list decides the highlighted card. Nothing is
     // highlighted when no plan is flagged — inventing an emphasis the operator

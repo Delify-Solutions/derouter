@@ -66,6 +66,7 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,
+      unlimitedCredit: result.userPlan?.unlimitedCredit === 1,
       // A grant repays what the account owes first; the remainder becomes plan
       // credit. Both numbers are returned so the result panel never overstates.
       appliedToOverdraftNanoUsd: result.appliedToOverdraftNanoUsd ?? 0,

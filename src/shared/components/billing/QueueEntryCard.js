@@ -2,6 +2,7 @@
 
 import PropTypes from "prop-types";
 import CreditBar from "./CreditBar";
+import { UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import LimitMeter from "./LimitMeter";
 import StatusTag, { dateOf } from "./StatusTag";
 
@@ -63,11 +64,19 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
         <StatusTag status={entry.statusLabel} reopenAt={entry.reopenAt} />
       </header>
 
-      <CreditBar
-        totalNanoUsd={entry.creditTotalNanoUsd}
-        remainingNanoUsd={entry.creditRemainingNanoUsd}
-        label="Credit còn lại"
-      />
+      {entry.unlimitedCredit ? (
+        // No ceiling to draw a bar against: the limits below are what bound it.
+        <div className="flex items-end justify-between gap-3">
+          <span className="text-sm text-text-muted">Credit</span>
+          <span className="text-2xl font-semibold leading-none tracking-tight text-text-main">{UNLIMITED_CREDIT_LABEL}</span>
+        </div>
+      ) : (
+        <CreditBar
+          totalNanoUsd={entry.creditTotalNanoUsd}
+          remainingNanoUsd={entry.creditRemainingNanoUsd}
+          label="Credit còn lại"
+        />
+      )}
 
       {Array.isArray(entry.windows) && entry.windows.length > 0 && (
         <div className="flex flex-col gap-3 border-t border-border pt-4">

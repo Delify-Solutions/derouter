@@ -61,8 +61,9 @@ export default async function LandingPage({ copy }) {
     toSalesPlan(row, offeredMethodsSync(db, row, settings))
   );
 
-  // A plan with no credit grants nothing; it has no card worth showing.
-  const visiblePlans = plans.filter((p) => p.creditUsd > 0);
+  // A plan with no credit grants nothing; it has no card worth showing. An
+  // unlimited plan stores 0 credit but grants everything its limits allow.
+  const visiblePlans = plans.filter((p) => p.unlimitedCredit || p.creditUsd > 0);
   const featured = visiblePlans.find((p) => p.highlighted) ?? null;
 
   // The address a customer points their client at: the configured public URL, else

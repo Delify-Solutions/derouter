@@ -26,6 +26,7 @@ export async function GET(request) {
 
   try {
     const db = await getAdapter();
+    const queue = getQueueSync(db, session.userId);
     const [plans, availableNanoUsd] = await Promise.all([
       listPlans({ onlyActive: true }),
       getAvailableNanoUsd(session.userId),
@@ -51,7 +52,10 @@ export async function GET(request) {
       {
         availableNanoUsd,
         debtNanoUsd: getDebtNanoSync(db, session.userId),
-        queue: getQueueSync(db, session.userId),
+        // An unlimited plan adds no credit to the sum above, so the page needs to
+        // know one is live to say "Không giới hạn" instead of a misleading "$0".
+        hasUnlimitedCredit: queue.some((entry) => entry.unlimitedCredit),
+        queue,
         history: getPlanHistorySync(db, session.userId),
         plans: catalogue,
       },

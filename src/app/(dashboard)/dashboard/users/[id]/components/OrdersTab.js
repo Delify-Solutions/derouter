@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/shared/components";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 const STATUS_LABEL = {
   pending: "Chờ duyệt",
@@ -103,7 +103,7 @@ export default function OrdersTab({ userId }) {
                     )}
                   </td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-main">{fmtUsdNano(order.amountNanoUsd)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{fmtUsdNano(order.creditNanoUsd)}</td>
+                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{fmtCreditNano(order.creditNanoUsd, order.unlimitedCredit)}</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{STATUS_LABEL[order.status] || order.status}</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
                     {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}

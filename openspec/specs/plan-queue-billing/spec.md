@@ -118,6 +118,21 @@ A completed `POST /v1/images/generations` SHALL be recorded as a usage row and c
 - **WHEN** a customer key calls an image model with no image price
 - **THEN** the call is refused with 403 and nothing is charged or forwarded
 
+### Requirement: Unlimited-credit plans
+A plan MAY be flagged `unlimitedCredit`. Such a plan SHALL store credit 0, SHALL be snapshotted as a flag into its orders and purchases, and its purchases SHALL be eligible while unexpired and not blocked by a window, regardless of credit. Charging one SHALL NOT change its credit or status (it never becomes `exhausted`) but SHALL still write a `charge` ledger row (tagged `unlimited`) and advance its windows; a request admitted through one SHALL always be paid in full by it, so no debt arises while one is queued. When every unlimited purchase is window-blocked, admission SHALL answer 429 `plan_limit` with the earliest reopen time, like any plan. A grant of an unlimited plan (order, admin grant, plan gift) SHALL repay no debt. An unlimited plan SHALL carry at least one bound: a window limit, an RPM or a TPM, and a plan without any SHALL be rejected with a Vietnamese message. Adjusting credit on an unlimited purchase SHALL be refused with HTTP 409, and its window limits SHALL NOT be cleared while the plan has no RPM or TPM. Screens SHALL show "Không giới hạn" in place of its credit figure.
+
+#### Scenario: Charging an unlimited plan
+- **WHEN** a customer whose only plan is unlimited with `{5h, $20}` makes a $3 request
+- **THEN** a `charge` row of -$3 tagged `unlimited` is written, the plan's credit stays 0 and its status stays `active`, the 5-hour window shows $3 spent and no debt is created
+
+#### Scenario: Window full
+- **WHEN** that customer has spent $20 inside the 5-hour window
+- **THEN** the next request is refused with 429 `plan_limit` and the window's reset time, not 402
+
+#### Scenario: No bound on the plan
+- **WHEN** an admin saves an unlimited plan with no limits and no RPM/TPM
+- **THEN** the response is HTTP 400 and nothing is saved
+
 ### Requirement: Expiry
 A plan whose expiry has passed SHALL never be selected by admission or charged, even before the periodic sweep runs. The sweep, running at least every 5 minutes, SHALL mark such plans `expired`, set their remaining credit to zero, record a ledger row of kind `expire` with the forfeited amount, and delete window state belonging to plans that are no longer `active`.
 

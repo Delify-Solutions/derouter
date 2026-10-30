@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Empty } from "@/app/account/components/ui";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import { formatGiftCode } from "./formatCode";
 
 function fmtWhen(value) {
@@ -77,10 +77,12 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
               </td>
               <td className="px-4 py-3">
                 <span className="font-mono text-sm text-text-main">
-                  {row.planName || fmtUsdNano(row.creditNanoUsd ?? 0)}
+                  {row.planName || fmtCreditNano(row.creditNanoUsd ?? 0, row.unlimitedCredit)}
                 </span>
                 {row.planName && (
-                  <p className="text-xs text-text-subtle">{fmtUsdNano(row.creditNanoUsd ?? 0)} credit</p>
+                  <p className="text-xs text-text-subtle">
+                    {row.unlimitedCredit ? "Credit không giới hạn" : `${fmtUsdNano(row.creditNanoUsd ?? 0)} credit`}
+                  </p>
                 )}
               </td>
               <td className="px-4 py-3 font-mono text-xs text-text-muted whitespace-nowrap">

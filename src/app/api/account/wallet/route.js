@@ -28,6 +28,7 @@ export async function GET(request) {
       {
         availableNanoUsd: summary.availableNanoUsd,
         availableUsd: fmtUsdNano(summary.availableNanoUsd),
+        hasUnlimitedCredit: summary.hasUnlimitedCredit === true,
         liveCreditNanoUsd: summary.liveCreditNanoUsd,
         liveCreditUsd: fmtUsdNano(summary.liveCreditNanoUsd),
         overdraftNanoUsd: summary.overdraftNanoUsd,

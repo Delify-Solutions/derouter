@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button, CardSkeleton, ConfirmModal } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 const FILTERS = [
   { value: "", label: "All" },
@@ -109,7 +109,7 @@ export default function OrdersPageClient() {
     const copy = {
       approve: {
         title: "Approve order",
-        message: `Mark payment received for ${order.userEmail || "this customer"}? Their plan and ${fmtUsdNano(order.creditNanoUsd)} of credit are granted immediately.`,
+        message: `Mark payment received for ${order.userEmail || "this customer"}? Their plan and ${order.unlimitedCredit ? "unlimited credit" : `${fmtUsdNano(order.creditNanoUsd)} of credit`} are granted immediately.`,
         confirmText: "Approve",
         variant: "success",
       },
@@ -280,7 +280,7 @@ export default function OrdersPageClient() {
                     {fmtUsdNano(order.amountNanoUsd)}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">
-                    {fmtUsdNano(order.creditNanoUsd)}
+                    {fmtCreditNano(order.creditNanoUsd, order.unlimitedCredit)}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <StatusTag status={order.status} />
@@ -400,7 +400,7 @@ export default function OrdersPageClient() {
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Credit</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">{fmtUsdNano(selected.creditNanoUsd)}</dd>
+                  <dd className="font-mono text-sm text-text-main mt-1">{fmtCreditNano(selected.creditNanoUsd, selected.unlimitedCredit)}</dd>
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Window</dt>

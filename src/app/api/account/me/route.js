@@ -22,6 +22,7 @@ async function readWallet(userId) {
       if (summary && typeof summary === "object") {
         return {
           availableNanoUsd: Number.isFinite(summary.availableNanoUsd) ? summary.availableNanoUsd : 0,
+          hasUnlimitedCredit: summary.hasUnlimitedCredit === true,
           overdraftNanoUsd: Number.isFinite(summary.overdraftNanoUsd) ? summary.overdraftNanoUsd : 0,
           totalGrantedNanoUsd: Number.isFinite(summary.totalGrantedNanoUsd) ? summary.totalGrantedNanoUsd : 0,
           plans: Array.isArray(summary.plans) ? summary.plans : [],

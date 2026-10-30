@@ -79,7 +79,7 @@ export default function MyOrders({ orders, loading, cancellingId, onCancel }) {
               tags={<Tag tone={tag.tone} icon={tag.icon}>{tag.label}</Tag>}
               // What the customer actually has to pay, in the currency they chose.
               // A gateway order is not "$10" — it may be 250.000đ.
-              detail={`${payAmountLabel(order) || order.amountUsd} · nhận ${order.creditUsd} · ${fmtDate(order.createdAt)}`}
+              detail={`${payAmountLabel(order) || order.amountUsd} · ${order.unlimitedCredit ? "credit không giới hạn" : `nhận ${order.creditUsd}`} · ${fmtDate(order.createdAt)}`}
               actions={
                 <>
                   {/* A gateway order has a page with the QR and the code; without
