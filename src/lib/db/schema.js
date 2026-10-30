@@ -334,6 +334,12 @@ export const TABLES = {
       // number so no SUM(creditRemainingNanoUsd) or credit display has to know
       // about a fake amount.
       unlimitedCredit: "INTEGER DEFAULT 0",
+      // 1 = the customer may type any amount in đồng and receive credit at this
+      // plan's own rate (priceVnd đồng buys creditNanoUsd). The bounds below are in
+      // đồng; NULL min = the plan's price, NULL max = a built-in ceiling.
+      allowCustomAmount: "INTEGER DEFAULT 0",
+      customMinVnd: "INTEGER",
+      customMaxVnd: "INTEGER",
       durationDays: "INTEGER NOT NULL",
       // Visibility vs purchasability are two separate switches on purpose:
       //   isActive     listed on the public pricing page at all

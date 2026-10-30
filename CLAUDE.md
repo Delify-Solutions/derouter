@@ -2,7 +2,7 @@
 
 # derouter
 
-Hosted AI proxy sold as OpenCode Go–style plans. Product description (Vietnamese, owner-approved): `openspec/PRODUCT.md`. The shipped behaviour is specified in `openspec/specs/` — 13 capabilities, 84 requirements:
+Hosted AI proxy sold as OpenCode Go–style plans. Product description (Vietnamese, owner-approved): `openspec/PRODUCT.md`. The shipped behaviour is specified in `openspec/specs/` — 14 capabilities, 89 requirements:
 - GĐ0 (foundation) and GĐ1–GĐ4 (`billing-v2-plan-queue`): plan queue billing, groups, customer portal, admin, landing
 - GĐ5 (`payment-gateways`): VietQR via SePay/web2m/ACB, Binance USDT
 

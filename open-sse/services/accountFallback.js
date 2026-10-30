@@ -1,4 +1,18 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, REQUEST_ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+
+/**
+ * True when the upstream rejected the request itself (too large, over the context
+ * window) rather than failing as an account. Text rules such as "rate limit" are
+ * matched first by checkFallbackError, so a 429 "request too large ... tokens per
+ * minute" stays a backoff; this only looks at 413 and at 400/422 with a size message.
+ * @param {number} status
+ * @param {string} lowerError - lower-cased error text
+ */
+export function isRequestError(status, lowerError) {
+  if (REQUEST_ERROR_RULES.statuses.includes(status)) return true;
+  if (!REQUEST_ERROR_RULES.textStatuses.includes(status) || !lowerError) return false;
+  return REQUEST_ERROR_RULES.texts.some((t) => lowerError.includes(t));
+}
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
@@ -18,7 +32,7 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, requestError?: boolean }}
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0) {
   const lowerError = errorText
@@ -43,6 +57,13 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
       }
       return { shouldFallback: true, cooldownMs: rule.cooldownMs };
     }
+  }
+
+  // The request itself was refused: no cooldown, and requestError tells the account
+  // loop to hand the upstream answer to the client instead of trying another account.
+  // A combo still moves on (shouldFallback) because another model may take the request.
+  if (isRequestError(status, lowerError)) {
+    return { shouldFallback: true, cooldownMs: 0, requestError: true };
   }
 
   // Default: transient cooldown for any unmatched error

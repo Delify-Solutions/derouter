@@ -5,6 +5,7 @@ import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle } from "@/shar
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { windowLabel } from "@/lib/billing/limits.js";
+import { topupBounds } from "@/lib/billing/topup.js";
 import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
@@ -21,6 +22,12 @@ const EMPTY_FORM = {
   // On = no credit ceiling; the credit field is hidden and the plan is bounded only
   // by its limits, RPM and TPM (at least one of them is then required).
   unlimitedCredit: false,
+  // On = the customer may type any amount in đồng and gets credit at this plan's
+  // own rate (price VND : credit). Bounds in đồng; empty min = the plan price,
+  // empty max = the built-in ceiling.
+  allowCustomAmount: false,
+  customMinVnd: "",
+  customMaxVnd: "",
   durationDays: "30",
   // Two separate switches: listed vs buyable. A plan can be advertised before
   // its capacity exists ("coming soon"), which neither flag expresses alone.
@@ -90,6 +97,26 @@ function validateDraft(draft) {
   });
   if (limitsError) errors.limits = limitsError;
 
+  if (draft.allowCustomAmount && !draft.unlimitedCredit) {
+    if (!(Number(draft.priceVnd) > 0)) {
+      errors.customAmount = "Nạp số tiền tùy ý cần giá VND của gói để tính tỷ lệ quy đổi";
+    }
+    for (const [field, label] of [["customMinVnd", "tối thiểu"], ["customMaxVnd", "tối đa"]]) {
+      const raw = String(draft[field] ?? "").trim();
+      if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) <= 0)) {
+        errors[field] = `Số tiền ${label} phải là số đồng nguyên dương`;
+      }
+    }
+    const { minVnd, maxVnd } = topupBounds({
+      priceVnd: draft.priceVnd,
+      customMinVnd: draft.customMinVnd,
+      customMaxVnd: draft.customMaxVnd,
+    });
+    if (!errors.customMinVnd && !errors.customMaxVnd && minVnd > maxVnd) {
+      errors.customMaxVnd = "Số tiền tối đa phải lớn hơn hoặc bằng tối thiểu";
+    }
+  }
+
   // An unlimited plan must keep some other bound on spend.
   if (draft.unlimitedCredit && !limitsError) {
     const hasWindow = (draftToLimits(draft.limits) ?? []).length > 0;
@@ -111,6 +138,9 @@ function planToDraft(plan) {
     priceVnd: plan.priceVnd == null ? "" : String(plan.priceVnd),
     creditUsd: plan.unlimitedCredit ? "" : String(plan.creditNanoUsd / 1e9),
     unlimitedCredit: plan.unlimitedCredit === true,
+    allowCustomAmount: plan.allowCustomAmount === true,
+    customMinVnd: plan.customMinVnd == null ? "" : String(plan.customMinVnd),
+    customMaxVnd: plan.customMaxVnd == null ? "" : String(plan.customMaxVnd),
     durationDays: String(plan.durationDays ?? 30),
     isActive: plan.isActive !== false,
     isPurchasable: plan.isPurchasable !== false,
@@ -209,6 +239,9 @@ export default function PlansPageClient() {
       priceVnd: String(draft.priceVnd ?? "").trim() === "" ? null : Number(draft.priceVnd),
       creditNanoUsd: draft.unlimitedCredit ? 0 : usdToNano(Number(draft.creditUsd)),
       unlimitedCredit: draft.unlimitedCredit,
+      allowCustomAmount: draft.allowCustomAmount && !draft.unlimitedCredit,
+      customMinVnd: String(draft.customMinVnd ?? "").trim() === "" ? null : Number(draft.customMinVnd),
+      customMaxVnd: String(draft.customMaxVnd ?? "").trim() === "" ? null : Number(draft.customMaxVnd),
       durationDays: Number(draft.durationDays),
       isActive: draft.isActive,
       isPurchasable: draft.isPurchasable,
@@ -393,6 +426,15 @@ export default function PlansPageClient() {
                   </dd>
                 </div>
               </dl>
+
+              {plan.allowCustomAmount && (
+                <div className="px-6 pb-4">
+                  <p className="meta text-text-subtle mb-1">Nạp tùy ý</p>
+                  <p className="font-mono text-[12px] text-text-muted">
+                    {formatVnd(topupBounds(plan).minVnd)} – {formatVnd(topupBounds(plan).maxVnd)} · {formatVnd(plan.priceVnd)} = {fmtUsdNano(plan.creditNanoUsd)}
+                  </p>
+                </div>
+              )}
 
               <div className="px-6 pb-4">
                 <p className="meta text-text-subtle mb-1">Tốc độ</p>
@@ -582,6 +624,49 @@ export default function PlansPageClient() {
                 error={touched ? errors.creditUsd : ""}
                 required
               />
+            </div>
+          )}
+
+          {!draft.unlimitedCredit && (
+            <div className="flex flex-col gap-3 border border-border bg-surface px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="meta text-text-subtle">Cho nạp số tiền tùy ý</span>
+                  <span className="text-sm text-text-muted">
+                    Khách nhập số đồng và nhận credit theo tỷ lệ của gói:
+                    {" "}{Number(draft.priceVnd) > 0 && Number(draft.creditUsd) > 0
+                      ? `${formatVnd(Number(draft.priceVnd))} = $${draft.creditUsd}`
+                      : "cần giá VND và credit để tính"}.
+                  </span>
+                </div>
+                <Toggle checked={draft.allowCustomAmount} onChange={(v) => setField("allowCustomAmount", v)} />
+              </div>
+              {draft.allowCustomAmount && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    label="Nạp tối thiểu (đồng)"
+                    value={draft.customMinVnd}
+                    onChange={(e) => setField("customMinVnd", e.target.value)}
+                    placeholder={draft.priceVnd ? `Để trống = ${draft.priceVnd}` : "Để trống = giá gói"}
+                    inputMode="numeric"
+                    error={touched ? errors.customMinVnd : null}
+                  />
+                  <Input
+                    label="Nạp tối đa (đồng)"
+                    value={draft.customMaxVnd}
+                    onChange={(e) => setField("customMaxVnd", e.target.value)}
+                    placeholder="Để trống = 50.000.000"
+                    inputMode="numeric"
+                    error={touched ? errors.customMaxVnd : null}
+                  />
+                </div>
+              )}
+              {touched && errors.customAmount && (
+                <p role="alert" className="flex items-center gap-1.5 text-[11px] text-danger">
+                  <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
+                  {errors.customAmount}
+                </p>
+              )}
             </div>
           )}
 
