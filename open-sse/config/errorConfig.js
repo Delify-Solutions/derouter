@@ -75,6 +75,33 @@ export const ERROR_RULES = [
   { status: 429, backoff: true },
 ];
 
+/**
+ * Errors that describe the request, not the account that answered it (body too
+ * large, prompt over the context window). Another account or a cooldown cannot
+ * fix them, and locking the connection would turn one caller's oversized request
+ * into an outage for every other caller of that model.
+ *   - statuses: rejected whatever the message says
+ *   - textStatuses + texts: 400/422 are ambiguous (some providers answer a bad API
+ *     key with 400), so they only count when the message names the size problem
+ */
+export const REQUEST_ERROR_RULES = {
+  statuses: [413],
+  textStatuses: [400, 422],
+  texts: [
+    "context_length",
+    "context length",
+    "context window",
+    "maximum context",
+    "prompt is too long",
+    "input is too long",
+    "exceeds the maximum number of tokens",
+    "request too large",
+    "request entity too large",
+    "payload too large",
+    "length limit exceeded",
+  ],
+};
+
 // Backward compat: COOLDOWN_MS object (used by index.js re-export)
 export const COOLDOWN_MS = {
   unauthorized: COOLDOWN.long,

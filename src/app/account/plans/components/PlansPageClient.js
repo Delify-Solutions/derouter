@@ -136,14 +136,14 @@ export default function PlansPageClient() {
    * customer needs the QR, and leaving them on the shop after picking "VietQR"
    * would hide the thing they must scan.
    */
-  const buy = async (plan, method = "manual") => {
+  const buy = async (plan, method = "manual", amountVnd) => {
     setBuyingId(`${plan.id}:${method}`);
     setNotice(null);
     try {
       const res = await fetch("/api/account/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: plan.id, method }),
+        body: JSON.stringify({ planId: plan.id, method, ...(amountVnd ? { amountVnd } : {}) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Không tạo được đơn hàng");

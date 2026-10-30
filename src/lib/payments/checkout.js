@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { generatePaymentCode, isValidPrefix } from "./codes.js";
 import { snapshotLimitsOf } from "../billing/orders.js";
 import { nano } from "../billing/ledger.js";
+import { quoteTopup } from "../billing/topup.js";
 
 export const METHOD_LABELS = {
   vietqr: "Chuyển khoản VietQR",
@@ -169,6 +170,7 @@ export function createGatewayOrderSync(db, {
   method,
   settings = {},
   nowIso = null,
+  amountVnd = null,
 } = {}) {
   if (!userId) return { ok: false, code: "invalid", error: "Thiếu người dùng", status: 400 };
   if (!plan) return { ok: false, code: "invalid", error: "Gói không tồn tại", status: 400 };
@@ -187,6 +189,15 @@ export function createGatewayOrderSync(db, {
           : "Gói này chưa mở bán bằng Binance USDT",
       status: 400,
     };
+  }
+
+  // A custom-amount top-up prices the order from the typed amount at the plan's own
+  // rate; the plan's fixed price and credit are used otherwise. The quote is taken
+  // BEFORE anything is written, so a bad amount leaves no order behind.
+  let quote = null;
+  if (amountVnd != null) {
+    quote = quoteTopup(plan, amountVnd);
+    if (!quote.ok) return { ok: false, code: "bad_amount", error: quote.error, status: 400 };
   }
 
   const pending = countPendingGatewayOrdersSync(db, userId);
@@ -234,16 +245,18 @@ export function createGatewayOrderSync(db, {
   }
 
   const payCurrency = offered.currency;
-  const payAmount = offered.amount;
+  // VietQR is paid in the typed đồng; USDT in the USD price of that amount.
+  const payAmount = quote ? (payCurrency === "VND" ? quote.amountVnd : quote.priceNanoUsd) : offered.amount;
 
   const order = {
     id: uuidv4(),
     userId,
     planId: plan.id,
-    // `amountNanoUsd` keeps its existing meaning (the plan's USD price) so every
-    // finance/statistics query built on it keeps working unchanged.
-    amountNanoUsd: nano(plan.priceNanoUsd),
-    creditNanoUsd: nano(plan.creditNanoUsd),
+    // `amountNanoUsd` keeps its existing meaning (the USD price of this order: the
+    // plan's price, or for a custom-amount top-up the quoted price of the typed
+    // amount) so every finance/statistics query built on it keeps working unchanged.
+    amountNanoUsd: quote ? quote.priceNanoUsd : nano(plan.priceNanoUsd),
+    creditNanoUsd: quote ? quote.creditNanoUsd : nano(plan.creditNanoUsd),
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: nano(plan.durationDays),
     status: "pending",
