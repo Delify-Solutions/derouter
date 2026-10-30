@@ -5,6 +5,7 @@ import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
 import { fmtUsd } from "@/shared/utils/money";
+import { getCurrentLocale } from "@/i18n/runtime";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -22,6 +23,22 @@ function maskKeyFull(key) {
 }
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
+
+// Response time: milliseconds under a second, seconds with two decimals above it.
+const fmtDuration = (ms) => {
+  if (ms == null || Number.isNaN(Number(ms))) return "—";
+  const n = Number(ms);
+  return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(2)} s`;
+};
+
+// 24-hour date and time in the page's language, not the browser's (a US browser gave 12:46:11 AM).
+const fmtDateTime = (value) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const locale = getCurrentLocale() === "vi" ? "vi-VN" : undefined;
+  return d.toLocaleString(locale, { hour12: false });
+};
 // Costs here are legacy USD floats from /api/usage/key*; fmtUsd applies the
 // shared adaptive precision (2dp >= $1, 4dp >= $0.01, else 6dp).
 const fmtCost = (n) => (typeof n === "number" && !Number.isNaN(n) ? fmtUsd(n) : "$0");
@@ -491,7 +508,7 @@ export default function UsageClient({ hasUserSession = false }) {
               {!data.active && <span className="ml-2 text-orange-500">Paused</span>}
               {data.expiresAt && (
                 <span className="ml-2 text-amber-600 dark:text-amber-400">
-                  Expires {new Date(data.expiresAt).toLocaleString()}
+                  Expires {fmtDateTime(data.expiresAt)}
                 </span>
               )}
             </p>
@@ -551,7 +568,7 @@ export default function UsageClient({ hasUserSession = false }) {
                   </div>
                   <p className="text-xs text-text-muted mt-1.5">
                     {data.resetWindow ? `Resets ${WINDOW_LABELS[data.resetWindow] || data.resetWindow}` : "No reset"}
-                    {data.resetAt ? ` · ${new Date(data.resetAt).toLocaleString()}` : ""}
+                    {data.resetAt ? ` · ${fmtDateTime(data.resetAt)}` : ""}
                   </p>
                 </>
               )}
@@ -576,10 +593,6 @@ export default function UsageClient({ hasUserSession = false }) {
                 <div className="flex justify-between">
                   <span className="text-text-muted text-xs">Peak RPM</span>
                   <span className="font-medium">{fmt(rec?.summary?.peakRpm || 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted text-xs">Peak Tok/s</span>
-                  <span className="font-medium">{fmt(rec?.summary?.peakTokS || 0)}</span>
                 </div>
               </div>
             </div>
@@ -657,7 +670,7 @@ export default function UsageClient({ hasUserSession = false }) {
             <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">Request History</h3>
-                <span className="text-xs text-text-muted">{filteredHistory.length} request{filteredHistory.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs text-text-muted">{filteredHistory.length} {filteredHistory.length === 1 ? "request" : "requests"}</span>
               </div>
               {/* Clear-all-history action. Destructive for this key's log only; admin
                   aggregate stats (daily rollup, lifetime counter) are NOT cleared. */}
@@ -731,10 +744,10 @@ export default function UsageClient({ hasUserSession = false }) {
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
-                      <th className="text-right font-medium px-3 py-2">Latency</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap" title="Total time from receiving the request until the response finished">Response time</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
-                      <th className="text-right font-medium px-3 py-2" title="Tokens (input + output); Tok/s = output / total time">Tok</th>
+                      <th className="text-right font-medium px-3 py-2" title="Input + output tokens">Tokens</th>
                       <th className="text-right font-medium px-3 py-2">Cache R</th>
                       <th className="text-right font-medium px-3 py-2">Cache W</th>
                       <th className="text-right font-medium px-3 py-2">Cost</th>
@@ -750,7 +763,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           title="Click to view request details"
                         >
                           <td className="px-3 py-1.5 whitespace-nowrap text-text-muted">
-                            {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
+                            {fmtDateTime(r.timestamp)}
                           </td>
                           <td className="px-3 py-1.5 font-mono max-w-[160px] truncate" title={r.model}>{r.model || "—"}</td>
                           <td className="px-3 py-1.5 text-center">
@@ -758,17 +771,12 @@ export default function UsageClient({ hasUserSession = false }) {
                               {r.status || "—"}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 text-right text-text-muted">
-                            {r.latencyMs != null ? `${r.latencyMs}ms` : "—"}
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
+                            {fmtDuration(r.latencyMs)}
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
-                          <td className="px-3 py-1.5 text-right">
-                            <div className="tabular-nums">{fmt(r.tok)}</div>
-                            {r.tokS != null && (
-                              <div className="text-text-muted text-[10px]">{r.tokS} t/s</div>
-                            )}
-                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{fmt(r.tok)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
                           <td className="px-3 py-1.5 text-right">{fmtCost(r.cost)}</td>
@@ -796,7 +804,7 @@ export default function UsageClient({ hasUserSession = false }) {
               <h3 className="text-sm font-semibold">Available Models</h3>
               <span className="text-xs text-text-muted">
                 {data.allowedModels && data.allowedModels.length > 0
-                  ? `${data.allowedModels.length} allowed`
+                  ? <>{data.allowedModels.length} allowed</>
                   : "All models allowed"}
               </span>
             </div>
@@ -897,7 +905,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           {detail.status || "—"}
                         </span>
                       </div>
-                      <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</span></div>
+                      <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{fmtDateTime(detail.timestamp)}</span></div>
                       <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
                     </div>
