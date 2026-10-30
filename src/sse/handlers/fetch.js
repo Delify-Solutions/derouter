@@ -15,6 +15,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 /**
  * Handle web fetch (URL extraction) request for the SSE/Next.js server.
@@ -22,7 +23,7 @@ import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
  *
  * @param {Request} request
  */
-export async function handleFetch(request) {
+async function handleFetchRequest(request) {
   let body;
   try {
     body = await request.json();
@@ -237,3 +238,6 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Fetch failed");
   }
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleFetch = withErrorLog(handleFetchRequest, { cloneBody: true });

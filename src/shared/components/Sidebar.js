@@ -41,6 +41,7 @@ const navItems = [
 ];
 
 const debugItems = [
+  { href: "/dashboard/errors", label: "Nhật ký lỗi", icon: "error" },
   { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
   { href: "/dashboard/translator", label: "Translator", icon: "translate" },
 ];

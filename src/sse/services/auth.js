@@ -1,5 +1,6 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
+import { noteAttempt } from "open-sse/utils/errorTrace.js";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
@@ -237,9 +238,14 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  * @returns {{ shouldFallback: boolean, cooldownMs: number }}
  */
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
-  if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
+  if (!connectionId || connectionId === "noauth") {
+    noteAttempt({ provider, model, connectionId: connectionId || null, status, error: errorText });
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
+  // Every failed upstream call of every handler reports here: hand it to the error log's trace.
+  noteAttempt({ provider, model, connectionId, connectionName: conn?.displayName || conn?.name || null, status, error: errorText });
   const backoffLevel = conn?.backoffLevel || 0;
 
   // GitHub premium-request exhaustion is account-wide until the next UTC month.

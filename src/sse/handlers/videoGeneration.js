@@ -13,6 +13,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
+import { withErrorLog } from "../utils/withErrorLog.js";
 
 // Video generation is xAI-only today; requests without a provider prefix
 // (bare model id, or multipart bodies we deliberately don't parse) land here.
@@ -99,7 +100,7 @@ function withConnectionHeader(response, connectionId) {
 /**
  * POST /v1/videos/{generations|edits|extensions} — async job creation proxy.
  */
-export async function handleVideoCreate(request, action) {
+async function handleVideoCreateRequest(request, action) {
   const authError = await requireValidApiKey(request);
   if (authError) return authError;
 
@@ -236,3 +237,6 @@ export async function handleVideoGet(request, requestId) {
   );
   return result.response;
 }
+
+// Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+export const handleVideoCreate = withErrorLog(handleVideoCreateRequest, { cloneBody: true });
