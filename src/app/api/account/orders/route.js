@@ -81,6 +81,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "Phương thức thanh toán không hợp lệ" }, { status: 400, headers: NO_STORE });
   }
 
+  // Only a custom-amount plan takes an amount; the engine refuses it for any other
+  // and checks the bounds, this only separates "not sent" from "sent".
+  const hasAmount = body?.amountVnd !== undefined && body?.amountVnd !== null && body?.amountVnd !== "";
+  const amountVnd = hasAmount ? body.amountVnd : null;
+
   const payerNote = typeof body?.payerNote === "string" && body.payerNote.trim()
     ? body.payerNote.trim().slice(0, 500)
     : null;
@@ -113,7 +118,7 @@ export async function POST(request) {
     }
 
     if (method === "manual") {
-      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual" });
+      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual", amountVnd });
       // The manual path records what the customer was quoted, in the same columns a
       // gateway order uses, so a single order list can show both.
       db.run(
@@ -140,6 +145,7 @@ export async function POST(request) {
       plan,
       method,
       settings,
+      amountVnd,
     }));
 
     if (!created.ok) {

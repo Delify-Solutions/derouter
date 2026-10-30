@@ -44,6 +44,10 @@ import {
 } from "../../billing/orders.js";
 import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
+import { quoteTopup, topupBounds } from "../../billing/topup.js";
+
+// Ceiling for an admin-set top-up bound: 1 billion đồng, far above any real top-up.
+const TOPUP_MAX_BOUND_VND = 1_000_000_000;
 
 // Re-exported so every existing importer (giftRepo, localDb, db/index, tests)
 // keeps working unchanged after the move to src/lib/billing/ (design D13).
@@ -324,6 +328,9 @@ function rowToPlan(row) {
     priceVnd: row.priceVnd == null ? null : nano(row.priceVnd),
     creditNanoUsd: nano(row.creditNanoUsd),
     unlimitedCredit: isUnlimitedInput(row.unlimitedCredit),
+    allowCustomAmount: isUnlimitedInput(row.allowCustomAmount),
+    customMinVnd: row.customMinVnd == null ? null : nano(row.customMinVnd),
+    customMaxVnd: row.customMaxVnd == null ? null : nano(row.customMaxVnd),
     durationDays: nano(row.durationDays),
     isActive: row.isActive === 1 || row.isActive === true,
     isPurchasable: row.isPurchasable == null ? true : row.isPurchasable === 1 || row.isPurchasable === true,
@@ -337,6 +344,21 @@ function rowToPlan(row) {
     tpm: row.tpm == null ? null : nano(row.tpm),
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
+  };
+}
+
+/**
+ * The three top-up columns as stored: the flag, and each bound as a positive
+ * integer or NULL. Nothing is stored for an unlimited plan, which cannot be
+ * topped up, so a toggled-off plan never keeps stale bounds.
+ */
+function customAmountColumns(input) {
+  const allow = isUnlimitedInput(input.allowCustomAmount) && !isUnlimitedInput(input.unlimitedCredit);
+  const bound = (value) => (allow && Number(value) > 0 ? Math.round(Number(value)) : null);
+  return {
+    allowCustomAmount: allow,
+    customMinVnd: bound(input.customMinVnd),
+    customMaxVnd: bound(input.customMaxVnd),
   };
 }
 
@@ -419,6 +441,26 @@ export function validatePlanInput(input = {}) {
     if (!hasWindow && !hasRate) {
       return "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM";
     }
+  }
+
+  // Custom-amount top-up: the rate is the plan's own price/credit pair, so both
+  // must exist, and an unlimited plan has no credit to scale.
+  if (isUnlimitedInput(input.allowCustomAmount)) {
+    if (unlimited) return "Gói không giới hạn credit không nạp được số tiền tùy ý";
+    if (!(Number(input.priceVnd) > 0)) return "Nạp số tiền tùy ý cần giá VND của gói để tính tỷ lệ quy đổi";
+    for (const [field, label] of [["customMinVnd", "tối thiểu"], ["customMaxVnd", "tối đa"]]) {
+      const raw = input[field];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= 0) return `Số tiền ${label} phải là số đồng nguyên dương`;
+      if (value > TOPUP_MAX_BOUND_VND) return `Số tiền ${label} không được vượt quá ${TOPUP_MAX_BOUND_VND.toLocaleString("vi-VN")}đ`;
+    }
+    const { minVnd, maxVnd } = topupBounds({
+      priceVnd: input.priceVnd,
+      customMinVnd: input.customMinVnd,
+      customMaxVnd: input.customMaxVnd,
+    });
+    if (minVnd > maxVnd) return "Số tiền tối thiểu không được lớn hơn số tiền tối đa";
   }
 
   // purchaseLimitPerMonth: null/0 = unlimited, otherwise a positive integer.
@@ -566,6 +608,7 @@ export async function createPlan(input = {}) {
     // An unlimited plan stores 0 whatever the caller sent.
     unlimitedCredit: isUnlimitedInput(input.unlimitedCredit),
     creditNanoUsd: isUnlimitedInput(input.unlimitedCredit) ? 0 : nano(input.creditNanoUsd),
+    ...customAmountColumns(input),
     durationDays: nano(input.durationDays),
     isActive: input.isActive !== false,
     isPurchasable: input.isPurchasable !== false,
@@ -584,11 +627,12 @@ export async function createPlan(input = {}) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
-      plan.unlimitedCredit ? 1 : 0, plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
+      plan.unlimitedCredit ? 1 : 0, plan.allowCustomAmount ? 1 : 0, plan.customMinVnd, plan.customMaxVnd,
+      plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
       plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
@@ -617,17 +661,21 @@ export function updatePlanSync(db, id, patch = {}) {
   if (error) throw new Error(error);
 
   const code = String(merged.code).trim().toLowerCase();
+  const topupColumns = customAmountColumns(merged);
   const clash = db.get(`SELECT id FROM plans WHERE code = ? AND id != ?`, [code, id]);
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
       nano(merged.priceNanoUsd), normalizePriceVnd(merged.priceVnd),
       isUnlimitedInput(merged.unlimitedCredit) ? 0 : nano(merged.creditNanoUsd),
       isUnlimitedInput(merged.unlimitedCredit) ? 1 : 0,
+      topupColumns.allowCustomAmount ? 1 : 0,
+      topupColumns.customMinVnd,
+      topupColumns.customMaxVnd,
       nano(merged.durationDays),
       merged.isActive ? 1 : 0, merged.isPurchasable ? 1 : 0,
       Array.isArray(merged.allowedGroupIds) && merged.allowedGroupIds.length > 0
@@ -748,7 +796,7 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
   return null;
 }
 
-export async function createOrder({ userId, planId, payerNote = null, method = "manual" } = {}) {
+export async function createOrder({ userId, planId, payerNote = null, method = "manual", amountVnd = null } = {}) {
   if (!userId) throw new Error("createOrder requires a userId");
   if (!planId) throw new Error("createOrder requires a planId");
   const db = await getAdapter();
@@ -762,12 +810,23 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
   const blocker = await planPurchaseBlocker(db, plan, user);
   if (blocker) throw new Error(blocker.reason);
 
+  // A custom-amount top-up is priced from the typed amount at the plan's own rate;
+  // anything else keeps the plan's fixed price and credit.
+  let priceNanoUsd = plan.priceNanoUsd;
+  let creditNanoUsd = plan.creditNanoUsd;
+  if (amountVnd != null) {
+    const quote = quoteTopup(plan, amountVnd);
+    if (!quote.ok) throw new Error(quote.error);
+    priceNanoUsd = quote.priceNanoUsd;
+    creditNanoUsd = quote.creditNanoUsd;
+  }
+
   const order = {
     id: uuidv4(),
     userId,
     planId: plan.id,
-    amountNanoUsd: plan.priceNanoUsd,
-    creditNanoUsd: plan.creditNanoUsd,
+    amountNanoUsd: priceNanoUsd,
+    creditNanoUsd,
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: plan.durationDays,
     status: "pending",

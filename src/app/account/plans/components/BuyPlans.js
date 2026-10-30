@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmtUsdNano } from "@/shared/utils/money";
+import { formatVnd } from "@/lib/payments/amounts.js";
+import { quoteTopup, topupBounds, topupEnabled } from "@/lib/billing/topup.js";
 import { ActionButton, Empty, Section } from "@/app/account/components/ui";
 
 /**
@@ -34,6 +36,8 @@ const SECTION_HINT =
 export default function BuyPlans({ plans = [], loading = false, buyingId = null, onBuy, highlightCode = "", highlightRef = null }) {
   const localRef = useRef(null);
   const containerRef = highlightRef ?? localRef;
+  // What the customer typed per top-up plan, as digits. Unset = the plan's own price.
+  const [typed, setTyped] = useState({});
 
   useEffect(() => {
     if (!highlightCode) return;
@@ -78,8 +82,27 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
             ?? fmtUsdNano(plan.priceNanoUsd);
           // The headline is the price the customer is most likely to pay: VietQR
           // when the plan has one, otherwise USD. The other sits underneath.
-          const headline = vndText || (plan.priceNanoUsd > 0 ? usdText : "Miễn phí");
-          const secondary = vndText && plan.priceNanoUsd > 0 ? usdText : null;
+          // A top-up plan prices whatever amount is typed, so its headline, credit
+          // line and buttons all follow the quote (the same maths the server runs).
+          const topup = topupEnabled(plan);
+          const bounds = topup ? topupBounds(plan) : null;
+          // Prefill with the plan's price, pulled inside the bounds: an admin may set
+          // a minimum above the price (or a maximum below it), and the card must not
+          // open on an error before the customer has typed anything.
+          const defaultAmount = topup
+            ? String(Math.min(Math.max(Number(plan.priceVnd) || 0, bounds.minVnd), bounds.maxVnd))
+            : "";
+          const amountText = typed[plan.id] ?? defaultAmount;
+          const quote = topup ? quoteTopup(plan, amountText) : null;
+          const quotedVnd = quote?.ok ? formatVnd(quote.amountVnd) : null;
+          const quotedUsd = quote?.ok && quote.priceNanoUsd > 0 ? fmtUsdNano(quote.priceNanoUsd) : null;
+          const headline = topup
+            ? (quotedVnd || "—")
+            : vndText || (plan.priceNanoUsd > 0 ? usdText : "Miễn phí");
+          const secondary = topup
+            ? (quotedVnd && quotedUsd ? quotedUsd : null)
+            : vndText && plan.priceNanoUsd > 0 ? usdText : null;
+          const inputId = `topup-${plan.id}`;
 
           return (
             <li
@@ -108,10 +131,42 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                 </p>
                 {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
                 <p className="mt-3 text-sm font-medium text-text-main">
-                  {plan.unlimitedCredit ? "Credit không giới hạn" : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
+                  {plan.unlimitedCredit
+                    ? "Credit không giới hạn"
+                    : topup
+                      ? (quote?.ok ? `Nhận ${fmtUsdNano(quote.creditNanoUsd)} credit` : "Nhập số tiền để xem credit nhận được")
+                      : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
                   <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
                 </p>
               </div>
+
+              {topup && (
+                <div className="flex flex-col gap-1.5 border-t border-border px-6 py-4">
+                  <label htmlFor={inputId} className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                    Số tiền nạp (đồng)
+                  </label>
+                  <input
+                    id={inputId}
+                    value={amountText}
+                    onChange={(event) => setTyped((prev) => ({ ...prev, [plan.id]: event.target.value.replace(/\D/g, "") }))}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    aria-invalid={quote && !quote.ok ? "true" : undefined}
+                    aria-describedby={`${inputId}-hint`}
+                    className="h-11 w-full border border-border bg-surface px-3 font-mono text-base text-text-main placeholder-text-subtle transition-colors duration-150 focus:border-text-main focus:outline-none"
+                    placeholder={String(bounds.minVnd)}
+                  />
+                  <p
+                    id={`${inputId}-hint`}
+                    role={quote && !quote.ok ? "alert" : undefined}
+                    className={`text-xs ${quote && !quote.ok ? "text-danger" : "text-text-muted"}`}
+                  >
+                    {quote && !quote.ok
+                      ? quote.error
+                      : `Tỷ lệ ${formatVnd(plan.priceVnd)} = ${fmtUsdNano(plan.creditNanoUsd)} credit · từ ${formatVnd(bounds.minVnd)} đến ${formatVnd(bounds.maxVnd)}`}
+                  </p>
+                </div>
+              )}
 
               {limits.length > 0 && (
                 <ul className="mt-4 flex flex-col gap-1.5 border-t border-border px-6 py-4">
@@ -140,6 +195,12 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
 
                 {plan.purchasable && methods.map((entry) => {
                   const key = `${plan.id}:${entry.method}`;
+                  // A top-up button carries the typed amount in its own currency.
+                  const entryText = topup
+                    ? (quote?.ok
+                        ? (entry.method === "vietqr" ? quotedVnd : quotedUsd)
+                        : null)
+                    : entry.amountText;
                   const busy = buyingId === key;
                   // Gateway buttons are the primary action; manual is deliberately
                   // the quiet one, because it needs a human and should not compete.
@@ -150,14 +211,15 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                       tone={primary ? "solid" : "outline"}
                       fullWidth
                       loading={busy}
-                      onClick={() => onBuy(plan, entry.method)}
+                      disabled={topup && !quote?.ok}
+                      onClick={() => onBuy(plan, entry.method, topup ? quote.amountVnd : undefined)}
                     >
                       {!busy && (
                         <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                           {METHOD_ICON[entry.method] || "payments"}
                         </span>
                       )}
-                      {busy ? "Đang tạo đơn…" : `${entry.label} · ${entry.amountText}`}
+                      {busy ? "Đang tạo đơn…" : entryText ? `${entry.label} · ${entryText}` : entry.label}
                     </ActionButton>
                   );
                 })}
