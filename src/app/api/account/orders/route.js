@@ -5,7 +5,7 @@ import { createOrder, getOrderById, getPlanById, listOrders, planPurchaseBlocker
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 import { createGatewayOrderSync, offeredMethodsSync, MAX_PENDING_GATEWAY_ORDERS } from "@/lib/payments/checkout.js";
 import { toCustomerOrder } from "@/lib/billing/orders.js";
-import { fmtUsdNano } from "@/shared/utils/money.js";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -33,7 +33,7 @@ function decorate(order) {
   return {
     ...visible,
     amountUsd: fmtUsdNano(visible.amountNanoUsd),
-    creditUsd: fmtUsdNano(visible.creditNanoUsd),
+    creditUsd: fmtCreditNano(visible.creditNanoUsd, visible.unlimitedCredit),
   };
 }
 

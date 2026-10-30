@@ -16,7 +16,7 @@ export default function HeroSection({ plans, models, copy, baseUrl = "" }) {
 
   const specs = [
     cheapest ? { label: "Giá từ", value: cheapest.priceVndText || fmtUsd(cheapest.priceUsd), unit: `/ ${cheapest.durationDays} ngày` } : null,
-    cheapest ? { label: "Credit nhận", value: fmtUsd(cheapest.creditUsd), unit: "dùng chung mọi model" } : null,
+    cheapest ? { label: "Credit nhận", value: cheapest.unlimitedCredit ? "Không giới hạn" : fmtUsd(cheapest.creditUsd), unit: "dùng chung mọi model" } : null,
     { label: "Danh mục", value: String(models.length), unit: "model lập trình" },
     { label: "Endpoint", value: "/v1", unit: "OpenAI · Claude" },
   ].filter(Boolean);

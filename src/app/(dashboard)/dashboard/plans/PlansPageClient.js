@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle } from "@/shared/components";
-import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { windowLabel } from "@/lib/billing/limits.js";
 import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
@@ -18,6 +18,9 @@ const EMPTY_FORM = {
   // (spec plan-dual-pricing "Two prices per plan").
   priceVnd: "",
   creditUsd: "",
+  // On = no credit ceiling; the credit field is hidden and the plan is bounded only
+  // by its limits, RPM and TPM (at least one of them is then required).
+  unlimitedCredit: false,
   durationDays: "30",
   // Two separate switches: listed vs buyable. A plan can be advertised before
   // its capacity exists ("coming soon"), which neither flag expresses alone.
@@ -60,8 +63,10 @@ function validateDraft(draft) {
       errors.priceVnd = "Giá VND phải là số nguyên không âm";
     }
   }
-  const credit = Number(draft.creditUsd);
-  if (!Number.isFinite(credit) || credit <= 0) errors.creditUsd = "Credit must be greater than 0";
+  if (!draft.unlimitedCredit) {
+    const credit = Number(draft.creditUsd);
+    if (!Number.isFinite(credit) || credit <= 0) errors.creditUsd = "Credit must be greater than 0";
+  }
 
   const days = Number(draft.durationDays);
   if (!Number.isInteger(days) || days < 1) errors.durationDays = "Duration must be a whole number of days, at least 1";
@@ -80,10 +85,19 @@ function validateDraft(draft) {
   // Same rules as the API (spec plan-templates "Limit validation"), evaluated
   // against this draft's own credit and duration so the message names the limit.
   const limitsError = draftLimitsError(draft.limits, {
-    creditUsd: draft.creditUsd,
+    creditUsd: draft.unlimitedCredit ? 0 : draft.creditUsd,
     durationDays: draft.durationDays,
   });
   if (limitsError) errors.limits = limitsError;
+
+  // An unlimited plan must keep some other bound on spend.
+  if (draft.unlimitedCredit && !limitsError) {
+    const hasWindow = (draftToLimits(draft.limits) ?? []).length > 0;
+    const hasRate = Number(draft.rpm) > 0 || Number(draft.tpm) > 0;
+    if (!hasWindow && !hasRate) {
+      errors.unlimited = "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM";
+    }
+  }
 
   return errors;
 }
@@ -95,7 +109,8 @@ function planToDraft(plan) {
     description: plan.description || "",
     priceUsd: String(plan.priceNanoUsd / 1e9),
     priceVnd: plan.priceVnd == null ? "" : String(plan.priceVnd),
-    creditUsd: String(plan.creditNanoUsd / 1e9),
+    creditUsd: plan.unlimitedCredit ? "" : String(plan.creditNanoUsd / 1e9),
+    unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: String(plan.durationDays ?? 30),
     isActive: plan.isActive !== false,
     isPurchasable: plan.isPurchasable !== false,
@@ -192,7 +207,8 @@ export default function PlansPageClient() {
       priceNanoUsd: usdToNano(Number(draft.priceUsd)),
       // 0 and "" both mean "not sold by VietQR"; the server normalises both to NULL.
       priceVnd: String(draft.priceVnd ?? "").trim() === "" ? null : Number(draft.priceVnd),
-      creditNanoUsd: usdToNano(Number(draft.creditUsd)),
+      creditNanoUsd: draft.unlimitedCredit ? 0 : usdToNano(Number(draft.creditUsd)),
+      unlimitedCredit: draft.unlimitedCredit,
       durationDays: Number(draft.durationDays),
       isActive: draft.isActive,
       isPurchasable: draft.isPurchasable,
@@ -350,7 +366,7 @@ export default function PlansPageClient() {
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Credit</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">{fmtUsdNano(plan.creditNanoUsd)}</dd>
+                  <dd className="font-mono text-sm text-text-main mt-1">{fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}</dd>
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Duration</dt>
@@ -537,20 +553,44 @@ export default function PlansPageClient() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Credit (USD)"
-              type="number"
-              step="0.01"
-              min="0"
-              value={draft.creditUsd}
-              onChange={(e) => setField("creditUsd", e.target.value)}
-              placeholder="25.00"
-              hint="Usable balance the plan grants."
-              error={touched ? errors.creditUsd : ""}
-              required
-            />
+          <div className="flex items-center justify-between border border-border bg-surface px-4 py-3">
+            <div className="flex flex-col">
+              <span className="meta text-text-subtle">Credit không giới hạn</span>
+              <span className="text-sm text-text-muted">
+                Bật thì gói không bị trừ hết credit: chỉ hạn mức theo khung giờ, RPM và TPM chặn chi tiêu.
+              </span>
+            </div>
+            <Toggle checked={draft.unlimitedCredit} onChange={(v) => setField("unlimitedCredit", v)} />
           </div>
+
+          {draft.unlimitedCredit ? (
+            <p className="border border-border bg-surface-2 px-3 py-2 text-xs text-text-muted">
+              Cần ít nhất một hạn mức theo khung giờ, RPM hoặc TPM ở bên dưới. Nợ credit hiện có của khách
+              không được trả bằng gói này.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Credit (USD)"
+                type="number"
+                step="0.01"
+                min="0"
+                value={draft.creditUsd}
+                onChange={(e) => setField("creditUsd", e.target.value)}
+                placeholder="25.00"
+                hint="Usable balance the plan grants."
+                error={touched ? errors.creditUsd : ""}
+                required
+              />
+            </div>
+          )}
+
+          {touched && errors.unlimited && (
+            <p role="alert" className="flex items-center gap-1.5 text-[11px] text-danger">
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
+              {errors.unlimited}
+            </p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
@@ -689,6 +729,7 @@ export default function PlansPageClient() {
               rows={draft.limits}
               onChange={(rows) => setField("limits", rows)}
               creditUsd={draft.creditUsd}
+              unlimitedCredit={draft.unlimitedCredit}
               durationDays={draft.durationDays}
               error={touched ? errors.limits : null}
             />
@@ -696,7 +737,7 @@ export default function PlansPageClient() {
             {/* The price half of the spec's preview sentence: the editor renders
                 the credit/limits half, this line completes it. */}
             <p className="text-xs text-text-muted">
-              Xem trước: Khách trả ${draft.priceUsd || "—"} → {draft.creditUsd ? `$${draft.creditUsd}` : "—"} dùng
+              Xem trước: Khách trả ${draft.priceUsd || "—"} → {draft.unlimitedCredit ? "credit không giới hạn" : draft.creditUsd ? `$${draft.creditUsd}` : "—"} dùng
               chung mọi model trong {draft.durationDays || "—"} ngày
               {draftToLimits(draft.limits)?.length
                 ? `; ${draftToLimits(draft.limits)

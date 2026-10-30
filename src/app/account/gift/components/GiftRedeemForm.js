@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActionButton, Eyebrow, Stat } from "@/app/account/components/ui";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { formatGiftCode } from "./formatCode";
 
 // Group in fours as the user types, matching the shape admin codes are minted in.
@@ -105,7 +105,7 @@ export default function GiftRedeemForm({ onRedeemed }) {
           <dl className="grid gap-5 sm:grid-cols-3">
             <Stat
               label="Đã cộng"
-              value={fmtUsdNano(result.creditAppliedNanoUsd ?? 0)}
+              value={result.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(result.creditAppliedNanoUsd ?? 0)}
               hint={
                 (result.appliedToOverdraftNanoUsd ?? 0) > 0
                   ? `${fmtUsdNano(result.appliedToOverdraftNanoUsd)} trong số này đã trả khoản nợ của bạn trước.`

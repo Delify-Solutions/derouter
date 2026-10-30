@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button, CardSkeleton } from "@/shared/components";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 import OverviewTab from "./components/OverviewTab";
 import PlansTab from "./components/PlansTab";
@@ -90,7 +90,9 @@ export default function UserDetailClient() {
   const headerLine = useMemo(() => {
     if (!user) return "";
     const parts = [user.groupName || "Chưa có nhóm", STATUS_LABEL[user.status] || user.status];
-    if (summary) parts.push(`${fmtUsdNano(summary.availableNanoUsd)} khả dụng`);
+    if (summary) parts.push(
+      summary.hasUnlimitedCredit ? "credit không giới hạn" : `${fmtUsdNano(summary.availableNanoUsd)} khả dụng`
+    );
     if (summary?.debtNanoUsd > 0) parts.push(`nợ ${fmtUsdNano(summary.debtNanoUsd)}`);
     return parts.join(" · ");
   }, [user, summary]);

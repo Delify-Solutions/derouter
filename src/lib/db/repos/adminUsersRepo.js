@@ -86,6 +86,9 @@ export async function listUsersAdmin(query = {}) {
         COALESCE(u.overdraftNanoUsd, 0) AS debt,
         (SELECT COUNT(*) FROM userPlans up
           WHERE up.userId = u.id AND up.status = 'active' AND up.expiresAt > ?) AS queuedPlans,
+        EXISTS(SELECT 1 FROM userPlans up
+                WHERE up.userId = u.id AND up.status = 'active' AND up.unlimitedCredit = 1
+                  AND up.expiresAt > ?) AS hasUnlimited,
         COALESCE((SELECT SUM(uh.costNanoUsd) FROM usageHistory uh
                    WHERE uh.timestamp >= ?
                      AND uh.apiKeyId IN (SELECT k.id FROM apiKeys k WHERE k.userId = u.id)), 0) AS spend30d,
@@ -117,14 +120,14 @@ export async function listUsersAdmin(query = {}) {
   const sortColumn = SORTABLE[query.sort] ?? SORTABLE.createdAt;
   const dir = String(query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
 
-  // The CTE parameters are bound in textual order: the three `?` in `agg`, then the
+  // The CTE parameters are bound in textual order: the four `?` in `agg`, then the
   // filter parameters, then LIMIT/OFFSET.
-  const cteParams = [at, at, spendSince];
+  const cteParams = [at, at, at, spendSince];
 
   const rows = db.all(
     `${base}${derived}
      SELECT id, email, displayName, groupId, groupName, status, createdAt, lastLoginAt,
-            availableNanoUsd, debt, spend30dNanoUsd, queuedPlans, lastUsageAt, overdraftNanoUsd
+            availableNanoUsd, debt, spend30dNanoUsd, queuedPlans, hasUnlimited, lastUsageAt, overdraftNanoUsd
        FROM d
        ${clause}
       ORDER BY ${sortColumn} ${dir}, id ASC
@@ -148,6 +151,9 @@ export async function listUsersAdmin(query = {}) {
       lastLoginAt: row.lastLoginAt ?? null,
       queuedPlans: nano(row.queuedPlans),
       availableNanoUsd: nano(row.availableNanoUsd),
+      // A live unlimited plan adds nothing to availableNanoUsd, so the list needs
+      // the flag to avoid showing such a customer as having no credit.
+      hasUnlimitedCredit: Number(row.hasUnlimited) === 1,
       debtNanoUsd: nano(row.debt),
       spend30dNanoUsd: nano(row.spend30dNanoUsd),
       lastUsageAt: row.lastUsageAt ?? null,
@@ -172,8 +178,10 @@ export async function getUserSummary(userId) {
     `SELECT
        COALESCE((SELECT SUM(creditRemainingNanoUsd) FROM userPlans
                   WHERE userId = ? AND status = 'active' AND expiresAt > ?), 0) AS credit,
+       EXISTS(SELECT 1 FROM userPlans WHERE userId = ? AND status = 'active'
+                AND unlimitedCredit = 1 AND expiresAt > ?) AS hasUnlimited,
        COALESCE((SELECT overdraftNanoUsd FROM users WHERE id = ?), 0) AS debt`,
-    [userId, at, userId]
+    [userId, at, userId, at, userId]
   );
 
   const spend = (since) =>
@@ -189,6 +197,7 @@ export async function getUserSummary(userId) {
 
   return {
     availableNanoUsd: Math.max(0, nano(creditRow?.credit) - nano(creditRow?.debt)),
+    hasUnlimitedCredit: Number(creditRow?.hasUnlimited) === 1,
     debtNanoUsd: nano(creditRow?.debt),
     spend7dNanoUsd: spend(since7),
     spend30dNanoUsd: spend(since30),

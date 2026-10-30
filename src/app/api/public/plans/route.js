@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -13,10 +13,11 @@ function rowToPlan(row) {
     description: row.description ?? null,
     priceNanoUsd: row.priceNanoUsd ?? 0,
     creditNanoUsd: row.creditNanoUsd ?? 0,
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: row.durationDays ?? 0,
     sortOrder: row.sortOrder ?? 0,
     priceLabel: fmtUsdNano(row.priceNanoUsd ?? 0),
-    creditLabel: fmtUsdNano(row.creditNanoUsd ?? 0),
+    creditLabel: fmtCreditNano(row.creditNanoUsd ?? 0, Number(row.unlimitedCredit) === 1),
   };
 }
 

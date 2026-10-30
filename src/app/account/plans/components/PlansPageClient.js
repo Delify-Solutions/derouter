@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CardSkeleton } from "@/shared/components";
 import { ActionButton, Page, Section, Stat } from "@/app/account/components/ui";
 import { PlanQueue } from "@/shared/components/billing";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import BuyPlans from "./BuyPlans";
 import MyOrders from "./MyOrders";
 import PlanHistory from "./PlanHistory";
@@ -36,7 +36,7 @@ export default function PlansPageClient() {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [data, setData] = useState({ availableNanoUsd: 0, debtNanoUsd: 0, queue: [], history: [], plans: [] });
+  const [data, setData] = useState({ availableNanoUsd: 0, hasUnlimitedCredit: false, debtNanoUsd: 0, queue: [], history: [], plans: [] });
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [buyingId, setBuyingId] = useState(null);
@@ -55,6 +55,7 @@ export default function PlansPageClient() {
       if (!res.ok) throw new Error(body.error || "Không tải được gói của bạn");
       setData({
         availableNanoUsd: body.availableNanoUsd || 0,
+        hasUnlimitedCredit: body.hasUnlimitedCredit === true,
         debtNanoUsd: body.debtNanoUsd || 0,
         queue: Array.isArray(body.queue) ? body.queue : [],
         history: Array.isArray(body.history) ? body.history : [],
@@ -224,8 +225,10 @@ export default function PlansPageClient() {
         <div className="bg-surface p-6">
           <Stat
             label="Credit khả dụng"
-            value={loading ? "…" : fmtUsdNano(data.availableNanoUsd)}
-            hint="Tổng credit còn lại của các gói chưa hết hạn."
+            value={loading ? "…" : data.hasUnlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(data.availableNanoUsd)}
+            hint={data.hasUnlimitedCredit
+              ? "Có gói không giới hạn credit; chỉ các hạn mức của gói được áp dụng."
+              : "Tổng credit còn lại của các gói chưa hết hạn."}
           />
         </div>
         {data.debtNanoUsd > 0 && (

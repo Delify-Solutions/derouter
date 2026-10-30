@@ -59,7 +59,7 @@ export default function FaqSection({ plans, models, copy }) {
         {plans.length > 0 && (
           <p className="mt-6 font-mono text-xs text-text-subtle">
             {plans
-              .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
+              .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${plan.unlimitedCredit ? "credit không giới hạn" : fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
               .join(" · ")}
           </p>
         )}

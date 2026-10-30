@@ -108,7 +108,7 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                 </p>
                 {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
                 <p className="mt-3 text-sm font-medium text-text-main">
-                  Nhận {fmtUsdNano(plan.creditNanoUsd)} credit
+                  {plan.unlimitedCredit ? "Credit không giới hạn" : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
                   <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
                 </p>
               </div>

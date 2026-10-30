@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { dateOf } from "@/shared/components/billing";
 
 const KIND_LABEL = { plan: "Gói", credit: "Credit" };
@@ -57,7 +57,7 @@ export default function GiftsTab({ userId }) {
                   <td className="px-4 py-2 font-mono text-[12px] text-text-main">{row.code || "—"}</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{KIND_LABEL[row.grantKind] || row.grantKind || "—"}</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                    {row.creditNanoUsd == null ? "—" : fmtUsdNano(row.creditNanoUsd)}
+                    {row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : row.creditNanoUsd == null ? "—" : fmtUsdNano(row.creditNanoUsd)}
                   </td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.durationDays ?? "—"}</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(row.redeemedAt)}</td>

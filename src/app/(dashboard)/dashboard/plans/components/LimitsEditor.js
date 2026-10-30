@@ -41,7 +41,7 @@ export function draftLimitsError(rows, { creditUsd, durationDays }) {
   });
 }
 
-export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, error }) {
+export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredit = false, durationDays, error }) {
   const update = (index, patch) => {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
@@ -63,7 +63,8 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
     const limits = draftToLimits(rows);
     if (!limits) return null;
     const days = Number(durationDays) || 0;
-    return `nhận $${formatNumber(creditUsd)} dùng chung mọi model trong ${days} ngày; ${limits
+    const credit = unlimitedCredit ? "credit không giới hạn" : `nhận $${formatNumber(creditUsd)}`;
+    return `${credit} dùng chung mọi model trong ${days} ngày; ${limits
       .map(describeLimit)
       .join(", ")}`;
   })();
@@ -91,7 +92,9 @@ export default function LimitsEditor({ rows, onChange, creditUsd, durationDays, 
 
       {rows.length === 0 && (
         <p className="border border-border bg-surface-2 px-3 py-2 text-xs text-text-muted">
-          Không có hạn mức — gói chỉ dừng khi hết credit.
+          {unlimitedCredit
+            ? "Chưa có hạn mức theo khung giờ — gói không giới hạn credit cần ít nhất một hạn mức, hoặc RPM/TPM."
+            : "Không có hạn mức — gói chỉ dừng khi hết credit."}
         </p>
       )}
 

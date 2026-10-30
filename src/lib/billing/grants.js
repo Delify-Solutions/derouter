@@ -89,6 +89,10 @@ export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = n
  * (users.overdraftNanoUsd); only the remainder lands on the new plan, so a grant
  * can never leave a user both funded and in debt.
  *
+ * `unlimitedCredit` grants a plan with no credit ceiling: both credit columns are
+ * 0 and nothing is repaid out of it, so an existing debt stays on the account (the
+ * plan never runs dry, so admission does not look at the debt).
+ *
  * `limits` is the normalised/serialisable snapshot of the plan's per-window limits
  * (spec plan-queue-billing "Each grant creates an independent purchased plan").
  * Credit-only grants pass `[]`. `priority` is always NULL: a new plan joins the
@@ -102,6 +106,7 @@ export function grantUserPlan(db, {
   orderId = null,
   source,
   creditNanoUsd,
+  unlimitedCredit = false,
   durationDays,
   limits = [],
   meta = null,
@@ -114,7 +119,8 @@ export function grantUserPlan(db, {
   if (!userId) throw new Error("grantUserPlan requires a userId");
   if (!source) throw new Error("grantUserPlan requires a source");
 
-  const credit = Math.max(0, nano(creditNanoUsd));
+  const unlimited = unlimitedCredit === true || Number(unlimitedCredit) === 1;
+  const credit = unlimited ? 0 : Math.max(0, nano(creditNanoUsd));
   const startsAt = now || nowIso();
   const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
 
@@ -146,6 +152,7 @@ export function grantUserPlan(db, {
     source,
     creditTotalNanoUsd: planCredit,
     creditRemainingNanoUsd: planCredit,
+    unlimitedCredit: unlimited ? 1 : 0,
     startsAt,
     expiresAt,
     status: "active",
@@ -155,11 +162,11 @@ export function grantUserPlan(db, {
   };
 
   db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, priority, limits, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, unlimitedCredit, startsAt, expiresAt, status, priority, limits, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source,
-      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
+      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd, userPlan.unlimitedCredit,
       userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.priority,
       userPlan.limits, userPlan.createdAt,
     ]
@@ -171,8 +178,8 @@ export function grantUserPlan(db, {
     deltaNanoUsd: planCredit,
     kind: ledgerKind,
     meta: meta && typeof meta === "object"
-      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown }
-      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
+      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...(unlimited ? { unlimited: true } : {}) }
+      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...(unlimited ? { unlimited: true } : {}) },
     createdAt: startsAt,
   });
 

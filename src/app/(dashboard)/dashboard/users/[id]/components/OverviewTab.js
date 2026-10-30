@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button, Input, Select } from "@/shared/components";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import ReasonModal from "./ReasonModal";
 
 const STATUS_OPTIONS = [
@@ -84,7 +84,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
 
       <section className="border border-border bg-surface">
         <dl className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-          <div className="bg-surface px-5 py-4"><Field label="Credit khả dụng">{fmtUsdNano(summary?.availableNanoUsd ?? 0)}</Field></div>
+          <div className="bg-surface px-5 py-4"><Field label="Credit khả dụng">{summary?.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(summary?.availableNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="Đang nợ">{fmtUsdNano(summary?.debtNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="Chi 7 ngày">{fmtUsdNano(summary?.spend7dNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="Chi 30 ngày">{fmtUsdNano(summary?.spend30dNanoUsd ?? 0)}</Field></div>

@@ -88,6 +88,7 @@ function rowToUserPlan(row) {
     creditTotalNanoUsd: total,
     creditRemainingNanoUsd: remaining,
     creditUsedNanoUsd: Math.max(0, total - remaining),
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
     expiresAt: row.expiresAt,
     status: row.status,
@@ -118,13 +119,20 @@ export async function walletSummary(userId) {
 
   let liveCredit = 0;
   let totalGrantedNanoUsd = 0;
+  let hasUnlimitedCredit = false;
   for (const plan of plans) {
     totalGrantedNanoUsd += plan.creditTotalNanoUsd;
-    if (plan.status === "active" && plan.expiresAt > now) liveCredit += plan.creditRemainingNanoUsd;
+    if (plan.status === "active" && plan.expiresAt > now) {
+      liveCredit += plan.creditRemainingNanoUsd;
+      if (plan.unlimitedCredit) hasUnlimitedCredit = true;
+    }
   }
 
   return {
     availableNanoUsd: Math.max(0, liveCredit - overdraftNanoUsd),
+    // True while an unlimited plan is live: the number above then understates what
+    // the customer can spend, so the screens say "Không giới hạn" instead.
+    hasUnlimitedCredit,
     liveCreditNanoUsd: liveCredit,
     overdraftNanoUsd,
     totalGrantedNanoUsd,
@@ -291,6 +299,11 @@ export async function getLedger(userId, { limit = 100, offset = 0 } = {}) {
 
 // ── Plans CRUD ────────────────────────────────────────────────────────────
 
+/** Truthy forms an API body or a stored column may carry for the unlimited flag. */
+function isUnlimitedInput(value) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
 function rowToPlan(row) {
   if (!row) return null;
   // allowedGroupIds is a JSON array of keyGroups ids; null means "any group".
@@ -310,6 +323,7 @@ function rowToPlan(row) {
     // Integer đồng, NULL when the plan is not sold by bank transfer.
     priceVnd: row.priceVnd == null ? null : nano(row.priceVnd),
     creditNanoUsd: nano(row.creditNanoUsd),
+    unlimitedCredit: isUnlimitedInput(row.unlimitedCredit),
     durationDays: nano(row.durationDays),
     isActive: row.isActive === 1 || row.isActive === true,
     isPurchasable: row.isPurchasable == null ? true : row.isPurchasable === 1 || row.isPurchasable === true,
@@ -338,7 +352,8 @@ function normalizeRate(value) {
  */
 export function validatePlanLimits(input = {}) {
   return validateLimits(input.limits ?? [], {
-    creditNanoUsd: nano(input.creditNanoUsd),
+    // No credit ceiling to compare a limit against on an unlimited plan.
+    creditNanoUsd: isUnlimitedInput(input.unlimitedCredit) ? 0 : nano(input.creditNanoUsd),
     durationDays: nano(input.durationDays),
   });
 }
@@ -361,8 +376,11 @@ export function validatePlanInput(input = {}) {
       return "priceVnd must be a non-negative integer (đồng)";
     }
   }
-  const credit = Number(input.creditNanoUsd);
-  if (!Number.isInteger(credit) || credit <= 0) return "creditNanoUsd must be an integer > 0";
+  const unlimited = isUnlimitedInput(input.unlimitedCredit);
+  if (!unlimited) {
+    const credit = Number(input.creditNanoUsd);
+    if (!Number.isInteger(credit) || credit <= 0) return "creditNanoUsd must be an integer > 0";
+  }
   const days = Number(input.durationDays);
   if (!Number.isInteger(days) || days < 1) return "durationDays must be an integer >= 1";
 
@@ -390,6 +408,17 @@ export function validatePlanInput(input = {}) {
     if (raw === undefined || raw === null || raw === "") continue;
     const value = Number(raw);
     if (!Number.isInteger(value) || value < 0) return `${label} phải là số nguyên không âm (0 hoặc để trống = không giới hạn)`;
+  }
+
+  // An unlimited-credit plan must keep some other bound on spend, or one customer
+  // could burn upstream cost without end for a fixed price: at least one window
+  // limit, an RPM or a TPM.
+  if (unlimited) {
+    const hasWindow = parseLimits(input.limits ?? []).length > 0;
+    const hasRate = nano(input.rpm) > 0 || nano(input.tpm) > 0;
+    if (!hasWindow && !hasRate) {
+      return "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM";
+    }
   }
 
   // purchaseLimitPerMonth: null/0 = unlimited, otherwise a positive integer.
@@ -534,7 +563,9 @@ export async function createPlan(input = {}) {
     description: input.description == null ? null : String(input.description),
     priceNanoUsd: nano(input.priceNanoUsd),
     priceVnd: normalizePriceVnd(input.priceVnd),
-    creditNanoUsd: nano(input.creditNanoUsd),
+    // An unlimited plan stores 0 whatever the caller sent.
+    unlimitedCredit: isUnlimitedInput(input.unlimitedCredit),
+    creditNanoUsd: isUnlimitedInput(input.unlimitedCredit) ? 0 : nano(input.creditNanoUsd),
     durationDays: nano(input.durationDays),
     isActive: input.isActive !== false,
     isPurchasable: input.isPurchasable !== false,
@@ -553,11 +584,11 @@ export async function createPlan(input = {}) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
-      plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
+      plan.unlimitedCredit ? 1 : 0, plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
       plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
@@ -590,12 +621,14 @@ export function updatePlanSync(db, id, patch = {}) {
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
       nano(merged.priceNanoUsd), normalizePriceVnd(merged.priceVnd),
-      nano(merged.creditNanoUsd), nano(merged.durationDays),
+      isUnlimitedInput(merged.unlimitedCredit) ? 0 : nano(merged.creditNanoUsd),
+      isUnlimitedInput(merged.unlimitedCredit) ? 1 : 0,
+      nano(merged.durationDays),
       merged.isActive ? 1 : 0, merged.isPurchasable ? 1 : 0,
       Array.isArray(merged.allowedGroupIds) && merged.allowedGroupIds.length > 0
         ? stringifyJson(merged.allowedGroupIds.map((g) => String(g).trim()))
@@ -735,6 +768,7 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     planId: plan.id,
     amountNanoUsd: plan.priceNanoUsd,
     creditNanoUsd: plan.creditNanoUsd,
+    unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: plan.durationDays,
     status: "pending",
     method: method || "manual",
@@ -748,11 +782,11 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     createdAt: nowIso(),
   };
   db.run(
-    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, durationDays, status, method, payerNote, emailSnapshot, limits, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, status, method, payerNote, emailSnapshot, limits, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.durationDays, order.status, order.method, order.payerNote, order.emailSnapshot,
+      order.unlimitedCredit, order.durationDays, order.status, order.method, order.payerNote, order.emailSnapshot,
       order.limits, order.createdAt,
     ]
   );

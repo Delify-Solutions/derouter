@@ -235,6 +235,7 @@ export async function listGiftPlans() {
     code: plan.code,
     name: plan.name ?? plan.code,
     creditNanoUsd: plan.creditNanoUsd ?? 0,
+    unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: plan.durationDays ?? 0,
     isActive: plan.isActive === true,
   }));
@@ -348,6 +349,7 @@ export async function listUserRedemptions(userId) {
             g.code AS giftCode, g.grantKind, g.creditNanoUsd, g.durationDays, g.planId,
             p.name AS planName,
             up.creditTotalNanoUsd AS grantedCreditNanoUsd,
+            up.unlimitedCredit AS grantedUnlimited,
             up.expiresAt AS planExpiresAt
        FROM giftRedemptions r
        JOIN giftCodes g ON g.id = r.giftId
@@ -366,6 +368,7 @@ export async function listUserRedemptions(userId) {
     grantKind: row.grantKind,
     planName: row.planName ?? null,
     creditNanoUsd: row.grantedCreditNanoUsd ?? row.creditNanoUsd ?? null,
+    unlimitedCredit: Number(row.grantedUnlimited) === 1,
     durationDays: row.durationDays ?? null,
     expiresAt: row.planExpiresAt ?? null,
   }));
@@ -398,6 +401,7 @@ export function redeemGiftCode(db, { userId, code } = {}) {
     grant = {
       planId: plan.id,
       creditNanoUsd: Number(plan.creditNanoUsd) || 0,
+      unlimitedCredit: Number(plan.unlimitedCredit) === 1,
       durationDays: Number(plan.durationDays) || 30,
       planName: plan.name ?? null,
       // A plan gift snapshots the plan's limits at grant time (spec
@@ -456,6 +460,7 @@ export function redeemGiftCode(db, { userId, code } = {}) {
         orderId: null,
         source: "gift",
         creditNanoUsd: grant.creditNanoUsd,
+        unlimitedCredit: grant.unlimitedCredit === true,
         durationDays: grant.durationDays,
         limits: grant.limits ?? [],
         meta: { giftId: row.id, giftRedemptionId: redemptionId, giftCode: formatGiftCode(row.code) },

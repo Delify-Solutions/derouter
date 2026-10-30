@@ -12,6 +12,7 @@ import { parseJson } from "../helpers/jsonCol.js";
 import { nano } from "../../billing/ledger.js";
 import { parseLimits, describeLimit, windowLabel } from "../../billing/limits.js";
 import { queueViewSync } from "../../billing/planQueue.js";
+import { UNLIMITED_CREDIT_LABEL } from "../../../shared/utils/money.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -41,6 +42,7 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     source: entry.source,
     creditTotalNanoUsd: entry.creditTotalNanoUsd,
     creditRemainingNanoUsd: entry.creditRemainingNanoUsd,
+    unlimitedCredit: entry.unlimitedCredit === true,
     startsAt: entry.startsAt,
     expiresAt: entry.expiresAt,
     priority: entry.priority,
@@ -85,6 +87,7 @@ export function getPlanHistorySync(db, userId, { limit = 50 } = {}) {
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
     expiresAt: row.expiresAt,
     status: row.status,
@@ -202,7 +205,7 @@ export function toCatalogPlan(plan, blocker, methods = []) {
     priceUsd: usd(plan.priceNanoUsd),
     priceVnd: plan.priceVnd == null ? null : nano(plan.priceVnd),
     priceVndText: plan.priceVnd ? formatVnd(nano(plan.priceVnd)) : null,
-    creditUsd: usd(plan.creditNanoUsd),
+    creditUsd: plan.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : usd(plan.creditNanoUsd),
     limits,
     limitsText: [...limits.map(describeLimit), ...describeRates(plan)],
     offeredMethods: methods,

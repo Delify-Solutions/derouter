@@ -244,6 +244,7 @@ export function createGatewayOrderSync(db, {
     // finance/statistics query built on it keeps working unchanged.
     amountNanoUsd: nano(plan.priceNanoUsd),
     creditNanoUsd: nano(plan.creditNanoUsd),
+    unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: nano(plan.durationDays),
     status: "pending",
     method,
@@ -259,13 +260,13 @@ export function createGatewayOrderSync(db, {
 
   db.run(
     `INSERT INTO orders(
-       id, userId, planId, amountNanoUsd, creditNanoUsd, durationDays, status, method,
+       id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, status, method,
        paymentCode, payCurrency, payAmount, paymentProviderId, expiresAt,
        emailSnapshot, limits, createdAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.durationDays, order.status, order.method, order.paymentCode, order.payCurrency,
+      order.unlimitedCredit, order.durationDays, order.status, order.method, order.paymentCode, order.payCurrency,
       order.payAmount, order.paymentProviderId, order.expiresAt, order.emailSnapshot,
       order.limits, order.createdAt,
     ]
@@ -297,6 +298,7 @@ export function readGatewayOrder(db, orderId) {
     planName: row.planName ?? null,
     amountNanoUsd: nano(row.amountNanoUsd),
     creditNanoUsd: nano(row.creditNanoUsd),
+    unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
     status: row.status,
     method: row.method ?? "manual",

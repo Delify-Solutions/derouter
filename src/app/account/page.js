@@ -6,7 +6,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getQueueSync } from "@/lib/db/repos/accountPlansRepo.js";
 import { getDebtNanoSync } from "@/lib/billing/ledger.js";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
-import { fmtUsdNano } from "@/shared/utils/money";
+import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { Page, Section, Panel, Stat, Tag, IconBox, ButtonLink, Eyebrow } from "./components/ui";
 import CopyBlock from "./components/CopyBlock";
 
@@ -102,6 +102,9 @@ export default async function AccountOverviewPage() {
   const baseUrl = await apiBaseUrl();
 
   const availableNanoUsd = queue.reduce((sum, entry) => sum + Math.max(0, entry.creditRemainingNanoUsd), 0);
+  // An unlimited plan adds nothing to that sum, so a live one is what the headline
+  // reports instead of a misleading figure.
+  const hasUnlimitedCredit = queue.some((entry) => entry.unlimitedCredit);
   const nearestReset = paying
     ? paying.windows
         .filter((window) => window.open && window.resetAt)
@@ -122,8 +125,10 @@ export default async function AccountOverviewPage() {
         <div className="bg-surface p-6">
           <Stat
             label="Credit khả dụng"
-            value={fmtUsdNano(availableNanoUsd)}
-            hint={`${queue.length} gói trong hàng đợi`}
+            value={hasUnlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(availableNanoUsd)}
+            hint={hasUnlimitedCredit && availableNanoUsd > 0
+              ? `${fmtUsdNano(availableNanoUsd)} từ gói có credit · ${queue.length} gói trong hàng đợi`
+              : `${queue.length} gói trong hàng đợi`}
           />
         </div>
         <div className="bg-surface p-6">
@@ -131,7 +136,7 @@ export default async function AccountOverviewPage() {
             <Stat
               label="Gói đang trả"
               value={paying.planName || paying.planCode || "Gói"}
-              hint={`Còn ${fmtUsdNano(paying.creditRemainingNanoUsd)} / ${fmtUsdNano(paying.creditTotalNanoUsd)} · hết hạn ${fmtDate(paying.expiresAt)}${nearestReset ? ` · reset ${fmtTime(nearestReset)}` : ""}`}
+              hint={`${paying.unlimitedCredit ? "Credit không giới hạn" : `Còn ${fmtUsdNano(paying.creditRemainingNanoUsd)} / ${fmtUsdNano(paying.creditTotalNanoUsd)}`} · hết hạn ${fmtDate(paying.expiresAt)}${nearestReset ? ` · reset ${fmtTime(nearestReset)}` : ""}`}
             />
           ) : (
             <Stat label="Gói đang trả" value="Chưa có" hint="Mua gói hoặc nhập mã quà tặng để nhận credit." />

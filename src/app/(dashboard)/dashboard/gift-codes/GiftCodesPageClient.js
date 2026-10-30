@@ -13,7 +13,7 @@ import {
 } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
+import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 
 const FILTERS = [
   { value: "all", label: "All" },
@@ -589,7 +589,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
 
   const planOptions = activePlans.map((p) => ({
     value: p.id,
-    label: `${p.name} · ${fmtUsdNano(p.creditNanoUsd)} · ${p.durationDays}d`,
+    label: `${p.name} · ${fmtCreditNano(p.creditNanoUsd, p.unlimitedCredit)} · ${p.durationDays}d`,
   }));
 
   return (

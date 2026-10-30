@@ -11,7 +11,7 @@ Defines the signed-in customer's self-service area: creating and revoking API ke
 - **THEN** the list shows only the 8-character prefix and no way to reveal the secret
 
 ### Requirement: Plan queue page
-`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar, expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. Times SHALL be shown in the browser's local time.
+`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar (an unlimited-credit plan shows "Không giới hạn" instead of a bar), expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. Times SHALL be shown in the browser's local time.
 
 The plans SHALL be split into two tabs, `Đang hoạt động` (the queue above) and `Không hoạt động`, each showing its count. The inactive tab SHALL list every purchase that is not `active`, newest first, with its plan name, source, start and expiry, total credit received and a status label: `Hết credit` (exhausted), `Hết hạn` (expired), `Đã hủy` (revoked) or `Đã hoàn tiền` (refunded). A plan SHALL appear on exactly one tab. The tabs SHALL follow the WAI-ARIA tabs pattern (arrow keys move between them).
 
