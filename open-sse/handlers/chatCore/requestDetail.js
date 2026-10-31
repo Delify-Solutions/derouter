@@ -153,6 +153,8 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     requestedModel: requestedModel || null,
     // True when the figures are the router's own estimate (the upstream reported no usage).
     estimated: normalized.estimated === true,
+    // True when the cached part of an estimated usage is itself an estimate (prefix reuse).
+    cacheEstimated: normalized.cache_estimated === true,
     // Latency in ms (total request wall-time). Persisted into usageHistory.meta
     // so the usage pages can show each request's response time without a schema
     // change. Null for callers that don't track timing (e.g. platform denials).

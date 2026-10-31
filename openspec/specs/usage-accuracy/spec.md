@@ -103,3 +103,71 @@ For a non-streamed response the router SHALL record the usage reported in the bo
 #### Scenario: JSON body to a streamed request
 - **WHEN** a provider answers a streamed request with a plain JSON chat completion that has usage
 - **THEN** the body reaches the client unchanged and the row records its usage
+
+### Requirement: The estimated cached part is a per-combo option, off by default
+A combo SHALL have the boolean option `cacheEstimation` (stored in the combo's `meta`, default off, changed in the combo form as "Ước lượng cache theo prefix" and through the combo API, which SHALL accept booleans only and answer 400 for anything else). A combo without the option, and a request to a bare provider/model, SHALL behave exactly as before this requirement. The combo the client called decides, also for a fusion combo; a combo reached from another combo keeps the outer decision. A request without an API key has no tenant to scope the remembered prompts to and SHALL get no estimate. The option only makes sense for an upstream that really caches its prompt prefix; the form SHALL say that it applies only when the upstream returns no usage and that the figure is an estimate.
+
+#### Scenario: Existing combo
+- **WHEN** a combo was created before this option existed
+- **THEN** it has no `cacheEstimation` key and its requests record cached tokens exactly as before
+
+#### Scenario: Fusion and nested combos
+- **WHEN** a fusion combo with the option on runs its models, or a combo with the option on reaches another combo
+- **THEN** every upstream call of that request is estimated under the outer combo's decision, and the inner combo's own option does not override it
+
+#### Scenario: Request without an API key
+- **WHEN** a request to a combo with the option on carries no API key
+- **THEN** it records the plain estimate, with no estimated cached part and no remembered prompt
+
+#### Scenario: Invalid value
+- **WHEN** a combo is created or updated with `cacheEstimation: "yes"`
+- **THEN** the API answers 400 and nothing is stored
+
+### Requirement: The estimate applies only to a pure estimate
+The estimated cached part SHALL be added only to a usage that is itself a pure estimate (the upstream reported no usable usage at all, spec "An estimate is a flagged billing fallback only"). Usage the upstream reported SHALL never be altered: not when it carries no cache details, not when it carries them, in any path (stream, non-stream, forced SSE-to-JSON). A request that failed or recorded no usage SHALL get no estimate. The estimate SHALL be computed after the response was delivered and off the request's own turn (after the last byte of a stream, after the reply of a non-streamed request was returned, both in `setImmediate`), never while chunks are in flight; an error in it SHALL leave the usage recorded unchanged.
+
+#### Scenario: Upstream reported usage without cache
+- **WHEN** a combo with the option on gets `prompt_tokens: 4511` and no cache details from the upstream
+- **THEN** the row records 0 cached tokens, not an estimate
+
+#### Scenario: Upstream reported nothing
+- **WHEN** the same combo gets a stream without usage and a previous request shared most of its prompt
+- **THEN** the row is flagged `estimated` and carries an estimated cached part
+
+### Requirement: The cached part is estimated from prefix reuse, deterministically
+The router SHALL remember, per scope (the calling API key, the upstream connection, the upstream model), the last three prompt texts of requests of combos with the option on, in a bounded in-memory LRU with a time to live of 10 minutes (`CACHE_ESTIMATION_TTL_MS`), a total cap of 64 MB (`CACHE_ESTIMATION_MAX_BYTES`) and a per-text cap of 8 MB (`CACHE_ESTIMATION_ENTRY_MAX_BYTES`); a value that is not a positive finite number SHALL fall back to the default. Least recently used scopes SHALL be evicted first, a text over the per-text cap SHALL be ignored, and a scope whose newest text is past the TTL SHALL be released by a lazy sweep (at most every 30 s, on writes and estimates), not only ignored on read. The prompt text is the system/instructions, the tools and then each message serialised separately, in the order the provider renders them, with inline base64 payloads (images, files) replaced by a short stable token (hash and length) so they neither inflate memory nor the shared-character ratio (a repeated image makes the estimate conservative). For a pure estimate the router SHALL take the longest common prefix, in characters, between the request's text and each remembered text of the scope, keep the longest, convert it to tokens in proportion to the request's own estimated prompt tokens (`promptEstimate * commonChars / totalChars`), round DOWN to a multiple of 64, keep it below the prompt estimate and record it as `prompt_tokens_details.cached_tokens`. A request with nothing in common gets 0. A different key never sees another key's prefixes. No tokenizer and no fixed ratio is used.
+
+#### Scenario: Agent turn that only appends
+- **WHEN** a request repeats the previous prompt and appends a new user turn
+- **THEN** the estimated cached tokens are the shared fraction of the prompt, rounded down to a multiple of 64
+
+#### Scenario: Cold request
+- **WHEN** nothing from the scope is remembered, or the remembered text expired
+- **THEN** the estimated cached tokens are 0
+
+#### Scenario: System prompt changed
+- **WHEN** the system part differs from every remembered text
+- **THEN** the estimated cached tokens are 0
+
+#### Scenario: Another customer
+- **WHEN** a different API key sends the same prompt
+- **THEN** it gets 0, not the first customer's prefix
+
+#### Scenario: Price
+- **WHEN** an estimated row has an estimated cached part
+- **THEN** its cost charges that part at the cached rate and the rest of the prompt at the input rate
+
+### Requirement: An estimated cache is labelled wherever it is shown
+A row whose cached part is estimated SHALL keep `estimated: true` and carry `cacheEstimated: true` in its meta, in the key receipts API and in the account usage rows. The usage pages (`/usage` history and by-model table, `/account/usage`) SHALL show the cached number with a leading "≈" and the tooltip "Ước lượng, upstream không báo cache"; an aggregate (by-model row, total) that contains at least one such row with cached tokens above zero SHALL be marked the same way. A cold request whose cached part is 0 is still labelled an estimate. Admin tables other than these are not labelled.
+
+#### Scenario: Receipt of an estimated row
+- **WHEN** a key holder opens their receipts
+- **THEN** the row has `estimated: true` and `cacheEstimated: true`, and the cached number is shown as "≈N"
+
+### Requirement: The estimated cache is honest about its limits
+The estimate SHALL be documented as an estimate that can be wrong: the upstream cache may have expired earlier or later than the router's 10 minutes, a provider may cache in different block sizes or only above a minimum prompt length, the characters-to-tokens proportion is approximate, concurrent requests of one key to the same upstream share one remembered history, and the memory is per process (lost on restart, not shared between instances). The option SHALL be enabled only for upstreams that really cache their prompt prefix; for an upstream that does not, it over-reports cached tokens and therefore under-charges.
+
+#### Scenario: Upstream without a cache
+- **WHEN** the option is on for an upstream that does not cache
+- **THEN** the recorded cached part is an estimate that does not match reality, which is why the option is off by default
+

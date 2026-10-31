@@ -10,7 +10,7 @@ import {
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo, getComboModels } from "../services/model.js";
+import { getModelInfo, getComboInfo } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
@@ -106,8 +106,12 @@ async function handleChatRequest(request, clientRawRequest = null) {
   const requiredCapabilities = detectRequiredCapabilities(body);
 
   // Check if model is a combo (has multiple models with fallback)
-  const comboModels = await getComboModels(modelStr);
+  const comboInfo = await getComboInfo(modelStr);
+  const comboModels = comboInfo?.models ?? null;
   if (comboModels) {
+    // Combo option: estimated cached tokens for upstreams that report no usage (default off).
+    // The combo the client called decides; it is passed down (also to fusion) as a boolean.
+    const cacheEstimation = comboInfo.cacheEstimation;
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
@@ -126,7 +130,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
             const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
             cleanRawReq = { ...clientRawRequest, body: cleanBody };
           }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { cacheEstimation });
         },
         log,
         comboName: modelStr,
@@ -141,7 +145,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
       body,
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, { cacheEstimation }),
         adapterAdded
       ),
       log,
@@ -179,13 +183,17 @@ export const handleChat = withErrorLog(handleChatRequest);
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, opts = {}) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
   if (!modelInfo.provider) {
-    const comboModels = await getComboModels(modelStr);
+    const nestedInfo = await getComboInfo(modelStr);
+    const comboModels = nestedInfo?.models ?? null;
     if (comboModels) {
+      // A combo reached from another combo keeps the OUTER decision (opts.cacheEstimation is a
+      // boolean whenever a combo called us); only a direct call uses this combo's own option.
+      const cacheEstimation = typeof opts.cacheEstimation === "boolean" ? opts.cacheEstimation : nestedInfo.cacheEstimation;
       const chatSettings = await getSettings();
       // Check for combo-specific strategy first, fallback to global
       const comboStrategies = chatSettings.comboStrategies || {};
@@ -206,7 +214,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
               const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
               cleanRawReq = { ...clientRawRequest, body: cleanBody };
             }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { cacheEstimation });
           },
           log,
           comboName: modelStr,
@@ -221,7 +229,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         body,
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, { cacheEstimation }),
           adapterAdded
         ),
         log,
@@ -308,6 +316,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       onPxpipeEvent: appendPxpipeEvent,
       providerThinking,
       compatNormalization: chatSettings.compatNormalization === true,
+      cacheEstimation: opts.cacheEstimation === true,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
       onCredentialsRefreshed: async (newCreds) => {

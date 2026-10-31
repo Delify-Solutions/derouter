@@ -465,7 +465,7 @@ export async function saveRequestUsage(entry) {
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
           entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(entry.estimated === true ? { estimated: true } : {}), ...discountMeta }),
+          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
         ]
       );
 
@@ -1111,6 +1111,8 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     m.cacheRead += cacheRead;
     m.cacheCreation += cacheCreation;
     m.requests += 1;
+    // The cached figure includes at least one estimated row (upstream reported no cache).
+    if (meta.cacheEstimated === true && cacheRead > 0) { m.cacheEstimated = true; totals.cacheEstimated = true; }
     addCostTo(m, rowCostNano(r.costNanoUsd, r.cost));
 
     totals.input += prompt;

@@ -5,6 +5,7 @@ import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.j
 import { filterUsageForFormat, claudeUsageFromOpenAI } from "../../utils/usageTracking.js";
 import { toOpenAIUsage, responsesUsageFromChat } from "../../translator/concerns/usage.js";
 import { createErrorResult } from "../../utils/error.js";
+import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine, usageOrEstimate } from "./requestDetail.js";
@@ -336,7 +337,7 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 /**
  * Handle non-streaming response from provider.
  */
-export async function handleNonStreamingResponse({ compat = false, providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS }) {
+export async function handleNonStreamingResponse({ compat = false, cacheCtx = null, providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS }) {
   trackDone();
   const contentType = providerResponse.headers.get("content-type") || "";
   let responseBody;
@@ -390,16 +391,38 @@ export async function handleNonStreamingResponse({ compat = false, providerRespo
 
   // Recorded/billed usage: the upstream's own figures; a flagged estimate only when it
   // reported none at all (never merged into, or shown in, the client's body).
-  const usage = usageOrEstimate(extractUsageFromResponse(responseBody), body, responseBody);
-  appendLog({ tokens: usage, status: "200 OK" });
+  // The usage to record. When the combo asked for an estimated cached part, applying it (and
+  // remembering the prompt) is a few ms of work on a large prompt, so it runs after the reply is
+  // returned (setImmediate) together with the writes that need its result; every write is a
+  // fire-and-forget one, so the order does not matter to the client. Without the option nothing
+  // is deferred.
+  const baseUsage = usageOrEstimate(extractUsageFromResponse(responseBody), body, responseBody);
+  let usage = baseUsage;
+  const deferUsage = cacheCtx !== null && cacheCtx !== undefined;
   // requestedModel = the original client model string (combo name if bare, no slash).
   // `body.model` here is the rewritten `provider/model` (handleSingleModelChat overrides
   // it before calling handleChatCore), so read the untouched original from clientRawRequest,
   // which handleChat snapshots before any combo expansion.
   const _reqModelRaw = clientRawRequest?.body?.model;
   const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
-  if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+  const usageLatencyMs = Date.now() - requestStartTime;
+  const recordUsage = () => {
+    appendLog({ tokens: usage, status: "200 OK" });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: usageLatencyMs, silent: true });
+    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: usageLatencyMs } }));
+  };
+  if (!deferUsage) {
+    recordUsage();
+  } else {
+    // Scheduled right here, before the translation below can throw: a malformed upstream body must
+    // never cost the tokens the upstream already consumed (the detail write below is queued after
+    // this one, so it sees the usage with the estimated cache applied).
+    setImmediate(() => {
+      // Nothing here may become an uncaught exception: on any failure record the usage unchanged.
+      try { usage = applyEstimatedCache(baseUsage, cacheCtx); } catch { usage = baseUsage; }
+      try { recordUsage(); } catch (err) { console.error("[ChatCore] usage record failed:", err?.message); }
+    });
+  }
 
   const translatedResponse = translating
     ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames, { compat })
@@ -459,7 +482,7 @@ export async function handleNonStreamingResponse({ compat = false, providerRespo
   reqLogger.logConvertedResponse(translatedResponse);
 
   const totalLatency = Date.now() - requestStartTime;
-  saveRequestDetail(buildRequestDetail({
+  const recordDetail = () => saveRequestDetail(buildRequestDetail({
     provider, model, requestedModel, connectionId, apiKey,
     latency: { ttft: totalLatency, total: totalLatency },
     tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -476,6 +499,13 @@ export async function handleNonStreamingResponse({ compat = false, providerRespo
   }, { endpoint: clientRawRequest?.endpoint || null })).catch(err => {
     console.error("[RequestDetail] Failed to save:", err.message);
   });
+  if (deferUsage) {
+    setImmediate(() => {
+      try { recordDetail(); } catch (err) { console.error("[RequestDetail] Failed to save:", err?.message); }
+    });
+  } else {
+    recordDetail();
+  }
 
   return {
     success: true,
