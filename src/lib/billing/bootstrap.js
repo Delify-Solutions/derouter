@@ -15,6 +15,7 @@ import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
 import { insertAuditSync } from "./audit.js";
 import { closeUserPlanSync } from "./grants.js";
 import { runBackfillSync } from "./planQueue.js";
+import { seedDocsSync } from "../content/seedDocs.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -234,6 +235,17 @@ export function runPostSyncTasksSync(db) {
     });
   } catch (error) {
     console.error(`[bootstrap] ensureCustomerGroups failed: ${error?.message || error}`);
+  }
+
+  // 1b. Every start: default docs pages from content/docs. Insert-only — a slug
+  // that already has a row is never touched — so running it each boot is what
+  // lets pages added in a later release appear without overwriting admin edits.
+  try {
+    const seeded = seedDocsSync(db);
+    if (seeded.inserted.length) console.log(`[bootstrap] docs: inserted ${seeded.inserted.length} page(s)`);
+    for (const item of seeded.skipped) console.warn(`[bootstrap] docs: skipped ${item.file} (${item.reason})`);
+  } catch (error) {
+    console.error(`[bootstrap] seedDocs failed: ${error?.message || error}`);
   }
 
   // 2-4. One-time data repairs.

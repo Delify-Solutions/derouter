@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
+import { fmtUsd as fmtCost } from "@/shared/utils/money";
 import { fmtRate, fmtUsd } from "./salesData";
 
 // Rows revealed per click. The catalogue can be hundreds of models long, so the
@@ -50,14 +51,14 @@ export default function PricingSection({ plans, models, copy }) {
         <div className="shell py-20">
           <SectionHeader eyebrow={copy.pricingEyebrow} title={copy.pricingTitle} />
           <p className="mt-8 border border-dashed border-border p-8 text-sm text-text-muted">
-            Chưa có gói nào được mở bán nên chưa có bảng giá.
+            Bảng giá sẽ hiện khi có gói mở bán.
           </p>
         </div>
       </section>
     );
   }
 
-  const headings = ["Model", "Vào / 1M", "Ra / 1M", "Cached / 1M"];
+  const headings = ["Model", "Input / 1M", "Output / 1M", "Cached / 1M"];
   const field = "h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
 
   return (
@@ -66,12 +67,11 @@ export default function PricingSection({ plans, models, copy }) {
         <SectionHeader eyebrow={copy.pricingEyebrow} title={copy.pricingTitle}>
           {copy.pricingSubtitle ? <p>{copy.pricingSubtitle}</p> : null}
           <p>
-            Giá token tính bằng USD cho 1 triệu token. Credit của gói bị trừ đúng theo các mức giá này, nên model càng đắt
-            thì credit hết càng nhanh.
+            Giá tính bằng USD cho mỗi 1 triệu token. Credit bị trừ đúng theo các mức giá này, nên model càng đắt thì credit hết càng nhanh.
           </p>
           {plan.limitsText?.length > 0 && (
             <p className="text-sm">
-              {plan.name}: {plan.limitsText.join(" · ")}.
+              Gói {plan.name}: {plan.limitsText.join(" · ")}.
             </p>
           )}
         </SectionHeader>
@@ -111,7 +111,7 @@ export default function PricingSection({ plans, models, copy }) {
 
         {rows.length === 0 ? (
           <p className="mt-6 border border-dashed border-border p-8 text-center text-sm text-text-muted">
-            Không có model nào khớp “{query}”.
+            {query.trim() ? `Không có model nào khớp “${query}”.` : "Chưa có model nào trong danh mục."}
           </p>
         ) : (
           <>
@@ -158,9 +158,9 @@ export default function PricingSection({ plans, models, copy }) {
                   </div>
                   <dl className="grid grid-cols-3 gap-px bg-border">
                     {[
-                      ["Vào / 1M", model.input, "text-text-main"],
-                      ["Ra / 1M", model.output, "text-text-main"],
-                      ["Cached", model.cached, "text-text-muted"],
+                      ["Input / 1M", model.input, "text-text-main"],
+                      ["Output / 1M", model.output, "text-text-main"],
+                      ["Cached / 1M", model.cached, "text-text-muted"],
                     ].map(([label, value, tone]) => (
                       <div key={label} className="bg-surface px-3 py-3">
                         <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">{label}</dt>
@@ -184,15 +184,14 @@ export default function PricingSection({ plans, models, copy }) {
               onClick={() => setShown((count) => count + PAGE)}
               className="h-9 border border-border bg-surface px-4 font-mono text-xs font-medium text-text-main transition-colors duration-150 hover:bg-surface-2"
             >
-              Hiện thêm {Math.min(PAGE, matches.length - rows.length)}
+              Xem thêm {Math.min(PAGE, matches.length - rows.length)}
             </button>
           ) : null}
         </div>
 
         {example && (
           <p className="mt-6 max-w-3xl text-sm text-text-subtle">
-            Ví dụ với {example.model}: 20.000 token vào và 2.000 token ra tốn {fmtUsd(example.costUsd)} credit, vì giá tính
-            trên từng 1 triệu token.
+            Ví dụ với {example.model}: một request 20.000 token input và 2.000 token output trừ {fmtCost(example.costUsd)} credit.
           </p>
         )}
       </div>

@@ -4,11 +4,11 @@
 Defines the public sales page: it presents the active plans truthfully from plan data, lists the models a newly registered customer can actually call with their token prices, explains how the shared credit is consumed, and routes a visitor to buy the plan they picked.
 ## Requirements
 ### Requirement: Plan cards come from plan data
-The landing page SHALL render one card per active plan in plan sort order, showing: name, description, price, "Nhận $<credit> dùng chung mọi model", "Dùng <N> ngày", one line per limit "Tối đa $<max> mỗi <window label>", a featured badge when the plan is featured, and an inert "Chưa mở bán" control when the plan is not purchasable. Window labels SHALL be `5 giờ` for 5, `1 ngày` for 24, `1 tuần` for 168 and `<N> giờ` otherwise. No text on the page SHALL describe per-model limits.
+The landing page SHALL render one card per active plan in plan sort order, showing: name, description, price, "Nhận $<credit> credit dùng chung cho mọi model", "Dùng <N> ngày", one line per limit "Tối đa $<max> mỗi <window label>", a featured badge when the plan is featured, and an inert "Chưa mở bán" control when the plan is not purchasable. Window labels SHALL be `5 giờ` for 5, `1 ngày` for 24, `1 tuần` for 168 and `<N> giờ` otherwise. No text on the page SHALL describe per-model limits.
 
 #### Scenario: Go card
 - **WHEN** plan "Go" is active with price $10, credit $250, 30 days and limits 5h/$20 and 168h/$80
-- **THEN** its card shows "$10", "Nhận $250 dùng chung mọi model", "Dùng 30 ngày", "Tối đa $20 mỗi 5 giờ" and "Tối đa $80 mỗi 1 tuần"
+- **THEN** its card shows "$10", "Nhận $250 credit dùng chung cho mọi model", "Dùng 30 ngày", "Tối đa $20 mỗi 5 giờ" and "Tối đa $80 mỗi 1 tuần"
 
 ### Requirement: Sellable models and pricing explanation
 The model list SHALL contain exactly the configured combos (the names a customer sends as `model`, as listed by the public `/v1/models`) that the default customer group allows — every chat combo when the group has no allow-list — and SHALL NOT list raw provider models. Each entry SHALL show input, output and cached-input price per 1M tokens: the combo's own price when the admin set one, otherwise the price of the combo's first model, from the router's pricing. The pricing section SHALL state that credit is deducted at these token prices so more expensive models use credit faster, and SHALL show one worked example computed from a listed model's prices for 20,000 input and 2,000 output tokens.

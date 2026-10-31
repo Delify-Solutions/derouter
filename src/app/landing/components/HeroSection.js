@@ -16,8 +16,8 @@ export default function HeroSection({ plans, models, copy, baseUrl = "" }) {
 
   const specs = [
     cheapest ? { label: "Giá từ", value: cheapest.priceVndText || fmtUsd(cheapest.priceUsd), unit: `/ ${cheapest.durationDays} ngày` } : null,
-    cheapest ? { label: "Credit nhận", value: cheapest.unlimitedCredit ? "Không giới hạn" : fmtUsd(cheapest.creditUsd), unit: "dùng chung mọi model" } : null,
-    { label: "Danh mục", value: String(models.length), unit: "model lập trình" },
+    cheapest ? { label: "Credit", value: cheapest.unlimitedCredit ? "Không giới hạn" : fmtUsd(cheapest.creditUsd), unit: "dùng chung cho mọi model" } : null,
+    { label: "Model", value: String(models.length), unit: "trong danh mục" },
     { label: "Endpoint", value: "/v1", unit: "OpenAI · Claude" },
   ].filter(Boolean);
 
@@ -35,10 +35,10 @@ export default function HeroSection({ plans, models, copy, baseUrl = "" }) {
             {interpolate(copy.heroTitle, { plans: plans.length })}
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-text-muted md:text-lg">
-            Một API dùng được với cả giao thức OpenAI và Claude. Credit trừ theo giá token của từng model, gói nào hết thì tự chuyển sang gói kế tiếp.
+            Một endpoint cho cả giao thức OpenAI và Claude. Credit bị trừ theo giá token của từng model; khi gói đầu hết credit hoặc chạm hạn mức, request chuyển sang gói kế tiếp.
           </p>
 
-          <ul className="mt-6 flex flex-wrap gap-2" aria-label="Giao thức hỗ trợ">
+          <ul className="mt-6 flex flex-wrap gap-2" aria-label="Giao thức được hỗ trợ">
             {PROTOCOLS.map((protocol) => (
               <li
                 key={protocol.id}

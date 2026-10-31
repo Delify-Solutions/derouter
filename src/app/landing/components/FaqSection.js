@@ -10,23 +10,23 @@ export default function FaqSection({ plans, models, copy }) {
   const questions = [
     {
       q: "Mua nhiều gói thì dùng thế nào?",
-      a: "Mỗi gói là một khoản credit riêng, xếp thành hàng đợi. Request được trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; khi gói đó tạm khóa, hệ thống tự chuyển sang gói kế tiếp. Bạn đổi được thứ tự trong trang Gói của tôi.",
+      a: "Mỗi gói có credit, thời hạn và hạn mức riêng, và các gói xếp thành hàng đợi. Request trừ vào gói đầu hàng đợi còn credit và chưa chạm hạn mức; khi gói đó tạm khóa, request chuyển sang gói kế tiếp. Mặc định gói sắp hết hạn được dùng trước, và bạn đổi được thứ tự trong mục Gói của tôi.",
     },
     {
       q: "Hạn mức 5 giờ nghĩa là gì?",
-      a: "Lần đầu gói được trừ tiền, một khung 5 giờ mở ra. Trong 5 giờ đó bạn chỉ dùng tối đa mức tiền mà gói quy định cho khung này (ví dụ $20). Hết 5 giờ, khung đóng và lần trừ tiền tiếp theo mở khung giờ mới, tính lại từ đầu.",
+      a: "Khung 5 giờ bắt đầu từ lần đầu gói bị trừ credit. Trong khung này, gói chỉ cho dùng tối đa số tiền đã quy định (ví dụ $20). Hết 5 giờ, hạn mức mở lại đầy đủ và lần trừ credit kế tiếp bắt đầu một khung mới.",
     },
     {
       q: "Credit còn lại khi gói hết hạn thì sao?",
-      a: "Credit chưa dùng hết sẽ mất khi gói hết hạn — đó là lý do gói được xếp theo ngày hết hạn, để phần sắp hết hạn được dùng trước. Nhật ký credit trong tài khoản ghi lại đúng phần credit bị mất.",
+      a: "Credit chưa dùng sẽ mất khi gói hết hạn. Vì vậy mặc định gói sắp hết hạn được dùng trước. Phần credit bị mất được ghi trong Nhật ký credit của tài khoản.",
     },
     {
       q: "Tôi dùng được những model nào?",
-      a: `Mọi model mà nhóm tài khoản của bạn cho phép — credit dùng chung cho tất cả, không chia theo model. Danh mục hiện có ${models.length} model; gọi model ngoài nhóm sẽ bị từ chối với lỗi 403.`,
+      a: `Mọi model mà nhóm của bạn cho phép. Credit dùng chung cho tất cả model, không chia theo từng model. Danh mục hiện có ${models.length} model; gọi model ngoài nhóm sẽ nhận lỗi 403.`,
     },
     {
       q: "Gói bị tạm khóa thì sao?",
-      a: "Khi một khung giờ đã dùng hết mức, gói đó tạm khóa cho tới khi khung giờ đóng. Nếu còn gói khác trong hàng đợi, request vẫn chạy bình thường trên gói đó. Nếu tất cả đều khóa, bạn nhận lỗi 429 kèm thời điểm mở lại gần nhất.",
+      a: "Khi đã dùng hết mức của một khung giờ, gói đó tạm khóa đến khi khung giờ kết thúc. Nếu hàng đợi còn gói khác, request chạy tiếp trên gói đó. Nếu mọi gói đều bị khóa, bạn nhận lỗi 429 kèm thời điểm mở lại gần nhất.",
     },
   ];
 
@@ -59,7 +59,7 @@ export default function FaqSection({ plans, models, copy }) {
         {plans.length > 0 && (
           <p className="mt-6 font-mono text-xs text-text-subtle">
             {plans
-              .map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} → ${plan.unlimitedCredit ? "credit không giới hạn" : fmtUsd(plan.creditUsd)} trong ${plan.durationDays} ngày`)
+              .map((plan) => `${plan.name}: ${fmtUsd(plan.priceUsd)} nhận ${plan.unlimitedCredit ? "credit không giới hạn" : `${fmtUsd(plan.creditUsd)} credit`}, dùng ${plan.durationDays} ngày`)
               .join(" · ")}
           </p>
         )}
