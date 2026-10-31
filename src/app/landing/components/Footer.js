@@ -10,11 +10,11 @@ const LICENSE_URL = "https://github.com/Delify-Solutions/derouter/blob/main/LICE
 
 const COLUMNS = [
   {
-    title: "Gói thuê bao",
+    title: "Gói",
     links: [
-      { href: "#plans", label: "So sánh các gói" },
-      { href: "#models", label: "Danh mục model" },
-      { href: "#pricing", label: "Bảng giá chi tiết" },
+      { href: "#plans", label: "Các gói" },
+      { href: "#models", label: "Model" },
+      { href: "#pricing", label: "Bảng giá" },
       { href: "#faq", label: "Câu hỏi thường gặp" },
     ],
   },
@@ -30,6 +30,7 @@ const COLUMNS = [
   {
     title: "Tài liệu",
     links: [
+      { href: "/docs", label: "Hướng dẫn sử dụng" },
       { href: DOCS_URL, label: "README", external: true },
       { href: REPO_URL, label: "Mã nguồn", external: true },
       { href: LICENSE_URL, label: "Giấy phép MIT", external: true },
@@ -47,11 +48,10 @@ export default function Footer({ modelCount, plans = [] }) {
               <span className="text-text-subtle" aria-hidden="true">{"//"}</span> derouter
             </p>
             <p className="mt-4 max-w-xs text-sm text-text-muted">
-              Credit dùng chung cho mọi model trong nhóm của bạn, trừ theo giá token, dùng qua
-              một endpoint dùng được với cả OpenAI và Claude.
+              Một khoản credit dùng chung cho mọi model, trừ theo giá token. Một endpoint cho cả client OpenAI và Claude.
             </p>
             <p className="mt-3 font-mono text-[11px] text-text-subtle">
-              {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)}/tháng`).join(" · ")}
+              {plans.map((plan) => `${plan.name} ${fmtUsd(plan.priceUsd)} / ${plan.durationDays} ngày`).join(" · ")}
             </p>
             <p className="mt-1 font-mono text-[11px] text-text-subtle">{modelCount} model trong danh mục</p>
           </div>

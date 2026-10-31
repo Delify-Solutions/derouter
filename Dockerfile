@@ -29,6 +29,8 @@ ENV DATA_DIR=/app/data
 
 COPY --chown=node:node --from=builder /app/public ./public
 COPY --chown=node:node --from=builder /app/.next/static ./.next/static
+# Default docs pages (Markdown), read by the start-up seeder from ./content/docs.
+COPY --chown=node:node --from=builder /app/content ./content
 COPY --chown=node:node --from=builder /app/.next/standalone ./
 COPY --chown=node:node --from=builder /app/custom-server.js ./custom-server.js
 # Next file tracing can omit sibling files; MITM runs server.js as a separate process.

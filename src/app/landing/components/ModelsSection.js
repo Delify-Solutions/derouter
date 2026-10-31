@@ -18,7 +18,7 @@ export default function ModelsSection({ models, copy }) {
         <SectionHeader eyebrow={copy.modelsEyebrow} title={interpolate(copy.modelsTitle, { count: models.length })}>
           {copy.modelsSubtitle ? <p>{copy.modelsSubtitle}</p> : null}
           <p>
-            Danh sách đọc thẳng từ registry của router, nên model nào hiện ở đây là model gọi được ngay.
+            Đây là các model tài khoản mới gọi được, theo đúng tên bạn gửi trong trường model.
           </p>
         </SectionHeader>
 
@@ -45,9 +45,9 @@ export default function ModelsSection({ models, copy }) {
 
         {rest > 0 ? (
           <p className="mt-4 text-sm text-text-muted">
-            và {rest} model khác.{" "}
+            Còn {rest} model khác.{" "}
             <a href="#pricing" className="font-medium text-text-main underline underline-offset-4">
-              Tìm trong bảng giá
+              Xem trong bảng giá
             </a>
           </p>
         ) : null}

@@ -392,7 +392,7 @@ export default function ContentPageClient() {
                       type="button"
                       onClick={() => setConfirm({
                         title: "Xóa trang",
-                        message: `Xóa "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động.`,
+                        message: `Xóa "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động. Nếu đây là trang mặc định của hệ thống, nó sẽ được tạo lại khi khởi động; muốn ẩn thì bỏ đăng thay vì xóa.`,
                         onConfirm: () => { setConfirm(null); removeDoc(doc); },
                       })}
                       aria-label={`Xóa ${doc.title}`}

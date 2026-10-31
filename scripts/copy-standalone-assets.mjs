@@ -30,6 +30,14 @@ export function copyStandaloneAssets({ projectRoot = process.cwd(), distDir = pr
     console.log(`[standalone-assets] Copied public assets to ${publicDestination}`);
   }
 
+  // Default docs pages (Markdown) read by the start-up seeder from ./content/docs.
+  const contentSource = resolve(projectRoot, "content");
+  const contentDestination = resolve(standaloneDir, "content");
+  if (existsSync(contentSource)) {
+    cpSync(contentSource, contentDestination, { recursive: true, force: true });
+    console.log(`[standalone-assets] Copied content to ${contentDestination}`);
+  }
+
   // Without it beside server.js the standalone build serves requests unsanitized.
   const serverWrapperSource = resolve(projectRoot, "custom-server.js");
   const serverWrapperDestination = resolve(standaloneDir, "custom-server.js");

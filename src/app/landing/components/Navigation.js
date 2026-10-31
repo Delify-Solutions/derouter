@@ -7,7 +7,7 @@ const PRODUCT_LINKS = [
   { href: "#plans", label: "Gói" },
   { href: "#models", label: "Model" },
   { href: "#pricing", label: "Bảng giá" },
-  { href: "#get-started", label: "Cách dùng" },
+  { href: "#get-started", label: "Bắt đầu" },
   { href: "#faq", label: "Hỏi đáp" },
 ];
 
@@ -32,7 +32,7 @@ export default function Navigation({ session = null }) {
           <span className="text-text-subtle" aria-hidden="true">{"//"}</span> derouter
         </Link>
 
-        <nav aria-label="Chính" className="hidden items-center gap-6 md:flex">
+        <nav aria-label="Menu chính" className="hidden items-center gap-6 md:flex">
           {PRODUCT_LINKS.map((item) => (
             <a
               key={item.href}
@@ -44,8 +44,6 @@ export default function Navigation({ session = null }) {
           ))}
           <a
             href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
             className="text-sm font-medium text-text-muted transition-colors duration-150 hover:text-text-main"
           >
             Tài liệu
@@ -92,7 +90,7 @@ export default function Navigation({ session = null }) {
 
       {mobileMenuOpen && (
         <div className="border-t border-border bg-bg md:hidden">
-          <nav aria-label="Di động" className="shell flex flex-col py-2">
+          <nav aria-label="Menu trên di động" className="shell flex flex-col py-2">
             {PRODUCT_LINKS.map((item) => (
               <a
                 key={item.href}
@@ -105,8 +103,6 @@ export default function Navigation({ session = null }) {
             ))}
             <a
               href={DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
               onClick={() => setMobileMenuOpen(false)}
               className="flex h-11 items-center text-sm font-medium text-text-muted hover:text-text-main"
             >
