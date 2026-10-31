@@ -424,7 +424,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     saveUsageError({
       provider, model, connectionId, apiKey, requestedModel,
       status: error.name === "AbortError" ? 499 : 502,
-      errorSource: "platform"
+      errorSource: "platform",
+      latencyMs: Date.now() - requestStartTime
     }).catch(() => { });
 
     if (error.name === "AbortError") {
@@ -502,7 +503,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     saveUsageError({
       provider, model, connectionId, apiKey, requestedModel,
       status: statusCode,
-      errorSource: "upstream"
+      errorSource: "upstream",
+      latencyMs: Date.now() - requestStartTime
     }).catch(() => { });
 
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);

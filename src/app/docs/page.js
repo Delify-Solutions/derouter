@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Tài liệu - derouter",
-  description: "Hướng dẫn sử dụng derouter: tạo API key, gọi model, theo dõi hạn mức.",
+  description: "Hướng dẫn sử dụng derouter: tạo API key, kết nối Claude Code, Codex, OpenCode và theo dõi hạn mức.",
 };
 
 // Docs index, laid out like opencode.ai/v2/docs: sections across the top and a
@@ -24,13 +24,13 @@ export default async function DocsIndexPage() {
         <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Tài liệu</h1>
         <p className="mt-3 max-w-2xl text-text-muted">
           {total > 0
-            ? `${total} trang hướng dẫn: tạo API key, gọi model và theo dõi hạn mức.`
-            : "Hướng dẫn tạo API key, gọi model và theo dõi hạn mức."}
+            ? `${total} trang hướng dẫn: tạo API key, kết nối công cụ lập trình và theo dõi hạn mức.`
+            : "Hướng dẫn tạo API key, kết nối công cụ lập trình và theo dõi hạn mức."}
         </p>
 
         {groups.length === 0 ? (
           <p className="mt-10 border border-border bg-surface p-6 text-sm text-text-muted">
-            Chưa có trang tài liệu nào được đăng.
+            Chưa có trang tài liệu nào được đăng. Các trang sẽ hiện ở đây khi quản trị viên đăng bài.
           </p>
         ) : (
           <div className="mt-10 flex flex-col gap-10">

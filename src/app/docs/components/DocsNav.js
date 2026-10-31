@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import PropTypes from "prop-types";
+import ThemeToggle from "@/shared/components/ThemeToggle";
 
 // Docs navigation, modelled on opencode.ai/v2/docs: sections across the top,
 // pages for the active section down the side.
@@ -27,12 +28,15 @@ export default function DocsNav({ groups, activeSlug }) {
         <Link href="/" className="font-mono text-sm font-semibold uppercase tracking-[0.12em]">
           derouter
         </Link>
-        <Link
-          href="/"
-          className="border border-border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.08em] text-text-main transition-colors hover:bg-surface-2"
-        >
-          Trang chủ
-        </Link>
+        <div className="flex items-center gap-2">
+          <ThemeToggle variant="square" className="size-8" />
+          <Link
+            href="/"
+            className="border border-border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.08em] text-text-main transition-colors hover:bg-surface-2"
+          >
+            Trang chủ
+          </Link>
+        </div>
       </div>
 
       {/* Section rail. Horizontal scroll rather than wrapping: five or six

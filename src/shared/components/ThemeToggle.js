@@ -12,6 +12,11 @@ export default function ThemeToggle({ className, variant = "default" }) {
       "text-text-muted hover:text-text-main",
       "hover:bg-surface-2 transition-colors"
     ),
+    // Public pages: square, hairline border, no shadow (openspec/ui-dna.md)
+    square: cn(
+      "flex size-9 items-center justify-center rounded-none border border-border",
+      "text-text-muted hover:text-text-main hover:bg-surface-2 transition-colors duration-150"
+    ),
     card: cn(
       "flex items-center justify-center size-11 rounded-full",
       "bg-surface/60 hover:bg-surface",
@@ -24,6 +29,7 @@ export default function ThemeToggle({ className, variant = "default" }) {
 
   return (
     <button
+      type="button"
       onClick={toggleTheme}
       className={cn(variants[variant], className)}
       aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
@@ -31,7 +37,8 @@ export default function ThemeToggle({ className, variant = "default" }) {
     >
       <span
         className={cn(
-          "material-symbols-outlined text-[22px]",
+          "material-symbols-outlined",
+          variant === "square" ? "text-[18px]" : "text-[22px]",
           variant === "card" && "transition-transform duration-300 group-hover:rotate-12"
         )}
       >

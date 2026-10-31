@@ -4,6 +4,13 @@ import { mergeLandingCopy } from "@/lib/db/repos/contentRepo.js";
 
 export const dynamic = "force-dynamic";
 
+// The root layout carries an English default title for the dashboard; the public
+// page is Vietnamese.
+export const metadata = {
+  title: "derouter - Gói AI dùng chung một credit",
+  description: "Mua gói, nhận credit dùng chung cho mọi model lập trình và gọi qua một endpoint tương thích OpenAI và Claude.",
+};
+
 /**
  * `/` always renders the landing page, for everyone.
  *

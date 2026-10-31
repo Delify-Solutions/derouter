@@ -55,6 +55,8 @@ source/*
 .cursor/*
 docs/*
 !docs/ARCHITECTURE.md
+!docs/screenshots-checklist.md
+!docs/computer-use-screenshots.md
 RM.vn.md
 RM.md
 cursor/*

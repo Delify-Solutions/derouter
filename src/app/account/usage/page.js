@@ -46,7 +46,6 @@ function toRow(r) {
     input,
     output,
     tok: input + output,
-    tokS: latencyMs && latencyMs > 0 ? Math.round((output / (latencyMs / 1000)) * 10) / 10 : null,
     cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
     cacheCreation: t.cache_creation_input_tokens ?? 0,
     costLabel: fmtUsd(r.cost ?? 0),

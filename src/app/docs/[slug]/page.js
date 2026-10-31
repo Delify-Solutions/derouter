@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDocBySlug, listDocsBySection } from "@/lib/db/repos/contentRepo.js";
 import { renderMarkdown } from "@/shared/utils/markdown.js";
 import DocsNav from "../components/DocsNav";
+import DocsTabsEnhancer from "../components/DocsTabsEnhancer";
 
 export const dynamic = "force-dynamic";
 
@@ -80,10 +81,15 @@ export default async function DocsPage({ params }) {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">{doc.title}</h1>
           {doc.summary ? <p className="mt-3 text-text-muted">{doc.summary}</p> : null}
 
+          {/* data-i18n-skip: the runtime literal translator would rewrite exact
+              matches such as the button names "Add" or "Switch" that the guides
+              quote from other apps. */}
           <div
+            data-i18n-skip="true"
             className="docs-body mt-8 text-text-main"
             dangerouslySetInnerHTML={{ __html: html }}
           />
+          <DocsTabsEnhancer watch={doc.slug} />
 
           {(prev || next) && (
             <nav aria-label="Trang trước và sau" className="mt-12 grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2">

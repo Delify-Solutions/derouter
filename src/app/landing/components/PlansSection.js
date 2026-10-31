@@ -23,7 +23,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
         <div className="shell py-20">
           <SectionHeader eyebrow={copy.plansEyebrow} title={copy.plansTitle} />
           <p className="mt-8 border border-dashed border-border p-8 text-sm text-text-muted">
-            Hiện chưa có gói nào được mở bán. Vui lòng quay lại sau.
+            Chưa có gói nào mở bán. Các gói đang bán sẽ hiện ở đây.
           </p>
         </div>
       </section>
@@ -75,9 +75,11 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                     <p className="mt-2 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>
                   ) : null}
                   <p className="mt-4 text-sm font-medium text-text-main">
-                    {plan.unlimitedCredit ? "Credit không giới hạn" : `Nhận ${fmtUsd(plan.creditUsd)} credit`}
-                    <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
+                    {plan.unlimitedCredit
+                      ? "Credit không giới hạn, dùng cho mọi model"
+                      : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`}
                   </p>
+                  <p className="mt-1 text-sm text-text-muted">Dùng {plan.durationDays} ngày</p>
                 </div>
 
                 <ul className="mt-6 flex flex-1 flex-col gap-2.5 border-t border-border px-6 py-5">

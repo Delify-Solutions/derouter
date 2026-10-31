@@ -30,14 +30,17 @@ export const PROTOCOLS = [
   { id: "openai-responses", label: "Responses", path: "/v1/responses" },
 ];
 
+/**
+ * A token price per 1M tokens: at least two decimals from $0.01 up ("0.60", "3.00"),
+ * more only when the price needs them ("0.075"), and a short tail below that.
+ */
 export function fmtRate(rate) {
   if (rate === null || rate === undefined) return "—";
   const value = Number(rate);
   if (!Number.isFinite(value)) return "—";
   if (value === 0) return "0";
-  if (value < 0.01) return value.toFixed(4).replace(/0+$/, "");
-  if (value < 1) return value.toFixed(2).replace(/0+$/, "");
-  return value.toFixed(2).replace(/\.00$/, "");
+  if (value < 0.01) return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  return value.toFixed(4).replace(/(\.\d\d\d?)0+$/, "$1").replace(/(\.\d\d)0$/, "$1");
 }
 
 /** "250.000đ" — the same grouping VietQR prices use everywhere else. */
@@ -82,10 +85,10 @@ export function interpolate(template, values = {}) {
 // hàng đợi gói, endpoint tương thích OpenAI). Admin thay được bằng cách sửa nội
 // dung ở /dashboard/content.
 export const DEFAULT_PERKS = [
-  "Một khoản credit dùng chung cho mọi model trong nhóm của bạn",
-  "Mua thêm gói thì phần credit còn lại vẫn giữ nguyên",
-  "Dùng được với client OpenAI lẫn Claude, chỉ cần đổi base URL",
-  "Tự chuyển sang gói kế tiếp trong hàng đợi khi gói đầu chạm hạn mức",
+  "Credit dùng được cho mọi model trong nhóm của bạn",
+  "Mua thêm gói thì credit còn lại vẫn giữ nguyên",
+  "Dùng được với client OpenAI và Claude, chỉ cần đổi base URL",
+  "Gói đầu hàng đợi chạm hạn mức thì request chuyển sang gói kế tiếp",
 ];
 
 const WINDOW_LABELS = { 5: "5 giờ", 24: "1 ngày", 168: "1 tuần" };

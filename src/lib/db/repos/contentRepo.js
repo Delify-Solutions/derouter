@@ -9,24 +9,9 @@
 // fixed-shape object, not a collection.
 import { getAdapter } from "../driver.js";
 import { v4 as uuidv4 } from "uuid";
+import { validateSlug } from "../../content/docsSlug.js";
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-
-/** Slugs that would shadow a real route or an existing static asset. */
-const RESERVED_SLUGS = new Set([
-  "api", "dashboard", "account", "login", "register", "verify-email", "admin",
-  "usage", "landing", "docs", "callback", "v1", "v1beta", "responses", "codex",
-]);
-
-export function validateSlug(slug) {
-  const value = typeof slug === "string" ? slug.trim() : "";
-  if (!value) return "Đường dẫn không được để trống";
-  if (!SLUG_RE.test(value)) {
-    return "Đường dẫn chỉ dùng chữ thường, số và dấu gạch ngang (tối đa 64 ký tự)";
-  }
-  if (RESERVED_SLUGS.has(value)) return `"${value}" trùng với một đường dẫn hệ thống`;
-  return null;
-}
+export { validateSlug };
 
 function rowToDoc(row) {
   if (!row) return null;
@@ -195,32 +180,32 @@ export const LANDING_COPY_DEFAULTS = {
   // Copy describes ONE shared credit per purchase, per-window limits and the plan
   // queue — never a per-model ceiling (spec public-landing "Default copy and FAQ"),
   // because the system has none: a purchase is a single pool drained in queue order.
-  heroTitle: "Một khoản credit dùng chung mọi model lập trình",
+  heroTitle: "Một khoản credit dùng chung cho mọi model lập trình",
   heroPrimaryCta: "Mua gói",
   heroSecondaryCta: "Đọc tài liệu",
 
-  plansEyebrow: "Các gói",
-  plansTitle: "Trả một lần, nhận credit dùng chung",
+  plansEyebrow: "Gói",
+  plansTitle: "Mua một gói, dùng chung một khoản credit",
   plansSubtitle:
-    "Mỗi gói cấp một khoản credit dùng cho mọi model trong nhóm của bạn, trong thời hạn của gói, có thể kèm hạn mức theo khung giờ. Mua thêm gói thì gói mới xếp vào hàng đợi.",
+    "Mỗi gói cấp một khoản credit dùng chung cho mọi model trong nhóm của bạn. Credit có thời hạn và có thể kèm hạn mức theo khung giờ. Khi mua thêm, gói mới xếp vào hàng đợi.",
   plansFootnote:
-    "Credit bị trừ theo bảng giá token bên dưới, nên model đắt dùng credit nhanh hơn. Request dài tốn nhiều credit hơn request ngắn.",
+    "Credit bị trừ theo giá token ở bảng bên dưới: model đắt và request dài đều dùng hết credit nhanh hơn.",
 
-  modelsEyebrow: "Danh mục",
-  modelsTitle: "Model bạn dùng được ngay",
+  modelsEyebrow: "Model",
+  modelsTitle: "Model dùng được ngay khi đăng ký",
   modelsSubtitle: "",
 
   pricingEyebrow: "Bảng giá",
-  pricingTitle: "Giá token trừ vào credit của bạn",
+  pricingTitle: "Credit bị trừ theo giá token",
   pricingSubtitle: "",
 
   getStartedEyebrow: "Bắt đầu",
-  getStartedTitle: "Bốn bước để chạy request đầu tiên",
+  getStartedTitle: "Gửi request đầu tiên trong bốn bước",
   getStartedSubtitle: "",
 
   faqEyebrow: "Câu hỏi thường gặp",
   faqTitle: "Năm câu hỏi trước khi mua",
-  faqSubtitle: "Credit còn lại giữ nguyên khi bạn mua thêm gói; hạn mức theo khung giờ tính lại sau mỗi khung giờ.",
+  faqSubtitle: "Mua thêm gói không làm mất credit còn lại. Hạn mức theo khung giờ được tính lại khi khung giờ kết thúc.",
 };
 
 /** Merge stored copy over defaults so a new field appears without a migration. */

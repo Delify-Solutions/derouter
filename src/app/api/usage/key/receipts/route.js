@@ -52,8 +52,9 @@ function periodToRange(period) {
  *               totals: {input, output, cacheRead, cacheCreation, requests, cost},
  *               peakTpm },
  *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM)
- *   history:  [{ timestamp, model, status, cost,
- *                input, output, cacheRead, cacheCreation }] // recent requests, NO raw payloads
+ *   history:  [{ timestamp, model, status, cost, input, output, tok,
+ *                latencyMs,          // total time of the request in ms; null when not measured
+ *                cacheRead, cacheCreation }] // recent requests, NO raw payloads
  * }
  *
  * Raw request/response payloads are NEVER exposed here (public endpoint). Use the
@@ -142,11 +143,8 @@ export async function GET(request) {
         const input = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
         const output = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
         const tok = input + output;
+        // Total time from receiving the request until the response finished.
         const latencyMs = meta?.latencyMs ?? null;
-        // Tok/s = generation speed = output tokens / total time. Only tokens
-        // the model PRODUCED count — input tokens are the prompt sent in, not
-        // generated, so they'd inflate the rate for prompt-heavy requests.
-        const tokS = latencyMs && latencyMs > 0 ? Math.round((output / (latencyMs / 1000)) * 10) / 10 : null;
         return {
           timestamp: r.timestamp,
           model: r.model,
@@ -159,7 +157,7 @@ export async function GET(request) {
           input,
           output,
           tok,
-          tokS,
+          latencyMs,
           cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreation: t.cache_creation_input_tokens ?? 0,
         };
@@ -255,9 +253,12 @@ export async function GET(request) {
       return { ...summary, items, totals };
     })();
 
+    // The peak tok/s figure divided output by total time (prefill and queueing included), which
+    // misreads long prompts, so it is not sent to the page any more.
+    const { peakTokS: _peakTokS, ...summaryOut } = filteredSummary || {};
     return NextResponse.json({
       period,
-      summary: filteredSummary,
+      summary: summaryOut,
       rate,
       history,
       pagination,

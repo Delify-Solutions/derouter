@@ -714,3 +714,76 @@ button:disabled,
   margin: 2rem 0;
 }
 .docs-body img { max-width: 100%; height: auto; }
+/* Screenshot block: the caption is the alt text, so a file that has not been
+   added yet still leaves a bordered, readable placeholder. */
+.docs-body .docs-figure {
+  display: block;
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+}
+.docs-body .docs-figure img { display: block; width: 100%; }
+.docs-body .docs-figure-caption {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-muted, inherit);
+}
+
+/* Tab groups in docs (see shared/utils/docsTabs.js). Without scripts every panel
+   shows under its own title; DocsTabsEnhancer adds .docs-tabs-js to turn it into
+   a tablist with one visible panel. */
+.docs-body .docs-tabs,
+.docs-body .docs-tab-single {
+  margin: 1.25rem 0;
+  border: 1px solid var(--color-border);
+}
+.docs-body .docs-tablist { display: none; }
+.docs-body .docs-tab-title {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  background: var(--color-bg-alt);
+  border-bottom: 1px solid var(--color-border);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.docs-body .docs-tab-panel > :not(.docs-tab-title),
+.docs-body .docs-tab-single > :not(.docs-tab-title) {
+  margin-left: 1rem;
+  margin-right: 1rem;
+}
+.docs-body .docs-tab-panel { padding-bottom: 0.5rem; }
+.docs-body .docs-tab-panel + .docs-tab-panel { border-top: 1px solid var(--color-border); }
+.docs-body .docs-tabs-js .docs-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  background: var(--color-bg-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+.docs-body .docs-tabs-js .docs-tab-title { display: none; }
+.docs-body .docs-tabs-js .docs-tab-panel + .docs-tab-panel { border-top: 0; }
+.docs-body .docs-tabs-js .docs-tab-panel[hidden] { display: none; }
+.docs-body .docs-tablist [role="tab"] {
+  padding: 0.6rem 1.1rem;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted, inherit);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.docs-body .docs-tablist [role="tab"][aria-selected="true"] {
+  background: var(--color-surface, var(--color-bg));
+  color: var(--color-text-main, inherit);
+  border-bottom-color: var(--color-primary);
+}
+.docs-body .docs-tablist [role="tab"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}

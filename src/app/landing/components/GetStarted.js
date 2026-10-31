@@ -30,25 +30,25 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
       number: "01",
       title: "Tạo tài khoản và chọn gói",
       body: plans.length
-        ? `Đăng ký bằng email, xác nhận liên kết được gửi tới hộp thư, rồi chọn ${plans
-            .map((p) => `${p.name} (${fmtUsd(p.priceUsd)}/tháng)`)
-            .join(" hoặc ")} trong mục Gói của tôi.`
-        : "Đăng ký bằng email và xác nhận liên kết được gửi tới hộp thư.",
+        ? `Đăng ký bằng email, mở liên kết xác minh gửi tới hộp thư, rồi vào Gói của tôi để chọn ${plans
+            .map((p) => `${p.name} (${fmtUsd(p.priceUsd)}, ${p.durationDays} ngày)`)
+            .join(" hoặc ")}.`
+        : "Đăng ký bằng email, rồi mở liên kết xác minh gửi tới hộp thư.",
     },
     {
       number: "02",
       title: "Tạo API key",
-      body: "Vào mục API key trong khu vực tài khoản và tạo một key. Key chỉ hiển thị một lần, hãy lưu vào nơi client đọc được.",
+      body: "Vào mục API key trong tài khoản và tạo key mới. Key chỉ hiện một lần, nên hãy lưu lại ngay.",
     },
     {
       number: "03",
       title: "Trỏ client vào endpoint",
-      body: `Đặt base URL là ${base}, dùng key làm bearer token. Trường model nhận đúng tên model trong danh mục ở trên.`,
+      body: `Đặt base URL là ${base} và dùng API key làm bearer token. Trường model nhận tên model trong danh mục ở trên.`,
     },
     {
       number: "04",
-      title: "Theo dõi hạn mức",
-      body: "Chạm trần một khung giờ hạn mức sẽ nhận 429 kèm thời điểm mở lại; hết sạch credit sẽ nhận 402. Nhật ký credit trong tài khoản ghi từng khoản trừ.",
+      title: "Theo dõi credit và hạn mức",
+      body: "Chạm hạn mức của một khung giờ thì request trả về lỗi 429 kèm thời điểm mở lại; hết credit thì trả về lỗi 402. Mỗi khoản trừ được ghi trong Nhật ký credit của tài khoản.",
     },
   ];
 
@@ -102,7 +102,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
               <p className="mt-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">Request mẫu · Claude</p>
               <CopyBlock value={claudeSnippet} label="Sao chép request mẫu Claude" />
               <p className="text-sm text-text-subtle">
-                Thay <span className="font-mono">&lt;API_KEY&gt;</span> bằng key tạo ở mục API key trong tài khoản.
+                Thay <span className="font-mono">&lt;API_KEY&gt;</span> bằng key bạn tạo ở bước 2.
               </p>
             </div>
 
