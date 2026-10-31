@@ -167,12 +167,12 @@ export default function AccountUsageTable({
                   <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Thời điểm</th>
                   <th className="px-4 py-3 text-left font-medium">Model</th>
                   <th className="px-4 py-3 text-center font-medium">Trạng thái</th>
-                  <th className="px-4 py-3 text-right font-medium">Độ trễ</th>
-                  <th className="px-4 py-3 text-right font-medium">Vào</th>
-                  <th className="px-4 py-3 text-right font-medium">Ra</th>
+                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap" title="Tổng thời gian từ lúc nhận request đến khi trả xong">Thời gian phản hồi</th>
+                  <th className="px-4 py-3 text-right font-medium">Input</th>
+                  <th className="px-4 py-3 text-right font-medium">Output</th>
                   <th className="px-4 py-3 text-right font-medium">Tổng</th>
-                  <th className="px-4 py-3 text-right font-medium">Cache đọc</th>
-                  <th className="px-4 py-3 text-right font-medium">Cache ghi</th>
+                  <th className="px-4 py-3 text-right font-medium">Input cache</th>
+                  <th className="px-4 py-3 text-right font-medium">Cache write</th>
                   <th className="px-4 py-3 text-right font-medium">Chi phí</th>
                 </tr>
               </thead>
@@ -187,14 +187,11 @@ export default function AccountUsageTable({
                     </td>
                     <td className={`px-4 py-3 text-center font-mono ${statusClass(row.status)}`}>{row.status}</td>
                     <td className="px-4 py-3 text-right font-mono text-text-muted">
-                      {row.latencyMs != null ? `${row.latencyMs} ms` : "—"}
+                      {row.latencyMs != null ? (row.latencyMs < 1000 ? `${Math.round(row.latencyMs)} ms` : `${(row.latencyMs / 1000).toFixed(2)} s`) : "—"}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {fmt(row.tok)}
-                      {row.tokS != null && <span className="ml-1 text-[10px] text-text-subtle">{row.tokS} t/s</span>}
-                    </td>
+                    <td className="px-4 py-3 text-right font-mono">{fmt(row.tok)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheRead)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheCreation)}</td>
                     <td className="px-4 py-3 text-right font-mono">{row.costLabel}</td>

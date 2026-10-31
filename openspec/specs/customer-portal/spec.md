@@ -79,3 +79,14 @@ Every data region SHALL have a static skeleton while loading, an empty state of 
 - **WHEN** a customer sends a message in the chat
 - **THEN** the reply streams in and a `charge` is written to their plan queue for the tokens used
 
+
+### Requirement: Try a model from the public key page
+The public `/usage` page, once a key is loaded, SHALL show a "Thử" button on every row of its available-models table ("Available Models") that the key may use and that is a text or image combo; there is no separate section or tab for it. The button opens a dialog ("Dùng thử model") already pointed at that model, with the same chat and image screen as `/account/chat`, usable WITHOUT any login. The dialog SHALL close on Escape, the close button or the backdrop, and SHALL keep the conversation when closed and reopened; it SHALL be discarded when the key is cleared. The panel SHALL call the public `/v1/chat/completions` and `/v1/images/generations` endpoints directly with the visitor's own key as a bearer token, so the key's group, limits, expiry, admission and credit charging apply exactly as for an API client, and each call is charged to that key. Its model list SHALL come from `GET /api/usage/key/models?key=`, which is public like the other `/api/usage/key/*` routes, SHALL answer a generic 404 for an unknown key, and SHALL list only the configured text and image combos the key's own settings allow. Errors from the endpoints SHALL be shown in the panel, and the page's usage figures SHALL refresh after each call. Conversations live in memory only. The signed-in `/account/chat` page and this panel SHALL share one implementation, differing only in how the call reaches the server.
+
+#### Scenario: Visitor tests a model
+- **WHEN** a visitor with no session loads `/usage` with a valid key and sends a chat message
+- **THEN** the reply streams in, a usage row is recorded for that key, and the request history refreshes
+
+#### Scenario: Unknown key
+- **WHEN** `/api/usage/key/models` is called with a key that does not exist
+- **THEN** the response is HTTP 404 and nothing about other keys is revealed

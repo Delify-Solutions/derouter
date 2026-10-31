@@ -136,8 +136,8 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // used to resolve a combo-level price override before falling back to per-pool.
     requestedModel: requestedModel || null,
     // Latency in ms (total request wall-time). Persisted into usageHistory.meta
-    // so the public /usage page can compute Tok/s per request without a schema
-    // change. Undefined/0 for callers that don't track timing (e.g. errors).
+    // so the usage pages can show each request's response time without a schema
+    // change. Null for callers that don't track timing (e.g. platform denials).
     latencyMs: latencyMs ?? null
   }).catch(() => {});
 }
@@ -158,7 +158,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
  * still applies — repeated identical errors within the same minute collapse to
  * one row, same as successful duplicates already do.
  */
-export async function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource }) {
+export async function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource, latencyMs }) {
   // Always returns a promise: every caller chains `.catch()` onto the result, so
   // an early `return` of undefined turned a harmless "no status" skip into a
   // TypeError that replaced the real provider error in the response.
@@ -174,5 +174,7 @@ export async function saveUsageError({ provider, model, connectionId, apiKey, en
     requestedModel: requestedModel || null,
     status: String(status),
     errorSource: errorSource || undefined,
+    // How long the failed request took, so slow failures (a timeout, a reset) can be told from instant ones.
+    latencyMs: Number.isFinite(latencyMs) ? latencyMs : undefined,
   }).catch(() => {});
 }

@@ -1228,7 +1228,7 @@ export default function ProfilePage() {
                             <p className="font-semibold text-text-main flex items-center gap-1.5">
                               <span>☁️</span> AWS IAM Identity Center
                             </p>
-                            <ol className="list-decimal pl-4 text-text-muted space-y-1">
+                            <ol data-i18n-skip className="list-decimal pl-4 text-text-muted space-y-1">
                               <li>Applications → <b>Add application</b> → Select <b>Add custom SAML 2.0 application</b>.</li>
                               <li>Set <b>Application ACS URL</b> to <code className="text-text-main font-mono">{samlAcsUrl}</code>.</li>
                               <li>Set <b>Application SAML audience</b> to <code className="text-text-main font-mono">{samlForm.samlIssuer || "urn:derouter:sp"}</code>.</li>
