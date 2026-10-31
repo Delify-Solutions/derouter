@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
+import ModelPlayground from "@/shared/components/ModelPlayground";
 import { fmtUsd } from "@/shared/utils/money";
+import { getCurrentLocale } from "@/i18n/runtime";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -21,6 +23,22 @@ function maskKeyFull(key) {
 }
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
+
+// Response time: milliseconds under a second, seconds with two decimals above it.
+const fmtDuration = (ms) => {
+  if (ms == null || Number.isNaN(Number(ms))) return "—";
+  const n = Number(ms);
+  return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(2)} s`;
+};
+
+// 24-hour date and time in the page's language, not the browser's (a US browser gave 12:46:11 AM).
+const fmtDateTime = (value) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const locale = getCurrentLocale() === "vi" ? "vi-VN" : undefined;
+  return d.toLocaleString(locale, { hour12: false });
+};
 // Costs here are legacy USD floats from /api/usage/key*; fmtUsd applies the
 // shared adaptive precision (2dp >= $1, 4dp >= $0.01, else 6dp).
 const fmtCost = (n) => (typeof n === "number" && !Number.isNaN(n) ? fmtUsd(n) : "$0");
@@ -35,8 +53,33 @@ function statusColorClass(status) {
   return "text-text-muted";
 }
 
+/**
+ * How the try-it panel reaches the server with NO login: the visitor's own API key
+ * on the public /v1 endpoints, exactly like any API client, so the key's group,
+ * limits, expiry and credit apply and every call is charged to it. The model list
+ * comes from the public key-scoped route, so it never offers a model the key cannot call.
+ */
+function keyTransport(key) {
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
+  return {
+    async loadModels() {
+      const res = await fetch(`/api/usage/key/models?key=${encodeURIComponent(key)}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status === 404 ? "Không tìm thấy key" : "Không tải được danh sách model");
+      return data;
+    },
+    chat: ({ model, messages, signal }) =>
+      fetch("/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model, messages, stream: true }), signal }),
+    image: ({ body, signal }) =>
+      fetch("/v1/images/generations", { method: "POST", headers, body: JSON.stringify(body), signal }),
+  };
+}
+
 export default function UsageClient({ hasUserSession = false }) {
   const [keyInput, setKeyInput] = useState("");
+  // The key that last loaded successfully. The try-it panel follows this, not the
+  // text field, so typing or mistyping a key never rebuilds its transport.
+  const [loadedKey, setLoadedKey] = useState("");
   const [data, setData] = useState(null);     // /api/usage/key (budget/limits/baseline)
   const [rec, setRec] = useState(null);       // /api/usage/key/receipts (summary+rate+history)
   const [loading, setLoading] = useState(false);
@@ -55,6 +98,74 @@ export default function UsageClient({ hasUserSession = false }) {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, totalItems: 0, totalPages: 0 });
 
   const STORAGE_KEY = "derouter.usage.key";
+
+  const playgroundKey = loadedKey;
+  const transport = useMemo(() => (playgroundKey ? keyTransport(playgroundKey) : null), [playgroundKey]);
+
+  // The try-it panel lives in a dialog opened by a button, to keep the page compact.
+  // Once opened it stays mounted (hidden when closed) so a conversation survives
+  // closing and reopening it.
+  const [playOpen, setPlayOpen] = useState(false);
+  const [playMounted, setPlayMounted] = useState(false);
+  const [playRequest, setPlayRequest] = useState(null);
+  // Which models of this key can be tried, and as what: text (chat) or image.
+  const [testable, setTestable] = useState({ text: new Set(), image: new Set() });
+  const playOpenerRef = useRef(null);
+  const playCloseRef = useRef(null);
+  const playDialogRef = useRef(null);
+  const closePlayground = useCallback(() => {
+    setPlayOpen(false);
+    playOpenerRef.current?.focus?.();
+  }, []);
+  // Opened from a row's "Thử" button, already pointed at that model.
+  const openPlayground = (model, kind) => {
+    playOpenerRef.current = document.activeElement;
+    setPlayRequest((current) => ({ id: (current?.id || 0) + 1, model, kind }));
+    setPlayMounted(true);
+    setPlayOpen(true);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!transport) { setTestable({ text: new Set(), image: new Set() }); return undefined; }
+    transport.loadModels()
+      .then((list) => {
+        if (cancelled) return;
+        setTestable({
+          text: new Set((list?.text || []).map((model) => model.id)),
+          image: new Set((list?.image || []).map((model) => model.id)),
+        });
+      })
+      .catch(() => { if (!cancelled) setTestable({ text: new Set(), image: new Set() }); });
+    return () => { cancelled = true; };
+  }, [transport]);
+
+  useEffect(() => {
+    if (!playOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") { closePlayground(); return; }
+      if (event.key !== "Tab" || !playDialogRef.current) return;
+      // Keep Tab inside the dialog: the page behind it is dimmed and inert.
+      const items = Array.from(playDialogRef.current.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((el) => el.offsetParent !== null);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !playDialogRef.current.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !playDialogRef.current.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    playCloseRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [playOpen, closePlayground]);
 
   // Read a key from a `?key=...` query param (a deep link). The key is
   // NOT kept in the URL — on mount we stash it into localStorage and strip it
@@ -98,6 +209,17 @@ export default function UsageClient({ hasUserSession = false }) {
     } catch { /* ignore — keep previous page */ }
   }, []);
 
+  // After a call from the playground: refresh the figures (budget, window, limits) without
+  // blanking the page, then the first page of the history, where the new call appears.
+  const refreshAfterCall = useCallback(async (key, p, pgSize) => {
+    try {
+      const res = await fetch(`/api/usage/key?key=${encodeURIComponent(key)}`);
+      if (res.ok) setData(await res.json());
+    } catch { /* keep the previous figures */ }
+    setPage(1);
+    await fetchHistoryPage(key, p, 1, pgSize);
+  }, [fetchHistoryPage]);
+
   const lookup = useCallback(async (key, p = "7d", pageNum = 1, pgSize = pageSize) => {
     if (!key) return;
     setLoading(true);
@@ -114,6 +236,7 @@ export default function UsageClient({ hasUserSession = false }) {
       if (!baseRes.ok) { setError("Failed to load usage"); return; }
       const d = await baseRes.json();
       setData(d);
+      setLoadedKey(key);
       if (recRes.ok) {
         const r = await recRes.json();
         setRec(r);
@@ -159,6 +282,9 @@ export default function UsageClient({ hasUserSession = false }) {
   };
 
   const clearKey = () => {
+    setLoadedKey("");
+    setPlayOpen(false);
+    setPlayMounted(false);
     setData(null);
     setRec(null);
     setKeyInput("");
@@ -382,7 +508,7 @@ export default function UsageClient({ hasUserSession = false }) {
               {!data.active && <span className="ml-2 text-orange-500">Paused</span>}
               {data.expiresAt && (
                 <span className="ml-2 text-amber-600 dark:text-amber-400">
-                  Expires {new Date(data.expiresAt).toLocaleString()}
+                  Expires {fmtDateTime(data.expiresAt)}
                 </span>
               )}
             </p>
@@ -442,7 +568,7 @@ export default function UsageClient({ hasUserSession = false }) {
                   </div>
                   <p className="text-xs text-text-muted mt-1.5">
                     {data.resetWindow ? `Resets ${WINDOW_LABELS[data.resetWindow] || data.resetWindow}` : "No reset"}
-                    {data.resetAt ? ` · ${new Date(data.resetAt).toLocaleString()}` : ""}
+                    {data.resetAt ? ` · ${fmtDateTime(data.resetAt)}` : ""}
                   </p>
                 </>
               )}
@@ -467,10 +593,6 @@ export default function UsageClient({ hasUserSession = false }) {
                 <div className="flex justify-between">
                   <span className="text-text-muted text-xs">Peak RPM</span>
                   <span className="font-medium">{fmt(rec?.summary?.peakRpm || 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted text-xs">Peak Tok/s</span>
-                  <span className="font-medium">{fmt(rec?.summary?.peakTokS || 0)}</span>
                 </div>
               </div>
             </div>
@@ -548,7 +670,7 @@ export default function UsageClient({ hasUserSession = false }) {
             <div className="px-4 py-2.5 border-b border-border bg-surface-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">Request History</h3>
-                <span className="text-xs text-text-muted">{filteredHistory.length} request{filteredHistory.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs text-text-muted">{filteredHistory.length} {filteredHistory.length === 1 ? "request" : "requests"}</span>
               </div>
               {/* Clear-all-history action. Destructive for this key's log only; admin
                   aggregate stats (daily rollup, lifetime counter) are NOT cleared. */}
@@ -622,10 +744,10 @@ export default function UsageClient({ hasUserSession = false }) {
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
-                      <th className="text-right font-medium px-3 py-2">Latency</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap" title="Total time from receiving the request until the response finished">Response time</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
-                      <th className="text-right font-medium px-3 py-2" title="Tokens (input + output); Tok/s = output / total time">Tok</th>
+                      <th className="text-right font-medium px-3 py-2" title="Input + output tokens">Tokens</th>
                       <th className="text-right font-medium px-3 py-2">Cache R</th>
                       <th className="text-right font-medium px-3 py-2">Cache W</th>
                       <th className="text-right font-medium px-3 py-2">Cost</th>
@@ -641,7 +763,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           title="Click to view request details"
                         >
                           <td className="px-3 py-1.5 whitespace-nowrap text-text-muted">
-                            {r.timestamp ? new Date(r.timestamp).toLocaleString() : "—"}
+                            {fmtDateTime(r.timestamp)}
                           </td>
                           <td className="px-3 py-1.5 font-mono max-w-[160px] truncate" title={r.model}>{r.model || "—"}</td>
                           <td className="px-3 py-1.5 text-center">
@@ -649,17 +771,12 @@ export default function UsageClient({ hasUserSession = false }) {
                               {r.status || "—"}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 text-right text-text-muted">
-                            {r.latencyMs != null ? `${r.latencyMs}ms` : "—"}
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
+                            {fmtDuration(r.latencyMs)}
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
-                          <td className="px-3 py-1.5 text-right">
-                            <div className="tabular-nums">{fmt(r.tok)}</div>
-                            {r.tokS != null && (
-                              <div className="text-text-muted text-[10px]">{r.tokS} t/s</div>
-                            )}
-                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{fmt(r.tok)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
                           <td className="px-3 py-1.5 text-right">{fmtCost(r.cost)}</td>
@@ -687,7 +804,7 @@ export default function UsageClient({ hasUserSession = false }) {
               <h3 className="text-sm font-semibold">Available Models</h3>
               <span className="text-xs text-text-muted">
                 {data.allowedModels && data.allowedModels.length > 0
-                  ? `${data.allowedModels.length} allowed`
+                  ? <>{data.allowedModels.length} allowed</>
                   : "All models allowed"}
               </span>
             </div>
@@ -718,7 +835,17 @@ export default function UsageClient({ hasUserSession = false }) {
                           <td className="px-3 py-2 text-right">{fmtUsd(m.cached || 0)}</td>
                           <td className="px-3 py-2 text-right">{fmtUsd(m.reasoning || 0)}</td>
                           <td className="px-3 py-2 text-right">{fmtUsd(m.cacheCreation || 0)}</td>
-                          <td className="px-3 py-2 text-center">
+                          <td className="px-3 py-2 text-center whitespace-nowrap">
+                            {allowed && (testable.text.has(m.name) || testable.image.has(m.name)) && (
+                              <button
+                                onClick={() => openPlayground(m.name, testable.image.has(m.name) ? "image" : "text")}
+                                className="mr-1 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-text-main hover:bg-surface-2"
+                                title={`Dùng thử ${m.name} bằng key này`}
+                              >
+                                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">play_arrow</span>
+                                Thử
+                              </button>
+                            )}
                             <button
                               onClick={() => copy(m.name)}
                               className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted"
@@ -778,7 +905,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           {detail.status || "—"}
                         </span>
                       </div>
-                      <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{detail.timestamp ? new Date(detail.timestamp).toLocaleString() : "—"}</span></div>
+                      <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{fmtDateTime(detail.timestamp)}</span></div>
                       <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
                     </div>
@@ -875,6 +1002,47 @@ export default function UsageClient({ hasUserSession = false }) {
           )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+        </div>
+      )}
+
+      {/* Try-it dialog. Mounted from the first open on and only hidden afterwards, so
+          the conversation is not lost; it follows the key, not the loaded data, so a
+          period switch (which reloads the data) does not wipe it either. */}
+      {playMounted && transport && (
+        <div className={playOpen ? "fixed inset-0 z-50 flex items-center justify-center p-4" : "hidden"}>
+          <div className="absolute inset-0 bg-black/40" onClick={closePlayground} aria-hidden="true" />
+          <div
+            ref={playDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Dùng thử model"
+            className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden border border-border bg-bg"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold">Dùng thử model</h2>
+                <p className="text-xs text-text-muted">Mỗi lượt gọi tính vào key này như một request API.</p>
+              </div>
+              <button
+                ref={playCloseRef}
+                type="button"
+                onClick={closePlayground}
+                aria-label="Đóng"
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2"
+              >
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              <ModelPlayground
+                key={playgroundKey /* another key starts a fresh conversation */}
+                transport={transport}
+                storageKey="usage.playground.mode"
+                request={playRequest}
+                onUsed={() => refreshAfterCall(playgroundKey, period, pageSize)}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

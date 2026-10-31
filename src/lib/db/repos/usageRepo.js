@@ -539,7 +539,7 @@ export async function getUsageHistory(filter = {}) {
       costNanoUsd: rowCostNano(r.costNanoUsd, r.cost),
       status: r.status, tokens: parseJson(r.tokens, {}),
       // Raw meta JSON (carries requestedModel + latencyMs). Exposed so downstream
-      // readers (e.g. /api/usage/key/receipts) can compute Tok/s from latencyMs.
+      // readers (e.g. /api/usage/key/receipts) can show each request's response time.
       meta,
     };
   });
