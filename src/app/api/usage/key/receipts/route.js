@@ -160,6 +160,8 @@ export async function GET(request) {
           latencyMs,
           cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreation: t.cache_creation_input_tokens ?? 0,
+          // True when the upstream reported no usage and these figures are the router's estimate.
+          estimated: meta?.estimated === true,
         };
       });
 

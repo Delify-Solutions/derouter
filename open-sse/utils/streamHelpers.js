@@ -100,18 +100,20 @@ function cleanUsagePayload(payload) {
   return cleaned;
 }
 
-// Format output as SSE
-export function formatSSE(data, sourceFormat) {
+// Format output as SSE.
+// `keepNulls`: leave `usage: null` and `perf_metrics: null` as the upstream sent them
+// (same-format Responses passthrough). Translated output keeps the legacy clean-up.
+export function formatSSE(data, sourceFormat, { keepNulls = false } = {}) {
   if (data === null || data === undefined) return "data: null\n\n";
   if (data && data.done) return "data: [DONE]\n\n";
 
   // OpenAI Responses API format
   if (data && data.event && data.data) {
-    const cleanedEventData = cleanUsagePayload(data.data);
+    const cleanedEventData = keepNulls ? data.data : cleanUsagePayload(data.data);
     return `event: ${data.event}\ndata: ${JSON.stringify(cleanedEventData)}\n\n`;
   }
 
-  data = cleanUsagePayload(data);
+  if (!keepNulls) data = cleanUsagePayload(data);
 
   // Claude format
   if (sourceFormat === FORMATS.CLAUDE && data && data.type) {

@@ -8,7 +8,7 @@ import { formatSSE } from "./stream.js";
  * Check for bypass patterns - return fake response without calling provider
  * Only works for Claude CLI requests
  */
-export function handleBypassRequest(body, model, userAgent = "", ccFilterNaming = false) {
+export function handleBypassRequest(body, model, userAgent = "", ccFilterNaming = false, { compat = false } = {}) {
   if (!userAgent.includes("claude-cli")) return null;
   if (!body.messages?.length) return null;
 
@@ -24,14 +24,17 @@ export function handleBypassRequest(body, model, userAgent = "", ccFilterNaming 
   let shouldBypass = false;
   let namingBypass = false;
 
+  // Patterns 1-4 answer a Claude Code request with a canned reply instead of asking the
+  // upstream (and so change what the client gets and what the provider cache is primed with):
+  // compat only. Pattern 5 stays its own opt-in (ccFilterNaming).
   // Pattern 1: Title extraction (assistant message = "{")
   const lastMsg = messages[messages.length - 1];
-  if (lastMsg?.role === "assistant" && lastMsg.content?.[0]?.text === "{") {
+  if (compat && lastMsg?.role === "assistant" && lastMsg.content?.[0]?.text === "{") {
     shouldBypass = true;
   }
 
   // Pattern 2: Warmup
-  if (!shouldBypass) {
+  if (compat && !shouldBypass) {
     const firstText = getText(messages[0]?.content);
     if (firstText === "Warmup") {
       shouldBypass = true;
@@ -39,7 +42,7 @@ export function handleBypassRequest(body, model, userAgent = "", ccFilterNaming 
   }
 
   // Pattern 3: Count
-  if (!shouldBypass && messages.length === 1 && messages[0]?.role === "user") {
+  if (compat && !shouldBypass && messages.length === 1 && messages[0]?.role === "user") {
     const firstText = getText(messages[0]?.content);
     if (firstText === "count") {
       shouldBypass = true;
@@ -47,7 +50,7 @@ export function handleBypassRequest(body, model, userAgent = "", ccFilterNaming 
   }
 
   // Pattern 4: Skip patterns
-  if (!shouldBypass && SKIP_PATTERNS?.length) {
+  if (compat && !shouldBypass && SKIP_PATTERNS?.length) {
     const userMessages = messages.filter(m => m.role === "user");
     const userText = userMessages.map(m => getText(m.content)).join(" ");
     if (SKIP_PATTERNS.some(p => userText.includes(p))) {

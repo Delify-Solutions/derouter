@@ -33,6 +33,10 @@ function processSSEMessage(msg, state) {
       state.usage.input_tokens = parsed.response.usage.input_tokens || 0;
       state.usage.output_tokens = parsed.response.usage.output_tokens || 0;
       state.usage.total_tokens = parsed.response.usage.total_tokens || 0;
+      // The cached / reasoning breakdown is the upstream's own: keep it (it was dropped, so
+      // the cached part of a Responses prompt was billed at the full input rate).
+      if (parsed.response.usage.input_tokens_details) state.usage.input_tokens_details = parsed.response.usage.input_tokens_details;
+      if (parsed.response.usage.output_tokens_details) state.usage.output_tokens_details = parsed.response.usage.output_tokens_details;
     }
   } else if (eventType === "response.failed") {
     state.status = "failed";

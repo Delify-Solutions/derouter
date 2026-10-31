@@ -32,3 +32,28 @@ export function adjustMaxTokens(body, ceiling = DEFAULT_MAX_TOKENS) {
   return maxTokens;
 }
 
+
+/**
+ * max_tokens for a request converted FROM another format, honouring the client's own limit.
+ *
+ * The legacy adjustMaxTokens() raises a small limit to 32000 whenever tools are present and
+ * caps it at 64000, i.e. it rewrites the output limit the client chose (and the output the
+ * upstream may bill). Strict mode (compatNormalization off) forwards the client's value; only
+ * Anthropic, which requires the field, gets a default when the client sent none, and a
+ * thinking budget still has to leave room (max_tokens > budget_tokens is an API rule).
+ *
+ * @param {object} body - source body (OpenAI shape: max_tokens / max_completion_tokens)
+ * @param {{ compat?: boolean, ceiling?: number, required?: boolean }} opts
+ */
+export function resolveMaxTokens(body, { compat = false, ceiling = DEFAULT_MAX_TOKENS, required = false } = {}) {
+  if (compat) return adjustMaxTokens(body, ceiling);
+  let maxTokens = body.max_tokens ?? body.max_completion_tokens;
+  if (maxTokens === undefined || maxTokens === null) {
+    if (!required) return undefined;
+    maxTokens = DEFAULT_MAX_TOKENS;
+  }
+  if (required && body.thinking?.budget_tokens && maxTokens <= body.thinking.budget_tokens) {
+    maxTokens = body.thinking.budget_tokens + 1024;
+  }
+  return maxTokens;
+}

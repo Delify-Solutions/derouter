@@ -1,5 +1,6 @@
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
-import { canonicalizeUsage } from "../../utils/usageTracking.js";
+import { canonicalizeUsage, hasValidUsage, estimateUsage } from "../../utils/usageTracking.js";
+import { bodyText } from "../../utils/chunkText.js";
 
 const OPTIONAL_PARAMS = [
   "temperature", "top_p", "top_k",
@@ -35,7 +36,9 @@ export function extractUsageFromResponse(responseBody) {
       completion_tokens: responseBody.usage.output_tokens || 0,
       cached_tokens: responseBody.usage.cached_tokens ?? responseBody.usage.input_tokens_details?.cached_tokens,
       cache_read_input_tokens: responseBody.usage.cache_read_input_tokens,
-      cache_creation_input_tokens: responseBody.usage.cache_creation_input_tokens
+      cache_creation_input_tokens: responseBody.usage.cache_creation_input_tokens,
+      // Responses API: reasoning is a subset of output_tokens (see canonicalizeUsage).
+      reasoning_tokens: responseBody.usage.output_tokens_details?.reasoning_tokens
     };
   }
 
@@ -44,7 +47,8 @@ export function extractUsageFromResponse(responseBody) {
     return {
       prompt_tokens: responseBody.usage.prompt_tokens || 0,
       completion_tokens: responseBody.usage.completion_tokens || 0,
-      cached_tokens: responseBody.usage.cached_tokens ?? responseBody.usage.prompt_tokens_details?.cached_tokens,
+      // prompt_cache_hit_tokens is DeepSeek's spelling of the same figure.
+      cached_tokens: responseBody.usage.cached_tokens ?? responseBody.usage.prompt_tokens_details?.cached_tokens ?? responseBody.usage.prompt_cache_hit_tokens,
       reasoning_tokens: responseBody.usage.completion_tokens_details?.reasoning_tokens
     };
   }
@@ -54,13 +58,25 @@ export function extractUsageFromResponse(responseBody) {
   if (usageMetadata) {
     return {
       prompt_tokens: usageMetadata.promptTokenCount || 0,
-      completion_tokens: usageMetadata.candidatesTokenCount || 0,
+      // Thinking tokens are output; completion carries both, reasoning_tokens is the subset.
+      completion_tokens: (usageMetadata.candidatesTokenCount || 0) + (usageMetadata.thoughtsTokenCount || 0),
       cached_tokens: usageMetadata.cachedContentTokenCount || 0,
       reasoning_tokens: usageMetadata.thoughtsTokenCount || 0
     };
   }
 
   return null;
+}
+
+/**
+ * The usage to record for a complete (non-streamed) response: what the upstream reported, and
+ * only when it reported nothing usable but did generate output, a flagged estimate (billing
+ * fallback; it is never put in the body sent to the client).
+ */
+export function usageOrEstimate(reported, requestBody, responseBody) {
+  if (hasValidUsage(reported)) return reported;
+  const text = bodyText(responseBody);
+  return text ? estimateUsage(requestBody, text) : reported;
 }
 
 export function buildRequestDetail(base, overrides = {}) {
@@ -135,6 +151,8 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // Original client model (bare combo name when the request was for a combo);
     // used to resolve a combo-level price override before falling back to per-pool.
     requestedModel: requestedModel || null,
+    // True when the figures are the router's own estimate (the upstream reported no usage).
+    estimated: normalized.estimated === true,
     // Latency in ms (total request wall-time). Persisted into usageHistory.meta
     // so the usage pages can show each request's response time without a schema
     // change. Null for callers that don't track timing (e.g. platform denials).

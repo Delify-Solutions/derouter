@@ -1,13 +1,14 @@
 import { FORMATS } from "./formats.js";
 import { ensureToolCallIds, fixMissingToolResponses } from "./concerns/toolCall.js";
 import { prepareClaudeRequest } from "./formats/claude.js";
-import { cloakClaudeTools, decloakStreamChunk } from "../utils/claudeCloaking.js";
+import { cloakClaudeTools, decloakStreamChunk, applyCloaking } from "../utils/claudeCloaking.js";
 import { filterToOpenAIFormat } from "./formats/openai.js";
 import { normalizeThinkingConfig } from "../services/provider.js";
-import { applyThinking, captureThinking } from "./concerns/thinkingUnified.js";
+import { applyThinking, captureThinking, parseSuffix } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
 import { PROVIDERS } from "../providers/index.js";
+import { isCustomNodeProvider } from "../utils/transparency.js";
 
 // Registry for translators. Lazy-init guards against circular-import order:
 // translator modules call register() (side-effect) before this module's body runs.
@@ -49,25 +50,41 @@ function stripContentTypes(body, stripList = []) {
 }
 
 // Translate request: source -> openai -> target
-export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
+//
+// Transparency (spec proxy-transparency): when the client and the upstream speak the SAME
+// format, the upstream is a CUSTOM NODE and `compat` is off, the request body is forwarded as
+// the client sent it. The normalisations below exist for odd clients and odd providers (re-id'd
+// tool calls, invented tool responses, dropped thinking fields, rewritten cache_control
+// breakpoints, ...); each one changes bytes the client chose and some of them break provider
+// prefix caching, so for a custom node they only run for a real format conversion or when the
+// operator turned `compatNormalization` on. A built-in registry provider always keeps them: the
+// router's own registry entry picked that upstream and the client cannot know its quirks.
+export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null, compat = false) {
   ensureInitialized();
   let result = body;
+  const legacy = compat || !isCustomNodeProvider(provider);
+  const strictSameFormat = sourceFormat === targetFormat && !legacy;
+  // Translators and executors that run after this read the same flag from the credentials.
+  if (credentials && legacy) credentials.compatNormalization = true;
 
-  // Strip explicit content types (opt-in via strip[] in PROVIDER_MODELS entry)
+  // Strip explicit content types (opt-in via strip[] in PROVIDER_MODELS entry). Kept in
+  // strict mode: it is an explicit per-model operator setting, empty for custom nodes.
   stripContentTypes(result, stripList);
 
-  // Normalize thinking config: remove if lastMessage is not user
-  normalizeThinkingConfig(result);
+  if (!strictSameFormat) {
+    // Normalize thinking config: remove if lastMessage is not user
+    normalizeThinkingConfig(result);
 
-  // Always ensure tool_calls have id (some providers require it)
-  ensureToolCallIds(result);
-  
-  // Kiro performs stricter source-aware reconciliation after session replay.
-  // The generic helper inserts OpenAI `role: tool` messages, which a direct
-  // Claude→Kiro translator cannot consume and which cannot repair partial
-  // parallel tool results.
-  if (targetFormat !== FORMATS.KIRO) {
-    fixMissingToolResponses(result);
+    // Always ensure tool_calls have id (some providers require it)
+    ensureToolCallIds(result);
+
+    // Kiro performs stricter source-aware reconciliation after session replay.
+    // The generic helper inserts OpenAI `role: tool` messages, which a direct
+    // Claude→Kiro translator cannot consume and which cannot repair partial
+    // parallel tool results.
+    if (targetFormat !== FORMATS.KIRO) {
+      fixMissingToolResponses(result);
+    }
   }
 
   // Capture thinking intent from the original (pre-translation) body, before any
@@ -115,22 +132,38 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   const kiroThinkingMappedByTranslator =
     targetFormat === FORMATS.KIRO &&
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
-  if (!kiroThinkingMappedByTranslator) {
+  // Strict same-format: the client's own thinking fields are forwarded verbatim. Only an
+  // explicit "model(level)" suffix, which the router strips from the upstream model id,
+  // still has to be turned into the provider-native field.
+  // The admin's per-provider thinking override (chatCore) is treated the same way: it injected a
+  // field of the wrong format for this upstream and must be mapped to the native one.
+  const thinkingSuffix = parseSuffix(model).override || credentials?._thinkingOverride === true;
+  if (!kiroThinkingMappedByTranslator && (!strictSameFormat || thinkingSuffix)) {
     applyThinking(targetFormat, model, result, provider, thinkingIntent);
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI
   // This handles hybrid requests (e.g., OpenAI messages + Claude tools)
-  if (targetFormat === FORMATS.OPENAI) {
+  if (targetFormat === FORMATS.OPENAI && !strictSameFormat) {
     result = filterToOpenAIFormat(result, {
       preserveCacheControl: !!PROVIDERS[provider]?.quirks?.preserveCacheControl,
     });
   }
 
   // Final step: prepare request for Claude format endpoints
-  if (targetFormat === FORMATS.CLAUDE) {
+  if (targetFormat === FORMATS.CLAUDE && !strictSameFormat) {
     const apiKey = credentials?.accessToken || credentials?.apiKey || null;
-    result = prepareClaudeRequest(result, provider, apiKey, connectionId, credentials?.rawHeaders, clientSessionId);
+    result = prepareClaudeRequest(result, provider, apiKey, connectionId, credentials?.rawHeaders, clientSessionId, legacy);
+  } else if (targetFormat === FORMATS.CLAUDE) {
+    // Strict same-format keeps the client's body. Two provider-required exceptions remain:
+    // a provider the registry flags as rejecting output_config (MiniMax's Claude-compatible
+    // endpoint answers 400), and the OAuth billing header, which only exists for an OAuth
+    // credential (applyCloaking is a no-op for a plain API key).
+    if (PROVIDERS[provider]?.quirks?.dropOutputConfig) delete result.output_config;
+    const oauthKey = credentials?.accessToken || credentials?.apiKey || null;
+    if ((provider === "claude" || provider?.startsWith?.("anthropic-compatible")) && oauthKey) {
+      result = applyCloaking(result, oauthKey, clientSessionId);
+    }
   }
 
   // Claude cloaking: rename client tools with CLAUDE_TOOL_SUFFIX (anti-ban)

@@ -11,7 +11,8 @@ import {
 } from "../endpoint/endpointConstants";
 
 export default function TokenSaverClient() {
-  const [rtkEnabled, setRtkEnabledState] = useState(true);
+  const [rtkEnabled, setRtkEnabledState] = useState(false);
+  const [compatNormalization, setCompatNormalization] = useState(false);
   const [headroomEnabled, setHeadroomEnabled] = useState(false);
   const [headroomUrl, setHeadroomUrl] = useState("http://localhost:8787");
   const [headroomTimeoutMs, setHeadroomTimeoutMs] = useState(3000);
@@ -103,6 +104,11 @@ export default function TokenSaverClient() {
     } catch (error) {
       console.error("Error updating rtkEnabled:", error);
     }
+  };
+
+  const handleCompatNormalization = (value) => {
+    setCompatNormalization(value);
+    patchSetting({ compatNormalization: value });
   };
 
   const handleCavemanEnabled = (value) => {
@@ -420,7 +426,8 @@ export default function TokenSaverClient() {
         const res = await fetch("/api/settings");
         if (res.ok) {
           const data = await res.json();
-          setRtkEnabledState(data.rtkEnabled !== false);
+          setRtkEnabledState(data.rtkEnabled === true);
+          setCompatNormalization(data.compatNormalization === true);
           setHeadroomEnabled(!!data.headroomEnabled);
           setHeadroomUrl(data.headroomUrl || "http://localhost:8787");
           if (typeof data.headroomTimeoutMs === "number") setHeadroomTimeoutMs(data.headroomTimeoutMs);
@@ -475,6 +482,26 @@ export default function TokenSaverClient() {
 
   return (
     <div className="space-y-6 p-6">
+      <Card id="transparency">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">swap_horiz</span>
+              Chế độ tương thích (compat)
+            </h2>
+            <p className="text-sm text-text-muted mt-1">
+              Tắt (mặc định): khi client và upstream cùng định dạng, request và response được chuyển tiếp nguyên vẹn,
+              chỉ đổi model id, thêm stream_options.include_usage và thông tin xác thực. Bật: chạy lại các bước
+              chuẩn hóa cũ cho client/provider &quot;lạ&quot; (sửa id, bỏ trường Azure, đánh lại tool id, chèn tool response,
+              ghi đè cache_control...).
+            </p>
+          </div>
+          <Toggle
+            checked={compatNormalization}
+            onChange={() => handleCompatNormalization(!compatNormalization)}
+          />
+        </div>
+      </Card>
       <Card id="rtk">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold flex items-center gap-2">

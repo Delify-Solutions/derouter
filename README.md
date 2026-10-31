@@ -73,6 +73,15 @@ npm run dev      # next dev on port 20127
 npm test         # node --test over test/**/*.test.js
 ```
 
+## Operations notes
+
+Two defaults changed with the `usage-accuracy` / `proxy-transparency` work. Both can be restored.
+
+- **`compatNormalization` (new, default `false`).** For a custom node (a provider node you added, `openai-compatible-*` / `anthropic-compatible-*`) the router now forwards same-format requests and responses as they are: no id repair, no field stripping, no `cache_control` rewriting, no invented tool responses. Built-in providers (MiniMax, Kimi, GLM, DeepSeek, Anthropic OAuth, ...) keep the shaping their registry entry needs. To get the old behaviour for custom nodes: Token Saver page, card "Chế độ tương thích", or `PATCH /api/settings {"compatNormalization": true}`.
+- **`rtkEnabled` (was `true`, now `false`).** RTK compresses tool results, which changes the prompt and breaks provider prefix caching, so it is opt-in like the other token savers. To turn it back on: Token Saver page, or `PATCH /api/settings {"rtkEnabled": true}`. An installation that had saved a value keeps it.
+
+Usage is recorded exactly as the upstream reports it (no token margin); when an upstream reports none, a flagged `estimated` figure is recorded for billing only. Reasoning tokens are priced as part of the completion, so totals before and after this change are not directly comparable.
+
 ## License
 
 MIT — see `LICENSE`.

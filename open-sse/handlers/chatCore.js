@@ -31,6 +31,7 @@ import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { isCustomNodeProvider } from "../utils/transparency.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -62,8 +63,15 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false }) {
   const { provider, model } = modelInfo;
+  // Strict transparency (spec proxy-transparency) applies to CUSTOM NODES only: the operator
+  // pointed those at an arbitrary upstream and the router knows none of its quirks. A built-in
+  // registry provider was chosen by the router's own registry entry, whose shims it relies on
+  // (tool `type` defaults, thinking placeholders, role mapping, ...), so it keeps them.
+  // `compat` is the operator's setting; `legacy` is "the legacy shaping runs for this request".
+  const compat = compatNormalization === true;
+  const legacy = compat || !isCustomNodeProvider(provider);
   const requestStartTime = Date.now();
   // Stable per-session color so all lines of one CLI conversation share a tag
   const sessionSeed = (() => {
@@ -88,7 +96,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     : null;
 
   // Check for bypass patterns (warmup, skip, cc naming)
-  const bypassResponse = handleBypassRequest(body, model, userAgent, ccFilterNaming);
+  const bypassResponse = handleBypassRequest(body, model, userAgent, ccFilterNaming, { compat: legacy });
   if (bypassResponse) return bypassResponse;
 
   const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
@@ -117,20 +125,29 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Inject provider-level thinking config override (only if client hasn't set)
   // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
+  let thinkingOverrideInjected = false;
   if (providerThinking?.mode && providerThinking.mode !== "auto") {
     const mode = providerThinking.mode;
     if (mode === "on" && !body.thinking) {
       body = { ...body, thinking: { type: "enabled", budget_tokens: 10000 } };
+      thinkingOverrideInjected = true;
     } else if (mode === "off" && !body.thinking) {
       body = { ...body, thinking: { type: "disabled" } };
+      thinkingOverrideInjected = true;
     } else if (!body.reasoning_effort) {
       body = { ...body, reasoning_effort: mode };
+      thinkingOverrideInjected = true;
     }
   }
 
   const clientRequestedStreaming = body.stream === true || sourceFormat === FORMATS.ANTIGRAVITY || sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.GEMINI_CLI;
   const providerRequiresStreaming = PROVIDERS[provider]?.forceStream === true;
-  let stream = providerRequiresStreaming ? true : (body.stream !== false);
+  // OpenAI chat, Anthropic Messages and Responses all define an omitted `stream` as false, and
+  // the upstream answers that way (a JSON body). Strict mode follows the protocol so what the
+  // router expects is what the upstream sends; the legacy default (stream unless false) stays
+  // for compat and for the Gemini-family formats, which stream by default.
+  const specDefaultsToJson = !compat && (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE || sourceFormat === FORMATS.OPENAI_RESPONSES);
+  let stream = providerRequiresStreaming ? true : (specDefaultsToJson ? body.stream === true : body.stream !== false);
 
   // Image generation models require non-streaming (Google v1internal:generateContent)
   const modelType = getModelType(alias, model);
@@ -163,17 +180,32 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Skip all translation/normalization — only model and Bearer are swapped
   const clientTool = detectClientTool(clientRawRequest?.headers || {}, body);
   const passthrough = isNativePassthrough(clientTool, provider);
+  const nativeClaudeShaping = legacy;
 
   // Expose raw client headers to translators/executors for session-id resolution
   if (credentials) credentials.rawHeaders = clientRawRequest?.headers || {};
+  // Translators and executors read the same switch (max_tokens policy, identity prompt, generic
+  // param stripping, reasoning injection). It means "legacy shaping runs", see `legacy` above.
+  if (credentials) credentials.compatNormalization = legacy;
+  // The admin's per-provider thinking override wrote a Claude-style `thinking` or an OpenAI-style
+  // `reasoning_effort` into the body; translateRequest must map it to the target's native field
+  // even in strict mode, exactly like a model(level) suffix.
+  if (credentials) credentials._thinkingOverride = thinkingOverrideInjected;
 
-  // Auto-strip media blocks the model can't read (vision/audio/pdf) before translation.
   if (!passthrough) {
-    const caps = getCapabilitiesForModel(provider, model);
-    if (stripUnsupportedModalities(body, sourceFormat, caps)) {
-      log?.debug?.("MODALITY", `stripped unsupported media for ${provider}/${model}`);
+    // Legacy shaping only: silently dropping media the capability table says the model cannot
+    // read. For a custom node the table is a guess (an uncatalogued model defaults to
+    // vision:false), so there the client's images go upstream and the upstream answers for
+    // itself; a built-in provider's models are catalogued. Capacity-adapter routing (combo
+    // fallback to a vision model) is a separate, operator-configured feature.
+    if (legacy) {
+      const caps = getCapabilitiesForModel(provider, model);
+      if (stripUnsupportedModalities(body, sourceFormat, caps)) {
+        log?.debug?.("MODALITY", `stripped unsupported media for ${provider}/${model}`);
+      }
     }
-    // Convert remote image URLs to base64 for targets that can't fetch URLs.
+    // Convert remote image URLs to base64 for targets that can't fetch URLs. Required by the
+    // target format (cross-format only, see TARGETS_NEED_BASE64), not an optional rewrite.
     try {
       const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: undefined });
       if (n > 0) log?.debug?.("MODALITY", `prefetched ${n} remote image(s) for ${targetFormat}`);
@@ -198,10 +230,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         delete translatedBody.reasoning_effort;
       }
     }
-    // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
-    if (clientTool === "claude") normalizeClaudePassthrough(translatedBody, translatedBody.model);
+    // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API
+    // rejects. This reshapes the client's messages (folds system turns, drops thinking blocks with
+    // a foreign signature, drops empty text), so for a custom node it only runs in compat mode (a built-in provider keeps it);
+    // the built-in Anthropic provider keeps it.
+    if (clientTool === "claude" && nativeClaudeShaping) normalizeClaudePassthrough(translatedBody, translatedBody.model);
   } else {
-    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool, compat);
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
@@ -211,11 +246,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     customToolNames = translatedBody._customToolNames;
     delete translatedBody._customToolNames;
     translatedBody.model = stripThinkingSuffix(upstreamModel);
-    stripContinuityFields(translatedBody);
+    // Translator-internal stash: only a cross-format translation can have created it.
+    if (sourceFormat !== targetFormat) stripContinuityFields(translatedBody);
   }
 
   // Dedupe duplicate built-in tools when equivalent MCP tools are present (Claude clients only).
-  if (clientTool === "claude" && Array.isArray(translatedBody.tools)) {
+  // Legacy shaping only: it removes tool definitions the client sent (and shifts the cached prefix).
+  if (legacy && clientTool === "claude" && Array.isArray(translatedBody.tools)) {
     const { tools: deduped, stripped } = dedupeTools(translatedBody.tools);
     if (stripped.length > 0) {
       translatedBody.tools = deduped;
@@ -256,7 +293,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Claude tool schema requires `type` to be explicitly set; strict gateways (e.g., MiniMax)
   // reject legacy payloads that omit it with HTTP 400. Default to "custom" when missing.
-  if (finalFormat === FORMATS.CLAUDE && Array.isArray(translatedBody.tools)) {
+  // Skipped only for a custom node reached by a Claude client (the tool list is then the
+  // client's own); a cross-format conversion builds the tool list itself, and a built-in
+  // provider (MiniMax, Kimi, GLM...) is what this default exists for.
+  if ((legacy || sourceFormat !== FORMATS.CLAUDE) && finalFormat === FORMATS.CLAUDE && Array.isArray(translatedBody.tools)) {
     translatedBody.tools = defaultClaudeToolType(translatedBody.tools);
   }
 
@@ -310,7 +350,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Pin cache breakpoints to the final body — every saver above can reshape
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.
-  if (passthrough && clientTool === "claude") anchorClaudeCache(translatedBody);
+  // Rewrites the client's own cache breakpoints, so it follows the same rule as the shaping above.
+  if (passthrough && clientTool === "claude" && nativeClaudeShaping) anchorClaudeCache(translatedBody);
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
@@ -516,7 +557,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs);
   }
 
-  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
+  const sharedCtx = { compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 
