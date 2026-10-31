@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import ThemeToggle from "@/shared/components/ThemeToggle";
 
 const PRODUCT_LINKS = [
   { href: "#plans", label: "Gói" },
@@ -53,6 +54,7 @@ export default function Navigation({ session = null }) {
         </nav>
 
         <div className="flex items-center gap-2">
+          <ThemeToggle variant="square" />
           {session === "customer" ? (
             <Link
               href="/account"

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/shared/utils/cn";
+import ThemeToggle from "@/shared/components/ThemeToggle";
 
 // Order is the spec's (customer-portal "Navigation and language"): the questions a
 // customer asks in order — what do I have, what am I paying, what did I spend, what
@@ -90,6 +91,7 @@ export default function AccountShell({ email = "", name = "", children }) {
           </div>
 
           <div className="flex items-center gap-3">
+            <ThemeToggle variant="square" className="size-8" />
             <span className="hidden max-w-[240px] truncate font-mono text-xs text-text-muted sm:inline" title={email}>
               {email}
             </span>

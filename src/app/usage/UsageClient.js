@@ -6,6 +6,8 @@ import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
 import { fmtUsd } from "@/shared/utils/money";
 import { getCurrentLocale } from "@/i18n/runtime";
+import ThemeToggle from "@/shared/components/ThemeToggle";
+import HeaderLanguage from "@/shared/components/HeaderLanguage";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -440,15 +442,19 @@ export default function UsageClient({ hasUserSession = false }) {
           <h1 className="text-xl font-semibold leading-tight">Derouter</h1>
           <p className="text-xs text-text-muted mt-0.5">Key Usage</p>
         </div>
-        {data && (
-          <button
-            onClick={clearKey}
-            className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors"
-            title="Sign out — clear key"
-          >
-            <span className="material-symbols-outlined text-[20px]">logout</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <HeaderLanguage variant="square" />
+          <ThemeToggle variant="square" />
+          {data && (
+            <button
+              onClick={clearKey}
+              className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors"
+              title="Sign out — clear key"
+            >
+              <span className="material-symbols-outlined text-[20px]">logout</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Signed-in visitors do not need a key pasted here: their account page
