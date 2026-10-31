@@ -5,10 +5,41 @@ import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
 import { fmtUsd as fmtCost } from "@/shared/utils/money";
 import { fmtRate, fmtUsd } from "./salesData";
+import { percentLabel, dateTimeLabel } from "@/shared/utils/discountFormat";
 
 // Rows revealed per click. The catalogue can be hundreds of models long, so the
 // table starts short and the reader searches or asks for more.
 const PAGE = 25;
+
+// Giá hiệu lực của một model cho gói đang chọn: giá giảm (nếu có đợt giảm giá
+// đang chạy) kèm giá niêm yết để gạch ngang.
+function effectiveRates(model, planId) {
+  const discount = (planId && model.planDiscounts?.[planId]) || model.discount || null;
+  return discount
+    ? { input: discount.input, output: discount.output, cached: discount.cached, discount }
+    : { input: model.input, output: model.output, cached: model.cached, discount: null };
+}
+
+// Một ô giá: giá giảm đậm, giá niêm yết gạch ngang ngay dưới.
+function RateCell({ list, shown, discounted, className }) {
+  if (!discounted || !(Number(list) > 0)) return <span className={className}>{fmtRate(shown)}</span>;
+  return (
+    <span className={className}>
+      {fmtRate(shown)}
+      <span className="block text-xs text-text-subtle line-through" title="Giá niêm yết">{fmtRate(list)}</span>
+    </span>
+  );
+}
+
+function DiscountTag({ discount }) {
+  if (!discount) return null;
+  return (
+    <span className="mt-1 inline-block border border-brand-500/30 bg-brand-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-text-main">
+      Giảm {percentLabel(discount.percentBp)}
+      {discount.endsAt ? ` · đến ${dateTimeLabel(discount.endsAt)}` : ""}
+    </span>
+  );
+}
 
 // Bảng giá chi tiết: desktop là bảng, dưới md là card. Cả hai đọc cùng một
 // nguồn (models từ registry + gói đang chọn), nên hai bố cục không thể lệch số.
@@ -36,12 +67,16 @@ export default function PricingSection({ plans, models, copy }) {
   // Falls back to null when the catalogue is empty, so the sentence is omitted
   // rather than printed with a made-up price.
   const exampleModel = models.find((model) => Number(model.input) > 0) ?? models[0] ?? null;
+  // A time-limited discount lowers the rates the credit is actually charged at,
+  // so the example uses the effective (discounted) rates of the selected plan.
+  const exampleRates = exampleModel ? effectiveRates(exampleModel, plan?.id) : null;
   const example = exampleModel
     ? {
         model: exampleModel.name || exampleModel.id,
+        discountBp: exampleRates.discount?.percentBp ?? 0,
         costUsd:
-          (Number(exampleModel.input) || 0) * 20_000 / 1_000_000 +
-          (Number(exampleModel.output) || 0) * 2_000 / 1_000_000,
+          (Number(exampleRates.input) || 0) * 20_000 / 1_000_000 +
+          (Number(exampleRates.output) || 0) * 2_000 / 1_000_000,
       }
     : null;
 
@@ -133,43 +168,59 @@ export default function PricingSection({ plans, models, copy }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((model) => (
-                    <tr key={model.id} className="border-b border-border last:border-b-0">
-                      <th scope="row" className="px-5 py-3 font-normal">
-                        <span className="block text-sm font-semibold text-text-main">{model.name}</span>
-                        <span className="mt-0.5 block font-mono text-xs text-text-subtle">{model.id}</span>
-                      </th>
-                      <td className="px-5 py-3 font-mono text-sm text-text-main">{fmtRate(model.input)}</td>
-                      <td className="px-5 py-3 font-mono text-sm text-text-main">{fmtRate(model.output)}</td>
-                      <td className="px-5 py-3 font-mono text-sm text-text-muted">{fmtRate(model.cached)}</td>
-                    </tr>
-                  ))}
+                  {rows.map((model) => {
+                    const eff = effectiveRates(model, plan.id);
+                    return (
+                      <tr key={model.id} className="border-b border-border last:border-b-0">
+                        <th scope="row" className="px-5 py-3 font-normal">
+                          <span className="block text-sm font-semibold text-text-main">{model.name}</span>
+                          <span className="mt-0.5 block font-mono text-xs text-text-subtle">{model.id}</span>
+                          <DiscountTag discount={eff.discount} />
+                        </th>
+                        <td className="px-5 py-3 font-mono text-sm text-text-main">
+                          <RateCell list={model.input} shown={eff.input} discounted={!!eff.discount} />
+                        </td>
+                        <td className="px-5 py-3 font-mono text-sm text-text-main">
+                          <RateCell list={model.output} shown={eff.output} discounted={!!eff.discount} />
+                        </td>
+                        <td className="px-5 py-3 font-mono text-sm text-text-muted">
+                          <RateCell list={model.cached} shown={eff.cached} discounted={!!eff.discount} />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile: một card cho mỗi model, cùng dữ liệu, không cuộn ngang. */}
             <ul className="mt-6 flex flex-col gap-3 md:hidden">
-              {rows.map((model) => (
-                <li key={model.id} className="border border-border bg-surface">
-                  <div className="border-b border-border px-4 py-3">
-                    <h3 className="text-sm font-semibold text-text-main">{model.name}</h3>
-                    <p className="mt-0.5 break-all font-mono text-xs text-text-subtle">{model.id}</p>
-                  </div>
-                  <dl className="grid grid-cols-3 gap-px bg-border">
-                    {[
-                      ["Input / 1M", model.input, "text-text-main"],
-                      ["Output / 1M", model.output, "text-text-main"],
-                      ["Cached / 1M", model.cached, "text-text-muted"],
-                    ].map(([label, value, tone]) => (
-                      <div key={label} className="bg-surface px-3 py-3">
-                        <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">{label}</dt>
-                        <dd className={`mt-1 font-mono text-sm ${tone}`}>{fmtRate(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </li>
-              ))}
+              {rows.map((model) => {
+                const eff = effectiveRates(model, plan.id);
+                return (
+                  <li key={model.id} className="border border-border bg-surface">
+                    <div className="border-b border-border px-4 py-3">
+                      <h3 className="text-sm font-semibold text-text-main">{model.name}</h3>
+                      <p className="mt-0.5 break-all font-mono text-xs text-text-subtle">{model.id}</p>
+                      <DiscountTag discount={eff.discount} />
+                    </div>
+                    <dl className="grid grid-cols-3 gap-px bg-border">
+                      {[
+                        ["Input / 1M", model.input, eff.input, "text-text-main"],
+                        ["Output / 1M", model.output, eff.output, "text-text-main"],
+                        ["Cached / 1M", model.cached, eff.cached, "text-text-muted"],
+                      ].map(([label, list, shown, tone]) => (
+                        <div key={label} className="bg-surface px-3 py-3">
+                          <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">{label}</dt>
+                          <dd className={`mt-1 font-mono text-sm ${tone}`}>
+                            <RateCell list={list} shown={shown} discounted={!!eff.discount} />
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </li>
+                );
+              })}
             </ul>
           </>
         )}
@@ -191,7 +242,7 @@ export default function PricingSection({ plans, models, copy }) {
 
         {example && (
           <p className="mt-6 max-w-3xl text-sm text-text-subtle">
-            Ví dụ với {example.model}: một request 20.000 token input và 2.000 token output trừ {fmtCost(example.costUsd)} credit.
+            Ví dụ với {example.model}: một request 20.000 token input và 2.000 token output trừ {fmtCost(example.costUsd)} credit{example.discountBp > 0 ? ` (đã tính mức giảm ${percentLabel(example.discountBp)} đang áp dụng)` : ""}.
           </p>
         )}
       </div>

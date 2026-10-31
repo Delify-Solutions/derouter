@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -636,6 +636,35 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_gr_gift_user ON giftRedemptions(giftId, userId)",
       "CREATE INDEX IF NOT EXISTS idx_gr_user ON giftRedemptions(userId)",
+    ],
+  },
+  // Time-limited discounts on the list price of models (spec model-discounts).
+  // One row is one rule; rules that apply to the same request stack additively,
+  // capped at 100%. See src/lib/billing/discounts.js for the matching rules.
+  modelDiscounts: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // 'combo' | 'plan' | 'group'
+      scopeType: "TEXT NOT NULL",
+      // combo: the combo NAME (the key combo prices use and the name a client
+      // requests); plan: plans.id; group: keyGroups.id.
+      scopeId: "TEXT NOT NULL",
+      // JSON array of combo names the rule covers. NULL/[] = every model of the
+      // scope (for a combo-scope rule: that combo). Always NULL for combo scope.
+      models: "TEXT",
+      // Discount in basis points (1..10000), an integer — never a float.
+      percentBp: "INTEGER NOT NULL",
+      // ISO instants. startsAt is inclusive, endsAt exclusive; NULL = open end.
+      startsAt: "TEXT",
+      endsAt: "TEXT",
+      isActive: "INTEGER DEFAULT 1",
+      label: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_md_scope ON modelDiscounts(scopeType, scopeId)",
+      "CREATE INDEX IF NOT EXISTS idx_md_window ON modelDiscounts(isActive, startsAt, endsAt)",
     ],
   },
 };

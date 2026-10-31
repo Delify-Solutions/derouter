@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, Button, Input, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker, DiscountsModal } from "@/shared/components";
 import Link from "next/link";
 
 /**
@@ -52,6 +52,7 @@ export default function GroupsPageClient() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null); // group being edited
   const [confirmState, setConfirmState] = useState(null);
+  const [discountGroup, setDiscountGroup] = useState(null); // group whose "Giảm giá" modal is open
 
   // Form state
   const [name, setName] = useState("");
@@ -224,6 +225,15 @@ export default function GroupsPageClient() {
                 </div>
                 <div className="flex items-center gap-1">
                   <button
+                    onClick={() => setDiscountGroup(group)}
+                    className="flex items-center gap-1 px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                    title="Giảm giá theo thời gian"
+                    aria-label={`Giảm giá của nhóm ${group.name}`}
+                  >
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
+                    <span className="text-[11px] font-mono uppercase tracking-[0.14em]">Giảm giá</span>
+                  </button>
+                  <button
                     onClick={() => openEdit(group)}
                     className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
                     title="Edit"
@@ -314,6 +324,16 @@ export default function GroupsPageClient() {
           </div>
         </div>
       </Modal>
+
+      {discountGroup && (
+        <DiscountsModal
+          isOpen
+          onClose={() => setDiscountGroup(null)}
+          scopeType="group"
+          scopeId={discountGroup.id}
+          scopeLabel={`Nhóm ${discountGroup.name}`}
+        />
+      )}
 
       <ConfirmModal
         isOpen={!!confirmState}

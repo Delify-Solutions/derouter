@@ -5,7 +5,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
-import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
+import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, DiscountsModal } from "@/shared/components";
 import PreviewThumb from "@/shared/components/PreviewThumb";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
@@ -481,6 +481,7 @@ const STRATEGY_OPTIONS = [
 function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onTest, strategy = {}, onSetStrategy, imagePrice = 0 }) {
   const isImage = combo.kind === "image";
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
+  const [showDiscounts, setShowDiscounts] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   // Fusion needs a judge model answering in text: it does not apply to image combos.
@@ -580,6 +581,15 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               <span className="text-[10px] leading-tight">Copy</span>
             </button>
             <button
+              onClick={() => setShowDiscounts(true)}
+              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+              title="Giảm giá theo thời gian"
+              aria-label={`Giảm giá của combo ${combo.name}`}
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
+              <span className="text-[10px] leading-tight">Giảm giá</span>
+            </button>
+            <button
               onClick={onEdit}
               className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
               title="Edit"
@@ -598,6 +608,16 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           </div>
         </div>
       </div>
+
+      {showDiscounts && (
+        <DiscountsModal
+          isOpen
+          onClose={() => setShowDiscounts(false)}
+          scopeType="combo"
+          scopeId={combo.name}
+          scopeLabel={`Combo ${combo.name}`}
+        />
+      )}
 
       {/* Judge model picker (single-select; combo members make natural judges too) */}
       {showJudgeSelect && (

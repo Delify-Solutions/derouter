@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle } from "@/shared/components";
+import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { windowLabel } from "@/lib/billing/limits.js";
@@ -169,6 +169,7 @@ export default function PlansPageClient() {
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [discountPlan, setDiscountPlan] = useState(null); // plan whose "Giảm giá" modal is open
   const [draft, setDraft] = useState(EMPTY_FORM);
   const [touched, setTouched] = useState(false);
   const [formError, setFormError] = useState("");
@@ -503,6 +504,16 @@ export default function PlansPageClient() {
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
+                    onClick={() => setDiscountPlan(plan)}
+                    aria-label={`Giảm giá của gói ${plan.name || plan.code}`}
+                    title="Giảm giá theo thời gian"
+                    className="h-8 px-2 flex items-center gap-1 border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
+                    <span className="font-mono text-[11px] uppercase tracking-wider">Giảm giá</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => openEdit(plan)}
                     aria-label={`Edit ${plan.name || plan.code}`}
                     className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
@@ -523,6 +534,16 @@ export default function PlansPageClient() {
             </li>
           ))}
         </ul>
+      )}
+
+      {discountPlan && (
+        <DiscountsModal
+          isOpen
+          onClose={() => setDiscountPlan(null)}
+          scopeType="plan"
+          scopeId={discountPlan.id}
+          scopeLabel={`Gói ${discountPlan.name || discountPlan.code}`}
+        />
       )}
 
       <Modal

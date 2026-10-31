@@ -194,7 +194,15 @@ export default function AccountUsageTable({
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.tok)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheRead)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheCreation)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{row.costLabel}</td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {row.costLabel}
+                      {row.discountLabel && (
+                        <span className="block text-[11px] text-text-muted">
+                          {row.listCostLabel && <span className="mr-1 line-through">{row.listCostLabel}</span>}
+                          {row.discountLabel}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

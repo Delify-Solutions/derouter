@@ -2,7 +2,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { USER_COOKIE, verifyUserToken } from "@/lib/auth/userSession";
 import { getApiKeys, getKeyUsageSummary, getUsageHistory, getUserById } from "@/lib/db/index.js";
-import { fmtUsd } from "@/shared/utils/money";
+import { fmtUsd, fmtUsdNano } from "@/shared/utils/money";
+import { percentLabel } from "@/shared/utils/discountFormat";
 import { Empty, Page, ButtonLink } from "@/app/account/components/ui";
 import AccountUsageTable from "./AccountUsageTable";
 
@@ -48,6 +49,10 @@ function toRow(r) {
     cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
     cacheCreation: t.cache_creation_input_tokens ?? 0,
     costLabel: fmtUsd(r.cost ?? 0),
+    // A discounted request shows what it would have cost at list price and how
+    // much was taken off (spec model-discounts "Receipts").
+    discountLabel: r.meta?.discountBp > 0 ? `giảm ${percentLabel(r.meta.discountBp)}` : null,
+    listCostLabel: r.meta?.discountBp > 0 && r.meta?.listCostNanoUsd != null ? fmtUsdNano(r.meta.listCostNanoUsd) : null,
   };
 }
 

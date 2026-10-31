@@ -5,6 +5,7 @@ import { getMeta, setMeta } from "../helpers/metaStore.js";
 import { costFromTokensNano, costFromImagesNano, nanoToUsd } from "../../../shared/utils/money.js";
 import { resolveApiKeyOwner } from "./billingRepo.js";
 import { chargeSync } from "../../billing/planQueue.js";
+import { applyRequestDiscountSync } from "../../billing/discounts.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 
 // Money is stored as integer nanoUSD. `costNanoUsd` is authoritative; the legacy
@@ -429,6 +430,31 @@ export async function saveRequestUsage(entry) {
         return;
       }
 
+      // Time-limited model discounts (spec model-discounts): the list cost computed
+      // above is lowered here, in the same transaction that writes the row and the
+      // charge, so the usage cost, the ledger and every report share one figure.
+      // A failure must not discard recorded usage; it falls back to the list cost.
+      const discountMeta = {};
+      try {
+        const discounted = applyRequestDiscountSync(db, {
+          listCostNanoUsd: entry.costNanoUsd,
+          at: entry.timestamp,
+          requestedModel: entry.requestedModel,
+          userId: owner?.userId ?? null,
+        });
+        if (discounted.discountBp > 0) {
+          discountMeta.listCostNanoUsd = discounted.listCostNanoUsd;
+          discountMeta.discountBp = discounted.discountBp;
+          discountMeta.discountRuleIds = discounted.ruleIds;
+          entry.listCostNanoUsd = discounted.listCostNanoUsd;
+          entry.discountBp = discounted.discountBp;
+          entry.costNanoUsd = discounted.costNanoUsd;
+          entry.cost = nanoToUsd(entry.costNanoUsd);
+        }
+      } catch (e) {
+        console.error("[discounts] could not apply, charging list price", e.message);
+      }
+
       // `apiKey` is the deprecated column: only a key with no owning apiKeys row
       // still needs its raw value to stay attributable. Tenant keys store their
       // apiKeyId and leave the secret out of the database entirely.
@@ -439,7 +465,7 @@ export async function saveRequestUsage(entry) {
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
           entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null }),
+          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...discountMeta }),
         ]
       );
 

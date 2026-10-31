@@ -5,6 +5,7 @@ import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
 import { fmtUsd } from "@/shared/utils/money";
+import { percentLabel, remainingLabel } from "@/shared/utils/discountFormat";
 import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
@@ -785,7 +786,15 @@ export default function UsageClient({ hasUserSession = false }) {
                           <td className="px-3 py-1.5 text-right tabular-nums">{fmt(r.tok)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
-                          <td className="px-3 py-1.5 text-right">{fmtCost(r.cost)}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <div>{fmtCost(r.cost)}</div>
+                            {r.discountBp > 0 && (
+                              <div className="text-[10px] text-text-muted" title="Giá niêm yết và mức giảm đã áp dụng">
+                                {r.listCost != null && <span className="line-through mr-1">{fmtCost(r.listCost)}</span>}
+                                giảm {percentLabel(r.discountBp)}
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -835,12 +844,29 @@ export default function UsageClient({ hasUserSession = false }) {
                       const allowed = !data.allowedModels || data.allowedModels.length === 0 || data.allowedModels.includes(m.name);
                       return (
                         <tr key={m.name} className={`border-b border-border/40 hover:bg-surface-2/40 ${allowed ? "" : "opacity-50"}`}>
-                          <td className="px-3 py-2 font-mono">{m.name}</td>
-                          <td className="px-3 py-2 text-right">{fmtUsd(m.input || 0)}</td>
-                          <td className="px-3 py-2 text-right">{fmtUsd(m.output || 0)}</td>
-                          <td className="px-3 py-2 text-right">{fmtUsd(m.cached || 0)}</td>
-                          <td className="px-3 py-2 text-right">{fmtUsd(m.reasoning || 0)}</td>
-                          <td className="px-3 py-2 text-right">{fmtUsd(m.cacheCreation || 0)}</td>
+                          <td className="px-3 py-2 font-mono">
+                            {m.name}
+                            {m.discount && (
+                              <div className="mt-0.5 font-sans text-[10px] text-text-muted" data-testid="model-discount">
+                                <span className="px-1 py-0.5 border border-primary/30 bg-primary/10 font-mono font-semibold uppercase">
+                                  Giảm {percentLabel(m.discount.percentBp)}
+                                </span>
+                                {m.discount.endsAt && <span className="ml-1">{remainingLabel(m.discount.endsAt)}</span>}
+                              </div>
+                            )}
+                          </td>
+                          {["input", "output", "cached", "reasoning", "cacheCreation"].map((field) => (
+                            <td key={field} className="px-3 py-2 text-right">
+                              {m.discounted && (m[field] || 0) > 0 ? (
+                                <>
+                                  <div>{fmtUsd(m.discounted[field] || 0)}</div>
+                                  <div className="text-[10px] text-text-muted line-through" title="Giá niêm yết">{fmtUsd(m[field] || 0)}</div>
+                                </>
+                              ) : (
+                                fmtUsd(m[field] || 0)
+                              )}
+                            </td>
+                          ))}
                           <td className="px-3 py-2 text-center whitespace-nowrap">
                             {allowed && (testable.text.has(m.name) || testable.image.has(m.name)) && (
                               <button
@@ -866,7 +892,7 @@ export default function UsageClient({ hasUserSession = false }) {
                   </tbody>
                 </table>
                 <p className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-                  Prices in $ per 1M tokens. A model&apos;s allowed/usable set for this key is shown at full opacity; dimmed rows are not permitted by this key&apos;s allow-list.
+                  Prices in $ per 1M tokens. A discounted model shows the lowered price with the list price struck through. A model&apos;s allowed/usable set for this key is shown at full opacity; dimmed rows are not permitted by this key&apos;s allow-list.
                 </p>
               </div>
             )}
