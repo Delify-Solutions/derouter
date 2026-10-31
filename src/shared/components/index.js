@@ -38,6 +38,7 @@ export { default as Tooltip } from "./Tooltip";
 export { default as ProviderInfoCard } from "./ProviderInfoCard";
 export { default as CapacityBadges } from "./CapacityBadges";
 export { default as AllowedModelsPicker } from "./AllowedModelsPicker";
+export { default as DiscountsModal } from "./DiscountsModal";
 
 // Layouts
 export * from "./layouts";

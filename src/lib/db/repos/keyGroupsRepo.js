@@ -226,6 +226,8 @@ export async function deleteKeyGroup(id) {
     // key may do, never what the customer can.
     db.run(`UPDATE apiKeys SET groupId = NULL WHERE groupId = ?`, [id]);
     db.run(`DELETE FROM keyGroups WHERE id = ?`, [id]);
+    // Its discount rules go with it.
+    db.run(`DELETE FROM modelDiscounts WHERE scopeType = 'group' AND scopeId = ?`, [id]);
     outcome = "deleted";
   });
   if (outcome === "deleted") return true;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getComboById, updateCombo, deleteCombo, getComboByName } from "@/lib/localDb";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { updateComboPricing, resetComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
+import { renameComboDiscounts, removeComboDiscounts } from "@/lib/db/repos/modelDiscountsRepo.js";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -66,6 +67,8 @@ export async function PUT(request, { params }) {
     // Combo-level pricing handling.
     const newName = combo.name || body.name;
     const renamed = prev?.name && newName && newName !== prev.name;
+    // Discount rules are keyed by combo name, like combo prices: follow the rename.
+    if (renamed) await renameComboDiscounts(prev.name, newName);
     if (pricing && typeof pricing === "object" && Object.keys(pricing).length > 0) {
       // On rename, clear the old name's pricing first (then set the new name below).
       if (renamed) await resetComboPricing(prev.name);
@@ -107,6 +110,8 @@ export async function DELETE(request, { params }) {
       resetComboRotation(prev.name);
       // Clean up combo-level pricing so deleted combos don't leave orphan prices.
       await resetComboPricing(prev.name);
+      // Its discount rules go with it (plan/group rules just drop the name).
+      await removeComboDiscounts(prev.name);
     }
 
     return NextResponse.json({ success: true });

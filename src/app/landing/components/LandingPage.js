@@ -50,7 +50,7 @@ export default async function LandingPage({ copy }) {
   // The model list is what a NEWLY REGISTERED customer can actually call: the
   // default group's allow-list (spec public-landing "Sellable models"). Advertising
   // the whole registry would promise models the group will 403 on.
-  const MODELS = await buildModelListForGroup();
+  const MODELS = await buildModelListForGroup({ planIds: planRows.map((row) => row.id) });
 
   // Which methods each plan actually offers decides what its card advertises: a
   // plan with no price or no receiving account must say "Chưa mở bán" instead of

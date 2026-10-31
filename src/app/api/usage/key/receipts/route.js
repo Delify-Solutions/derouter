@@ -8,6 +8,9 @@ import {
   getComboPricing,
   getPricingForModel,
 } from "@/lib/db/index.js";
+import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.js";
+import { applyBpToPricing } from "@/lib/billing/discounts.js";
+import { nanoToUsd } from "@/shared/utils/money";
 
 export const dynamic = "force-dynamic";
 
@@ -148,7 +151,11 @@ export async function GET(request) {
           timestamp: r.timestamp,
           model: r.model,
           status: normalizeStatus(r.status),
+          // Discounted cost, as charged. A discounted request also carries the list
+          // cost and the total percent so the receipt can say "giảm X%".
           cost: r.cost,
+          listCost: meta?.discountBp > 0 && meta?.listCostNanoUsd != null ? nanoToUsd(meta.listCostNanoUsd) : null,
+          discountBp: meta?.discountBp > 0 ? meta.discountBp : 0,
           input,
           output,
           tok,
@@ -188,10 +195,20 @@ export async function GET(request) {
       return null;
     };
 
+    // Time-limited discounts in force right now, for THIS key's owner (their group
+    // and the plan that pays first). input/output/... stay the LIST price; a
+    // discounted model also carries `discount` and the lowered `discounted` rates.
+    let discounts = new Map();
+    try {
+      discounts = await getActiveDiscountsForModels(visibleCombos.map((c) => c.name), { userId: auth.owner?.id ?? null });
+    } catch {
+      discounts = new Map();
+    }
+
     const availableModels = [];
     for (const c of visibleCombos) {
       const p = (await resolveComboPricing(c)) || {};
-      availableModels.push({
+      const entry = {
         name: c.name,
         kind: c.kind || "llm",
         modelsCount: Array.isArray(c.models) ? c.models.length : 0,
@@ -200,7 +217,20 @@ export async function GET(request) {
         cached: p.cached ?? 0,
         reasoning: p.reasoning ?? 0,
         cacheCreation: p.cache_creation ?? 0,
-      });
+      };
+      const found = discounts.get(c.name);
+      if (found) {
+        const low = applyBpToPricing(p, found.totalBp);
+        entry.discount = { percentBp: found.totalBp, capped: found.capped, endsAt: found.endsAt };
+        entry.discounted = {
+          input: low.input ?? 0,
+          output: low.output ?? 0,
+          cached: low.cached ?? 0,
+          reasoning: low.reasoning ?? 0,
+          cacheCreation: low.cache_creation ?? 0,
+        };
+      }
+      availableModels.push(entry);
     }
 
     // Scope the per-model usage summary to the same allow-list, so the By-Model

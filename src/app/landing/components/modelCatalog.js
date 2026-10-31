@@ -17,6 +17,7 @@ import { getPricingForModel } from "open-sse/providers/pricing.js";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
 import { resolveDefaultGroupId, getKeyGroupById, getCombos } from "@/lib/localDb";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
+import { getActiveDiscountsForModels, applyBpToPricing } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { PROTOCOLS } from "./salesData";
 
 // Bảng giá nội bộ chưa phủ hết mọi id. Model nào không tra được theo provider
@@ -45,10 +46,11 @@ function resolveRate(modelId) {
  *
  * @returns {Promise<Array<{id,name,formats,input,output,cached}>>}
  */
-export async function buildModelListForGroup() {
+export async function buildModelListForGroup({ planIds = [] } = {}) {
   let allowedModels = null;
+  let groupId = null;
   try {
-    const groupId = await resolveDefaultGroupId();
+    groupId = await resolveDefaultGroupId();
     const group = groupId ? await getKeyGroupById(groupId) : null;
     allowedModels = Array.isArray(group?.allowedModels) && group.allowedModels.length > 0
       ? group.allowedModels
@@ -74,7 +76,7 @@ export async function buildModelListForGroup() {
     comboByName = new Map();
   }
 
-  return Promise.all(
+  const models = await Promise.all(
     listed.map(async (model) => {
       const id = model.id;
       // The combo's first pool model stands in for its price when the admin set no
@@ -107,6 +109,47 @@ export async function buildModelListForGroup() {
       };
     })
   );
+
+  return attachDiscounts(models, { groupId, planIds });
+}
+
+/**
+ * Add the time-limited discounts in force now (spec model-discounts): `discount`
+ * for a visitor with no plan yet (combo rules + the default group's rules) and
+ * `planDiscounts[planId]` for each plan that has a rule of its own, which already
+ * includes the base rules and the 100% cap. Each carries the lowered rates, so the
+ * client only formats. input/output/cached stay the LIST price.
+ */
+async function attachDiscounts(models, { groupId, planIds }) {
+  try {
+    const ids = models.map((m) => m.id);
+    const base = await getActiveDiscountsForModels(ids, { groupId, planId: null });
+    const perPlan = new Map();
+    for (const planId of planIds) {
+      perPlan.set(planId, await getActiveDiscountsForModels(ids, { groupId, planId }));
+    }
+    const shape = (model, found) => {
+      const low = applyBpToPricing({ input: model.input, output: model.output, cached: model.cached }, found.totalBp);
+      return { percentBp: found.totalBp, capped: found.capped, endsAt: found.endsAt, input: low.input, output: low.output, cached: low.cached };
+    };
+    return models.map((model) => {
+      const out = { ...model };
+      const b = base.get(model.id);
+      if (b) out.discount = shape(model, b);
+      for (const [planId, found] of perPlan) {
+        const p = found.get(model.id);
+        // Only a plan whose figure differs from the base needs its own entry.
+        if (p && p.totalBp !== (b?.totalBp ?? 0)) {
+          out.planDiscounts = { ...(out.planDiscounts ?? {}), [planId]: shape(model, p) };
+        }
+      }
+      return out;
+    });
+  } catch {
+    // A discount lookup failure must never take the landing page down; the page
+    // falls back to list prices.
+    return models;
+  }
 }
 
 /** Nhãn wire format cho một model. */
