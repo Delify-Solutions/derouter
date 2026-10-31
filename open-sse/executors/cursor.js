@@ -10,7 +10,6 @@ import {
   extractTextFromResponse
 } from "../utils/cursorProtobuf.js";
 import { buildCursorHeaders } from "../utils/cursorChecksum.js";
-import { estimateUsage } from "../utils/usageTracking.js";
 import { SSE_DONE, SSE_HEADERS } from "../utils/sseConstants.js";
 import { chatChunkSse, sseChunk } from "../utils/sse.js";
 import { FORMATS } from "../translator/formats.js";
@@ -618,7 +617,6 @@ export class CursorExecutor extends BaseExecutor {
           created,
           model,
           choices: [{ index: 0, message: { role: "assistant", content: content || null, ...(reasoning ? { reasoning_content: reasoning } : {}) }, finish_reason: "stop" }],
-          usage: estimateUsage(body, content.length, FORMATS.OPENAI),
         }), { headers: { "Content-Type": "application/json" } }),
         url,
         headers,
@@ -856,8 +854,8 @@ export class CursorExecutor extends BaseExecutor {
       message.tool_calls = toolCalls;
     }
 
-    const usage = estimateUsage(body, finalContent.length, FORMATS.OPENAI);
-
+    // Cursor's agent service reports no token usage. None is fabricated for the client; the
+    // router records a flagged estimate for billing from the generated text (usage-accuracy).
     const completion = {
       id: responseId,
       object: "chat.completion",
@@ -867,8 +865,7 @@ export class CursorExecutor extends BaseExecutor {
         index: 0,
         message,
         finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop"
-      }],
-      usage
+      }]
     };
 
     return new Response(JSON.stringify(completion), {
@@ -1079,8 +1076,6 @@ export class CursorExecutor extends BaseExecutor {
       chunks.push(chatChunkSse({ id: responseId, created, model, delta: { role: "assistant", content: "" } }));
     }
 
-    const usage = estimateUsage(body, totalContent.length, FORMATS.OPENAI);
-
     chunks.push(
       `data: ${JSON.stringify({
         id: responseId,
@@ -1093,8 +1088,7 @@ export class CursorExecutor extends BaseExecutor {
             delta: {},
             finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop"
           }
-        ],
-        usage
+        ]
       })}\n\n`
     );
     chunks.push(SSE_DONE);

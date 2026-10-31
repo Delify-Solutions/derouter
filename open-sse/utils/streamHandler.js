@@ -211,6 +211,14 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     }, stallTimeoutMs);
   };
 
+  // A client cancel, an upstream error and a stall never run the transform's flush(), so the
+  // usage tail would be lost and a request that streamed tokens would go unrecorded. The
+  // transform exposes abortFinalize(); it is idempotent, so a normal completion that already
+  // finalized is unaffected.
+  const recordAbortedStream = () => {
+    try { transformStream.abortFinalize?.(); } catch { /* recording must never break teardown */ }
+  };
+
   // Wrap controller so every termination path clears the stall timer.
   // Without this, abort/cancel/downstream-error paths leave the timer armed
   // and a stale abort could fire after the request has already ended.
@@ -222,11 +230,12 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     handleError: (e) => {
       dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`);
       clearStall();
+      recordAbortedStream();
       // Lets the error log say how far the stream got.
       if (e && typeof e === "object" && !e.streamStats) e.streamStats = { chunks: chunkCount, bytes: totalBytes };
       streamController.handleError(e);
     },
-    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleDisconnect(r); },
+    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); recordAbortedStream(); streamController.handleDisconnect(r); },
     abort: () => { clearStall(); streamController.abort(); }
   };
 

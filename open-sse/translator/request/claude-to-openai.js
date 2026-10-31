@@ -1,6 +1,6 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
-import { adjustMaxTokens } from "../formats/maxTokens.js";
+import { resolveMaxTokens } from "../formats/maxTokens.js";
 import { encodeDataUri } from "../concerns/image.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
 import { collapseTextParts } from "../concerns/message.js";
@@ -11,7 +11,7 @@ function stripAnthropicBillingHeader(text) {
 }
 
 // Convert Claude request to OpenAI format
-export function claudeToOpenAIRequest(model, body, stream) {
+export function claudeToOpenAIRequest(model, body, stream, credentials = null) {
   const result = {
     model: model,
     messages: [],
@@ -20,7 +20,7 @@ export function claudeToOpenAIRequest(model, body, stream) {
 
   // Max tokens
   if (body.max_tokens) {
-    result.max_tokens = adjustMaxTokens(body);
+    result.max_tokens = resolveMaxTokens(body, { compat: credentials?.compatNormalization === true });
   }
 
   // Temperature

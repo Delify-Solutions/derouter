@@ -49,7 +49,10 @@ const DEFAULT_SETTINGS = {
   outboundNoProxy: "",
   mitmRouterBaseUrl: DEFAULT_MITM_ROUTER_BASE,
   dnsToolEnabled: {},
-  rtkEnabled: true,
+  // Token savers rewrite the prompt (RTK compresses tool results), which changes what the
+  // upstream bills and breaks provider prefix caching, so every one is opt-in. This used to
+  // default to true, i.e. every deployment silently compressed tool output.
+  rtkEnabled: false,
   headroomEnabled: false,
   headroomUrl: DEFAULT_HEADROOM_URL,
   headroomCompressUserMessages: false,
@@ -62,6 +65,12 @@ const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
+
+  // Proxy transparency (spec proxy-transparency). OFF = strict: request bodies and upstream
+  // responses of same-format flows pass through untouched except for the upstream model id,
+  // the stream_options.include_usage addition and credentials. ON = the legacy compatibility
+  // shims for odd clients/providers (id repair, field stripping, tool-id rewriting, ...).
+  compatNormalization: false,
 
   // ── Tenant accounts (public signup / mail / admin notifications) ──────────
   // Signup is on out of the box; email verification is on and there is no mail

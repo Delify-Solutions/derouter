@@ -67,3 +67,25 @@ export function toOpenAIUsage(raw, kind) {
   if (!extract || !raw || typeof raw !== "object") return null;
   return buildUsage(extract(raw));
 }
+
+// Responses-format usage from an OpenAI chat usage object. input_tokens includes the cached
+// part (as in chat prompt_tokens) and the cached/reasoning breakdown rides in *_details.
+// Exported for tests.
+export function responsesUsageFromChat(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const input = Number(usage.prompt_tokens ?? usage.input_tokens);
+  const output = Number(usage.completion_tokens ?? usage.output_tokens);
+  if (!Number.isFinite(input) && !Number.isFinite(output)) return null;
+  const inputTokens = Number.isFinite(input) ? input : 0;
+  const outputTokens = Number.isFinite(output) ? output : 0;
+  const out = {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: Number.isFinite(Number(usage.total_tokens)) ? Number(usage.total_tokens) : inputTokens + outputTokens,
+  };
+  const cached = Number(usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens);
+  if (Number.isFinite(cached) && cached > 0) out.input_tokens_details = { cached_tokens: cached };
+  const reasoning = Number(usage.completion_tokens_details?.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens);
+  if (Number.isFinite(reasoning) && reasoning > 0) out.output_tokens_details = { reasoning_tokens: reasoning };
+  return out;
+}
