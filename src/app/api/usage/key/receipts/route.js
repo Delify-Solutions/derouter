@@ -162,6 +162,8 @@ export async function GET(request) {
           cacheCreation: t.cache_creation_input_tokens ?? 0,
           // True when the upstream reported no usage and these figures are the router's estimate.
           estimated: meta?.estimated === true,
+          // True when the cached figure is the router's prefix-reuse estimate (combo option).
+          cacheEstimated: meta?.cacheEstimated === true,
         };
       });
 

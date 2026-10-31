@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Eyebrow, SelectField, Stat, fieldClass } from "@/app/account/components/ui";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
+const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
 
 function statusClass(status) {
   const s = String(status || "");
@@ -192,7 +193,7 @@ export default function AccountUsageTable({
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.tok)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheRead)}</td>
+                    <td className="px-4 py-3 text-right font-mono" title={row.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{row.cacheEstimated ? "≈" : ""}{fmt(row.cacheRead)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheCreation)}</td>
                     <td className="px-4 py-3 text-right font-mono">
                       {row.costLabel}

@@ -32,6 +32,7 @@ import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isCustomNodeProvider } from "../utils/transparency.js";
+import { makeCacheCtx, promptTextForCache } from "../utils/cacheEstimator.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -63,7 +64,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false, cacheEstimation = false }) {
   const { provider, model } = modelInfo;
   // Strict transparency (spec proxy-transparency) applies to CUSTOM NODES only: the operator
   // pointed those at an arbitrary upstream and the router knows none of its quirks. A built-in
@@ -557,7 +558,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs);
   }
 
-  const sharedCtx = { compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
+  // Estimated cached tokens (spec usage-accuracy): only for a request made through a combo with the
+  // option on. The prompt text is read lazily, after the response, from the body the upstream got.
+  // A request without an API key has no tenant to scope the remembered prompts to: no estimate.
+  const cacheCtx = makeCacheCtx({
+    enabled: cacheEstimation === true, apiKey, connectionId, model,
+    getText: () => promptTextForCache(finalBody ?? translatedBody),
+  });
+  const sharedCtx = { cacheCtx, compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 

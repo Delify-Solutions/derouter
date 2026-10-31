@@ -48,6 +48,7 @@ function toRow(r) {
     tok: input + output,
     cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
     cacheCreation: t.cache_creation_input_tokens ?? 0,
+    cacheEstimated: r.meta?.cacheEstimated === true,
     costLabel: fmtUsd(r.cost ?? 0),
     // A discounted request shows what it would have cost at list price and how
     // much was taken off (spec model-discounts "Receipts").

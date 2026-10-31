@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCombos, createCombo, getComboByName } from "@/lib/localDb";
 import { updateComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
+import { CACHE_ESTIMATION_ERROR, isValidCacheEstimationInput, withCacheEstimation } from "@/lib/combos/cacheEstimation.js";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, models, kind, pricing, capabilities } = body;
+    const { name, models, kind, pricing, capabilities, cacheEstimation } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -32,6 +33,11 @@ export async function POST(request) {
       return NextResponse.json({ error: "Name can only contain letters, numbers, -, _ and ." }, { status: 400 });
     }
 
+    // Estimated cache option (spec usage-accuracy): boolean only, default off.
+    if (!isValidCacheEstimationInput(cacheEstimation)) {
+      return NextResponse.json({ error: CACHE_ESTIMATION_ERROR }, { status: 400 });
+    }
+
     // Check if name already exists
     const existing = await getComboByName(name);
     if (existing) {
@@ -40,7 +46,7 @@ export async function POST(request) {
 
     // Capabilities live in the combo's JSON `meta` blob (no schema change).
     // Null/undefined → no entry → /v1/models auto-resolves from the first model.
-    const meta = capabilities ? { capabilities } : {};
+    const meta = withCacheEstimation(capabilities ? { capabilities } : {}, cacheEstimation === true);
     const combo = await createCombo({ name, models: models || [], kind: kind || null, meta });
 
     // Optional combo-level pricing (5 fields). Save after the combo exists so the

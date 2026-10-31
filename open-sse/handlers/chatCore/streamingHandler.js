@@ -7,6 +7,7 @@ import { STREAM_STALL_TIMEOUT_MS } from "../../config/runtimeConfig.js";
 import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamHelpers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
+import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
@@ -123,14 +124,30 @@ export async function handleStreamingResponse({ compat, providerResponse, provid
 /**
  * Build onStreamComplete callback for streaming usage tracking.
  */
-export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log }) {
+export function buildOnStreamComplete({ cacheCtx = null, provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
-  const onStreamComplete = (contentObj, usage, ttftAt) => {
+  const onStreamComplete = (contentObj, reportedUsage, ttftAt) => {
     const latency = {
       ttft: ttftAt ? ttftAt - requestStartTime : Date.now() - requestStartTime,
       total: Date.now() - requestStartTime
     };
+    // The estimated cached part (combo option) is computed after the last byte was forwarded and
+    // off the stream's own turn (setImmediate), never while chunks are in flight.
+    const record = () => {
+      let usage = reportedUsage;
+      try { usage = applyEstimatedCache(reportedUsage, cacheCtx); } catch { usage = reportedUsage; }
+      try {
+        recordStreamUsage(usage);
+      } catch (err) {
+        // Last resort inside setImmediate: never an uncaught exception, and the usage is still recorded.
+        console.error("[ChatCore] stream usage record failed:", err?.message);
+        try { if (usage !== reportedUsage) recordStreamUsage(reportedUsage); } catch { /* give up quietly */ }
+      }
+    };
+    if (cacheCtx) setImmediate(record); else record();
+
+    function recordStreamUsage(usage) {
     const safeContent = contentObj?.content || "[Empty streaming response]";
     const safeThinking = contentObj?.thinking || null;
 
@@ -159,6 +176,7 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
     saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: latency.total, label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
+    }
   };
 
   return { onStreamComplete, streamDetailId };

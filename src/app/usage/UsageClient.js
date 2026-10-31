@@ -26,6 +26,7 @@ function maskKeyFull(key) {
 }
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
+const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
 
 // Response time: milliseconds under a second, seconds with two decimals above it.
 const fmtDuration = (ms) => {
@@ -652,7 +653,7 @@ export default function UsageClient({ hasUserSession = false }) {
                         <td className="px-4 py-2 text-right">{fmt(m.requests)}</td>
                         <td className="px-4 py-2 text-right">{fmt(m.input)}</td>
                         <td className="px-4 py-2 text-right">{fmt(m.output)}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.cacheRead)}</td>
+                        <td className="px-4 py-2 text-right" title={m.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{m.cacheEstimated ? "≈" : ""}{fmt(m.cacheRead)}</td>
                         <td className="px-4 py-2 text-right">{fmt(m.cacheCreation)}</td>
                         <td className="px-4 py-2 text-right">{fmtCost(m.cost)}</td>
                       </tr>
@@ -662,7 +663,7 @@ export default function UsageClient({ hasUserSession = false }) {
                       <td className="px-4 py-2 text-right">{fmt(totals.requests)}</td>
                       <td className="px-4 py-2 text-right">{fmt(totals.input)}</td>
                       <td className="px-4 py-2 text-right">{fmt(totals.output)}</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.cacheRead)}</td>
+                      <td className="px-4 py-2 text-right" title={totals.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{totals.cacheEstimated ? "≈" : ""}{fmt(totals.cacheRead)}</td>
                       <td className="px-4 py-2 text-right">{fmt(totals.cacheCreation)}</td>
                       <td className="px-4 py-2 text-right">{fmtCost(totals.cost)}</td>
                     </tr>
@@ -784,7 +785,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{fmt(r.tok)}</td>
-                          <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
+                          <td className="px-3 py-1.5 text-right" title={r.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{r.cacheEstimated ? "≈" : ""}{fmt(r.cacheRead)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
                           <td className="px-3 py-1.5 text-right">
                             <div>{fmtCost(r.cost)}</div>

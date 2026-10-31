@@ -900,6 +900,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
   const [caps, setCaps] = useState(() => existingCaps ? { ...DEFAULT_CAPABILITIES, ...existingCaps } : { ...DEFAULT_CAPABILITIES });
   const [capsTouched, setCapsTouched] = useState(!!existingCaps);
 
+  // Estimated cache (meta.cacheEstimation): off unless the combo already has it on.
+  const [cacheEstimation, setCacheEstimation] = useState(combo?.meta?.cacheEstimation === true);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -1067,6 +1070,8 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
     if (capsTouched) {
       payload.capabilities = caps;
     }
+    // Sent on create only when on, always on edit (so it can be switched off).
+    if (!isImage && (combo || cacheEstimation)) payload.cacheEstimation = cacheEstimation;
     await onSave(payload);
     setSaving(false);
   };
@@ -1221,6 +1226,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
               onChange={handleCapChange}
               onAutofill={autofillCaps}
             />
+          )}
+
+          {/* Estimated cache: only meaningful for LLM combos. */}
+          {!isImage && (
+            <div className="flex items-start justify-between gap-3 border-t border-black/10 pt-3 dark:border-white/10">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Ước lượng cache theo prefix</p>
+                <p className="text-xs text-text-muted">
+                  Chỉ áp dụng khi upstream không trả usage. Đây là số ước lượng, chỉ nên bật cho upstream thật sự có cache.
+                </p>
+              </div>
+              <Toggle checked={cacheEstimation} onChange={(v) => setCacheEstimation(v)} aria-label="Ước lượng cache theo prefix" />
+            </div>
           )}
 
           {/* Actions */}

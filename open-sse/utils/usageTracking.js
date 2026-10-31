@@ -131,6 +131,7 @@ export function normalizeUsage(usage) {
   assignNumber("cached_tokens", usage?.cached_tokens);
   assignNumber("reasoning_tokens", usage?.reasoning_tokens);
   if (usage?.estimated === true) normalized.estimated = true;
+  if (usage?.cache_estimated === true) normalized.cache_estimated = true;
 
   // Preserve nested details objects for OpenAI format forwarding
   if (usage?.prompt_tokens_details && typeof usage.prompt_tokens_details === "object") {
@@ -212,6 +213,8 @@ export function canonicalizeUsage(usage) {
   if (reasoning > 0) result.reasoning_tokens = reasoning;
   // Carried through so the usage row can say the figures are an estimate.
   if (usage.estimated === true) result.estimated = true;
+  // The cached part of an ESTIMATED usage is itself an estimate (prefix reuse, see cacheEstimator).
+  if (usage.cache_estimated === true) result.cache_estimated = true;
   return result;
 }
 

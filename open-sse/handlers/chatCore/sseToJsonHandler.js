@@ -3,6 +3,7 @@ import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
+import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine, usageOrEstimate } from "./requestDetail.js";
 // readBodyWithTimeout/guardWithTimeout live in nonStreamingHandler (which imports
 // parseSSEToOpenAIResponse from here). The cycle is safe: both are function
@@ -189,7 +190,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
  * Handle case: provider forced streaming but client wants JSON.
  * Supports both Codex/Responses API SSE and standard Chat Completions SSE.
  */
-export async function handleForcedSSEToJson({ compat = false, providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS, bodySignal = null }) {
+export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS, bodySignal = null }) {
   const contentType = providerResponse.headers.get("content-type") || "";
   const isSSE = contentType.includes("text/event-stream") || (contentType === "" && isResponsesProvider(provider));
   if (!isSSE) return null; // not handled here
@@ -332,7 +333,7 @@ export async function handleForcedSSEToJson({ compat = false, providerResponse, 
     if (onRequestSuccess) await onRequestSuccess();
 
     // Recorded/billed usage; `parsed.usage` (what the client gets) stays the upstream's own.
-    const usage = usageOrEstimate(parsed.usage || {}, body, parsed);
+    const usage = applyEstimatedCache(usageOrEstimate(parsed.usage || {}, body, parsed), cacheCtx);
     appendLog({ tokens: usage, status: "200 OK" });
     // requestedModel = original client model string (bare combo name when a combo was
     // called, before combo expansion rewrote body.model). Same derivation as the
