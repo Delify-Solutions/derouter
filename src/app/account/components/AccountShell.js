@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import ThemeToggle from "@/shared/components/ThemeToggle";
+import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 
 // Order is the spec's (customer-portal "Navigation and language"): the questions a
 // customer asks in order — what do I have, what am I paying, what did I spend, what
@@ -38,6 +39,9 @@ export default function AccountShell({ email = "", name = "", children }) {
 
   const signOut = async () => {
     setPending(true);
+    // A key handed to /usage from the key list must not outlive the session on a
+    // shared browser.
+    try { localStorage.removeItem(USAGE_KEY_STORAGE); } catch { /* storage blocked */ }
     try {
       await fetch("/api/public/logout", { method: "POST" });
     } catch {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
@@ -101,7 +102,6 @@ export default function UsageClient({ hasUserSession = false }) {
   const [pageSize, setPageSize] = useState(20);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, totalItems: 0, totalPages: 0 });
 
-  const STORAGE_KEY = "derouter.usage.key";
 
   const playgroundKey = loadedKey;
   const transport = useMemo(() => (playgroundKey ? keyTransport(playgroundKey) : null), [playgroundKey]);
@@ -185,7 +185,7 @@ export default function UsageClient({ hasUserSession = false }) {
   const consumeQueryKey = useCallback((k) => {
     if (typeof window === "undefined") return;
     if (k) {
-      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      try { localStorage.setItem(USAGE_KEY_STORAGE, k); } catch {}
       // Strip the key= param so the address bar shows a clean /usage URL.
       // After removing the param (and any trailing ? or &), replaceState
       // with just the pathname leaves no hash and no query.
@@ -265,7 +265,7 @@ export default function UsageClient({ hasUserSession = false }) {
       return;
     }
     let stored = "";
-    try { stored = localStorage.getItem(STORAGE_KEY) || ""; } catch {}
+    try { stored = localStorage.getItem(USAGE_KEY_STORAGE) || ""; } catch {}
     if (stored) {
       setKeyInput(stored);
       lookup(stored, "7d");
@@ -278,7 +278,7 @@ export default function UsageClient({ hasUserSession = false }) {
     if (!k) return;
     // Stash key in storage (not the URL); reload usage for this key.
     if (typeof window !== "undefined") {
-      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      try { localStorage.setItem(USAGE_KEY_STORAGE, k); } catch {}
       // Drop any lingering ?key= from the address bar — keep a clean /usage URL.
       window.history.replaceState(null, "", window.location.pathname);
     }
@@ -294,7 +294,7 @@ export default function UsageClient({ hasUserSession = false }) {
     setKeyInput("");
     setError("");
     if (typeof window !== "undefined") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      try { localStorage.removeItem(USAGE_KEY_STORAGE); } catch {}
       window.history.replaceState(null, "", window.location.pathname);
     }
   };

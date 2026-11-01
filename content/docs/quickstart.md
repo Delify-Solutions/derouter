@@ -30,7 +30,7 @@ Chi tiết về hàng đợi gói và hạn mức nằm ở trang [Gói, credit 
 
 ## 3. Tạo API key
 
-Vào API key và tạo key mới. Key bắt đầu bằng `sk-` và chỉ hiện đầy đủ một lần, ngay sau khi tạo. Hãy sao chép và lưu vào nơi an toàn. Nếu mất key, xóa key đó và tạo key mới.
+Vào API key và tạo key mới. Key bắt đầu bằng `sk-`. Sao chép key ngay sau khi tạo để dán vào ứng dụng; sau này bạn vẫn xem lại hoặc sao chép key bằng các nút trên từng dòng ở trang API key (cần đăng nhập). Nếu key bị lộ, xóa key đó và tạo key mới.
 
 ![Hộp thoại sau khi tạo key, hiện secret bắt đầu bằng sk- cùng nút sao chép](/docs-img/quickstart/03-create-key.png)
 

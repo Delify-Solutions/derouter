@@ -39,7 +39,7 @@ Trang bán gói dùng AI kiểu OpenCode Go. Khách đăng ký, mua gói, lấy 
 - Tổng quan: gói đang trả, credit còn, group và model được dùng.
 - Gói của tôi: hàng đợi, mua thêm, đơn hàng, lịch sử gói.
 - Nhật ký sử dụng: từng request trừ bao nhiêu, từ gói nào, model nào.
-- Mã quà tặng, API key (tạo key, secret chỉ hiện một lần, xóa), lịch sử dùng.
+- Mã quà tặng, API key (tạo key, xem/sao chép key, mở trang usage của key, xóa), lịch sử dùng.
 
 ## Phía admin
 
