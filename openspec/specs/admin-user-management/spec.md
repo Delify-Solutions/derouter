@@ -64,3 +64,14 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 - **WHEN** a user with 2 paid orders is deleted
 - **THEN** both orders remain with the user's email visible on the orders page and the plan revenue figures are unchanged
 
+
+### Requirement: Usage by customer
+The admin usage page SHALL have a "Users" tab (`/dashboard/usage?tab=users`; the old `?tab=keys` opens it) that groups usage by the customer who owns the key, because one customer may hold many keys. For a chosen period (today, 24 hours, 7, 30 or 60 days; default 30 days) each customer SHALL be one row with: email (linked to their user detail page), display name and group, active and total key count, requests, input, output and input-cache tokens (marked `≈` when part of the figure is estimated), cost, peak requests and peak tokens in one minute summed over all of their keys, and the time of their last request. Opening a row SHALL show each of their keys (name, masked key showing only the prefix and last four characters, status, requests, tokens, cost, last request) and each model they called (by the model name the client asked for). Customers who own keys but made no request in the period SHALL be listed with zero figures; a "With requests" filter SHALL hide them. Keys with no owner SHALL be grouped as one "Admin keys" row, where requests made without any key (local traffic) appear as a "No key (local)" line, and usage whose key no longer exists as one "Deleted or unknown keys" row. An invalid period bound SHALL be answered with HTTP 400. Rows SHALL be sorted by cost, highest first, and searchable by email, name, group, key name or masked key. The data SHALL come from the admin-only `GET /api/usage/user-summary`, which SHALL NOT return any key secret or request payload.
+
+#### Scenario: One customer, two keys
+- **WHEN** a customer made 3 requests with their laptop key and 2 with their server key in the period
+- **THEN** the Users tab shows one row for that customer with 5 requests and the summed tokens and cost, and opening it lists both keys with 3 and 2 requests
+
+#### Scenario: Idle customer
+- **WHEN** a customer owns a key but made no request in the period
+- **THEN** they are listed with 0 requests and "—" as last request, and disappear when "With requests" is selected
