@@ -465,7 +465,7 @@ export async function saveRequestUsage(entry) {
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
           entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
+          stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(Number.isFinite(entry.ttftMs) ? { ttftMs: entry.ttftMs } : {}), ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
         ]
       );
 

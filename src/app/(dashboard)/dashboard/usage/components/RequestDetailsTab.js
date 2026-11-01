@@ -8,6 +8,7 @@ import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { maskKeyFull } from "@/shared/utils/apiKey";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
+import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
 
 let providerNameCache = null;
 let providerNodesCache = null;
@@ -521,7 +522,7 @@ export default function RequestDetailsTab() {
                     })()}
                     <td className="p-4 text-sm text-text-muted">
                       <div className="flex flex-col gap-0.5">
-                        <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
+                        <div>TTFT: <span className="font-mono">{detailTtft(detail.latency) != null ? `${detailTtft(detail.latency)}ms` : "—"}</span></div>
                         <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
                       </div>
                     </td>
@@ -593,7 +594,7 @@ export default function RequestDetailsTab() {
               <div>
                 <span className="text-text-muted">Latency:</span>{" "}
                 <span className="text-text-main font-mono">
-                  TTFT {selectedDetail.latency?.ttft || 0}ms / Total {selectedDetail.latency?.total || 0}ms
+                  {formatLatency(selectedDetail.latency?.total, detailTtft(selectedDetail.latency))}
                 </span>
               </div>
               <div>

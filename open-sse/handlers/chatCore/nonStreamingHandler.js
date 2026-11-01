@@ -484,7 +484,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   const totalLatency = Date.now() - requestStartTime;
   const recordDetail = () => saveRequestDetail(buildRequestDetail({
     provider, model, requestedModel, connectionId, apiKey,
-    latency: { ttft: totalLatency, total: totalLatency },
+    latency: { ttft: null, total: totalLatency },
     tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
     providerRequest: finalBody || translatedBody || null,

@@ -91,7 +91,7 @@ export function buildRequestDetail(base, overrides = {}) {
     connectionId: base.connectionId || undefined,
     apiKey: base.apiKey || undefined,
     timestamp: new Date().toISOString(),
-    latency: base.latency || { ttft: 0, total: 0 },
+    latency: base.latency || { ttft: null, total: 0 },
     tokens: base.tokens || { prompt_tokens: 0, completion_tokens: 0 },
     request: base.request,
     providerRequest: base.providerRequest || null,
@@ -125,7 +125,7 @@ export function formatDoneLine({ usage, latency }) {
   return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, label = "USAGE", silent = false }) {
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, label = "USAGE", silent = false }) {
   if (!tokens || typeof tokens !== "object") return;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -158,7 +158,9 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // Latency in ms (total request wall-time). Persisted into usageHistory.meta
     // so the usage pages can show each request's response time without a schema
     // change. Null for callers that don't track timing (e.g. platform denials).
-    latencyMs: latencyMs ?? null
+    latencyMs: latencyMs ?? null,
+    // Time to the first bytes from the upstream stream, in ms. Streams only; null otherwise.
+    ttftMs: Number.isFinite(ttftMs) ? ttftMs : null
   }).catch(() => {});
 }
 

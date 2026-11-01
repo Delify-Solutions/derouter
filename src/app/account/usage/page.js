@@ -38,11 +38,13 @@ function toRow(r) {
   const input = t.prompt_tokens ?? t.input_tokens ?? 0;
   const output = t.completion_tokens ?? t.output_tokens ?? 0;
   const latencyMs = r.meta?.latencyMs ?? null;
+  const ttftMs = Number.isFinite(r.meta?.ttftMs) ? r.meta.ttftMs : null;
   return {
     timestamp: r.timestamp,
     model: r.model || "—",
     status: normalizeStatus(r.status),
     latencyMs,
+    ttftMs,
     input,
     output,
     tok: input + output,

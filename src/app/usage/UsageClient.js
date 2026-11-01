@@ -10,6 +10,7 @@ import { percentLabel, remainingLabel } from "@/shared/utils/discountFormat";
 import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
+import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -28,13 +29,6 @@ function maskKeyFull(key) {
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
-
-// Response time: milliseconds under a second, seconds with two decimals above it.
-const fmtDuration = (ms) => {
-  if (ms == null || Number.isNaN(Number(ms))) return "—";
-  const n = Number(ms);
-  return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(2)} s`;
-};
 
 // 24-hour date and time in the page's language, not the browser's (a US browser gave 12:46:11 AM).
 const fmtDateTime = (value) => {
@@ -752,7 +746,7 @@ export default function UsageClient({ hasUserSession = false }) {
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
-                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap" title="Total time from receiving the request until the response finished">Response time</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap" title="TTFT: time to the first bytes from the upstream (streamed requests). Total: from receiving the request until the response finished">Response time</th>
                       <th className="text-right font-medium px-3 py-2">Input</th>
                       <th className="text-right font-medium px-3 py-2">Output</th>
                       <th className="text-right font-medium px-3 py-2" title="Input + output tokens">Tokens</th>
@@ -780,7 +774,7 @@ export default function UsageClient({ hasUserSession = false }) {
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
-                            {fmtDuration(r.latencyMs)}
+                            {formatLatency(r.latencyMs, r.ttftMs)}
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
@@ -939,7 +933,7 @@ export default function UsageClient({ hasUserSession = false }) {
                         </span>
                       </div>
                       <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{fmtDateTime(detail.timestamp)}</span></div>
-                      <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
+                      <div><span className="text-text-muted">Latency:</span> <span className="font-mono">{formatLatency(detail.latency?.total, detailTtft(detail.latency))}</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
                     </div>
 
