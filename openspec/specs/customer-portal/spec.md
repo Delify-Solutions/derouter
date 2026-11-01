@@ -4,11 +4,15 @@
 Defines the signed-in customer's self-service area: creating and revoking API keys, seeing and reordering purchased plans with live window status, buying plans, and auditing every charge — entirely in Vietnamese and usable by keyboard.
 ## Requirements
 ### Requirement: API key page
-`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status) and SHALL let the customer create a key with a name of 1–80 characters and delete a key after confirmation. After creation the full secret SHALL be shown exactly once with a copy control and the warning "Lưu key ngay — bạn sẽ không xem lại được". The page SHALL show the API base URL (`<public base URL>/v1`, the public base URL being the `publicBaseUrl` setting or the request origin) with a copy control. With no keys it SHALL show "Bạn chưa có API key" and a "Tạo key" action.
+`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status, and the time of the key's last request recorded in usage history as "dùng lần cuối HH:MM DD/MM/YYYY" in the browser's local time, or "chưa dùng" when no request is on record within the usage retention period) with, on each row, a "Usage" link to `/account/usage?key=<key id>` that opens that key's history (the link carries the key id, never the secret), and SHALL let the customer create a key with a name of 1–80 characters and delete a key after confirmation. After creation the full secret SHALL be shown exactly once with a copy control and the warning "Lưu key ngay — bạn sẽ không xem lại được". The page SHALL show the API base URL (`<public base URL>/v1`, the public base URL being the `publicBaseUrl` setting or the request origin) with a copy control. With no keys it SHALL show "Bạn chưa có API key" and a "Tạo key" action.
 
 #### Scenario: Secret shown once
 - **WHEN** a customer creates a key and reloads the page
 - **THEN** the list shows only the 8-character prefix and no way to reveal the secret
+
+#### Scenario: Last used and usage link
+- **WHEN** a customer's key made its last request at 20:53 on 01/11/2026 and the customer opens `/account/keys`
+- **THEN** the row shows "dùng lần cuối 20:53 01/11/2026", and its "Usage" link opens `/account/usage` with that key selected
 
 ### Requirement: Plan queue page
 `/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar (an unlimited-credit plan shows "Không giới hạn" instead of a bar), expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. Times SHALL be shown in the browser's local time.

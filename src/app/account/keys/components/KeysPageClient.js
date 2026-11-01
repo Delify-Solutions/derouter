@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input, Modal } from "@/shared/components";
+import Link from "next/link";
 import { ActionButton, Empty, ListRow, Page, Section, Tag } from "@/app/account/components/ui";
 import CopyBlock from "@/app/account/components/CopyBlock";
 
@@ -12,6 +13,20 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const time = date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  return `${time} ${formatDate(value)}`;
+}
+
+/** "dùng lần cuối 20:53 01/11/2026", or "chưa dùng" for a key with no request on record. */
+function lastUsedLabel(value) {
+  const at = formatDateTime(value);
+  return at ? `dùng lần cuối ${at}` : "chưa dùng";
 }
 
 export default function KeysPageClient({ publicBaseUrl = "" }) {
@@ -157,17 +172,29 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
                     {key.isActive ? "Đang dùng" : "Đã tắt"}
                   </Tag>
                 }
-                detail={`${key.keyPrefix ? `${key.keyPrefix}…` : "—"} · tạo ${formatDate(key.createdAt)}`}
+                detail={`${key.keyPrefix ? `${key.keyPrefix}…` : "—"} · tạo ${formatDate(key.createdAt)} · ${lastUsedLabel(key.lastUsedAt)}`}
                 actions={
-                  <button
-                    type="button"
-                    aria-label={`Xóa key ${key.name || key.keyPrefix || ""}`}
-                    title="Xóa key"
-                    onClick={() => setDeleteTarget(key)}
-                    className="flex size-9 items-center justify-center border border-border bg-surface text-text-muted transition-colors duration-150 hover:bg-red-500/10 hover:text-red-600"
-                  >
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-                  </button>
+                  <>
+                    <Link
+                      href={`/account/usage?key=${encodeURIComponent(key.id)}`}
+                      className="flex h-9 items-center gap-2 border border-border bg-surface px-3 font-mono text-xs font-medium text-text-main transition-colors duration-150 hover:bg-surface-2"
+                      aria-label={`Xem usage của key ${key.name || key.keyPrefix || ""}`}
+                      title="Xem usage của key này"
+                    >
+                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">monitoring</span>
+                      {/* A technical term kept in English, so the page translator must not touch it. */}
+                      <span data-i18n-skip="true">Usage</span>
+                    </Link>
+                    <button
+                      type="button"
+                      aria-label={`Xóa key ${key.name || key.keyPrefix || ""}`}
+                      title="Xóa key"
+                      onClick={() => setDeleteTarget(key)}
+                      className="flex size-9 items-center justify-center border border-border bg-surface text-text-muted transition-colors duration-150 hover:bg-red-500/10 hover:text-red-600"
+                    >
+                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
+                    </button>
+                  </>
                 }
               />
             ))}
