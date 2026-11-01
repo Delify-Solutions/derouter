@@ -196,7 +196,7 @@ export function IconBox({ icon }) {
 /** Row in a list: grey fill, one line of identity, an optional line of detail. */
 export function ListRow({ title, detail, tags, actions }) {
   return (
-    <li className="flex items-center justify-between gap-4 border border-border bg-surface-2 px-5 py-4">
+    <li className="flex flex-col gap-3 border border-border bg-surface-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-mono text-sm text-text-main">{title}</span>

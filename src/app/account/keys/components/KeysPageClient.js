@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input, Modal } from "@/shared/components";
-import Link from "next/link";
 import { ActionButton, Empty, ListRow, Page, Section, Tag } from "@/app/account/components/ui";
 import CopyBlock from "@/app/account/components/CopyBlock";
+import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 
 const NAME_MAX = 80;
+
+const ICON_BUTTON =
+  "flex size-9 items-center justify-center border border-border bg-surface text-text-muted transition-colors duration-150 " +
+  "hover:bg-surface-2 hover:text-text-main disabled:cursor-not-allowed disabled:opacity-50";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -37,12 +41,21 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
   const [name, setName] = useState("");
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
-  // The secret exists in this state ONLY: it is shown once, right after creation,
-  // and the reloaded list never carries it.
+  // The secret of a key just created, for the confirmation dialog. The list itself
+  // never carries secrets; they are fetched one at a time on an explicit press.
   const [createdSecret, setCreatedSecret] = useState("");
   const [createdName, setCreatedName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  // Id of the key being handed to /usage, while the request is in flight.
+  const [openingUsageId, setOpeningUsageId] = useState(null);
+  // Secrets the customer chose to reveal, by key id. Memory only: a reload hides them.
+  const [revealed, setRevealed] = useState({});
+  // Per-key state of the show/copy buttons: "loading" | "copied".
+  const [secretState, setSecretState] = useState({});
+  // Error of a per-row action (show, copy, usage). Shown above the list without
+  // unmounting it, unlike loadError, which replaces the list.
+  const [actionError, setActionError] = useState("");
 
   const baseUrl = useMemo(() => {
     const configured = String(publicBaseUrl || "").trim().replace(/\/+$/, "");
@@ -126,12 +139,103 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
     }
   };
 
+  const fetchSecret = async (id) => {
+    const res = await fetch(`/api/account/keys/${encodeURIComponent(id)}/secret`, {
+      method: "POST",
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error("Phiên đăng nhập đã hết hạn, hãy đăng nhập lại");
+    if (res.status === 404) {
+      // Deleted elsewhere (another tab, an admin): refresh the list.
+      load();
+      throw new Error("Key này không còn tồn tại");
+    }
+    if (res.status === 429) throw new Error("Thao tác quá nhanh, thử lại sau ít phút");
+    if (!res.ok || !data.secret) throw new Error("Không lấy được key, thử lại sau");
+    return data.secret;
+  };
+
+  const setKeyState = (id, value) => setSecretState((prev) => ({ ...prev, [id]: value }));
+
+  const toggleReveal = async (key) => {
+    if (revealed[key.id]) {
+      setRevealed((prev) => {
+        const next = { ...prev };
+        delete next[key.id];
+        return next;
+      });
+      return;
+    }
+    setActionError("");
+    setKeyState(key.id, "loading");
+    try {
+      const secret = await fetchSecret(key.id);
+      setRevealed((prev) => ({ ...prev, [key.id]: secret }));
+      setKeyState(key.id, null);
+    } catch (error) {
+      setKeyState(key.id, null);
+      setActionError(error.message || "Không lấy được key, thử lại sau");
+    }
+  };
+
+  const copySecret = async (key) => {
+    setActionError("");
+    setKeyState(key.id, "loading");
+    let secret;
+    try {
+      secret = revealed[key.id] || (await fetchSecret(key.id));
+    } catch (error) {
+      setKeyState(key.id, null);
+      setActionError(error.message || "Không lấy được key, thử lại sau");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(secret);
+    } catch {
+      setKeyState(key.id, null);
+      setActionError("Không sao chép được key. Bấm hiện key rồi sao chép thủ công.");
+      return;
+    }
+    setKeyState(key.id, "copied");
+    setTimeout(() => setSecretState((prev) => (prev[key.id] === "copied" ? { ...prev, [key.id]: null } : prev)), 2000);
+  };
+
+  // /usage works from the raw key. The server hands this customer's own key over
+  // only on this explicit press; it goes to the slot /usage reads on load and
+  // never into the URL, so it stays out of the address bar, history and logs.
+  const openUsage = async (key) => {
+    setOpeningUsageId(key.id);
+    setActionError("");
+    try {
+      let secret;
+      try {
+        secret = revealed[key.id] || (await fetchSecret(key.id));
+      } catch (error) {
+        setActionError(error.message || "Không mở được trang usage của key này");
+        setOpeningUsageId(null);
+        return;
+      }
+      try {
+        localStorage.setItem(USAGE_KEY_STORAGE, secret);
+      } catch {
+        setActionError("Trình duyệt chặn lưu trữ cục bộ nên không mở được trang usage");
+        setOpeningUsageId(null);
+        return;
+      }
+      window.location.assign("/usage");
+    } catch {
+      setActionError("Không kết nối được máy chủ");
+      setOpeningUsageId(null);
+    }
+  };
+
   const createAction = <ActionButton tone="solid" onClick={openCreate}>Tạo key</ActionButton>;
 
   return (
     <Page
       title="API key"
-      description="Dùng key này để gọi model trong nhóm của bạn. Key chỉ hiển thị một lần khi tạo."
+      description="Dùng key này để gọi model trong nhóm của bạn. Chỉ bạn xem được key, khi đã đăng nhập."
       actions={createAction}
     >
       <Section title="Kết nối" description="Trỏ client OpenAI hoặc Claude tới địa chỉ này.">
@@ -162,6 +266,23 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
             action={createAction}
           />
         ) : (
+          <>
+          {actionError ? (
+            <div role="alert" className="mb-2 flex items-start justify-between gap-4 border border-red-600/30 bg-red-500/10 px-5 py-3">
+              <span className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">error</span>
+                <span>{actionError}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setActionError("")}
+                aria-label="Đóng thông báo lỗi"
+                className="flex size-7 shrink-0 items-center justify-center text-red-600 hover:bg-red-500/10 dark:text-red-400"
+              >
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+              </button>
+            </div>
+          ) : null}
           <ul className="flex flex-col gap-2">
             {keys.map((key) => (
               <ListRow
@@ -172,19 +293,59 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
                     {key.isActive ? "Đang dùng" : "Đã tắt"}
                   </Tag>
                 }
-                detail={`${key.keyPrefix ? `${key.keyPrefix}…` : "—"} · tạo ${formatDate(key.createdAt)} · ${lastUsedLabel(key.lastUsedAt)}`}
+                detail={
+                  <>
+                    {revealed[key.id] ? (
+                      <span className="block break-all font-mono text-text-main">{revealed[key.id]}</span>
+                    ) : null}
+                    {`${key.keyPrefix ? `${key.keyPrefix}…` : "—"} · tạo ${formatDate(key.createdAt)} · ${lastUsedLabel(key.lastUsedAt)}`}
+                  </>
+                }
                 actions={
                   <>
-                    <Link
-                      href={`/account/usage?key=${encodeURIComponent(key.id)}`}
-                      className="flex h-9 items-center gap-2 border border-border bg-surface px-3 font-mono text-xs font-medium text-text-main transition-colors duration-150 hover:bg-surface-2"
-                      aria-label={`Xem usage của key ${key.name || key.keyPrefix || ""}`}
-                      title="Xem usage của key này"
+                    <button
+                      type="button"
+                      onClick={() => toggleReveal(key)}
+                      disabled={secretState[key.id] === "loading"}
+                      aria-label={`${revealed[key.id] ? "Ẩn" : "Hiện"} key ${key.name || key.keyPrefix || ""}`}
+                      title={revealed[key.id] ? "Ẩn key" : "Hiện key"}
+                      className={ICON_BUTTON}
                     >
-                      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">monitoring</span>
+                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                        {revealed[key.id] ? "visibility_off" : "visibility"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copySecret(key)}
+                      disabled={secretState[key.id] === "loading"}
+                      aria-label={`Sao chép key ${key.name || key.keyPrefix || ""}`}
+                      title={secretState[key.id] === "copied" ? "Đã sao chép" : "Sao chép key"}
+                      className={ICON_BUTTON}
+                    >
+                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                        {secretState[key.id] === "copied" ? "check" : "content_copy"}
+                      </span>
+                      <span className="sr-only" role="status">{secretState[key.id] === "copied" ? "Đã sao chép key" : ""}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openUsage(key)}
+                      disabled={openingUsageId !== null}
+                      aria-busy={openingUsageId === key.id || undefined}
+                      aria-label={`Xem usage của key ${key.name || key.keyPrefix || ""}`}
+                      title="Mở trang /usage của key này"
+                      className="flex h-9 items-center gap-2 border border-border bg-surface px-3 font-mono text-xs font-medium text-text-main transition-colors duration-150 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-[16px]${openingUsageId === key.id ? " animate-spin" : ""}`}
+                        aria-hidden="true"
+                      >
+                        {openingUsageId === key.id ? "progress_activity" : "monitoring"}
+                      </span>
                       {/* A technical term kept in English, so the page translator must not touch it. */}
                       <span data-i18n-skip="true">Usage</span>
-                    </Link>
+                    </button>
                     <button
                       type="button"
                       aria-label={`Xóa key ${key.name || key.keyPrefix || ""}`}
@@ -199,6 +360,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
               />
             ))}
           </ul>
+          </>
         )}
       </Section>
 
@@ -226,7 +388,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
         />
       </Modal>
 
-      {/* Secret shown exactly once */}
+      {/* Secret of a key just created */}
       <Modal
         isOpen={!!createdSecret}
         onClose={() => setCreatedSecret("")}
@@ -244,7 +406,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
             className="flex items-start gap-2 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
           >
             <span className="material-symbols-outlined text-[18px] shrink-0" aria-hidden="true">warning</span>
-            <span>Lưu key ngay — bạn sẽ không xem lại được</span>
+            <span>Sao chép key ngay để dán vào ứng dụng. Sau này bạn vẫn xem lại được ở danh sách key.</span>
           </div>
         </div>
       </Modal>

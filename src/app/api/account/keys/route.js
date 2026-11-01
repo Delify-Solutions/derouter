@@ -28,7 +28,8 @@ export async function GET(request) {
     createdAt: key.createdAt,
     lastUsedAt: lastUsed[key.id] ?? null,
     groupId: key.groupId ?? null,
-    // Never the full secret: it is shown once, at creation.
+    // Never the full secret in the list: it is sent only on an explicit show,
+    // copy or open-usage press (POST /api/account/keys/{id}/secret).
   }));
 
   return NextResponse.json({ keys }, { headers: NO_STORE });
