@@ -138,7 +138,7 @@ function scrubDetailForList(d, includeRaw) {
     resolvedModel: d.model || null,
     status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
-    latency: d.latency || { ttft: 0, total: 0 },
+    latency: d.latency || { ttft: null, total: 0 },
     inputTokens: d.tokens?.prompt_tokens ?? d.tokens?.input_tokens ?? 0,
     outputTokens: d.tokens?.completion_tokens ?? d.tokens?.output_tokens ?? 0,
     cachedTokens: d.tokens?.cached_tokens ?? d.tokens?.cache_read_input_tokens ?? d.tokens?.prompt_tokens_details?.cached_tokens ?? 0,

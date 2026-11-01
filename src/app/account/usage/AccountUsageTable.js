@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eyebrow, SelectField, Stat, fieldClass } from "@/app/account/components/ui";
+import { formatLatency } from "@/shared/utils/latencyFormat";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
@@ -168,7 +169,7 @@ export default function AccountUsageTable({
                   <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Thời điểm</th>
                   <th className="px-4 py-3 text-left font-medium">Model</th>
                   <th className="px-4 py-3 text-center font-medium">Trạng thái</th>
-                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap" title="Tổng thời gian từ lúc nhận request đến khi trả xong">Thời gian phản hồi</th>
+                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap" title="TTFT: thời gian tới byte đầu tiên từ upstream (request stream). Tổng: từ lúc nhận request đến khi trả xong">Thời gian phản hồi</th>
                   <th className="px-4 py-3 text-right font-medium">Input</th>
                   <th className="px-4 py-3 text-right font-medium">Output</th>
                   <th className="px-4 py-3 text-right font-medium">Tổng</th>
@@ -188,7 +189,7 @@ export default function AccountUsageTable({
                     </td>
                     <td className={`px-4 py-3 text-center font-mono ${statusClass(row.status)}`}>{row.status}</td>
                     <td className="px-4 py-3 text-right font-mono text-text-muted">
-                      {row.latencyMs != null ? (row.latencyMs < 1000 ? `${Math.round(row.latencyMs)} ms` : `${(row.latencyMs / 1000).toFixed(2)} s`) : "—"}
+                      {formatLatency(row.latencyMs, row.ttftMs)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>
