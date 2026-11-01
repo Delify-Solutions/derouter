@@ -19,6 +19,11 @@ export function detailTtft(latency) {
   return ttft;
 }
 
+/** Whole-millisecond TTFT and total, each null when not measured. */
+export function latencyParts(totalMs, ttftMs) {
+  return { total: ms(totalMs), ttft: ms(ttftMs) };
+}
+
 export function formatLatency(totalMs, ttftMs) {
   const total = ms(totalMs);
   const ttft = ms(ttftMs);
