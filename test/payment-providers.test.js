@@ -17,6 +17,7 @@ const fixtures = JSON.parse(
 );
 
 const sepay = await import("../src/lib/payments/providers/sepay.js");
+const { receivingAccountMatches } = await import("../src/lib/payments/webhook.js");
 const web2m = await import("../src/lib/payments/providers/web2m.js");
 const binance = await import("../src/lib/payments/providers/binance.js");
 
@@ -81,9 +82,34 @@ test("sepay: webhook incoming normalizes id, direction, amount, content, time", 
   assert.equal(tx.currency, "VND");
   assert.equal(tx.content, "MBVCB.1234567.DR8K3Q7MZP.CT tu 0123 toi 9876");
   assert.equal(tx.accountNumber, "1017588888");
+  assert.equal(tx.subAccount, null, "an empty subAccount is no virtual account");
   // 11:08:33 Vietnam time == 04:08:33Z.
   assert.equal(tx.occurredAt, "2024-07-02T04:08:33.000Z");
   assert.deepEqual(tx.raw, fixtures.sepay.webhookIncoming);
+});
+
+test("sepay: a virtual-account delivery keeps the VA as subAccount", () => {
+  const tx = sepay.normalizeSepayTransaction({
+    ...fixtures.sepay.webhookIncoming,
+    accountNumber: "8857011098",
+    subAccount: "96247061103",
+  });
+  assert.equal(tx.accountNumber, "8857011098");
+  assert.equal(tx.subAccount, "96247061103");
+});
+
+test("sepay: receivingAccountMatches checks the bank account and the VA", () => {
+  const va = { accountNumber: "8857011098", subAccount: "96247061103" };
+  assert.equal(receivingAccountMatches("96247061103", va), true);
+  assert.equal(receivingAccountMatches("8857011098", va), true);
+  assert.equal(receivingAccountMatches("9624 7061-103", va), true);
+  assert.equal(receivingAccountMatches("1017588888", va), false);
+  assert.equal(receivingAccountMatches("8857011098", { accountNumber: "1017588888", subAccount: "96247000000" }), false);
+  assert.equal(receivingAccountMatches("delify", { accountNumber: "DELIFY", subAccount: null }), true);
+  assert.equal(receivingAccountMatches("DELIFY1", { accountNumber: "1", subAccount: null }), false, "an alias is not reduced to its digits");
+  // Nothing configured, or nothing reported, cannot be judged.
+  assert.equal(receivingAccountMatches("", va), true);
+  assert.equal(receivingAccountMatches("96247061103", { accountNumber: null, subAccount: null }), true);
 });
 
 test("sepay: webhook outgoing normalizes as out", () => {

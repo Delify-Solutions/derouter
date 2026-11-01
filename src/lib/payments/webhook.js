@@ -19,6 +19,29 @@ import { formatVnd } from "./amounts.js";
 
 export const MAX_BODY_BYTES = 64 * 1024;
 
+// Letters stay (VietQR allows alias account numbers such as "DELIFY"); spaces,
+// dashes and dots typed into the admin form do not.
+const accountKey = (value) => String(value ?? "").replace(/[^0-9A-Za-z]+/g, "").toUpperCase();
+
+/**
+ * True when the transfer reached the account this provider is configured with.
+ * SePay reports the bank account in `accountNumber` and, for a virtual account
+ * (BIDV VA and similar), the VA the customer paid into in `subAccount`; the
+ * configured number may be either. Compared on letters and digits only, case
+ * insensitive, so spacing or dashes typed into the admin form do not matter. Nothing configured, or nothing
+ * reported, cannot be judged and counts as a match.
+ *
+ * @param {string|null|undefined} configured
+ * @param {{accountNumber?: string|null, subAccount?: string|null}} tx
+ */
+export function receivingAccountMatches(configured, tx) {
+  const want = accountKey(configured);
+  if (!want) return true;
+  const reported = [tx?.accountNumber, tx?.subAccount].map(accountKey).filter(Boolean);
+  if (reported.length === 0) return true;
+  return reported.includes(want);
+}
+
 /**
  * The active SePay provider whose webhook key verifies `authorization`, or null.
  * Synchronous: the caller passes the provider rows it already has (the route loads
@@ -85,9 +108,7 @@ export async function handleSepayWebhook(request, { providers, db, settings, now
 
   // 4. Money that arrived at another account of this provider can never be this
   //    order's payment; the reconciliation engine is told so up front.
-  const accountMismatch = provider.config?.accountNumber
-    && tx.accountNumber
-    && String(provider.config.accountNumber) !== String(tx.accountNumber);
+  const accountMismatch = !receivingAccountMatches(provider.config?.accountNumber, tx);
 
   let outcome;
   try {
