@@ -103,7 +103,7 @@ export async function handleStreamingResponse({ compat, providerResponse, provid
 
   saveRequestDetail(buildRequestDetail({
     provider, model, requestedModel: requestedModel0, connectionId, apiKey,
-    latency: { ttft: 0, total: Date.now() - requestStartTime },
+    latency: { ttft: null, total: Date.now() - requestStartTime },
     tokens: { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
     providerRequest: finalBody || translatedBody || null,
@@ -129,7 +129,8 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
 
   const onStreamComplete = (contentObj, reportedUsage, ttftAt) => {
     const latency = {
-      ttft: ttftAt ? ttftAt - requestStartTime : Date.now() - requestStartTime,
+      // Unknown (null) when no upstream byte was seen; never "= total".
+      ttft: ttftAt ? ttftAt - requestStartTime : null,
       total: Date.now() - requestStartTime
     };
     // The estimated cached part (combo option) is computed after the last byte was forwarded and
@@ -174,7 +175,8 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
     });
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: latency.total, label: "STREAM USAGE", silent: true });
+    // TTFT = time to the first bytes from the upstream; null when none were seen.
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
     }
   };

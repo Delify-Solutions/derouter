@@ -1788,5 +1788,6 @@
   "Control Panel": "Bảng điều khiển",
   "Unknown": "Không rõ",
   "Switch to dark mode": "Chuyển sang giao diện tối",
-  "Switch to light mode": "Chuyển sang giao diện sáng"
+  "Switch to light mode": "Chuyển sang giao diện sáng",
+  "TTFT: time to the first bytes from the upstream (streamed requests). Total: from receiving the request until the response finished": "TTFT: thời gian tới byte đầu tiên từ upstream (request stream). Tổng: từ lúc nhận request đến khi trả xong"
 }

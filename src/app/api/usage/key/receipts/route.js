@@ -54,6 +54,7 @@ function periodToRange(period) {
  *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM)
  *   history:  [{ timestamp, model, status, cost, input, output, tok,
  *                latencyMs,          // total time of the request in ms; null when not measured
+ *                ttftMs,             // time to the first streamed chunk in ms; null for non-streams and older rows
  *                cacheRead, cacheCreation }] // recent requests, NO raw payloads
  * }
  *
@@ -158,6 +159,7 @@ export async function GET(request) {
           output,
           tok,
           latencyMs,
+          ttftMs: Number.isFinite(meta?.ttftMs) ? meta.ttftMs : null,
           cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreation: t.cache_creation_input_tokens ?? 0,
           // True when the upstream reported no usage and these figures are the router's estimate.

@@ -128,7 +128,7 @@ export async function logPlatformDenial({ apiKey, model, status, message, resetA
       status: statusText,
       errorSource: "platform",
       response: { error: message, resetAt: resetAt ?? undefined },
-    }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+    }, { latency: { ttft: null, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
     saveUsageError({
       provider: "platform",
       model: model || "unknown",
