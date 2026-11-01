@@ -97,7 +97,7 @@ function vndAmount(value) {
  * @param {object} payload
  * @returns {{externalId: string, direction: "in"|"out", amount: number, currency: "VND",
  *            content: string, occurredAt: string|null, accountNumber: string|null,
- *            raw: object}|null} null when the row carries no usable id
+ *            subAccount: string|null, raw: object}|null} null when the row carries no usable id
  */
 export function normalizeSepayTransaction(payload) {
   if (!payload || typeof payload !== "object") return null;
@@ -123,6 +123,9 @@ export function normalizeSepayTransaction(payload) {
     payload.content ?? payload.transaction_content ?? payload.description ?? ""
   );
   const accountNumber = payload.accountNumber ?? payload.account_number ?? null;
+  // A virtual account (BIDV VA and similar) is reported here while `accountNumber`
+  // holds the bank's main account behind it; customers transfer to the VA.
+  const subAccount = payload.subAccount ?? payload.sub_account ?? null;
 
   const occurredAt = sepayDateToIso(
     payload.transactionDate ?? payload.transaction_date ?? null
@@ -141,6 +144,7 @@ export function normalizeSepayTransaction(payload) {
     content,
     occurredAt,
     accountNumber: accountNumber == null ? null : String(accountNumber),
+    subAccount: subAccount == null || String(subAccount).trim() === "" ? null : String(subAccount),
     raw: payload,
   };
 }

@@ -1072,6 +1072,7 @@ function ProviderForm({ draft, editing, error, onField, onConfig, onSecret }) {
             label="Số tài khoản"
             value={draft.config.accountNumber || ""}
             onChange={(event) => onConfig("accountNumber", event.target.value)}
+            hint={kind === "sepay" ? "Tài khoản ảo (VA): nhập số VA in trên mã QR. Số tài khoản gốc cũng được chấp nhận." : undefined}
             required
           />
           <Input

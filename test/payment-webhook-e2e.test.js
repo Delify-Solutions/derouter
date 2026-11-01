@@ -28,7 +28,7 @@ after(() => {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function seed({ code = "DR8K3Q7MZP", payAmount = 250000, expiresInMs = 30 * 60 * 1000 } = {}) {
+async function seed({ code = "DR8K3Q7MZP", payAmount = 250000, expiresInMs = 30 * 60 * 1000, accountNumber = "1017588888" } = {}) {
   for (const table of ["paymentTransactions", "paymentProviders", "userPlanWindows", "creditLedger", "userPlans", "orders", "plans", "users"]) {
     try { db.run(`DELETE FROM ${table}`); } catch { /* partial schema */ }
   }
@@ -58,7 +58,7 @@ async function seed({ code = "DR8K3Q7MZP", payAmount = 250000, expiresInMs = 30 
       JSON.stringify({
         bankBin: "970436",
         bankName: "Vietcombank",
-        accountNumber: "1017588888",
+        accountNumber,
         accountName: "NGUYEN VAN A",
       }),
       JSON.stringify({ webhookKey }),
@@ -216,6 +216,53 @@ test("a transfer to another account is kept as wrong_provider", async () => {
   const row = db.get(`SELECT * FROM paymentTransactions`);
   assert.equal(row.status, "needs_review");
   assert.equal(row.reason, "wrong_provider", "the money arrived somewhere this order cannot be paid to");
+});
+
+// A BIDV virtual account through SePay: the bank account is reported in
+// `accountNumber`, the VA the customer paid into (and the number on the QR) in
+// `subAccount`. Shape copied from a real delivery.
+const VA_PAYLOAD = {
+  gateway: "BIDV",
+  accountNumber: "8857011098",
+  subAccount: "96247061103",
+  content: "MBVCB.16824599969.476942.DR8K3Q7MZP.CT tu 1023911443 NGUYEN VAN B toi 96247061103 NGUYEN VAN A",
+  description: "BankAPINotify MBVCB.16824599969.476942.DR8K3Q7MZP.CT tu 1023911443 NGUYEN VAN B toi 96247061103 NGUYEN VAN A",
+  referenceCode: "dc06fdeb-63b9-4130-a326-6a3bb3d96102",
+  accumulated: 0,
+};
+
+test("a transfer to the configured virtual account (subAccount) approves the order", async () => {
+  const { webhookKey } = await seed({ accountNumber: "96247061103" });
+
+  const res = await deliver(payload(VA_PAYLOAD), `Apikey ${webhookKey}`);
+  assert.equal(res.status, 200);
+  assert.equal(order().status, "paid");
+  const row = db.get(`SELECT * FROM paymentTransactions`);
+  assert.equal(row.status, "matched");
+});
+
+test("the main account behind a virtual account also matches", async () => {
+  const { webhookKey } = await seed({ accountNumber: "8857011098" });
+
+  await deliver(payload(VA_PAYLOAD), `Apikey ${webhookKey}`);
+  assert.equal(order().status, "paid");
+});
+
+test("the configured number is compared on digits only", async () => {
+  const { webhookKey } = await seed({ accountNumber: " 9624-7061 103 " });
+
+  await deliver(payload(VA_PAYLOAD), `Apikey ${webhookKey}`);
+  assert.equal(order().status, "paid");
+});
+
+test("a virtual account that is not the configured one is still wrong_provider", async () => {
+  const { webhookKey } = await seed({ accountNumber: "96247061103" });
+
+  await deliver(payload({ ...VA_PAYLOAD, subAccount: "96247000000" }), `Apikey ${webhookKey}`);
+  assert.equal(order().status, "pending");
+  const row = db.get(`SELECT * FROM paymentTransactions`);
+  assert.equal(row.status, "needs_review");
+  assert.equal(row.reason, "wrong_provider");
 });
 
 test("a payment after expiry is reviewed, not approved", async () => {
