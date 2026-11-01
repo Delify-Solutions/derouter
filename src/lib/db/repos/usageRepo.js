@@ -1064,6 +1064,184 @@ export async function getRecentLogs(limit = 200) {
 // (Tok/s = LLM generation speed = output tokens/sec. Input tokens are the
 //  prompt sent in, not generated, so they're excluded. Thresholds: <10 slow,
 //  20-40 normal, 80+ instant.)
+// Display form of a stored key: prefix and last four, never the middle.
+function maskStoredKey(key) {
+  if (!key || typeof key !== "string") return "";
+  if (key.length <= 12) return "****";
+  const dash = key.indexOf("-");
+  const prefix = dash > 0 ? key.slice(0, dash + 1) : key.slice(0, 3);
+  return `${prefix}…****${key.slice(-4)}`;
+}
+
+function emptyUsageTotals() {
+  return { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 };
+}
+
+/**
+ * Usage grouped by the customer who owns the key, for the admin usage page.
+ *
+ * One customer may hold many keys, so each owner gets one entry with totals over
+ * all of their keys, a per-model breakdown, a per-key breakdown, the busiest
+ * minute (tokens and requests summed across their keys) and the last request.
+ * Keys with no owner (admin keys) share one "admin" entry, where requests made
+ * without any key (loopback/local traffic) appear as a "no key" line; rows whose
+ * key no longer exists share one "unknown" entry. Customers who own keys but made
+ * no request in the range are listed with zero totals.
+ *
+ * Rows are matched to keys by apiKeyId, or by the legacy raw apiKey column.
+ *
+ * @param {{startDate?: string, endDate?: string}} [range]
+ * @returns {Promise<Array<object>>} owners, highest cost first
+ */
+export async function getUsageByOwner({ startDate, endDate } = {}) {
+  const db = await getAdapter();
+  const conds = [];
+  const params = [];
+  for (const [value, op] of [[startDate, ">="], [endDate, "<="]]) {
+    if (!value) continue;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) throw new RangeError(`Invalid date: ${value}`);
+    conds.push(`timestamp ${op} ?`);
+    params.push(d.toISOString());
+  }
+  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+
+  const keys = db.all(`SELECT id, key, keyPrefix, name, userId, isActive FROM apiKeys`);
+  const users = db.all(`SELECT id, email, displayName, groupId, status FROM users`);
+  let groups = [];
+  try { groups = db.all(`SELECT id, name FROM keyGroups`); } catch { groups = []; }
+  const groupName = new Map(groups.map((g) => [g.id, g.name]));
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const keyById = new Map(keys.map((k) => [k.id, k]));
+  const keyByRaw = new Map(keys.filter((k) => k.key).map((k) => [k.key, k]));
+
+  const owners = new Map();
+  const ownerFor = (ownerId) => {
+    let o = owners.get(ownerId);
+    if (o) return o;
+    const user = userById.get(ownerId);
+    o = {
+      ownerId,
+      kind: ownerId === "__admin" ? "admin" : ownerId === "__unknown" ? "unknown" : "user",
+      userId: user ? user.id : null,
+      email: user?.email ?? null,
+      displayName: user?.displayName ?? null,
+      group: user?.groupId ? groupName.get(user.groupId) ?? null : null,
+      status: user?.status ?? null,
+      keys: new Map(),
+      byModel: {},
+      totals: emptyUsageTotals(),
+      perMinuteTok: {},
+      perMinuteReq: {},
+      lastUsedAt: null,
+    };
+    owners.set(ownerId, o);
+    return o;
+  };
+  const ownerIdOfKey = (k) => (k.userId && userById.has(k.userId) ? k.userId : k.userId ? "__unknown" : "__admin");
+  const blank = { requests: 0, tokens: 0, cost: 0, costNanoUsd: 0, lastUsedAt: null };
+  // `k` is an apiKeys row, or null with `noKey` for a request made without any key.
+  const keyEntry = (o, k, noKey = false) => {
+    const id = k ? k.id : noKey ? "__nokey" : "__deleted";
+    let e = o.keys.get(id);
+    if (!e) {
+      if (k) {
+        e = {
+          id: k.id,
+          name: k.name || null,
+          maskedKey: maskStoredKey(k.key) || (k.keyPrefix ? `${k.keyPrefix}…` : ""),
+          active: k.isActive !== 0 && k.isActive !== false,
+          ...blank,
+        };
+      } else if (noKey) {
+        e = { id, name: null, maskedKey: "", active: true, noKey: true, ...blank };
+      } else {
+        e = { id, name: null, maskedKey: "", active: false, deleted: true, ...blank };
+      }
+      o.keys.set(id, e);
+    }
+    return e;
+  };
+
+  // Every customer who owns a key is listed, even with no traffic in the range.
+  for (const k of keys) keyEntry(ownerFor(ownerIdOfKey(k)), k);
+
+  const rows = db.all(
+    `SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta
+       FROM usageHistory ${where}`,
+    params
+  );
+  for (const r of rows) {
+    const k = (r.apiKeyId && keyById.get(r.apiKeyId)) || (r.apiKey && keyByRaw.get(r.apiKey)) || null;
+    // No key at all: loopback/local traffic, shown under the admin entry.
+    const noKey = !k && !r.apiKeyId && !r.apiKey;
+    const o = ownerFor(k ? ownerIdOfKey(k) : noKey ? "__admin" : "__unknown");
+    const t = parseJson(r.tokens, {}) || {};
+    const meta = parseJson(r.meta, {}) || {};
+    const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
+    const completion = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
+    const cacheRead = t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0;
+    const cacheCreation = t.cache_creation_input_tokens ?? 0;
+    const costNano = rowCostNano(r.costNanoUsd, r.cost);
+
+    const model = meta.requestedModel || r.model || "unknown";
+    const m = o.byModel[model] || (o.byModel[model] = { model, ...emptyUsageTotals() });
+    for (const acc of [m, o.totals]) {
+      acc.input += prompt;
+      acc.output += completion;
+      acc.cacheRead += cacheRead;
+      acc.cacheCreation += cacheCreation;
+      acc.requests += 1;
+      if (meta.cacheEstimated === true && cacheRead > 0) acc.cacheEstimated = true;
+      addCostTo(acc, costNano);
+    }
+
+    const e = keyEntry(o, k, noKey);
+    e.requests += 1;
+    e.tokens += prompt + completion;
+    addCostTo(e, costNano);
+    const ts = r.timestamp || "";
+    if (ts && (!e.lastUsedAt || ts > e.lastUsedAt)) e.lastUsedAt = ts;
+    if (ts && (!o.lastUsedAt || ts > o.lastUsedAt)) o.lastUsedAt = ts;
+    const minute = ts.slice(0, 16);
+    if (minute) {
+      o.perMinuteTok[minute] = (o.perMinuteTok[minute] || 0) + prompt + completion;
+      o.perMinuteReq[minute] = (o.perMinuteReq[minute] || 0) + 1;
+    }
+  }
+
+  const out = [];
+  for (const o of owners.values()) {
+    let peakTpm = 0;
+    for (const v of Object.values(o.perMinuteTok)) if (v > peakTpm) peakTpm = v;
+    let peakRpm = 0;
+    for (const v of Object.values(o.perMinuteReq)) if (v > peakRpm) peakRpm = v;
+    const keyList = [...o.keys.values()].sort(
+      (a, b) => (b.costNanoUsd - a.costNanoUsd) || (b.requests - a.requests) || String(a.name || "").localeCompare(String(b.name || ""))
+    );
+    out.push({
+      ownerId: o.ownerId,
+      kind: o.kind,
+      userId: o.userId,
+      email: o.email,
+      displayName: o.displayName,
+      group: o.group,
+      status: o.status,
+      keyCount: keyList.filter((k) => !k.deleted && !k.noKey).length,
+      activeKeyCount: keyList.filter((k) => !k.deleted && !k.noKey && k.active).length,
+      keys: keyList,
+      byModel: Object.values(o.byModel).sort((a, b) => (b.costNanoUsd - a.costNanoUsd) || (b.requests - a.requests)),
+      totals: o.totals,
+      peakTpm,
+      peakRpm,
+      lastUsedAt: o.lastUsedAt,
+    });
+  }
+  out.sort((a, b) => (b.totals.costNanoUsd - a.totals.costNanoUsd) || (b.totals.requests - a.totals.requests)
+    || String(a.email || a.ownerId).localeCompare(String(b.email || b.ownerId)));
+  return out;
+}
+
 /**
  * When each key last made a request, for the customer key list.
  *

@@ -4,7 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { UsageStats, RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import RequestDetailsTab from "./components/RequestDetailsTab";
-import KeyUsageTable from "./components/KeyUsageTable";
+import UserUsageTable from "./components/UserUsageTable";
 import ProviderUsageTable from "./components/ProviderUsageTable";
 
 const PERIODS = [
@@ -30,8 +30,10 @@ function UsageContent() {
   const [period, setPeriod] = useState("today");
 
   const tabFromUrl = searchParams.get("tab");
-  const activeTab = tabFromUrl && ["overview", "logs", "details", "keys", "providers"].includes(tabFromUrl)
-    ? tabFromUrl
+  // "keys" is the old name of the per-user tab; links to it still land there.
+  const normalizedTab = tabFromUrl === "keys" ? "users" : tabFromUrl;
+  const activeTab = normalizedTab && ["overview", "logs", "details", "users", "providers"].includes(normalizedTab)
+    ? normalizedTab
     : "overview";
 
   const handleTabChange = (value) => {
@@ -48,7 +50,7 @@ function UsageContent() {
         <SegmentedControl
           options={[
             { value: "overview", label: "Overview" },
-            { value: "keys", label: "Keys" },
+            { value: "users", label: "Users" },
             { value: "details", label: "Details" },
             { value: "providers", label: "Providers" },
           ]}
@@ -73,7 +75,7 @@ function UsageContent() {
         </Suspense>
       )}
       {activeTab === "logs" && <RequestLogger />}
-      {activeTab === "keys" && <KeyUsageTable />}
+      {activeTab === "users" && <UserUsageTable />}
       {activeTab === "details" && <RequestDetailsTab />}
       {activeTab === "providers" && <ProviderUsageTable />}
     </div>
