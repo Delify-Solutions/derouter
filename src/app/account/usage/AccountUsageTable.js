@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eyebrow, SelectField, Stat, fieldClass } from "@/app/account/components/ui";
-import { formatLatency } from "@/shared/utils/latencyFormat";
+import LatencyCell from "@/shared/components/LatencyCell";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
@@ -189,7 +189,7 @@ export default function AccountUsageTable({
                     </td>
                     <td className={`px-4 py-3 text-center font-mono ${statusClass(row.status)}`}>{row.status}</td>
                     <td className="px-4 py-3 text-right font-mono text-text-muted">
-                      {formatLatency(row.latencyMs, row.ttftMs)}
+                      <LatencyCell totalMs={row.latencyMs} ttftMs={row.ttftMs} />
                     </td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
                     <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>

@@ -13,7 +13,7 @@ process.env.DATA_DIR = tmpDir;
 
 const { getAdapter } = await import("../src/lib/db/driver.js");
 const usage = await import("../src/lib/db/repos/usageRepo.js");
-const { formatLatency, detailTtft } = await import("../src/shared/utils/latencyFormat.js");
+const { formatLatency, detailTtft, latencyParts } = await import("../src/shared/utils/latencyFormat.js");
 
 let db;
 before(async () => { db = await getAdapter(); });
@@ -60,4 +60,10 @@ test("detailTtft treats 0, a missing value and TTFT = total as unknown", () => {
   assert.equal(detailTtft({ ttft: 0, total: 1200 }), null, "older error rows wrote 0");
   assert.equal(detailTtft({ ttft: 1200, total: 1200 }), null, "older non-streamed rows wrote the total");
   assert.equal(detailTtft(undefined), null);
+});
+
+test("latencyParts gives the two lines of the history cell", () => {
+  assert.deepEqual(latencyParts(20213, 2034), { total: 20213, ttft: 2034 });
+  assert.deepEqual(latencyParts(1683.4, null), { total: 1683, ttft: null });
+  assert.deepEqual(latencyParts(null, undefined), { total: null, ttft: null });
 });

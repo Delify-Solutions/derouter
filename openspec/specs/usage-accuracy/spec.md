@@ -173,11 +173,11 @@ The estimate SHALL be documented as an estimate that can be wrong: the upstream 
 
 
 ### Requirement: Response time shows TTFT and total
-Every usage row written by the chat handlers SHALL record the total response time (from the router receiving the request until the response finished) in milliseconds. A streamed chat request SHALL also record its TTFT: the time from the router receiving the request until the first bytes of the upstream stream arrived. A request that was not streamed, or a stream that never delivered any bytes, SHALL record no TTFT (it is unknown, not equal to the total). The request histories on the public `/usage` page and on `/account/usage` SHALL show the response time as "TTFT <n>ms / Tổng <n>ms" in whole milliseconds, or "Tổng <n>ms" when no TTFT is recorded (including rows written before TTFT was recorded), or "—" when nothing was measured (image generation, embeddings and the Gemini-native route record no response time). Stored request details SHALL carry no TTFT (null) for a request that was not streamed, and their views SHALL show it as unknown.
+Every usage row written by the chat handlers SHALL record the total response time (from the router receiving the request until the response finished) in milliseconds. A streamed chat request SHALL also record its TTFT: the time from the router receiving the request until the first bytes of the upstream stream arrived. A request that was not streamed, or a stream that never delivered any bytes, SHALL record no TTFT (it is unknown, not equal to the total). The request histories on the public `/usage` page and on `/account/usage` SHALL show the response time in whole milliseconds on two short lines, "TTFT <n>ms" (smaller) above "Tổng <n>ms" (the request detail dialog shows the same on one line, "TTFT <n>ms / Tổng <n>ms"), or only "Tổng <n>ms" when no TTFT is recorded (including rows written before TTFT was recorded), or "—" when nothing was measured (image generation, embeddings and the Gemini-native route record no response time). Stored request details SHALL carry no TTFT (null) for a request that was not streamed, and their views SHALL show it as unknown.
 
 #### Scenario: Streamed request
 - **WHEN** a streamed request gets its first upstream bytes after 810 ms and finishes after 19 338 ms
-- **THEN** its history row shows "TTFT 810ms / Tổng 19338ms"
+- **THEN** its history row shows "TTFT 810ms" above "Tổng 19338ms"
 
 #### Scenario: Non-streamed request
 - **WHEN** a non-streamed request finishes after 1 200 ms

@@ -11,6 +11,7 @@ import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
+import LatencyCell from "@/shared/components/LatencyCell";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -774,7 +775,7 @@ export default function UsageClient({ hasUserSession = false }) {
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
-                            {formatLatency(r.latencyMs, r.ttftMs)}
+                            <LatencyCell totalMs={r.latencyMs} ttftMs={r.ttftMs} />
                           </td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
                           <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
