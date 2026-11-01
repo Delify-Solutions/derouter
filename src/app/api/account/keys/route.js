@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAccountUser } from "@/lib/auth/userSession";
-import { getApiKeys, createApiKey } from "@/lib/localDb";
+import { getApiKeys, createApiKey, getKeysLastUsedAt } from "@/lib/db/index.js";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 
 export const dynamic = "force-dynamic";
@@ -12,17 +12,24 @@ export async function GET(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   }
 
-  const keys = (await getApiKeys())
-    .filter((key) => key.userId === session.userId)
-    .map((key) => ({
-      id: key.id,
-      name: key.name,
-      keyPrefix: key.keyPrefix,
-      isActive: key.isActive,
-      createdAt: key.createdAt,
-      groupId: key.groupId ?? null,
-      // Never the full secret: it is shown once, at creation.
-    }));
+  const owned = (await getApiKeys()).filter((key) => key.userId === session.userId);
+  // Best effort: a failed lookup leaves "last used" blank instead of failing the list.
+  let lastUsed = {};
+  try {
+    lastUsed = await getKeysLastUsedAt(owned);
+  } catch {
+    lastUsed = {};
+  }
+  const keys = owned.map((key) => ({
+    id: key.id,
+    name: key.name,
+    keyPrefix: key.keyPrefix,
+    isActive: key.isActive,
+    createdAt: key.createdAt,
+    lastUsedAt: lastUsed[key.id] ?? null,
+    groupId: key.groupId ?? null,
+    // Never the full secret: it is shown once, at creation.
+  }));
 
   return NextResponse.json({ keys }, { headers: NO_STORE });
 }

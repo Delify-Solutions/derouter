@@ -1064,6 +1064,32 @@ export async function getRecentLogs(limit = 200) {
 // (Tok/s = LLM generation speed = output tokens/sec. Input tokens are the
 //  prompt sent in, not generated, so they're excluded. Thresholds: <10 slow,
 //  20-40 normal, 80+ instant.)
+/**
+ * When each key last made a request, for the customer key list.
+ *
+ * A key's history is split across two row shapes (legacy rows carry the raw key
+ * in `apiKey`, rows written since migration 005 carry `apiKeyId`), so both are
+ * read; each MAX() is answered from its (column, timestamp DESC) index. Rows are
+ * pruned after LOG_RETENTION_DAYS, so a key idle for longer reads as never used.
+ *
+ * @param {Array<{id: string, key?: string|null}>} keys
+ * @returns {Promise<Record<string, string|null>>} key id -> ISO timestamp or null
+ */
+export async function getKeysLastUsedAt(keys = []) {
+  const out = {};
+  if (!Array.isArray(keys) || keys.length === 0) return out;
+  const db = await getAdapter();
+  for (const k of keys) {
+    if (!k?.id) continue;
+    const byId = db.get(`SELECT MAX(timestamp) AS ts FROM usageHistory WHERE apiKeyId = ?`, [k.id])?.ts || null;
+    const byKey = k.key
+      ? db.get(`SELECT MAX(timestamp) AS ts FROM usageHistory WHERE apiKey = ?`, [k.key])?.ts || null
+      : null;
+    out[k.id] = byId && byKey ? (byId > byKey ? byId : byKey) : byId || byKey;
+  }
+  return out;
+}
+
 export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
   if (!apiKey) return { items: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 }, peakTpm: 0, peakRpm: 0, peakTokS: 0 };
   const db = await getAdapter();
