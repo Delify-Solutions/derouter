@@ -152,6 +152,22 @@ export async function getErrorLog(id) {
   return { ...rest, stream: !!rest.stream, data: parseJson(data, {}) };
 }
 
+/**
+ * Full entries (the data blob included) matching the list filters, newest first,
+ * for the "download what is filtered" export. Capped at 500 so one click cannot
+ * build an unbounded file.
+ */
+export async function exportErrorLogs(filter = {}) {
+  const db = await getAdapter();
+  const limit = Math.min(500, Math.max(1, Math.trunc(Number(filter.limit)) || 100));
+  const { sql, params } = where(filter);
+  const rows = db.all(
+    `SELECT ${LIST_COLUMNS}, data FROM errorLogs ${sql} ORDER BY timestamp DESC, id DESC LIMIT ?`,
+    [...params, limit],
+  );
+  return rows.map(({ data, ...rest }) => ({ ...rest, stream: !!rest.stream, data: parseJson(data, {}) }));
+}
+
 /** Counts per source and per status class since `since` (ISO), for the page summary. */
 export async function errorLogSummary(since) {
   const db = await getAdapter();
