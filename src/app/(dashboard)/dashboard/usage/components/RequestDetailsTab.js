@@ -10,6 +10,96 @@ import { maskKeyFull } from "@/shared/utils/apiKey";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
 
+/**
+ * Who made the request: the key owner's e-mail (or "Key admin"), then the key's
+ * name and its masked value. Clicking the e-mail filters the table to that user.
+ */
+function KeyOwner({ apiKey, info, onPickUser = null, compact = true }) {
+  if (!apiKey) return <span className="text-text-muted">—</span>;
+  const masked = maskKeyFull(apiKey);
+  const owner = info?.kind === "user"
+    ? (info.email || info.userId)
+    : info?.kind === "admin" ? "Key admin" : "Key đã xóa / không rõ";
+  return (
+    <span className={`flex min-w-0 flex-col ${compact ? "gap-0.5" : "gap-1"}`}>
+      {info?.kind === "user" && onPickUser ? (
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onPickUser(info); }}
+          title={`Chỉ xem request của ${owner}`}
+          className="min-w-0 truncate text-left text-sm text-text-main hover:underline"
+        >
+          {owner}
+        </button>
+      ) : (
+        <span className={`min-w-0 truncate text-sm ${info?.kind === "user" ? "text-text-main" : "text-text-muted"}`} title={owner}>{owner}</span>
+      )}
+      <span className="min-w-0 truncate font-mono text-xs text-text-muted" title={`${info?.name ? `${info.name} — ` : ""}${masked}`}>
+        {info?.name ? `${info.name} · ` : ""}{masked}
+      </span>
+    </span>
+  );
+}
+
+/** Search customers by e-mail; picking one filters the table to all of their keys. */
+function UserFilter({ value, onChange }) {
+  const [query, setQuery] = useState(value?.email || "");
+  const [options, setOptions] = useState([]);
+  useEffect(() => { setQuery(value?.email || ""); }, [value?.email]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2 || q === value?.email) { setOptions([]); return undefined; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/users?q=${encodeURIComponent(q)}&pageSize=10`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        setOptions(Array.isArray(data.users) ? data.users : []);
+      } catch {
+        setOptions([]);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query, value?.email]);
+
+  const pick = (text) => {
+    setQuery(text);
+    const match = options.find((u) => u.email === text);
+    if (match) onChange({ id: match.id, email: match.email });
+    if (!text) onChange(null);
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <label htmlFor="user-filter" className="text-sm font-medium text-text-main">Người dùng</label>
+      <div className="flex min-w-0 gap-2">
+        <input
+          id="user-filter"
+          type="search"
+          list="user-filter-options"
+          value={query}
+          onChange={(event) => pick(event.target.value)}
+          placeholder="Gõ email để lọc mọi key của user"
+          autoComplete="off"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-black/10 bg-surface px-3 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-white/10"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => { setQuery(""); onChange(null); }}
+            aria-label="Bỏ lọc người dùng"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-black/10 text-text-muted hover:text-text-main dark:border-white/10"
+          >
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>
+          </button>
+        )}
+      </div>
+      <datalist id="user-filter-options">
+        {options.map((u) => <option key={u.id} value={u.email}>{u.displayName || u.groupName || ""}</option>)}
+      </datalist>
+    </div>
+  );
+}
+
 let providerNameCache = null;
 let providerNodesCache = null;
 
@@ -150,6 +240,8 @@ export default function RequestDetailsTab() {
   const [filters, setFilters] = useState({
     provider: "",
     apiKey: "",
+    // { id, email } of the customer whose keys to show, or null.
+    user: null,
     status: "",
     startDate: "",
     endDate: ""
@@ -191,6 +283,7 @@ export default function RequestDetailsTab() {
       });
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.apiKey) params.append("apiKey", filters.apiKey);
+      if (filters.user?.id) params.append("userId", filters.user.id);
       if (filters.status) params.append("status", filters.status);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
@@ -231,7 +324,7 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", apiKey: "", status: "", startDate: "", endDate: "" });
+    setFilters({ provider: "", apiKey: "", user: null, status: "", startDate: "", endDate: "" });
     setShowRaw(false);
   };
 
@@ -281,8 +374,13 @@ export default function RequestDetailsTab() {
             </select>
           </div>
 
+          <UserFilter
+            value={filters.user}
+            onChange={(user) => { setFilters((f) => ({ ...f, user })); setPagination((p) => ({ ...p, page: 1 })); }}
+          />
+
           <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="key-filter" className="text-sm font-medium text-text-main">Key</label>
+            <label htmlFor="key-filter" className="text-sm font-medium text-text-main">Key admin</label>
             <select
               id="key-filter"
               value={filters.apiKey}
@@ -435,7 +533,7 @@ export default function RequestDetailsTab() {
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Key</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Người dùng / Key</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Status</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
@@ -479,8 +577,12 @@ export default function RequestDetailsTab() {
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
-                    <td className="max-w-[200px] truncate p-4 text-xs text-text-muted font-mono" title={detail.apiKey || ""}>
-                      {detail.apiKey ? maskKeyFull(detail.apiKey) : "—"}
+                    <td className="max-w-[240px] p-4">
+                      <KeyOwner
+                        apiKey={detail.apiKey}
+                        info={detail.keyInfo}
+                        onPickUser={(info) => { setFilters((f) => ({ ...f, user: { id: info.userId, email: info.email } })); setPagination((p) => ({ ...p, page: 1 })); }}
+                      />
                     </td>
                     <td className="p-4 text-sm">
                       <div className="flex flex-col gap-1">
@@ -577,8 +679,8 @@ export default function RequestDetailsTab() {
                  <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
                </div>
               <div>
-                <span className="text-text-muted">Key:</span>{" "}
-                <span className="text-text-main font-mono">{selectedDetail.apiKey ? maskKeyFull(selectedDetail.apiKey) : "—"}</span>
+                <span className="text-text-muted">Người dùng / Key:</span>{" "}
+                <span className="inline-flex max-w-full align-top"><KeyOwner apiKey={selectedDetail.apiKey} info={selectedDetail.keyInfo} compact={false} /></span>
               </div>
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
