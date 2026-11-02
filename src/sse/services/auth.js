@@ -409,3 +409,20 @@ export async function enforceKeyAccess(apiKey, model, { clientIp = null } = {}) 
 
   return null;
 }
+/**
+ * Refuse a customer key on a model with no token price (it would be billed $0).
+ * Admin and local keys pass. Returns an error Response, or null.
+ */
+export async function refuseUnpricedModelResponse(apiKey, { provider, model, requestedModel = null, clientIp = null, logDenial = true } = {}) {
+  if (!apiKey) return null;
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const { resolvePrice } = await import("@/lib/db/repos/pricingRepo.js");
+  const { refuseUnpricedModel } = await import("@/lib/billing/unpricedModels.js");
+  const denial = await refuseUnpricedModel(await getAdapter(), { apiKey, provider, model, requestedModel, resolvePrice });
+  if (!denial) return null;
+  const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
+  if (logDenial) {
+    await logPlatformDenial({ apiKey, model: requestedModel || `${provider}/${model}`, status: denial.status, message: denial.message, clientIp });
+  }
+  return platformErrorResponse(denial);
+}

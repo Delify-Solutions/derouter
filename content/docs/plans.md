@@ -57,6 +57,7 @@ Gói còn có thể giới hạn số request mỗi phút (RPM) và số token m
 | Không còn gói nào có credit | 402 `insufficient_quota` |
 | Mọi gói còn credit đều đang chạm hạn mức khung giờ | 429 `plan_limit`, kèm `Retry-After` (giây) và `resetAt` (giờ UTC) |
 | Vượt RPM hoặc TPM của gói | 429 `rate_limit`, `Retry-After: 60` |
+| Quá nhiều request chạy cùng lúc trên tài khoản (mặc định tối đa 10) | 429 `concurrency_limit`, `Retry-After: 5` |
 
 Với `plan_limit`, `Retry-After` và `resetAt` trỏ tới thời điểm sớm nhất mà một gói mở lại. Thông báo tiếng Việt trong `message` nêu thời gian chờ còn lại. Định dạng đầy đủ của các lỗi này nằm ở [Bắt đầu nhanh](/docs/quickstart).
 
