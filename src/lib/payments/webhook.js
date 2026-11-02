@@ -144,6 +144,13 @@ export async function handleSepayWebhook(request, { providers, db, settings, now
     }
   }
 
+  // The customer hears about their own payment (spec telegram-notify).
+  if (outcome?.outcome === "matched" && outcome.orderId) {
+    import("../notify/customerTelegram.js")
+      .then(({ notifyOrderApproved }) => notifyOrderApproved(outcome.orderId))
+      .catch(() => {});
+  }
+
   // 6. Always 200 for an authenticated request, so SePay does not retry.
   return { status: 200, body: { success: true }, outcome: outcome?.outcome ?? null };
 }

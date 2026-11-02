@@ -5,6 +5,9 @@ import { getUserByEmailWithPassword } from "@/lib/localDb";
 import { startUserSession } from "@/lib/auth/userSession";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { getAdapter } from "@/lib/db/driver.js";
+import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
+import { fireAndForget, isNewLoginIpSync, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +92,18 @@ export async function POST(request) {
   }
 
   recordSuccess(ip);
+  // Checked before this login is recorded, or the IP would always look known.
+  const loggedIp = getRequestIp(request);
+  let newIp = false;
+  try {
+    newIp = isNewLoginIpSync(await getAdapter(), user.id, loggedIp);
+  } catch {
+    newIp = false;
+  }
   await recordActivity(request, { userId: user.id, action: "login" });
+  if (newIp) {
+    fireAndForget(notifyCustomer(user.id, "security", messages.newLoginIp({ ip: loggedIp, userAgent: getRequestUserAgent(request) })));
+  }
 
   // Persists the session row as well, so logout and password reset can revoke it
   // and the account API can require a live row rather than a bare signature.

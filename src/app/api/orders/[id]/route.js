@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getOrderById, approveOrder, refundOrder, updateOrderStatus } from "@/lib/db/repos/billingRepo.js";
 import { getAdminIdentity } from "@/lib/auth/adminIdentity";
+import { fireAndForget, notifyOrderApproved } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -53,6 +54,7 @@ export async function PATCH(request, { params }) {
         return NextResponse.json({ order: result.order, alreadyApproved: true }, { headers: NO_STORE });
       }
       if (adminNote) await updateOrderStatus(id, { status: result.order.status, adminNote });
+      fireAndForget(notifyOrderApproved(id));
       return NextResponse.json(
         {
           order: adminNote ? await getOrderById(id) : result.order,

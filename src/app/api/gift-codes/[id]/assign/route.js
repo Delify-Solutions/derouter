@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assignGiftCode, getGiftCodeById } from "@/lib/db/repos/giftRepo.js";
 import { getAdminIdentity } from "@/lib/auth/adminIdentity";
+import { fireAndForget, notifyGiftAssignments } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -42,6 +43,7 @@ export async function POST(request, { params }) {
       const error = result.reason === "not_found" ? "Không tìm thấy mã quà tặng" : "Chọn ít nhất một tài khoản";
       return NextResponse.json({ error }, { status, headers: NO_STORE });
     }
+    fireAndForget(notifyGiftAssignments(result.results));
     return NextResponse.json(
       { results: result.results, code: await getGiftCodeById(id) },
       { headers: NO_STORE }

@@ -5,6 +5,7 @@ import { verifyInitData } from "@/lib/telegram/initData.js";
 import { consumeLinkTokenSync, LINK_ERROR_TEXT, maskEmail } from "@/lib/db/repos/telegramLinkRepo.js";
 import { loadTelegramLinkConfig, NOT_CONFIGURED_TEXT } from "@/lib/telegram/config.js";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,9 @@ export async function POST(request) {
     action: "telegram_link",
     details: { telegramUserId: verified.user.id, telegramUsername: verified.user.username },
   });
+  // Confirms in the chat that notifications reach this Telegram; a refusal marks
+  // the account so the web card can ask the customer to open the bot.
+  fireAndForget(notifyCustomer(result.userId, "security", messages.linked(), { force: true }));
   return NextResponse.json(
     { ok: true, email: maskEmail(result.email), telegramUsername: verified.user.username },
     { headers: NO_STORE }

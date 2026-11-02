@@ -95,7 +95,7 @@ test("a token links its account once and stores only its hash", () => {
   assert.equal(first.userId, "u1");
   assert.deepEqual(
     { ...link.getTelegramLinkSync(db, "u1"), linkedAt: null },
-    { linked: true, telegramUserId: "42", telegramUsername: "alice", linkedAt: null }
+    { linked: true, telegramUserId: "42", telegramUsername: "alice", linkedAt: null, notifyPrefs: null, dmBlockedAt: null }
   );
 
   assert.equal(link.consumeLinkTokenSync(db, token, { id: "42" }).reason, "invalid_token");

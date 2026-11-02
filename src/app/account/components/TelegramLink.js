@@ -113,7 +113,133 @@ export function useTelegramLink({ onLinked } = {}) {
     }
   }, [refresh]);
 
-  return { status, pending, busy, error, start, cancel, unlink };
+  return { status, setStatus, pending, busy, error, start, cancel, unlink };
+}
+
+// Customer-facing groups (spec telegram-notify). Security messages are always on.
+const NOTIFY_OPTIONS = [
+  { key: "billing", label: "Thanh toán & gói", hint: "Đơn được duyệt, gói được kích hoạt, nhận quà." },
+  { key: "expiry", label: "Gói sắp hết", hint: "Trước khi gói hết hạn và khi credit còn dưới 10%." },
+  { key: "announcements", label: "Thông báo từ admin", hint: "Khuyến mãi, bảo trì, tin chung." },
+];
+
+/** Notification switches, the test button and the "bot cannot reach you" warning. */
+function NotifySettings({ status, setStatus }) {
+  const [saving, setSaving] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const prefs = status.notifyPrefs || {};
+
+  const toggle = async (key, value) => {
+    setError("");
+    setNotice("");
+    setSaving(key);
+    try {
+      const res = await fetch("/api/account/telegram", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notifyPrefs: { [key]: value } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "save");
+      setStatus(data);
+    } catch {
+      setError("Không lưu được tuỳ chọn. Thử lại.");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const sendTest = async () => {
+    setError("");
+    setNotice("");
+    setTesting(true);
+    try {
+      const res = await fetch("/api/account/telegram/test", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setNotice("Đã gửi tin nhắn thử. Kiểm tra Telegram của bạn.");
+        setStatus((prev) => (prev ? { ...prev, dmBlocked: false } : prev));
+      } else {
+        setError(data.error || "Không gửi được tin nhắn thử.");
+        if (data.code === "blocked") setStatus((prev) => (prev ? { ...prev, dmBlocked: true } : prev));
+      }
+    } catch {
+      setError("Không kết nối được máy chủ. Thử lại.");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const botUrl = status.botUsername ? `https://t.me/${status.botUsername}?start=notify` : null;
+
+  return (
+    <div className="flex flex-col gap-4 border-t border-border pt-4">
+      <div>
+        <p className="text-sm font-medium text-text-main">Thông báo qua Telegram</p>
+        <p className="mt-1 text-sm text-text-muted">
+          Tin bảo mật (đăng nhập từ IP mới, đổi mật khẩu, tạo API key, khoá tài khoản) luôn được gửi.
+        </p>
+      </div>
+      {status.dmBlocked && (
+        <div role="alert" className="flex flex-col gap-3 border border-amber-500/40 bg-amber-500/5 p-4">
+          <p className="flex items-start gap-2 text-sm text-text-main">
+            <span className="material-symbols-outlined text-[16px] mt-0.5 text-amber-700 dark:text-amber-400" aria-hidden="true">warning</span>
+            <span>
+              Bot chưa nhắn tin được cho bạn, nên bạn sẽ không nhận được thông báo. Mở bot, bấm
+              <b> Start</b> (Bắt đầu), rồi bấm &quot;Gửi tin thử&quot;.
+            </span>
+          </p>
+          {botUrl && (
+            <div>
+              <a href={botUrl} target="_blank" rel="noopener noreferrer" className={buttonClass({ tone: "solid" })}>
+                Mở bot Telegram
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+      <ul className="flex flex-col divide-y divide-border border border-border">
+        {NOTIFY_OPTIONS.map((option) => {
+          const id = `tg-notify-${option.key}`;
+          const checked = prefs[option.key] !== false;
+          return (
+            <li key={option.key} className="flex items-start gap-3 p-3">
+              <input
+                id={id}
+                type="checkbox"
+                className="mt-0.5 size-4 shrink-0 accent-brand-500"
+                checked={checked}
+                disabled={saving === option.key}
+                onChange={(e) => toggle(option.key, e.target.checked)}
+              />
+              <label htmlFor={id} className="min-w-0 cursor-pointer">
+                <span className="block text-sm text-text-main">{option.label}</span>
+                <span className="block text-xs text-text-muted">{option.hint}</span>
+              </label>
+              <span className="ml-auto shrink-0 font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                {checked ? "Bật" : "Tắt"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div>
+        <ActionButton type="button" loading={testing} onClick={sendTest}>
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">send</span>
+          Gửi tin thử
+        </ActionButton>
+      </div>
+      {notice && (
+        <p role="status" className="flex items-start gap-2 text-sm text-text-main">
+          <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">check_circle</span>
+          <span>{notice}</span>
+        </p>
+      )}
+      <ErrorLine message={error} />
+    </div>
+  );
 }
 
 function ErrorLine({ message }) {
@@ -172,7 +298,7 @@ export function TelegramLinkPrompt({ onLinked }) {
 
 /** Telegram row on the account overview: state, link and unlink. Hidden until configured. */
 export function TelegramLinkCard({ className = "" }) {
-  const { status, pending, busy, error, start, cancel, unlink } = useTelegramLink();
+  const { status, setStatus, pending, busy, error, start, cancel, unlink } = useTelegramLink();
   if (!status || !status.configured) return null;
   return (
     <div className={`flex flex-col gap-4 p-6 ${className}`}>
@@ -182,7 +308,7 @@ export function TelegramLinkCard({ className = "" }) {
           <p className="mt-1 text-sm text-text-muted">
             {status.linked
               ? `Đã liên kết${status.telegramUsername ? ` với @${status.telegramUsername}` : ""}.`
-              : "Liên kết Telegram để nhận ưu đãi dành cho tài khoản mới."}
+              : "Liên kết Telegram để nhận ưu đãi dành cho tài khoản mới và thông báo về tài khoản."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -203,6 +329,7 @@ export function TelegramLinkCard({ className = "" }) {
       </div>
       {pending && !status.linked && <PendingBlock pending={pending} cancel={cancel} />}
       <ErrorLine message={error} />
+      {status.linked && <NotifySettings status={status} setStatus={setStatus} />}
     </div>
   );
 }

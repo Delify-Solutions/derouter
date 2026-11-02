@@ -132,6 +132,12 @@ async function runHeavyStartup() {
   import("@/lib/payments/poller.js")
     .then(({ startPaymentPoller }) => startPaymentPoller())
     .catch((e) => console.error("[PaymentPoller] start failed:", e.message));
+
+  // Telegram reminders to customers (plan expiring, credit low). Idempotent,
+  // skipped during a build; DISABLE_TELEGRAM_REMINDERS turns it off.
+  import("@/lib/notify/planReminders.js")
+    .then(({ startTelegramReminders }) => startTelegramReminders())
+    .catch((e) => console.error("[TelegramReminders] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

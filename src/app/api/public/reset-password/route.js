@@ -8,6 +8,7 @@ import {
 } from "@/lib/localDb";
 import { RESET_PURPOSE, validatePassword } from "@/lib/users/register";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -56,6 +57,7 @@ export async function POST(request) {
   // a compromised password, so the attacker's cookie must die with it.
   await revokeAllUserSessions(user.id);
   await recordActivity(request, { userId: user.id, action: "password_reset" });
+  fireAndForget(notifyCustomer(user.id, "security", messages.passwordChanged({ reset: true })));
 
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
