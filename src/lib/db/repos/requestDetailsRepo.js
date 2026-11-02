@@ -173,6 +173,8 @@ export async function getRequestDetails(filter = {}) {
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.apiKey) { conds.push("apiKey = ?"); params.push(filter.apiKey); }
+  // Every key a customer owns (spec admin-user-management "Request details show the key owner").
+  if (filter.userId) { conds.push("apiKey IN (SELECT key FROM apiKeys WHERE userId = ?)"); params.push(filter.userId); }
   // Status filter: empty/full status value → exact match (e.g. "429"); a single
   // leading digit ("2","4","5") → prefix match so selecting "4xx" shows every
   // 4xx row. Non-numeric statuses ("error","ok") fall through to exact match.

@@ -267,3 +267,39 @@ export async function ensureDefaultAdminKey(machineId) {
   })();
   return ensuring;
 }
+
+/**
+ * Who a set of raw keys belongs to, for admin screens that store the raw key on a
+ * row (request details): `{ [rawKey]: { keyId, name, kind, userId, email, displayName } }`.
+ * `kind` is "user" for a customer key, "admin" for a key with no owner. A key that
+ * no longer exists is absent from the map. Looked up by the raw key and by its
+ * hash, so keys migrated to hash-only lookup still resolve.
+ */
+export async function describeKeysByRaw(rawKeys = []) {
+  const keys = [...new Set((rawKeys || []).filter((k) => typeof k === "string" && k))].slice(0, 500);
+  if (keys.length === 0) return {};
+  const db = await getAdapter();
+  const hashes = keys.map(hashApiKey);
+  const byHash = new Map(keys.map((k, i) => [hashes[i], k]));
+  const marks = keys.map(() => "?").join(", ");
+  const rows = db.all(
+    `SELECT k.id, k.key, k.keyHash, k.name, k.userId, u.email, u.displayName
+       FROM apiKeys k LEFT JOIN users u ON u.id = k.userId
+      WHERE k.key IN (${marks}) OR k.keyHash IN (${marks})`,
+    [...keys, ...hashes]
+  );
+  const out = {};
+  for (const row of rows) {
+    const raw = keys.includes(row.key) ? row.key : byHash.get(row.keyHash);
+    if (!raw) continue;
+    out[raw] = {
+      keyId: row.id,
+      name: row.name ?? null,
+      kind: row.userId ? "user" : "admin",
+      userId: row.userId ?? null,
+      email: row.email ?? null,
+      displayName: row.displayName ?? null,
+    };
+  }
+  return out;
+}

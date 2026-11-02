@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestDetails, clearAllRequestDetails } from "@/lib/usageDb";
+import { describeKeysByRaw } from "@/lib/db/repos/apiKeysRepo.js";
 
 /**
  * GET /api/usage/request-details
@@ -17,6 +18,8 @@ export async function GET(request) {
     const model = searchParams.get("model");
     const connectionId = searchParams.get("connectionId");
     const apiKey = searchParams.get("apiKey");
+    // Every key of one customer.
+    const userId = searchParams.get("userId");
     const status = searchParams.get("status");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
@@ -48,6 +51,7 @@ export async function GET(request) {
     if (model) filter.model = model;
     if (connectionId) filter.connectionId = connectionId;
     if (apiKey) filter.apiKey = apiKey;
+    if (userId) filter.userId = userId;
     if (status) filter.status = status;
     if (startDate) filter.startDate = startDate;
     if (endDate) filter.endDate = endDate;
@@ -70,7 +74,15 @@ export async function GET(request) {
       return redacted;
     });
 
-    return NextResponse.json({ ...result, details: redactedDetails });
+    // Name the key and its owner on every row, so the admin sees WHO made the
+    // request, not just a masked key.
+    const owners = await describeKeysByRaw(redactedDetails.map((d) => d.apiKey));
+    const details = redactedDetails.map((d) => ({
+      ...d,
+      keyInfo: d.apiKey ? owners[d.apiKey] ?? { kind: "unknown" } : null,
+    }));
+
+    return NextResponse.json({ ...result, details });
   } catch (error) {
     console.error("[API] Failed to get request details:", error);
     return NextResponse.json(
