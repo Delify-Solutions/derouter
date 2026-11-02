@@ -1031,9 +1031,7 @@ export default function UsageClient({ hasUserSession = false }) {
                           </button>
                         </div>
                         <RawBlock title="Client Request (Input)" data={detail.request} />
-                        {detail.providerRequest && <RawBlock title="Provider Request" data={detail.providerRequest} />}
-                        {detail.providerResponse && <RawBlock title="Provider Response" data={detail.providerResponse} />}
-                        {detail.response && detail.response !== detail.providerResponse && <RawBlock title="Client Response" data={detail.response} />}
+                        {detail.response && <RawBlock title="Client Response" data={detail.response} />}
                       </div>
                     ) : (
                       <button
