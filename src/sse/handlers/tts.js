@@ -12,6 +12,7 @@ import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
 const CREDENTIALED_PROVIDERS = new Set(
@@ -47,7 +48,7 @@ async function handleTtsRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

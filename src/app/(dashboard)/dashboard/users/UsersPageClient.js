@@ -208,7 +208,7 @@ export default function UsersPageClient() {
             label="Tìm kiếm"
             value={q}
             onChange={(event) => setQ(event.target.value)}
-            placeholder="Email hoặc tên hiển thị"
+            placeholder="Email, tên hiển thị hoặc IP"
           />
         </div>
         <div className="flex flex-col gap-1">

@@ -16,6 +16,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 /**
  * Handle web fetch (URL extraction) request for the SSE/Next.js server.
@@ -65,7 +66,7 @@ async function handleFetchRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, providerInput);
+    const denied = await enforceKeyAccess(apiKey, providerInput, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

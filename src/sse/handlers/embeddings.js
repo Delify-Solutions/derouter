@@ -16,6 +16,7 @@ import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -70,7 +71,7 @@ async function handleEmbeddingsRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 
@@ -156,6 +157,7 @@ async function handleEmbeddingsRequest(request) {
           endpoint: url.pathname,
           tokens: usage,
           status: "success",
+          clientIp: getRequestIp(request),
           // Original client model (bare combo name when the request was for a combo);
           // used to resolve a combo-level price override before falling back to per-pool.
           requestedModel: modelStr && !modelStr.includes("/") ? modelStr : null,

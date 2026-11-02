@@ -14,6 +14,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 // Video generation is xAI-only today; requests without a provider prefix
 // (bare model id, or multipart bodies we deliberately don't parse) land here.
@@ -40,7 +41,7 @@ async function requireValidApiKey(request) {
   // Advanced key limits: RPM/TPM/expiry/budget (model allow-list checked later
   // once the model is parsed from the body).
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, null);
+    const denied = await enforceKeyAccess(apiKey, null, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
   return null;
@@ -114,7 +115,7 @@ async function handleVideoCreateRequest(request, action) {
   // Model allow-list for the key (RPM/TPM/expiry/budget already enforced above).
   const keyForModel = extractApiKey(request);
   if (keyForModel && provider && model) {
-    const denied = await enforceKeyAccess(keyForModel, `${provider}/${model}`);
+    const denied = await enforceKeyAccess(keyForModel, `${provider}/${model}`, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

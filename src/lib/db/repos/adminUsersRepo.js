@@ -7,6 +7,7 @@
 // 5 000 customers must not become 15 000 queries.
 import { getAdapter } from "../driver.js";
 import { nano } from "../../billing/ledger.js";
+import { looksLikeIp } from "./activityRepo.js";
 
 // Column names in the OUTER select (the CTEs already flattened the `u.` prefix), so
 // sorting refers to the derived names the query actually exposes.
@@ -50,7 +51,16 @@ export async function listUsersAdmin(query = {}) {
   const params = [];
 
   const q = typeof query.q === "string" ? query.q.trim() : "";
-  if (q) {
+  if (q && looksLikeIp(q)) {
+    // An IP finds the accounts seen on it, from web actions or their keys' API
+    // requests (spec activity-ip-log "Admin IP lookup"), as well as text matches.
+    where.push(`(LOWER(email) LIKE ? OR LOWER(COALESCE(displayName, '')) LIKE ?
+      OR id IN (SELECT al.userId FROM activityLog al WHERE al.ip = ?)
+      OR id IN (SELECT ak.userId FROM usageHistory uh JOIN apiKeys ak ON ak.id = uh.apiKeyId WHERE uh.clientIp = ?))`);
+    const like = `%${q.toLowerCase()}%`;
+    const ip = q.toLowerCase();
+    params.push(like, like, ip, ip);
+  } else if (q) {
     where.push(`(LOWER(email) LIKE ? OR LOWER(COALESCE(displayName, '')) LIKE ?)`);
     const like = `%${q.toLowerCase()}%`;
     params.push(like, like);

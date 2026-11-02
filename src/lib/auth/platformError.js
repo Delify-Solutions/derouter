@@ -132,7 +132,7 @@ export function planLimitMessage(resetAt) {
  * Fully defensive: logging must never be able to break the deny path, so every
  * failure (including a missing module on a partial install) is swallowed.
  */
-export async function logPlatformDenial({ apiKey, model, status, message, resetAt = null }) {
+export async function logPlatformDenial({ apiKey, model, status, message, resetAt = null, clientIp = null }) {
   try {
     const { saveRequestDetail } = await import("../usageDb.js");
     const { buildRequestDetail, saveUsageError } = await import("../../../open-sse/handlers/chatCore/requestDetail.js");
@@ -152,6 +152,7 @@ export async function logPlatformDenial({ apiKey, model, status, message, resetA
       requestedModel: model || null,
       status: statusText,
       errorSource: "platform",
+      clientIp,
     }).catch(() => {});
   } catch {
     /* usage logging must never break the deny path */

@@ -3,6 +3,7 @@ import { resolveAccountUser } from "@/lib/auth/userSession";
 import { getAdapter } from "@/lib/db/driver.js";
 import { reorderSync } from "@/lib/billing/planQueue.js";
 import { getQueueSync } from "@/lib/db/repos/accountPlansRepo.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -46,6 +47,7 @@ export async function PUT(request) {
       return NextResponse.json({ error: { code: result.code, message } }, { status: result.status, headers: NO_STORE });
     }
 
+    await recordActivity(request, { userId: session.userId, action: "plan_reorder" });
     return NextResponse.json({ queue: getQueueSync(db, session.userId) }, { headers: NO_STORE });
   } catch (error) {
     console.error("[account/plans/order] failed:", error?.message || error);

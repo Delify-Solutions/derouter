@@ -12,6 +12,7 @@ import {
   sendVerificationEmail,
   validatePassword,
 } from "@/lib/users/register";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,8 @@ export async function POST(request) {
     console.error("[public/register] create failed:", message);
     return fail("Could not create the account", 500);
   }
+
+  await recordActivity(request, { userId: user.id, action: "register" });
 
   const needsVerification = user.status === "unverified";
   if (needsVerification) {

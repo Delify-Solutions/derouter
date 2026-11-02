@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveAccountUser } from "@/lib/auth/userSession";
 import { getOwnedKeySecret } from "@/lib/account/keySecret";
 import { hitLimit } from "@/lib/auth/actionLimiter";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store", Pragma: "no-cache" };
@@ -36,5 +37,7 @@ export async function POST(request, { params }) {
   if (!secret) {
     return NextResponse.json({ error: "Key not found" }, { status: 404, headers: NO_STORE });
   }
+  // The secret itself is never logged, only that it was shown.
+  await recordActivity(request, { userId: session.userId, action: "key_reveal", details: { keyId: id } });
   return NextResponse.json({ secret }, { headers: NO_STORE });
 }

@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/localDb";
 import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS } from "open-sse/config/runtimeConfig.js";
 import { initTranslators } from "open-sse/translator/index.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 let initialized = false;
 const GEMINI_NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -241,7 +242,7 @@ const GEMINI_NATIVE_METER_LIMIT_CHARS = 64 * 1024 * 1024;
  * `usageMetadata` is recorded; a client that disconnects early records nothing,
  * as on the translator path.
  */
-function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint }) {
+function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint, clientIp = null }) {
   if (!body || !apiKey) return body;
 
   const decoder = new TextDecoder();
@@ -271,6 +272,7 @@ function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint }
         endpoint,
         tokens,
         status: "success",
+        clientIp,
       }).catch(() => {});
     },
   }));
@@ -290,7 +292,7 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   // suspended, unverified or out-of-credit key could still spend provider quota.
   const clientApiKey = extractGeminiClientApiKey(request);
   if (clientApiKey) {
-    const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`);
+    const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
   const excludeConnectionIds = new Set();
@@ -379,6 +381,7 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
           connectionId: credentials.connectionId,
           modelId,
           endpoint: new URL(request.url).pathname,
+          clientIp: getRequestIp(request),
         }),
         {
           status: upstreamResponse.status,

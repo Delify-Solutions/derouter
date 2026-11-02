@@ -1,4 +1,5 @@
 import "open-sse/index.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 import {
   getProviderCredentials,
@@ -56,6 +57,9 @@ async function handleChatRequest(request, clientRawRequest = null) {
       headers: Object.fromEntries(request.headers.entries())
     };
   }
+  // The usage writers deep in the engine only see clientRawRequest, so the trusted
+  // client IP travels on it (spec activity-ip-log, design D3).
+  if (clientRawRequest.clientIp === undefined) clientRawRequest.clientIp = getRequestIp(request);
   // Claude Code marks a 1M-context request as `<model>[1m]`; the marker matches
   // no combo, alias or provider/model pair, so it must not reach resolution.
   // The capability travels in the anthropic-beta header, forwarded as-is.
@@ -90,7 +94,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

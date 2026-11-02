@@ -92,7 +92,17 @@ export async function POST(request) {
   const path = isImage ? "/v1/images/generations" : "/v1/chat/completions";
   const inner = new Request(new URL(path, request.url), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${secret}`,
+      // Carry custom-server's client-IP stamp and its proof onto the inner request,
+      // so playground usage rows record the customer's IP (spec activity-ip-log).
+      ...Object.fromEntries(
+        ["x-dr-real-ip", "x-dr-peer-token"]
+          .map((name) => [name, request.headers.get(name)])
+          .filter(([, value]) => value)
+      ),
+    },
     body: JSON.stringify(payload),
     signal: request.signal,
   });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,14 @@ export async function POST(request) {
       redeemGiftCode(db, { userId: session.userId, code: body.code })
     );
 
+    const giftCode = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
     if (!result?.ok) {
+      // Refusals are kept too: repeated guessing or welcome-code farming shows up here.
+      await recordActivity(request, {
+        userId: session.userId,
+        action: "gift_refused",
+        details: { code: giftCode, reason: result?.reason || "not_found" },
+      });
       const mapped = FAILURE[result?.reason] || FAILURE.not_found;
       return NextResponse.json(
         { error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) },
@@ -71,6 +79,11 @@ export async function POST(request) {
       );
     }
 
+    await recordActivity(request, {
+      userId: session.userId,
+      action: "gift_redeem",
+      details: { code: giftCode, userPlanId: result.userPlan?.id ?? null },
+    });
     return NextResponse.json({
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,

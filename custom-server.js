@@ -46,6 +46,41 @@ function startBackgroundTokenRefreshFromCustomServer() {
     });
 }
 
+// Opt-in (spec activity-ip-log, design D1): with TRUST_PRIVATE_PROXY=true a peer on
+// a private network may also assert the client address. That is what nginx on a
+// Docker host looks like (it reaches the container from the bridge gateway, e.g.
+// 172.17.0.1). Only enable it when that proxy OVERWRITES X-Real-IP /
+// X-Forwarded-For — otherwise a client's own header would pass through it — and
+// the published port is not reachable from outside except through the proxy.
+const TRUST_PRIVATE_PROXY = process.env.TRUST_PRIVATE_PROXY === "true";
+
+// A peer that may assert the client address through forwarding headers: a reverse
+// proxy on this host, or (opt-in) on a private network.
+function isTrustedProxyPeer(address, { allowPrivate = TRUST_PRIVATE_PROXY } = {}) {
+  let ip = String(address || "").toLowerCase();
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  if (ip === "::1" || ip.startsWith("127.")) return true;
+  if (!allowPrivate) return false;
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  }
+  // fc00::/7 unique-local and fe80::/10 link-local.
+  return /^f[cd][0-9a-f]{2}:/.test(ip) || /^fe[89ab][0-9a-f]:/.test(ip);
+}
+
+// The address the nearest trusted proxy saw: X-Real-IP (nginx sets it to
+// $remote_addr), else the LAST X-Forwarded-For hop — $proxy_add_x_forwarded_for
+// appends the real peer after whatever the client itself sent.
+function forwardedClientIp(xRealIp, xff) {
+  const real = String(xRealIp || "").trim();
+  if (real) return real;
+  const hops = String(xff || "").split(",").map((hop) => hop.trim()).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : "";
+}
+
 // Wrap Next standalone HTTP server: derive client IP from the TCP socket
 // (unspoofable) and strip client-supplied forwarding headers so downstream
 // rate-limiting keys on the real peer address instead of attacker-controlled XFF.
@@ -58,11 +93,10 @@ http.createServer = (...args) => {
     const xff = req.headers["x-forwarded-for"];
     const xRealIp = req.headers["x-real-ip"];
     const viaProxy = !!(xff || xRealIp);
-    const isLoopbackProxy = socketIp === "127.0.0.1" || socketIp === "::1" || socketIp === "::ffff:127.0.0.1";
-    // Trust forwarding headers only when the TCP peer is a local reverse proxy.
-    // Direct/public sockets remain keyed by the unspoofable peer address.
-    const proxyIp = xRealIp || (xff ? String(xff).split(",")[0].trim() : "");
-    const ip = isLoopbackProxy && proxyIp ? proxyIp : socketIp;
+    // Trust forwarding headers only when the TCP peer is a local or private-network
+    // reverse proxy. Public sockets remain keyed by the unspoofable peer address.
+    const proxyIp = forwardedClientIp(xRealIp, xff);
+    const ip = isTrustedProxyPeer(socketIp) && proxyIp ? proxyIp : socketIp;
     delete req.headers["x-dr-real-ip"];
     delete req.headers["x-forwarded-for"];
     delete req.headers["x-dr-via-proxy"];
@@ -124,6 +158,9 @@ http.createServer = (...args) => {
   };
   return server;
 };
+
+// Exposed for tests; the server itself only uses them inside the wrapper above.
+module.exports = { isTrustedProxyPeer, forwardedClientIp };
 
 if (require.main === module) {
   const standalone = path.join(__dirname, "server.js");

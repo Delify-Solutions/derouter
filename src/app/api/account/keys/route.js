@@ -4,6 +4,7 @@ import { getApiKeys, createApiKey, getKeysLastUsedAt } from "@/lib/db/index.js";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getAdapter } from "@/lib/db/driver.js";
 import { listBindablePlansSync, resolveKeyPlanInputSync } from "@/lib/db/repos/accountPlansRepo.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -85,6 +86,11 @@ export async function POST(request) {
   try {
     const machineId = await getConsistentMachineId();
     const apiKey = await createApiKey(name, machineId, { userId: session.userId, planId: binding.planId });
+    await recordActivity(request, {
+      userId: session.userId,
+      action: "key_create",
+      details: { keyId: apiKey.id, name: apiKey.name, planId: apiKey.planId ?? null },
+    });
     return NextResponse.json(
       {
         key: {

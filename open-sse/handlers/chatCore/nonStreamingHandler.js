@@ -408,7 +408,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   const usageLatencyMs = Date.now() - requestStartTime;
   const recordUsage = () => {
     appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: usageLatencyMs, silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: usageLatencyMs, silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: usageLatencyMs } }));
   };
   if (!deferUsage) {

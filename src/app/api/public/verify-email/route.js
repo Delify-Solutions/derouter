@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { consumeVerification, getUserById, updateUser } from "@/lib/localDb";
 import { VERIFICATION_PURPOSE } from "@/lib/users/register";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -31,5 +32,6 @@ export async function GET(request) {
     await updateUser(user.id, { status: "active" });
   }
 
+  await recordActivity(request, { userId: user.id, action: "email_verified" });
   return NextResponse.json({ ok: true, email: user.email }, { headers: NO_STORE });
 }
