@@ -23,7 +23,27 @@ export function timeOf(iso) {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // 24-hour clock, as Vietnamese customers read times ("13:08", not "01:08 PM").
+  return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
+/** `dd/mm/yyyy HH:MM` in the browser's local time. */
+export function dateTimeOf(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${dateOf(iso)} ${timeOf(iso)}`;
+}
+
+/** "27 ngày 3 giờ", "5 giờ 20 phút", "12 phút" — a remaining span, coarse to fine. */
+export function spanText(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 60_000) || 0);
+  const days = Math.floor(total / 1440);
+  const hours = Math.floor((total % 1440) / 60);
+  const minutes = total % 60;
+  if (days > 0) return hours > 0 ? `${days} ngày ${hours} giờ` : `${days} ngày`;
+  if (hours > 0) return minutes > 0 ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
+  return minutes > 0 ? `${minutes} phút` : "dưới 1 phút";
 }
 
 /** `dd/mm/yyyy` in the browser's local time. */

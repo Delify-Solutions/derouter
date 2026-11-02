@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CardSkeleton } from "@/shared/components";
 import { ActionButton, Page, Section, Stat } from "@/app/account/components/ui";
-import { PlanQueue } from "@/shared/components/billing";
+import { PlanQueue, RateNow } from "@/shared/components/billing";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import BuyPlans from "./BuyPlans";
 import MyOrders from "./MyOrders";
@@ -60,6 +60,7 @@ export default function PlansPageClient() {
         queue: Array.isArray(body.queue) ? body.queue : [],
         history: Array.isArray(body.history) ? body.history : [],
         plans: Array.isArray(body.plans) ? body.plans : [],
+        rate: body.rate ?? null,
       });
     } catch (e) {
       setLoadError(e.message || "Không tải được gói của bạn");
@@ -226,7 +227,7 @@ export default function PlansPageClient() {
         </div>
       )}
 
-      <div className={`grid gap-px border border-border bg-border ${data.debtNanoUsd > 0 ? "sm:grid-cols-2" : ""}`}>
+      <div className={`grid gap-px border border-border bg-border sm:grid-cols-2 ${data.debtNanoUsd > 0 ? "lg:grid-cols-3" : ""}`}>
         <div className="bg-surface p-6">
           <Stat
             label="Credit khả dụng"
@@ -235,6 +236,9 @@ export default function PlansPageClient() {
               ? "Có gói không giới hạn credit; chỉ các hạn mức của gói được áp dụng."
               : "Tổng credit còn lại của các gói chưa hết hạn."}
           />
+        </div>
+        <div className="min-w-0 bg-surface p-6">
+          {loading ? <p className="text-sm text-text-muted">…</p> : <RateNow rate={data.rate} />}
         </div>
         {data.debtNanoUsd > 0 && (
           <div className="bg-surface p-6">

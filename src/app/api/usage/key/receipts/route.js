@@ -11,6 +11,7 @@ import {
 import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { applyBpToPricing } from "@/lib/billing/discounts.js";
 import { nanoToUsd } from "@/shared/utils/money";
+import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,8 @@ function periodToRange(period) {
  *   summary:  { items: [{model, input, output, cacheRead, cacheCreation, requests, cost}],
  *               totals: {input, output, cacheRead, cacheCreation, requests, cost},
  *               peakTpm },
- *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM)
+ *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM); for a
+ *                                                            // customer key, over every key of the account
  *   history:  [{ timestamp, model, status, cost, input, output, tok,
  *                latencyMs,          // total time of the request in ms; null when not measured
  *                ttftMs,             // time to the first streamed chunk in ms; null for non-streams and older rows
@@ -97,7 +99,8 @@ export async function GET(request) {
 
     const [summary, rate, historyRaw, combos, comboPricing] = await Promise.all([
       getKeyUsageSummary(key, { startDate, endDate }),
-      getKeyRateUsage(key, 60_000),
+      // A customer is rate-limited per account (keyEnforcement), so count the account.
+      auth.key.userId ? getUserRateUsage(auth.key.userId, 60_000) : getKeyRateUsage(key, 60_000),
       getUsageHistory({ apiKey: key, startDate, endDate }),
       getCombos(),
       getComboPricing(),

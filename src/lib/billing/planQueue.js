@@ -73,6 +73,10 @@ function rowToEntry(row, windowsByPlan) {
     planId: row.planId ?? null,
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
+    // The plan's request/token rate, read live (never snapshotted): it applies
+    // while this purchase is the one paying. null = no limit.
+    rpm: Number(row.planRpm) > 0 ? Number(row.planRpm) : null,
+    tpm: Number(row.planTpm) > 0 ? Number(row.planTpm) : null,
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
@@ -103,7 +107,7 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
   const at = nowIsoArg || nowIso();
 
   const rows = db.all(
-    `SELECT up.*, p.code AS planCode, p.name AS planName
+    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm
        FROM userPlans up
        LEFT JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
