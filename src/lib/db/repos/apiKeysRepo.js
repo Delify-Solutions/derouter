@@ -41,6 +41,8 @@ function rowToKey(row) {
     // Tenant ownership + hash-based lookup metadata.
     userId: row.userId ?? null,
     keyPrefix: row.keyPrefix ?? keyPrefixOf(row.key),
+    // plans.id the key is pinned to; null = any plan of the owner.
+    planId: row.planId ?? null,
   };
 }
 
@@ -98,15 +100,17 @@ export async function createApiKey(name, machineId, options = {}) {
     userId: options.userId ?? null,
     keyPrefix: keyPrefixOf(result.key),
     keyHash: hashApiKey(result.key),
+    // Only a customer key can be pinned to a plan; an admin key has no plan queue.
+    planId: options.userId ? options.planId ?? null : null,
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix, planId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt,
       apiKey.groupId, apiKey.rpm, apiKey.tpm, apiKey.budgetUsd, apiKey.resetWindow,
       apiKey.expiresAt, stringifyJson(apiKey.allowedModels),
       apiKey.windowStartedAt, apiKey.windowCostUsd, apiKey.updatedAt,
-      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix,
+      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix, apiKey.planId,
     ]
   );
   return apiKey;
@@ -123,19 +127,21 @@ export async function updateApiKey(id, data) {
     ...data,
     groupId: null,
     allowedModels: data.allowedModels !== undefined ? data.allowedModels : current.allowedModels,
+    // Pinning only exists for customer keys.
+    planId: current.userId ? (data.planId !== undefined ? data.planId || null : current.planId) : null,
     updatedAt: new Date().toISOString(),
   };
   // Keep the hash/prefix derived columns in lockstep with the plaintext key.
   const keyHash = hashApiKey(merged.key);
   const keyPrefix = keyPrefixOf(merged.key);
   db.run(
-    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ?, keyHash = COALESCE(?, keyHash), keyPrefix = COALESCE(?, keyPrefix) WHERE id = ?`,
+    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ?, keyHash = COALESCE(?, keyHash), keyPrefix = COALESCE(?, keyPrefix), planId = ? WHERE id = ?`,
     [
       merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0,
       merged.groupId, merged.rpm, merged.tpm, merged.budgetUsd, merged.resetWindow,
       merged.expiresAt, stringifyJson(merged.allowedModels),
       merged.windowStartedAt, merged.windowCostUsd ?? 0, merged.updatedAt,
-      keyHash, keyPrefix, id,
+      keyHash, keyPrefix, merged.planId, id,
     ]
   );
   return merged;

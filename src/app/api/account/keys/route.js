@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { resolveAccountUser } from "@/lib/auth/userSession";
 import { getApiKeys, createApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { getAdapter } from "@/lib/db/driver.js";
+import { listBindablePlansSync, resolveKeyPlanInputSync } from "@/lib/db/repos/accountPlansRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -12,6 +14,15 @@ export async function GET(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   }
 
+  const db = await getAdapter();
+  const held = listBindablePlansSync(db, session.userId);
+  const heldIds = new Set(held.map((plan) => plan.id));
+  // A pinned plan may have lapsed since: its name still comes from the plans table
+  // so the row can say which plan the key waits for.
+  const pinnedNames = new Map(
+    db.all(`SELECT id, name FROM plans`).map((plan) => [plan.id, plan.name])
+  );
+
   const keys = (await getApiKeys())
     .filter((key) => key.userId === session.userId)
     .map((key) => ({
@@ -21,10 +32,19 @@ export async function GET(request) {
       isActive: key.isActive,
       createdAt: key.createdAt,
       groupId: key.groupId ?? null,
+      // null = the key may be paid by any plan; otherwise plans.id it is pinned to.
+      planId: key.planId ?? null,
+      planName: key.planId ? pinnedNames.get(key.planId) ?? null : null,
+      // False when the pinned plan has no live purchase: the key cannot pay until
+      // the plan is renewed or the key is moved.
+      planHeld: key.planId ? heldIds.has(key.planId) : true,
       // Never the full secret: it is shown once, at creation.
     }));
 
-  return NextResponse.json({ keys }, { headers: NO_STORE });
+  return NextResponse.json(
+    { keys, plans: held.map(({ id, name, code, rpm, tpm }) => ({ id, name, code, rpm, tpm })) },
+    { headers: NO_STORE }
+  );
 }
 
 export async function POST(request) {
@@ -48,9 +68,15 @@ export async function POST(request) {
     return NextResponse.json({ error: "Name is too long" }, { status: 400, headers: NO_STORE });
   }
 
+  const db = await getAdapter();
+  const binding = resolveKeyPlanInputSync(db, session.userId, body?.planId);
+  if (!binding.ok) {
+    return NextResponse.json({ error: binding.error }, { status: 400, headers: NO_STORE });
+  }
+
   try {
     const machineId = await getConsistentMachineId();
-    const apiKey = await createApiKey(name, machineId, { userId: session.userId });
+    const apiKey = await createApiKey(name, machineId, { userId: session.userId, planId: binding.planId });
     return NextResponse.json(
       {
         key: {
@@ -59,6 +85,7 @@ export async function POST(request) {
           keyPrefix: apiKey.keyPrefix,
           isActive: apiKey.isActive,
           createdAt: apiKey.createdAt,
+          planId: apiKey.planId ?? null,
         },
         // The only time the plaintext value ever leaves the server.
         secret: apiKey.key,

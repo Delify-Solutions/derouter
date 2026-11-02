@@ -113,11 +113,13 @@ function insertGrant(userId, nanoUsd, { expiresAt = inDays(30), planId = null, p
   );
 }
 
-function insertUsage(apiKeyId, { at = NOW(), prompt = 10, completion = 10 } = {}) {
+// `ratePlanId` = the plans.id whose allowance the request counted against; customer
+// RPM/TPM are counted per (user, plan), so a row without it counts toward no plan.
+function insertUsage(apiKeyId, { at = NOW(), prompt = 10, completion = 10, ratePlanId = null } = {}) {
   db.run(
-    `INSERT INTO usageHistory(timestamp, provider, model, apiKeyId, promptTokens, completionTokens, costNanoUsd, status, meta)
-     VALUES(?, 'test', 'model-a', ?, ?, ?, 0, 'ok', '{}')`,
-    [at, apiKeyId, prompt, completion]
+    `INSERT INTO usageHistory(timestamp, provider, model, apiKeyId, promptTokens, completionTokens, costNanoUsd, status, meta, ratePlanId)
+     VALUES(?, 'test', 'model-a', ?, ?, ?, 0, 'ok', '{}', ?)`,
+    [at, apiKeyId, prompt, completion, ratePlanId]
   );
 }
 
@@ -204,8 +206,8 @@ test("two keys share one RPM allowance, set by the paying plan", async () => {
   const secret2 = insertKey("k2", { userId: "u1" });
   insertGrant("u1", USD(10), { planId: "p10" });
 
-  for (let i = 0; i < 6; i += 1) insertUsage("k1", { at: secondsAgo(5) });
-  for (let i = 0; i < 4; i += 1) insertUsage("k2", { at: secondsAgo(5) });
+  for (let i = 0; i < 6; i += 1) insertUsage("k1", { at: secondsAgo(5), ratePlanId: "p10" });
+  for (let i = 0; i < 4; i += 1) insertUsage("k2", { at: secondsAgo(5), ratePlanId: "p10" });
 
   for (const secret of [secret1, secret2]) {
     const result = await enforceKeyLimits(secret, "model-a");
@@ -235,7 +237,7 @@ test("TPM is shared across keys and denies when the wait budget is zero", async 
   insertUser("u1", { groupId: "gtpm" });
   const secret1 = insertKey("k1", { userId: "u1" });
   insertGrant("u1", USD(10), { planId: "ptpm" });
-  insertUsage("k1", { prompt: 60, completion: 60 });
+  insertUsage("k1", { prompt: 60, completion: 60, ratePlanId: "ptpm" });
 
   const result = await enforceKeyLimits(secret1, "model-a");
   assert.equal(result.ok, false);
@@ -266,7 +268,7 @@ test("the rate comes from the plan at the head of the queue", async () => {
   const secret = insertKey("k1", { userId: "u1" });
   insertGrant("u1", USD(10), { planId: "slow", priority: 1 });
   insertGrant("u1", USD(10), { planId: "fast", priority: 2 });
-  insertUsage("k1", { at: secondsAgo(5) });
+  insertUsage("k1", { at: secondsAgo(5), ratePlanId: "slow" });
 
   const slowFirst = await enforceKeyLimits(secret, "model-a");
   assert.equal(slowFirst.ok, false, "slow (1 RPM) pays first and is already used once");
@@ -283,7 +285,7 @@ test("editing a plan's rpm applies to existing holders immediately", async () =>
   insertUser("u1", { groupId: "g" });
   const secret = insertKey("k1", { userId: "u1" });
   insertGrant("u1", USD(10), { planId: "p" });
-  insertUsage("k1", { at: secondsAgo(5) });
+  insertUsage("k1", { at: secondsAgo(5), ratePlanId: "p" });
 
   assert.equal((await enforceKeyLimits(secret, "model-a")).ok, false);
   db.run(`UPDATE plans SET rpm = 50 WHERE id = 'p'`);

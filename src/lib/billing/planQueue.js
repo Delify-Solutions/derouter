@@ -181,6 +181,31 @@ export function evaluatePlan(entry, nowMs) {
 }
 
 /**
+ * The part of a queue a request may use. A key pinned to a plan (`planId` = plans.id)
+ * sees only purchases of that plan, in their normal order; an unpinned key sees the
+ * whole queue. A pinned key never falls through to another plan: that is the point
+ * of pinning it.
+ */
+export function scopeQueue(queue, planId) {
+  return planId ? queue.filter((entry) => entry.planId === planId) : queue;
+}
+
+/**
+ * Which plan's RPM/TPM allowance a request counts against: the key's pinned plan,
+ * else the plan of the purchase that pays right now. Null when no plan is involved
+ * (credit without a plan, nothing able to pay), which means no rate limit applies.
+ * Allowances are per (user, plan) and shared by every key, so minting more keys
+ * never opens a second allowance.
+ */
+export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
+  if (keyPlanId) return keyPlanId;
+  const paying = admitSync(db, userId, nowIsoArg);
+  if (!paying.ok) return null;
+  const row = db.get(`SELECT planId FROM userPlans WHERE id = ?`, [paying.planId]);
+  return row?.planId ?? null;
+}
+
+/**
  * May a request run? (spec plan-queue-billing "Admission")
  *
  *   first eligible plan      → { ok: true, planId }
@@ -188,10 +213,10 @@ export function evaluatePlan(entry, nowMs) {
  *                              seconds until it
  *   nothing with credit      → 402 insufficient_quota
  */
-export function admitSync(db, userId, nowIsoArg = null) {
+export function admitSync(db, userId, nowIsoArg = null, { planId = null } = {}) {
   const at = nowIsoArg || nowIso();
   const nowMs = new Date(at).getTime();
-  const queue = listQueueSync(db, userId, at);
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
 
   let earliestReopenMs = null;
   let anyOnlyBlocked = false;
@@ -322,6 +347,7 @@ export function chargeSync(db, {
   requestKey,
   costNanoUsd = 0,
   nowIso: atArg = null,
+  planId = null,
 } = {}) {
   if (!db) throw new Error("chargeSync requires the db adapter");
   if (!userId) throw new Error("chargeSync requires a userId");
@@ -342,7 +368,9 @@ export function chargeSync(db, {
   const nowMs = new Date(at).getTime();
   // Fresh read: the queue is re-evaluated at charge time, never pinned at
   // admission (D4), so concurrent streams are bounded by the plan that can pay.
-  const queue = listQueueSync(db, userId, at);
+  // `planId` = the key's pinned plan: only purchases of that plan may pay, so a
+  // shortfall becomes debt rather than leaking onto another plan.
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
 
   const parts = [];
   let remaining = cost;

@@ -1,11 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Input, Modal } from "@/shared/components";
+import { Input, Modal, Select } from "@/shared/components";
 import { ActionButton, Empty, ListRow, Page, Section, Tag } from "@/app/account/components/ui";
 import CopyBlock from "@/app/account/components/CopyBlock";
 
 const NAME_MAX = 80;
+const ALL_PLANS = "all";
+
+/** `60 RPM · 200.000 TPM`, or null when the plan sets no rate. */
+function rateText(plan) {
+  const parts = [];
+  if (plan?.rpm) parts.push(`${Number(plan.rpm).toLocaleString("vi-VN")} RPM`);
+  if (plan?.tpm) parts.push(`${Number(plan.tpm).toLocaleString("vi-VN")} TPM`);
+  return parts.length ? parts.join(" · ") : null;
+}
 
 function formatDate(value) {
   if (!value) return "—";
@@ -16,6 +25,13 @@ function formatDate(value) {
 
 export default function KeysPageClient({ publicBaseUrl = "" }) {
   const [keys, setKeys] = useState([]);
+  // Plans the customer holds now: the only ones a key can be pinned to.
+  const [plans, setPlans] = useState([]);
+  const [planId, setPlanId] = useState(ALL_PLANS);
+  const [planTarget, setPlanTarget] = useState(null);
+  const [planTargetId, setPlanTargetId] = useState(ALL_PLANS);
+  const [planError, setPlanError] = useState("");
+  const [planSaving, setPlanSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -47,6 +63,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
         return;
       }
       setKeys(Array.isArray(data.keys) ? data.keys : []);
+      setPlans(Array.isArray(data.plans) ? data.plans : []);
     } catch {
       setLoadError("Không kết nối được máy chủ");
     } finally {
@@ -58,8 +75,39 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
 
   const openCreate = () => {
     setName("");
+    setPlanId(ALL_PLANS);
     setFormError("");
     setCreateOpen(true);
+  };
+
+  const openPlanEdit = (key) => {
+    setPlanTarget(key);
+    setPlanTargetId(key.planId || ALL_PLANS);
+    setPlanError("");
+  };
+
+  const submitPlan = async () => {
+    if (!planTarget) return;
+    setPlanSaving(true);
+    setPlanError("");
+    try {
+      const res = await fetch(`/api/account/keys/${planTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: planTargetId === ALL_PLANS ? null : planTargetId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPlanError(data.error || "Không đổi được gói cho key");
+        return;
+      }
+      setPlanTarget(null);
+      await load();
+    } catch {
+      setPlanError("Không kết nối được máy chủ");
+    } finally {
+      setPlanSaving(false);
+    }
   };
 
   const submitCreate = async () => {
@@ -73,7 +121,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
       const res = await fetch("/api/account/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({ name: trimmed, planId: planId === ALL_PLANS ? null : planId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -110,6 +158,27 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
       setDeleteTarget(null);
     }
   };
+
+  const planOptions = useMemo(
+    () => [
+      { value: ALL_PLANS, label: "Tất cả gói — dùng gói đầu hàng đợi" },
+      ...plans.map((plan) => ({
+        value: plan.id,
+        label: rateText(plan) ? `${plan.name} (${rateText(plan)})` : plan.name,
+      })),
+    ],
+    [plans]
+  );
+
+  // A plan the key is pinned to but no longer holds stays selectable, so the modal
+  // reflects the real value instead of silently showing another option.
+  const editOptions = useMemo(() => {
+    if (!planTarget?.planId || plans.some((plan) => plan.id === planTarget.planId)) return planOptions;
+    return [...planOptions, { value: planTarget.planId, label: `${planTarget.planName || "Gói đã chọn"} (hết hạn)` }];
+  }, [planOptions, planTarget, plans]);
+
+  const planHint =
+    "RPM/TPM theo gói và tính chung cho mọi key dùng cùng gói — tạo thêm key không tăng giới hạn. Key gắn một gói chỉ trừ tiền từ gói đó.";
 
   const createAction = <ActionButton tone="solid" onClick={openCreate}>Tạo key</ActionButton>;
 
@@ -153,12 +222,22 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
                 key={key.id}
                 title={key.name || "—"}
                 tags={
-                  <Tag tone={key.isActive ? "success" : "neutral"} icon={key.isActive ? "check_circle" : "block"}>
-                    {key.isActive ? "Đang dùng" : "Đã tắt"}
-                  </Tag>
+                  <>
+                    <Tag tone={key.isActive ? "success" : "neutral"} icon={key.isActive ? "check_circle" : "block"}>
+                      {key.isActive ? "Đang dùng" : "Đã tắt"}
+                    </Tag>
+                    <Tag tone={key.planId && !key.planHeld ? "danger" : "neutral"} icon={key.planId ? "workspace_premium" : "stack"}>
+                      {key.planId ? `Gói: ${key.planName || "đã chọn"}` : "Tất cả gói"}
+                    </Tag>
+                    {key.planId && !key.planHeld && (
+                      <Tag tone="danger" icon="warning">Gói hết hạn/hết credit</Tag>
+                    )}
+                  </>
                 }
                 detail={`${key.keyPrefix ? `${key.keyPrefix}…` : "—"} · tạo ${formatDate(key.createdAt)}`}
                 actions={
+                  <>
+                    <ActionButton size="sm" onClick={() => openPlanEdit(key)}>Đổi gói</ActionButton>
                   <button
                     type="button"
                     aria-label={`Xóa key ${key.name || key.keyPrefix || ""}`}
@@ -168,6 +247,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
                   >
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
                   </button>
+                  </>
                 }
               />
             ))}
@@ -197,6 +277,42 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
           maxLength={NAME_MAX}
           autoFocus
         />
+        <div className="mt-4">
+          <Select
+            label="Áp dụng cho"
+            options={planOptions}
+            value={planId}
+            onChange={(event) => setPlanId(event.target.value)}
+            hint={planHint}
+          />
+        </div>
+      </Modal>
+
+      {/* Change plan */}
+      <Modal
+        isOpen={!!planTarget}
+        onClose={() => setPlanTarget(null)}
+        title="Đổi gói cho key"
+        footer={
+          <>
+            <ActionButton tone="ghost" onClick={() => setPlanTarget(null)} disabled={planSaving}>Hủy</ActionButton>
+            <ActionButton tone="solid" onClick={submitPlan} loading={planSaving}>Lưu</ActionButton>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-text-main">
+            Key <span className="font-mono">{planTarget?.name || planTarget?.keyPrefix}</span>
+          </p>
+          <Select
+            label="Áp dụng cho"
+            options={editOptions}
+            value={planTargetId}
+            onChange={(event) => setPlanTargetId(event.target.value)}
+            error={planError}
+            hint={planHint}
+          />
+        </div>
       </Modal>
 
       {/* Secret shown exactly once */}
