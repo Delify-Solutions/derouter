@@ -1,20 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, Button, Input, Modal, ConfirmModal, Badge } from "@/shared/components";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Card, Button, Input, ConfirmModal, Badge } from "@/shared/components";
+import BannerCard from "./BannerCard";
+import DocEditor, { EMPTY_DOC, downloadDocFile, draftFromFile, readMarkdownFile } from "./DocEditor";
 
 // Field groups mirror the section order of the landing page, so an admin editing
 // copy finds it in the same order they see it on the site.
 const COPY_GROUPS = [
-  {
-    title: "Thông báo đầu trang",
-    note: "Dải thông báo phía trên tiêu đề, giống \"New … is now available\" của opencode.ai/go. Chỉ hiện khi đã bật và có nội dung.",
-    fields: [
-      { key: "bannerText", label: "Nội dung thông báo", type: "text" },
-      { key: "bannerHref", label: "Liên kết (để trống nếu chỉ thông báo)", type: "text" },
-      { key: "bannerEnabled", label: "Bật thông báo", type: "toggle" },
-    ],
-  },
   {
     title: "Khối đầu trang",
     fields: [
@@ -66,7 +59,24 @@ const COPY_GROUPS = [
   },
 ];
 
-const EMPTY_DOC = { slug: "", title: "", summary: "", excerpt: "", section: "", body: "", isPublished: false, sortOrder: 0 };
+// Copy keys compared for the "unsaved changes" indicator.
+function copyDiffers(a, b) {
+  if (!a || !b) return false;
+  return Object.keys({ ...a, ...b }).some((key) => (a[key] ?? "") !== (b[key] ?? ""));
+}
+
+function docToDraft(doc) {
+  return {
+    slug: doc.slug,
+    title: doc.title,
+    summary: doc.summary || "",
+    excerpt: doc.excerpt || "",
+    section: doc.section || "",
+    body: doc.body || "",
+    isPublished: Boolean(doc.isPublished),
+    sortOrder: doc.sortOrder ?? 0,
+  };
+}
 
 function fmtDate(value) {
   if (!value) return "—";
@@ -82,6 +92,9 @@ export default function ContentPageClient() {
 
   // ── Landing copy ────────────────────────────────────────────────────────
   const [copy, setCopy] = useState(null);
+  // The copy as the server last returned it (load or save). The banner status
+  // describes this, not the draft, because it is what visitors currently see.
+  const [savedCopy, setSavedCopy] = useState(null);
   const [copySaving, setCopySaving] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [copySaved, setCopySaved] = useState(false);
@@ -93,6 +106,7 @@ export default function ContentPageClient() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Không tải được nội dung");
       setCopy(data.copy);
+      setSavedCopy(data.copy);
     } catch (e) {
       setCopyError(e.message);
     }
@@ -117,6 +131,7 @@ export default function ContentPageClient() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Không lưu được nội dung");
       setCopy(data.copy);
+      setSavedCopy(data.copy);
       setCopySaved(true);
     } catch (e) {
       setCopyError(e.message);
@@ -125,16 +140,18 @@ export default function ContentPageClient() {
     }
   };
 
+  const copyDirty = copyDiffers(copy, savedCopy);
+
   // ── Docs pages ──────────────────────────────────────────────────────────
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState(EMPTY_DOC);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
+  // { key, editingId, draft, warnings } while the editor is open. `key` remounts
+  // the editor so each page starts from its own initial state.
+  const [editor, setEditor] = useState(null);
+  const editorSeq = useRef(0);
   const [confirm, setConfirm] = useState(null);
+  const importRef = useRef(null);
 
   const loadDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -153,54 +170,64 @@ export default function ContentPageClient() {
 
   useEffect(() => { loadDocs(); }, [loadDocs]);
 
-  const openNew = () => {
-    setEditingId(null);
-    setDraft(EMPTY_DOC);
-    setFormError("");
-    setModalOpen(true);
+  const openEditor = (editingId, draft, warnings = []) => {
+    editorSeq.current += 1;
+    setEditor({ key: editorSeq.current, editingId, draft, warnings });
+  };
+
+  const openNew = () => openEditor(null, EMPTY_DOC);
+
+  const fetchDoc = async (id) => {
+    const res = await fetch(`/api/docs/${id}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Không tải được trang");
+    return data.doc;
   };
 
   const openEdit = async (id) => {
-    setFormError("");
+    setDocsError("");
     try {
-      const res = await fetch(`/api/docs/${id}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Không tải được trang");
-      setDraft({
-        slug: data.doc.slug,
-        title: data.doc.title,
-        summary: data.doc.summary || "",
-        excerpt: data.doc.excerpt || "",
-        section: data.doc.section || "",
-        body: data.doc.body || "",
-        isPublished: data.doc.isPublished,
-        sortOrder: data.doc.sortOrder ?? 0,
-      });
-      setEditingId(id);
-      setModalOpen(true);
+      openEditor(id, docToDraft(await fetchDoc(id)));
     } catch (e) {
       setDocsError(e.message);
     }
   };
 
-  const submitDoc = async () => {
-    setSaving(true);
-    setFormError("");
+  // "Tải lên .md": opens the editor prefilled as a NEW page; nothing is saved
+  // until the admin clicks "Tạo trang".
+  const importFile = async (file) => {
+    setDocsError("");
     try {
-      const res = await fetch(editingId ? `/api/docs/${editingId}` : "/api/docs", {
-        method: editingId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Không lưu được trang");
-      setModalOpen(false);
-      await loadDocs();
+      const text = await readMarkdownFile(file);
+      const { draft, warnings } = draftFromFile(text, file.name);
+      openEditor(null, draft, warnings);
     } catch (e) {
-      setFormError(e.message);
-    } finally {
-      setSaving(false);
+      setDocsError(e.message);
     }
+  };
+
+  const exportDoc = async (doc) => {
+    setDocsError("");
+    try {
+      // The list omits bodies, so fetch the full page first.
+      downloadDocFile(docToDraft(await fetchDoc(doc.id)));
+    } catch (e) {
+      setDocsError(e.message);
+    }
+  };
+
+  // Throws on failure so the editor can show the error and stay open.
+  const submitDoc = async (draft) => {
+    const editingId = editor?.editingId;
+    const res = await fetch(editingId ? `/api/docs/${editingId}` : "/api/docs", {
+      method: editingId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Không lưu được trang");
+    setEditor(null);
+    await loadDocs();
   };
 
   const removeDoc = async (doc) => {
@@ -214,10 +241,10 @@ export default function ContentPageClient() {
     }
   };
 
-  const slugPreview = useMemo(() => {
-    const s = String(draft.slug || "").trim();
-    return s ? `/docs/${s}` : "/docs/…";
-  }, [draft.slug]);
+  const sections = useMemo(
+    () => [...new Set(docs.map((d) => d.section).filter(Boolean))],
+    [docs]
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -256,6 +283,8 @@ export default function ContentPageClient() {
             )
           ) : (
             <>
+              <BannerCard copy={copy} saved={savedCopy} onChange={setCopyField} />
+
               {COPY_GROUPS.map((group) => (
                 <Card key={group.title} className="flex flex-col gap-4 p-5">
                   <div>
@@ -266,16 +295,7 @@ export default function ContentPageClient() {
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {group.fields.map((field) =>
-                      field.type === "toggle" ? (
-                        <label key={field.key} className="flex items-center gap-2 text-sm text-text-main">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(copy[field.key])}
-                            onChange={(e) => setCopyField(field.key, e.target.checked)}
-                          />
-                          {field.label}
-                        </label>
-                      ) : field.type === "textarea" ? (
+                      field.type === "textarea" ? (
                         <div key={field.key} className="md:col-span-2">
                           <label className="meta text-text-subtle">{field.label}</label>
                           <textarea
@@ -302,21 +322,28 @@ export default function ContentPageClient() {
                 </Card>
               ))}
 
-              {copyError && (
-                <p className="flex items-center gap-1.5 text-[11px] text-danger">
-                  <span className="material-symbols-outlined text-[14px]">error</span>
-                  {copyError}
-                </p>
-              )}
-              {copySaved && (
-                <p className="flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-400">
-                  <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                  Đã lưu. Tải lại trang chủ để xem.
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2">
+              {/* Sticky: the banner card is at the top of a long form, and a save
+                  button only at the bottom is easy to miss. */}
+              <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-2 border-t border-border bg-bg px-1 py-3">
                 <Button onClick={saveCopy} loading={copySaving}>Lưu nội dung</Button>
+                {copyDirty ? (
+                  <span role="status" className="inline-flex items-center gap-1.5 font-mono text-[11px] text-amber-800 dark:text-amber-300">
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">edit_note</span>
+                    Có thay đổi chưa lưu
+                  </span>
+                ) : null}
+                {copySaved && !copyDirty ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-400">
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">check_circle</span>
+                    Đã lưu. Tải lại trang chủ để xem.
+                  </span>
+                ) : null}
+                {copyError ? (
+                  <span role="alert" className="inline-flex items-center gap-1.5 text-[11px] text-danger">
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">error</span>
+                    {copyError}
+                  </span>
+                ) : null}
                 <a
                   href="/"
                   target="_blank"
@@ -339,13 +366,33 @@ export default function ContentPageClient() {
               Mỗi trang là một đường dẫn công khai dưới <span className="font-mono">/docs/</span>.
               Nội dung viết bằng Markdown.
             </p>
-            <Button onClick={openNew}>
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Trang mới
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={importRef}
+                type="file"
+                accept=".md,.markdown,text/markdown"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) importFile(file);
+                }}
+              />
+              <Button variant="secondary" icon="upload_file" onClick={() => importRef.current?.click()}>
+                Tải lên .md
+              </Button>
+              <Button icon="add" onClick={openNew}>
+                Trang mới
+              </Button>
+            </div>
           </div>
 
-          {docsError && <p className="text-[12px] text-danger">{docsError}</p>}
+          {docsError && (
+            <p role="alert" className="flex items-center gap-1.5 text-[12px] text-danger">
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">error</span>
+              {docsError}
+            </p>
+          )}
 
           {docsLoading ? (
             <p className="text-[12px] text-text-muted">Đang tải…</p>
@@ -382,6 +429,15 @@ export default function ContentPageClient() {
                     )}
                     <button
                       type="button"
+                      onClick={() => exportDoc(doc)}
+                      aria-label={`Tải ${doc.title} dưới dạng .md`}
+                      title="Tải .md"
+                      className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">download</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => openEdit(doc.id)}
                       aria-label={`Sửa ${doc.title}`}
                       className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
@@ -408,112 +464,18 @@ export default function ContentPageClient() {
         </div>
       )}
 
-      <Modal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editingId ? "Sửa trang tài liệu" : "Trang tài liệu mới"}
-        size="lg"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</Button>
-            <Button onClick={submitDoc} loading={saving}>
-              {editingId ? "Lưu trang" : "Tạo trang"}
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Input
-              label="Đường dẫn"
-              value={draft.slug}
-              onChange={(e) => setDraft((d) => ({ ...d, slug: e.target.value }))}
-              hint={slugPreview}
-            />
-            <Input
-              label="Thứ tự"
-              value={String(draft.sortOrder ?? 0)}
-              onChange={(e) => setDraft((d) => ({ ...d, sortOrder: e.target.value }))}
-              hint="Số nhỏ hiện trước"
-            />
-          </div>
-
-          <Input
-            label="Tiêu đề"
-            value={draft.title}
-            onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-          />
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="meta text-text-subtle">Nhóm (tab trên đầu trang docs)</label>
-              <input
-                list="docs-sections"
-                value={draft.section}
-                onChange={(e) => setDraft((d) => ({ ...d, section: e.target.value }))}
-                placeholder="VD: Bắt đầu, API, Hạn mức"
-                className="mt-1 w-full border border-border bg-surface px-3 py-2 text-sm text-text-main"
-              />
-              {/* Gợi ý từ các nhóm đã có, nhưng vẫn cho gõ tên mới: danh sách
-                  nhóm được suy ra từ chính các trang, không phải enum cố định. */}
-              <datalist id="docs-sections">
-                {[...new Set(docs.map((d) => d.section).filter(Boolean))].map((sec) => (
-                  <option key={sec} value={sec} />
-                ))}
-              </datalist>
-            </div>
-            <div>
-              <label className="meta text-text-subtle">Mô tả trên thẻ (index)</label>
-              <input
-                value={draft.excerpt}
-                onChange={(e) => setDraft((d) => ({ ...d, excerpt: e.target.value }))}
-                placeholder="Một câu, hiện trên thẻ ở /docs"
-                className="mt-1 w-full border border-border bg-surface px-3 py-2 text-sm text-text-main"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="meta text-text-subtle">Mô tả dưới tiêu đề trang</label>
-            <textarea
-              value={draft.summary}
-              onChange={(e) => setDraft((d) => ({ ...d, summary: e.target.value }))}
-              rows={2}
-              className="mt-1 w-full border border-border bg-surface px-3 py-2 text-sm text-text-main"
-            />
-          </div>
-
-          <div>
-            <label className="meta text-text-subtle">Nội dung (Markdown)</label>
-            <textarea
-              value={draft.body}
-              onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-              rows={16}
-              spellCheck={false}
-              className="mt-1 w-full border border-border bg-surface px-3 py-2 font-mono text-[13px] text-text-main"
-            />
-            <p className="mt-1 font-mono text-[10px] text-text-subtle">
-              Hỗ trợ Markdown: # tiêu đề, **đậm**, `code`, ```khối code```, - danh sách, [liên kết](url).
-            </p>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-text-main">
-            <input
-              type="checkbox"
-              checked={Boolean(draft.isPublished)}
-              onChange={(e) => setDraft((d) => ({ ...d, isPublished: e.target.checked }))}
-            />
-            Đăng công khai
-          </label>
-
-          {formError && (
-            <p className="flex items-center gap-1.5 text-[11px] text-danger">
-              <span className="material-symbols-outlined text-[14px]">error</span>
-              {formError}
-            </p>
-          )}
-        </div>
-      </Modal>
+      {editor && (
+        <DocEditor
+          key={editor.key}
+          editingId={editor.editingId}
+          initialDraft={editor.draft}
+          initialWarnings={editor.warnings}
+          sections={sections}
+          docs={docs}
+          onClose={() => setEditor(null)}
+          onSubmit={submitDoc}
+        />
+      )}
 
       <ConfirmModal
         isOpen={!!confirm}

@@ -3,10 +3,14 @@
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
-import { marked } from "marked";
+import { Marked } from "marked";
 import { GITHUB_CONFIG } from "@/shared/constants/config";
 
-marked.setOptions({ gfm: true, breaks: true });
+// A private instance rather than the global `marked` with setOptions: the same
+// options, but nothing shared with shared/utils/markdown.js. Importing `Marked`
+// (not `marked`) also keeps both client imports of the package on one module id;
+// next's barrel optimiser otherwise emits ids that differ only in casing.
+const marked = new Marked({ gfm: true, breaks: true });
 
 // The changelog is rendered with dangerouslySetInnerHTML, so the markdown has to be
 // neutralised first: marked does not sanitise (raw HTML in the source is passed
