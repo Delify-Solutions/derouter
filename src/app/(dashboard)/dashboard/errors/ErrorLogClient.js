@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button, ConfirmModal, Select, Toggle } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
+import { errorFileName, errorReportMarkdown, replayCurl } from "@/lib/errorLog/report.js";
 
 const SOURCES = [
   { value: "", label: "Tất cả nguồn" },
@@ -95,6 +96,20 @@ async function copy(text) {
   }
 }
 
+/** Save `text` as a file in the browser (no server round trip). */
+function downloadText(text, fileName, type = "application/json") {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const origin = () => (typeof window !== "undefined" ? window.location.origin : "");
+
 const TURN_KEYS = ["messages", "input", "contents"];
 
 function turnsOf(request) {
@@ -151,9 +166,35 @@ function Detail({ detail, onDelete }) {
   const params = data.request && typeof data.request === "object"
     ? Object.fromEntries(Object.entries(data.request).filter(([k]) => !TURN_KEYS.includes(k)))
     : null;
+  const curl = replayCurl(detail, origin());
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Hand the whole failure over for a fix: the file, a pasteable report, or a
+          command that sends the same request again. */}
+      <div className="flex flex-col gap-2 border border-border bg-surface-2 p-3">
+        <p className="meta text-text-subtle">Xuất lỗi để sửa</p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" icon="download" onClick={() => downloadText(JSON.stringify(detail, null, 2), errorFileName(detail))}>
+            Tải JSON
+          </Button>
+          <Button size="sm" variant="secondary" icon="description" onClick={() => downloadText(errorReportMarkdown(detail, { baseUrl: origin() }), errorFileName(detail, "md"), "text/markdown")}>
+            Tải báo cáo .md
+          </Button>
+          <Button size="sm" variant="secondary" icon="content_copy" onClick={() => doCopy(errorReportMarkdown(detail, { baseUrl: origin() }))}>
+            Sao chép báo cáo
+          </Button>
+          {curl && (
+            <Button size="sm" variant="ghost" icon="terminal" onClick={() => doCopy(curl)}>
+              Sao chép lệnh curl
+            </Button>
+          )}
+        </div>
+        <p className="text-xs text-text-muted">
+          Gồm báo lỗi, các lần gọi upstream, phản hồi lỗi gốc, request khách gửi và body đã gửi upstream (khóa bí mật đã được che).
+          {curl ? " Lệnh curl gửi lại đúng request này; đặt biến DEROUTER_KEY trước khi chạy." : ""}
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusTag status={detail.status} />
         <Tag className={SOURCE_STYLE[detail.source]}>{detail.source}</Tag>
@@ -428,6 +469,37 @@ export default function ErrorLogClient() {
     }
   };
 
+  // Row shortcuts: fetch the full entry, then download it or copy its report.
+  const [rowBusy, setRowBusy] = useState("");
+  const [rowNote, setRowNote] = useState("");
+  const exportRow = async (id, kind) => {
+    setRowBusy(`${id}:${kind}`);
+    try {
+      const res = await fetch(`/api/error-logs/${encodeURIComponent(id)}`, { cache: "no-store" });
+      const entry = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(entry.error || "Không mở được mục này");
+      if (kind === "json") {
+        downloadText(JSON.stringify(entry, null, 2), errorFileName(entry));
+      } else {
+        const ok = await copy(errorReportMarkdown(entry, { baseUrl: origin() }));
+        setRowNote(ok ? "Đã sao chép báo cáo lỗi." : "Không sao chép được: trình duyệt từ chối.");
+        setTimeout(() => setRowNote(""), 2500);
+      }
+    } catch (e) {
+      setError(e.message || "Không xuất được mục này");
+    } finally {
+      setRowBusy("");
+    }
+  };
+
+  // Everything the current filters match, as one file (at most 500 entries).
+  const exportHref = () => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    p.set("limit", "500");
+    return `/api/error-logs/export?${p.toString()}`;
+  };
+
   const openDetail = async (id) => {
     setDetail({ id, loading: true });
     setDetailLoading(true);
@@ -515,6 +587,16 @@ export default function ErrorLogClient() {
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="secondary" icon="search">Tìm</Button>
             <Button type="button" variant="ghost" icon="refresh" onClick={() => load(filters)}>Làm mới</Button>
+            <a
+              href={exportHref()}
+              download
+              aria-disabled={items.length === 0}
+              title="Tải mọi lỗi khớp bộ lọc hiện tại (tối đa 500), kèm request và body đã gửi"
+              className={`inline-flex h-10 items-center gap-1.5 px-4 text-sm text-text-muted hover:bg-surface-2 hover:text-text-main ${items.length === 0 ? "pointer-events-none opacity-50" : ""}`}
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>
+              Tải lỗi đang lọc
+            </a>
             <Button type="button" variant="ghost" icon="tune" onClick={() => setShowSettings((v) => !v)}>Cài đặt</Button>
             <Button type="button" variant="ghost" icon="delete" onClick={() => setConfirmClear(true)} disabled={!summary?.total}>Xóa hết</Button>
           </div>
@@ -579,7 +661,29 @@ export default function ErrorLogClient() {
                   <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">{kb(r.bodyBytes)} · ~{(r.estTokens || 0).toLocaleString("vi-VN")} tk</td>
                   <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">{(r.latencyMs || 0).toLocaleString("vi-VN")} ms</td>
                   <td className="px-4 py-3 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => openDetail(r.id)} aria-label={`Xem chi tiết lỗi ${r.id}`}>Chi tiết</Button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => exportRow(r.id, "report")}
+                        disabled={rowBusy === `${r.id}:report`}
+                        title="Sao chép báo cáo lỗi (Markdown)"
+                        aria-label={`Sao chép báo cáo lỗi ${r.id}`}
+                        className="flex size-8 items-center justify-center border border-border text-text-muted hover:border-text-main hover:text-text-main disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">content_copy</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportRow(r.id, "json")}
+                        disabled={rowBusy === `${r.id}:json`}
+                        title="Tải lỗi kèm request (JSON)"
+                        aria-label={`Tải lỗi ${r.id}`}
+                        className="flex size-8 items-center justify-center border border-border text-text-muted hover:border-text-main hover:text-text-main disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span>
+                      </button>
+                      <Button size="sm" variant="secondary" onClick={() => openDetail(r.id)} aria-label={`Xem chi tiết lỗi ${r.id}`}>Chi tiết</Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -587,6 +691,8 @@ export default function ErrorLogClient() {
           </table>
         </div>
       )}
+
+      <p role="status" aria-live="polite" className="-mt-3 min-h-4 text-xs text-text-muted">{rowNote}</p>
 
       {nextBefore && (
         <div className="flex justify-center">

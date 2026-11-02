@@ -78,3 +78,14 @@ The router SHALL provide an admin-only page `/dashboard/errors` ("Nhật ký l�
 #### Scenario: Open an entry
 - **WHEN** an admin opens an entry
 - **THEN** the drawer shows the error, each attempt, and the prompt with its roles, and says when the prompt was truncated or not stored
+
+### Requirement: Exporting an entry
+So a failure can be handed over for a fix, the admin page SHALL let the admin, for one entry: download it as a JSON file (the whole entry: error, attempts, raw error response, the client request and the body sent upstream as stored), download or copy a Markdown report of the same content, and copy a curl command that sends the stored client request to this router again with the placeholder `$DEROUTER_KEY` instead of any key. The list rows SHALL offer copy-report and download without opening the entry. `GET /api/error-logs/export` (same filters as the list, at most 500, admin only) SHALL download every matching entry with its stored data as one JSON file. Exports SHALL contain only what the log stored, so secrets stay masked; an entry without a stored prompt SHALL say so and offer no replay command.
+
+#### Scenario: Send a failure to the developer
+- **WHEN** an admin opens an upstream 400 entry and clicks "Sao chép báo cáo"
+- **THEN** the clipboard holds a Markdown report with the status, model, each upstream attempt, the error body, the client request, the body sent upstream and a curl replay command without a key
+
+#### Scenario: Download what is filtered
+- **WHEN** the page is filtered to source `stream`, last 24 hours, and the admin clicks "Tải lỗi đang lọc"
+- **THEN** a JSON file downloads with every matching entry, newest first, each with its stored request and attempts
