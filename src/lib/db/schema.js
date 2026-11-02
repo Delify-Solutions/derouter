@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -272,8 +272,17 @@ export const TABLES = {
       createdAt: "TEXT",
       updatedAt: "TEXT",
       lastLoginAt: "TEXT",
+      // Linked Telegram user (spec telegram-link), set through the Mini App.
+      // The id is a string: Telegram ids exceed 32 bits. NULL = not linked.
+      telegramUserId: "TEXT",
+      telegramUsername: "TEXT",
+      telegramLinkedAt: "TEXT",
     },
-    indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+      // One Telegram user per account; unlinked accounts (NULL) do not collide.
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram ON users(telegramUserId) WHERE telegramUserId IS NOT NULL",
+    ],
   },
   // Every admin or system action on a customer account, with who did it and why.
   //
@@ -636,6 +645,10 @@ export const TABLES = {
       startsAt: "TEXT",
       expiresAt: "TEXT",
       isActive: "INTEGER DEFAULT 1",
+      // 1 = welcome code (spec gift-codes "New-user codes"): only accounts with
+      // no purchase and a linked Telegram user, one per Telegram user across
+      // every new-user code. perUserLimit is pinned to 1.
+      newUserOnly: "INTEGER DEFAULT 0",
       note: "TEXT",
       createdBy: "TEXT",
       createdAt: "TEXT",
@@ -654,6 +667,9 @@ export const TABLES = {
       // Admin identity when the admin gave this code straight to the account
       // (no code typed by the customer). NULL = redeemed by the customer.
       assignedBy: "TEXT",
+      // Telegram user of the account at redemption time. For new-user codes this
+      // snapshot (not the account's current link) is what blocks a second claim.
+      telegramUserId: "TEXT",
     },
     // No UNIQUE(giftId, userId) here on purpose: a code may be redeemed up to
     // giftCodes.perUserLimit times by the same account, and that limit is
@@ -663,7 +679,20 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_gr_gift_user ON giftRedemptions(giftId, userId)",
       "CREATE INDEX IF NOT EXISTS idx_gr_user ON giftRedemptions(userId)",
+      "CREATE INDEX IF NOT EXISTS idx_gr_telegram ON giftRedemptions(telegramUserId)",
     ],
+  },
+  // One-time tokens that bind a Telegram Mini App launch to the account that
+  // asked for it (spec telegram-link). Only the SHA-256 of the token is kept.
+  telegramLinkTokens: {
+    columns: {
+      tokenHash: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
+      usedAt: "TEXT",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_tlt_user ON telegramLinkTokens(userId)"],
   },
   // Time-limited discounts on the list price of models (spec model-discounts).
   // One row is one rule; rules that apply to the same request stack additively,

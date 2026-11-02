@@ -51,6 +51,10 @@ function rowToUser(row) {
     // Operator-only. Customer routes build their `user` payload field by field, so
     // this never reaches the account area; admin routes show and edit it.
     adminNote: row.adminNote ?? null,
+    // Linked Telegram user (spec telegram-link); null when not linked.
+    telegramUserId: row.telegramUserId ?? null,
+    telegramUsername: row.telegramUsername ?? null,
+    telegramLinkedAt: row.telegramLinkedAt ?? null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
     lastLoginAt: row.lastLoginAt ?? null,

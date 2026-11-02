@@ -74,14 +74,44 @@ const nextConfig = {
       "connect-src 'self' https: wss:",
     ].join("; ");
 
+    // The Telegram Mini App page (spec telegram-link, design D6). Telegram Web shows
+    // Mini Apps in an iframe on web.telegram.org, so this one path may be framed
+    // there (no X-Frame-Options, which cannot allow-list) and may load Telegram's
+    // own bridge script. Native Telegram apps use a webview and need neither.
+    const miniAppPolicy = [
+      "default-src 'self'",
+      "frame-ancestors https://web.telegram.org",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "img-src 'self' data: blob: https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org",
+      "connect-src 'self'",
+    ].join("; ");
+
     return [
       {
-        source: "/(.*)",
+        // Every path except exactly /telegram/link. Note: Next 16 answers paths
+        // below /telegram/link with its static 404 page before middleware or these
+        // headers run (observed; not caused by this rule). That page has no content
+        // or actions, so the missing headers there carry no practical risk.
+        source: "/((?!telegram/link$).*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "no-referrer" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Content-Security-Policy", value: contentSecurityPolicy },
+        ],
+      },
+      {
+        // Exactly the path the global rule excludes, so no request falls between
+        // the two rules without headers.
+        source: "/telegram/link",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Content-Security-Policy", value: miniAppPolicy },
         ],
       },
     ];

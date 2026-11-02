@@ -61,6 +61,20 @@ export async function PATCH(request) {
       }
     }
 
+    // Telegram Mini App used to link customer accounts (spec telegram-link): both
+    // names end up in a t.me URL, so only Telegram's own alphabet is accepted.
+    for (const [key, label] of [["telegramBotUsername", "Bot username"], ["telegramMiniAppName", "Mini App short name"]]) {
+      if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+      const value = typeof body[key] === "string" ? body[key].trim().replace(/^@/, "") : "";
+      if (value && !/^[A-Za-z0-9_]{1,64}$/.test(value)) {
+        return NextResponse.json(
+          { error: `${label} chỉ gồm chữ, số và dấu gạch dưới` },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
+      }
+      body[key] = key === "telegramMiniAppName" ? value || "link" : value;
+    }
+
     // If updating password, hash it
     if (body.newPassword) {
       const settings = await getSettings();

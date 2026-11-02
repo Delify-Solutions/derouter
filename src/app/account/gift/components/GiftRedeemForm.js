@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionButton, Eyebrow, Stat } from "@/app/account/components/ui";
+import { TelegramLinkPrompt } from "@/app/account/components/TelegramLink";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { formatGiftCode } from "./formatCode";
 
@@ -24,7 +25,7 @@ function fmtWhen(value) {
 export default function GiftRedeemForm({ onRedeemed }) {
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
-  const [result, setResult] = useState(null);   // { ok: true, ... } | { error }
+  const [result, setResult] = useState(null);   // { ok: true, ... } | { error, needsTelegram? }
   const inputRef = useRef(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -34,25 +35,20 @@ export default function GiftRedeemForm({ onRedeemed }) {
     if (result) setResult(null);
   };
 
-  const submit = async (event) => {
-    event.preventDefault();
-    const key = code.replace(/[^A-Z0-9]/g, "");
-    if (key.length < 4) {
-      setResult({ error: "Nhập đầy đủ mã." });
-      return;
-    }
-
+  const redeem = useCallback(async (value) => {
     setPending(true);
     setResult(null);
     try {
       const res = await fetch("/api/account/redeem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: value }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setResult({ error: data.error || "Không nhập được mã này." });
+        // A new-user code on an account without Telegram: the one refusal the
+        // customer can fix here. The code stays in the field for the retry.
+        setResult({ error: data.error || "Không nhập được mã này.", needsTelegram: data.code === "telegram_required" });
         return;
       }
       setResult({ ok: true, ...data });
@@ -63,7 +59,20 @@ export default function GiftRedeemForm({ onRedeemed }) {
     } finally {
       setPending(false);
     }
+  }, [onRedeemed]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const key = code.replace(/[^A-Z0-9]/g, "");
+    if (key.length < 4) {
+      setResult({ error: "Nhập đầy đủ mã." });
+      return;
+    }
+    await redeem(code);
   };
+
+  // Linked from the prompt below: redeem the same code without another click.
+  const onTelegramLinked = useCallback(() => { redeem(code); }, [redeem, code]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -95,6 +104,8 @@ export default function GiftRedeemForm({ onRedeemed }) {
           <span>{result.error}</span>
         </div>
       )}
+
+      {result?.needsTelegram && <TelegramLinkPrompt onLinked={onTelegramLinked} />}
 
       {result?.ok && (
         <div role="status" className="flex flex-col gap-4 border border-brand-500/30 bg-brand-500/5 p-5">

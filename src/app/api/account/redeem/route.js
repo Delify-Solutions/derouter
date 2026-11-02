@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { redeemGiftCode, listUserRedemptions } from "@/lib/db/repos/giftRepo.js";
+import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,11 @@ const FAILURE = {
   exhausted: { status: 404, error: "This code is not valid." },
   already_redeemed: { status: 409, error: "You have already used this code." },
   invalid_plan: { status: 409, error: "This code cannot be applied to your account." },
+  // New-user codes (spec gift-codes "New-user codes"). Only `telegram_required`
+  // carries a code: it is the one refusal the page offers to fix (link Telegram).
+  not_new_user: { status: 409, error: GIFT_REASON_TEXT.not_new_user },
+  telegram_required: { status: 403, error: GIFT_REASON_TEXT.telegram_required, code: "telegram_required" },
+  telegram_used: { status: 409, error: GIFT_REASON_TEXT.telegram_used },
 };
 
 async function requireSession(request) {
@@ -60,7 +65,10 @@ export async function POST(request) {
 
     if (!result?.ok) {
       const mapped = FAILURE[result?.reason] || FAILURE.not_found;
-      return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      return NextResponse.json(
+        { error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) },
+        { status: mapped.status }
+      );
     }
 
     return NextResponse.json({
