@@ -74,6 +74,9 @@ export default function RedemptionHistory({ refreshKey = 0 }) {
             <tr key={row.id} className="border-b border-border last:border-b-0">
               <td className="px-4 py-3 font-mono text-xs tracking-wider text-text-main">
                 {formatGiftCode(row.giftCode)}
+                {row.assignedByAdmin && (
+                  <p className="mt-0.5 font-sans text-xs tracking-normal text-text-subtle">Admin tặng trực tiếp</p>
+                )}
               </td>
               <td className="px-4 py-3">
                 <span className="font-mono text-sm text-text-main">

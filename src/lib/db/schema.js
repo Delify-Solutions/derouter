@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -616,6 +616,11 @@ export const TABLES = {
       grantKind: "TEXT NOT NULL",
       planId: "TEXT",
       creditNanoUsd: "INTEGER",
+      // A plan gift for a custom-amount (top-up) plan may carry an amount in đồng:
+      // the redeemer gets credit for that amount at the plan's own rate, with the
+      // plan's duration and limits — as if they had topped up that much. NULL =
+      // the plan's own credit.
+      amountVnd: "INTEGER",
       durationDays: "INTEGER",
       maxRedemptions: "INTEGER DEFAULT 1",
       redeemedCount: "INTEGER DEFAULT 0",
@@ -638,6 +643,9 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       userPlanId: "TEXT",
       redeemedAt: "TEXT",
+      // Admin identity when the admin gave this code straight to the account
+      // (no code typed by the customer). NULL = redeemed by the customer.
+      assignedBy: "TEXT",
     },
     // No UNIQUE(giftId, userId) here on purpose: a code may be redeemed up to
     // giftCodes.perUserLimit times by the same account, and that limit is

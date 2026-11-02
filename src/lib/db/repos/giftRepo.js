@@ -9,6 +9,8 @@ import { randomInt } from "crypto";
 import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
 import { parseLimits } from "../../billing/limits.js";
+import { topupCreditForAmount } from "../../billing/topup.js";
+import { insertAuditSync } from "../../billing/audit.js";
 
 // Human-typable alphabet: no 0/O/1/I/L, so codes survive being read aloud or
 // copied off a screen by hand.
@@ -74,6 +76,13 @@ function rowToGiftCode(row) {
     planId: row.planId ?? null,
     planName: row.planName ?? null,
     creditNanoUsd: row.creditNanoUsd ?? null,
+    // Top-up plan gift: the amount in đồng the credit is computed from.
+    amountVnd: row.amountVnd == null ? null : Number(row.amountVnd),
+    // Credit that amount buys at the plan's current rate (list/preview only;
+    // redemption recomputes it).
+    amountCreditNanoUsd: row.amountVnd == null ? null : topupCreditForAmount({
+      priceVnd: row.planPriceVnd, creditNanoUsd: row.planCreditNanoUsd, unlimitedCredit: row.planUnlimited,
+    }, row.amountVnd),
     durationDays: row.durationDays ?? null,
     maxRedemptions: row.maxRedemptions ?? 1,
     redeemedCount: row.redeemedCount ?? 0,
@@ -105,6 +114,26 @@ function planRow(db, planId) {
   return db.get(`SELECT * FROM plans WHERE id = ?`, [planId]) || null;
 }
 
+/**
+ * An amount may only be attached to a plan that is sold by custom amount, and the
+ * amount must buy some credit at its rate. Throws a Vietnamese message otherwise.
+ */
+function assertAmountPlan(plan, amountVnd) {
+  if (amountVnd == null) return;
+  if (!plan || Number(plan.allowCustomAmount) !== 1) {
+    throw new Error("Chỉ gói nạp số tiền tùy ý mới tặng theo số tiền");
+  }
+  if (topupCreditForAmount(plan, amountVnd) <= 0) {
+    throw new Error("Số tiền quá nhỏ để quy đổi ra credit");
+  }
+}
+
+// The plan columns a gift row needs to preview its top-up credit.
+const GIFT_SELECT = `SELECT g.*, p.name AS planName, p.priceVnd AS planPriceVnd,
+         p.creditNanoUsd AS planCreditNanoUsd, p.unlimitedCredit AS planUnlimited
+    FROM giftCodes g
+    LEFT JOIN plans p ON p.id = g.planId`;
+
 function inWindow(row, nowMs) {
   const startsAt = toMillis(row.startsAt);
   const expiresAt = toMillis(row.expiresAt);
@@ -131,9 +160,17 @@ function validateGrantInput(input) {
       throw new Error("durationDays must be at least 1 for credit grants");
     }
   }
+  const hasAmount = input.amountVnd !== undefined && input.amountVnd !== null && input.amountVnd !== "";
+  if (hasAmount) {
+    if (!hasPlan) throw new Error("Số tiền chỉ dùng cho mã tặng gói nạp tùy ý");
+    if (!Number.isSafeInteger(Number(input.amountVnd)) || Number(input.amountVnd) <= 0) {
+      throw new Error("Số tiền phải là số đồng nguyên dương");
+    }
+  }
   return {
     grantKind,
     planId: hasPlan ? input.planId : null,
+    amountVnd: hasAmount ? Number(input.amountVnd) : null,
     creditNanoUsd: hasCredit ? Number(input.creditNanoUsd) : null,
     durationDays: hasCredit ? Number(input.durationDays) : (input.durationDays ? Number(input.durationDays) : null),
   };
@@ -174,6 +211,7 @@ export async function createGiftCode(input) {
   if (grant.grantKind === "plan") {
     const plan = planRow(db, grant.planId);
     if (!plan) throw new Error("Plan not found");
+    assertAmountPlan(plan, grant.amountVnd);
   }
 
   const now = nowIso();
@@ -185,6 +223,7 @@ export async function createGiftCode(input) {
     grantKind: grant.grantKind,
     planId: grant.planId,
     creditNanoUsd: grant.creditNanoUsd,
+    amountVnd: grant.amountVnd,
     durationDays: grant.durationDays,
     maxRedemptions,
     redeemedCount: 0,
@@ -199,27 +238,22 @@ export async function createGiftCode(input) {
   };
 
   db.run(
-    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, note, createdBy, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, note, createdBy, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.durationDays,
+      gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.amountVnd, gift.durationDays,
       gift.maxRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
       gift.isActive, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
     ]
   );
 
-  return rowToGiftCode({ ...gift, planName: planRow(db, gift.planId)?.name ?? null });
+  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [gift.id]));
 }
 
 /** All gift codes, newest first, with the plan name resolved. */
 export async function listGiftCodes() {
   const db = await getAdapter();
-  const rows = db.all(
-    `SELECT g.*, p.name AS planName
-       FROM giftCodes g
-       LEFT JOIN plans p ON p.id = g.planId
-      ORDER BY g.createdAt DESC`
-  );
+  const rows = db.all(`${GIFT_SELECT} ORDER BY g.createdAt DESC`);
   return rows.map(rowToGiftCode);
 }
 
@@ -238,19 +272,15 @@ export async function listGiftPlans() {
     unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: plan.durationDays ?? 0,
     isActive: plan.isActive === true,
+    // A custom-amount plan can be gifted as an amount in đồng at this rate.
+    allowCustomAmount: plan.allowCustomAmount === true,
+    priceVnd: plan.priceVnd ?? null,
   }));
 }
 
 export async function getGiftCodeById(id) {
   const db = await getAdapter();
-  const row = db.get(
-    `SELECT g.*, p.name AS planName
-       FROM giftCodes g
-       LEFT JOIN plans p ON p.id = g.planId
-      WHERE g.id = ?`,
-    [id]
-  );
-  return rowToGiftCode(row);
+  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
 }
 
 /** Patch an existing gift code. Only the fields below are writable. */
@@ -263,6 +293,9 @@ export async function updateGiftCode(id, patch = {}) {
     const next = {
       planId: patch.planId !== undefined ? patch.planId : row.planId,
       creditNanoUsd: patch.creditNanoUsd !== undefined ? patch.creditNanoUsd : row.creditNanoUsd,
+      amountVnd: patch.amountVnd !== undefined
+        ? (patch.amountVnd === null || patch.amountVnd === "" ? null : Number(patch.amountVnd))
+        : row.amountVnd,
       durationDays: patch.durationDays !== undefined ? patch.durationDays : row.durationDays,
       maxRedemptions: patch.maxRedemptions !== undefined ? Number(patch.maxRedemptions) : row.maxRedemptions,
       perUserLimit: patch.perUserLimit !== undefined ? Number(patch.perUserLimit) : row.perUserLimit,
@@ -289,24 +322,23 @@ export async function updateGiftCode(id, patch = {}) {
       throw new Error("durationDays must be at least 1 for credit grants");
     }
     const grantKind = hasPlan ? "plan" : "credit";
+    if (!hasPlan) next.amountVnd = null;
+    if (next.amountVnd != null && (!Number.isSafeInteger(next.amountVnd) || next.amountVnd <= 0)) {
+      throw new Error("Số tiền phải là số đồng nguyên dương");
+    }
+    if (hasPlan) assertAmountPlan(planRow(db, next.planId), next.amountVnd);
     db.run(
       `UPDATE giftCodes
-          SET grantKind = ?, planId = ?, creditNanoUsd = ?, durationDays = ?,
+          SET grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
               maxRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
               note = ?, updatedAt = ?
         WHERE id = ?`,
       [
-        grantKind, next.planId, next.creditNanoUsd, next.durationDays, next.maxRedemptions,
+        grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
         next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.note, nowIso(), id,
       ]
     );
-    updated = rowToGiftCode({
-      ...row,
-      ...next,
-      grantKind,
-      planName: planRow(db, next.planId)?.name ?? null,
-      updatedAt: nowIso(),
-    });
+    updated = rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
   });
   return updated;
 }
@@ -338,6 +370,8 @@ export async function listRedemptions(giftId) {
     userPlanId: row.userPlanId ?? null,
     planExpiresAt: row.planExpiresAt ?? null,
     redeemedAt: row.redeemedAt ?? null,
+    // Set when the admin gave the code straight to this account.
+    assignedBy: row.assignedBy ?? null,
   }));
 }
 
@@ -345,7 +379,7 @@ export async function listRedemptions(giftId) {
 export async function listUserRedemptions(userId) {
   const db = await getAdapter();
   const rows = db.all(
-    `SELECT r.id, r.giftId, r.userPlanId, r.redeemedAt,
+    `SELECT r.id, r.giftId, r.userPlanId, r.redeemedAt, r.assignedBy,
             g.code AS giftCode, g.grantKind, g.creditNanoUsd, g.durationDays, g.planId,
             p.name AS planName,
             up.creditTotalNanoUsd AS grantedCreditNanoUsd,
@@ -371,6 +405,7 @@ export async function listUserRedemptions(userId) {
     unlimitedCredit: Number(row.grantedUnlimited) === 1,
     durationDays: row.durationDays ?? null,
     expiresAt: row.planExpiresAt ?? null,
+    assignedByAdmin: Boolean(row.assignedBy),
   }));
 }
 
@@ -382,7 +417,7 @@ export async function listUserRedemptions(userId) {
  * @returns {{ok: true, userPlan: object, appliedToOverdraftNanoUsd: number}
  *          | {ok: false, reason: "not_found"|"not_active"|"exhausted"|"already_redeemed"|"invalid_plan"}}
  */
-export function redeemGiftCode(db, { userId, code } = {}) {
+export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
   if (!db) throw new Error("redeemGiftCode requires a db adapter");
   if (!userId) return { ok: false, reason: "not_found" };
 
@@ -398,9 +433,12 @@ export function redeemGiftCode(db, { userId, code } = {}) {
     if (!plan || (plan.isActive !== 1 && plan.isActive !== true)) {
       return { ok: false, reason: "invalid_plan" };
     }
+    // A top-up plan gifted as an amount: credit at the plan's own rate.
+    const amountCredit = row.amountVnd != null ? topupCreditForAmount(plan, row.amountVnd) : null;
+    if (amountCredit === 0) return { ok: false, reason: "invalid_plan" };
     grant = {
       planId: plan.id,
-      creditNanoUsd: Number(plan.creditNanoUsd) || 0,
+      creditNanoUsd: amountCredit ?? (Number(plan.creditNanoUsd) || 0),
       unlimitedCredit: Number(plan.unlimitedCredit) === 1,
       durationDays: Number(plan.durationDays) || 30,
       planName: plan.name ?? null,
@@ -442,8 +480,8 @@ export function redeemGiftCode(db, { userId, code } = {}) {
       if ((mine?.c ?? 0) >= perUser) return { ok: false, reason: "already_redeemed" };
 
       db.run(
-        `INSERT INTO giftRedemptions(id, giftId, userId, userPlanId, redeemedAt) VALUES(?, ?, ?, NULL, ?)`,
-        [redemptionId, row.id, userId, now]
+        `INSERT INTO giftRedemptions(id, giftId, userId, userPlanId, redeemedAt, assignedBy) VALUES(?, ?, ?, NULL, ?, ?)`,
+        [redemptionId, row.id, userId, now, assignedBy]
       );
       // Conditional bump: the last slot cannot be sold twice even if the
       // counter read above was stale.
@@ -463,7 +501,13 @@ export function redeemGiftCode(db, { userId, code } = {}) {
         unlimitedCredit: grant.unlimitedCredit === true,
         durationDays: grant.durationDays,
         limits: grant.limits ?? [],
-        meta: { giftId: row.id, giftRedemptionId: redemptionId, giftCode: formatGiftCode(row.code) },
+        meta: {
+          giftId: row.id,
+          giftRedemptionId: redemptionId,
+          giftCode: formatGiftCode(row.code),
+          ...(row.amountVnd != null ? { amountVnd: Number(row.amountVnd) } : {}),
+          ...(assignedBy ? { assignedBy } : {}),
+        },
       });
 
       db.run(
@@ -488,4 +532,91 @@ export function redeemGiftCode(db, { userId, code } = {}) {
     }
     throw error;
   }
+}
+
+/** Vietnamese text for a refused redemption, shown to the admin per account. */
+export const GIFT_REASON_TEXT = {
+  not_found: "Mã không tồn tại hoặc đã tắt",
+  not_active: "Mã chưa tới ngày dùng hoặc đã hết hạn",
+  exhausted: "Mã đã hết lượt dùng",
+  already_redeemed: "Tài khoản đã dùng mã này đủ số lần cho phép",
+  invalid_plan: "Gói của mã không còn bán hoặc không quy đổi được",
+  user_not_found: "Không tìm thấy tài khoản",
+};
+
+/** Accounts by id or e-mail (case-insensitive), in the order given, deduplicated. */
+function resolveUsersSync(db, { userIds = [], emails = [] } = {}) {
+  const out = [];
+  const seen = new Set();
+  const push = (input, row) => {
+    const key = row?.id ?? `missing:${input}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ input, user: row ?? null });
+  };
+  for (const id of Array.isArray(userIds) ? userIds : []) {
+    const value = String(id ?? "").trim();
+    if (value) push(value, db.get(`SELECT id, email FROM users WHERE id = ?`, [value]));
+  }
+  for (const email of Array.isArray(emails) ? emails : []) {
+    const value = String(email ?? "").trim();
+    if (value) push(value, db.get(`SELECT id, email FROM users WHERE lower(email) = lower(?)`, [value]));
+  }
+  return out;
+}
+
+/**
+ * Give a gift code straight to accounts, without the customer typing it (spec
+ * gift-codes "Admin assigns a code to accounts").
+ *
+ * Each account is a normal redemption — the code's active flag, validity window,
+ * total and per-user limits all apply and the redemption counts against them — so
+ * an assigned code and a typed one can never grant more than the code allows. Each
+ * account succeeds or fails on its own; the result lists every one with its reason.
+ * The redemption records the admin, and an audit row is written per account.
+ *
+ * @returns {{ ok: true, results: Array<{ input, userId, email, ok, reason?, message?, userPlanId? }> }
+ *          | { ok: false, reason: "not_found"|"no_users" }}
+ */
+export function assignGiftCodeSync(db, giftId, { userIds = [], emails = [], actor = "admin" } = {}) {
+  const row = db.get(`SELECT * FROM giftCodes WHERE id = ?`, [giftId]);
+  if (!row) return { ok: false, reason: "not_found" };
+  const targets = resolveUsersSync(db, { userIds, emails });
+  if (targets.length === 0) return { ok: false, reason: "no_users" };
+
+  const results = targets.map(({ input, user }) => {
+    if (!user) {
+      return { input, userId: null, email: null, ok: false, reason: "user_not_found", message: GIFT_REASON_TEXT.user_not_found };
+    }
+    const redeemed = redeemGiftCode(db, { userId: user.id, code: row.code, assignedBy: actor });
+    if (!redeemed.ok) {
+      return {
+        input, userId: user.id, email: user.email, ok: false,
+        reason: redeemed.reason, message: GIFT_REASON_TEXT[redeemed.reason] ?? redeemed.reason,
+      };
+    }
+    insertAuditSync(db, {
+      userId: user.id,
+      actor,
+      action: "gift_assigned",
+      details: {
+        giftId: row.id,
+        giftCode: formatGiftCode(row.code),
+        userPlanId: redeemed.userPlan?.id ?? null,
+        ...(row.amountVnd != null ? { amountVnd: Number(row.amountVnd) } : {}),
+      },
+    });
+    return {
+      input, userId: user.id, email: user.email, ok: true,
+      userPlanId: redeemed.userPlan?.id ?? null,
+      startsAt: redeemed.userPlan?.startsAt ?? null,
+      expiresAt: redeemed.userPlan?.expiresAt ?? null,
+    };
+  });
+  return { ok: true, results };
+}
+
+export async function assignGiftCode(giftId, options = {}) {
+  const db = await getAdapter();
+  return assignGiftCodeSync(db, giftId, options);
 }

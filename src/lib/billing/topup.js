@@ -38,6 +38,22 @@ function fmtVnd(value) {
 }
 
 /**
+ * Credit a gift of `amountVnd` đồng buys at this plan's own rate, without the
+ * customer-facing bounds: an admin may gift any amount (spec gift-codes
+ * "Top-up plan gifts carry an amount"). 0 when the plan has no usable rate
+ * (no VND price, no credit, or unlimited).
+ */
+export function topupCreditForAmount(plan, amountVnd) {
+  const amount = Number(amountVnd);
+  const priceVnd = Math.round(Number(plan?.priceVnd) || 0);
+  const credit = Math.round(Number(plan?.creditNanoUsd) || 0);
+  const unlimited = plan?.unlimitedCredit === true || Number(plan?.unlimitedCredit) === 1;
+  if (!Number.isSafeInteger(amount) || amount <= 0 || priceVnd <= 0 || credit <= 0 || unlimited) return 0;
+  const out = (BigInt(amount) * BigInt(credit)) / BigInt(priceVnd);
+  return out > BigInt(Number.MAX_SAFE_INTEGER) ? 0 : Number(out);
+}
+
+/**
  * Price a top-up.
  *
  *   credit   = floor(amountVnd × plan.creditNanoUsd ÷ plan.priceVnd)
