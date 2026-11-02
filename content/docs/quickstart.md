@@ -117,7 +117,7 @@ Hãy xử lý theo `code`, không theo nội dung `message`.
 | 403 | `model_not_priced` | Model chưa được đặt giá nên chưa mở cho key khách | Chọn model khác trong `/v1/models` |
 | 429 | `rate_limit` | Vượt số request hoặc token mỗi phút của gói | Chờ theo header `Retry-After` (60 giây) |
 | 429 | `plan_limit` | Mọi gói còn credit đều chạm hạn mức theo khung giờ | Chờ đến `resetAt`, hoặc theo header `Retry-After` (giây) |
-| 429 | `concurrency_limit` | Tài khoản đang có quá nhiều request chạy cùng lúc | Đợi request trước xong rồi gửi lại (`Retry-After` tính bằng giây) |
+| 429 | `concurrency_limit` | Số request đang chạy cùng lúc đã chạm mức tối đa (bằng RPM của gói, hoặc mức chung do quản trị viên đặt) | Đợi request trước xong rồi gửi lại (`Retry-After` tính bằng giây) |
 
 Với lỗi 429, client nên đọc header `Retry-After` để biết cần chờ bao nhiêu giây rồi thử lại. Với `plan_limit`, trường `resetAt` trong `error` cho biết thời điểm mở lại, theo giờ UTC. Lỗi 402 và 403 không tự hết: thử lại ngay vô ích cho đến khi bạn xử lý nguyên nhân.
 

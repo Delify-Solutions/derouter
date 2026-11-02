@@ -12,7 +12,7 @@ import path from "node:path";
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-concurrency-test-"));
 process.env.DATA_DIR = tmpDir;
 process.env.TPM_MAX_WAIT_MS = "0";
-process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS = "2";
+delete process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS;
 
 const { getAdapter } = await import("../src/lib/db/driver.js");
 const inflight = await import("../src/lib/billing/inflight.js");
@@ -37,7 +37,7 @@ beforeEach(() => {
   }
 });
 
-function customer(userId = "u1") {
+function customer(userId = "u1", { rpm = 2 } = {}) {
   const now = NOW();
   db.run(`INSERT OR IGNORE INTO keyGroups(id, name, isActive, createdAt, updatedAt) VALUES('g', 'g', 1, ?, ?)`, [now, now]);
   db.run(
@@ -46,9 +46,9 @@ function customer(userId = "u1") {
     [userId, `${userId}@test.local`, now, now]
   );
   db.run(
-    `INSERT INTO plans(id, code, name, priceNanoUsd, creditNanoUsd, durationDays, isActive, createdAt, updatedAt)
-     VALUES(?, ?, 'P', 0, ?, 30, 1, ?, ?)`,
-    [`p-${userId}`, `p-${userId}`, USD(100), now, now]
+    `INSERT INTO plans(id, code, name, priceNanoUsd, creditNanoUsd, durationDays, isActive, rpm, createdAt, updatedAt)
+     VALUES(?, ?, 'P', 0, ?, 30, 1, ?, ?, ?)`,
+    [`p-${userId}`, `p-${userId}`, USD(100), rpm, now, now]
   );
   db.run(
     `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, startsAt, expiresAt, status, createdAt)
@@ -70,7 +70,7 @@ function adminKey() {
 
 // ── Concurrency cap ────────────────────────────────────────────────────────
 
-test("a customer can run at most N requests at once; finishing one frees a slot", async () => {
+test("a customer can run at most RPM requests at once; finishing one frees a slot", async () => {
   const secret = customer();
   const scopes = [inflight.createRequestScope(), inflight.createRequestScope(), inflight.createRequestScope()];
   const run = (scope) => inflight.runInScope(scope, () => enforceKeyLimits(secret, "m"));
@@ -81,7 +81,7 @@ test("a customer can run at most N requests at once; finishing one frees a slot"
   assert.equal(third.ok, false);
   assert.equal(third.status, 429);
   assert.equal(third.code, "concurrency_limit");
-  assert.match(third.message, /tối đa 2/);
+  assert.match(third.message, /tối đa 2, bằng RPM của gói/);
 
   inflight.releaseScope(scopes[0]);
   assert.equal((await run(inflight.createRequestScope())).ok, true);
@@ -96,12 +96,53 @@ test("the cap is per account, and one request holds one slot however many checks
     assert.equal((await enforceKeyLimits(a, "m")).ok, true);
     assert.equal((await enforceKeyLimits(a, "m")).ok, true, "a second check of the same request");
   });
-  assert.equal(inflight.inflightCount("ua"), 1);
+  assert.equal(inflight.inflightCount(inflight.slotKey("ua", "p-ua")), 1, "counted per (user, plan)");
   const other = inflight.createRequestScope();
   assert.equal((await inflight.runInScope(other, () => enforceKeyLimits(b, "m"))).ok, true);
   inflight.releaseScope(scope);
   inflight.releaseScope(other);
-  assert.equal(inflight.inflightCount("ua"), 0);
+  assert.equal(inflight.inflightCount(inflight.slotKey("ua", "p-ua")), 0);
+});
+
+test("the cap follows the plan's RPM", async () => {
+  const secret = customer("big", { rpm: 50 });
+  const scopes = [];
+  for (let i = 0; i < 50; i += 1) {
+    const scope = inflight.createRequestScope();
+    scopes.push(scope);
+    assert.equal((await inflight.runInScope(scope, () => enforceKeyLimits(secret, "m"))).ok, true, `request ${i + 1}`);
+  }
+  const over = await inflight.runInScope(inflight.createRequestScope(), () => enforceKeyLimits(secret, "m"));
+  assert.equal(over.code, "concurrency_limit");
+  assert.match(over.message, /tối đa 50/);
+  scopes.forEach((scope) => inflight.releaseScope(scope));
+});
+
+test("a plan without RPM is uncapped unless CUSTOMER_MAX_CONCURRENT_REQUESTS is set", async () => {
+  const secret = customer("norpm", { rpm: null });
+  const held = [];
+  for (let i = 0; i < 30; i += 1) {
+    const scope = inflight.createRequestScope();
+    held.push(scope);
+    assert.equal((await inflight.runInScope(scope, () => enforceKeyLimits(secret, "m"))).ok, true);
+  }
+  held.forEach((scope) => inflight.releaseScope(scope));
+
+  // fallbackMaxConcurrent() reads the env on every call, so setting it here applies.
+  process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS = "3";
+  try {
+    assert.equal(inflight.concurrencyCapFor(null), 3);
+    assert.equal(inflight.concurrencyCapFor(20), 20, "a plan RPM always wins");
+    const scopes = [inflight.createRequestScope(), inflight.createRequestScope(), inflight.createRequestScope()];
+    for (const scope of scopes) assert.equal((await inflight.runInScope(scope, () => enforceKeyLimits(secret, "m"))).ok, true);
+    const fourth = await inflight.runInScope(inflight.createRequestScope(), () => enforceKeyLimits(secret, "m"));
+    assert.equal(fourth.code, "concurrency_limit");
+    assert.doesNotMatch(fourth.message, /RPM/, "the env fallback is not called the plan's RPM");
+    scopes.forEach((scope) => inflight.releaseScope(scope));
+  } finally {
+    delete process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS;
+  }
+  assert.equal(inflight.concurrencyCapFor(null), 0, "unset = no cap");
 });
 
 test("admin keys and calls outside a request scope are not capped", async () => {

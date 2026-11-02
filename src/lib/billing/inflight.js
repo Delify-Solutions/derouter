@@ -1,11 +1,18 @@
-// Concurrent-request cap per customer account.
+// Concurrent-request cap per customer account and plan.
 //
 // Admission only asks "does a plan still have credit?" and the charge is taken when
 // a request FINISHES. Without a cap, a burst of N parallel requests is admitted on
 // the same remaining credit and every cost past it becomes debt; on an unlimited
-// plan the same burst overshoots the "$X per window" limits. The cap bounds what
-// one burst can run up to (cap × one request) — a second burst is refused by
-// admission because the credit is gone or the window is full.
+// plan the same burst overshoots the "$X per window" limits. RPM alone does not
+// stop it: it counts requests that already FINISHED, so N simultaneous requests
+// all see the same count. The cap bounds what one burst can run up to (cap × one
+// request) — a second burst is refused by admission because the credit is gone or
+// the window is full.
+//
+// The cap is the RPM of the plan paying for the request, counted per (user,
+// plan) like RPM itself: a plan that allows N requests a minute may have at most
+// N running at once. A plan without RPM falls back to
+// CUSTOMER_MAX_CONCURRENT_REQUESTS (unset or 0 = no cap).
 //
 // A request holds one slot from admission until its response body is finished,
 // cancelled or errored. The slot lives in an AsyncLocalStorage scope opened by
@@ -20,40 +27,54 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 export const LEASE_TTL_MS = 15 * 60 * 1000;
-const DEFAULT_MAX_CONCURRENT = 10;
 
-/** Per-account cap. CUSTOMER_MAX_CONCURRENT_REQUESTS=0 disables it. */
-export function maxConcurrentRequests() {
-  const raw = process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS;
-  if (raw == null || String(raw).trim() === "") return DEFAULT_MAX_CONCURRENT;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_MAX_CONCURRENT;
+/** Fallback cap for a plan without RPM. Unset or 0 = no cap. */
+export function fallbackMaxConcurrent() {
+  const parsed = parseInt(process.env.CUSTOMER_MAX_CONCURRENT_REQUESTS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
-export function concurrencyLimitMessage(max) {
-  return `Tài khoản đang có quá nhiều request chạy cùng lúc (tối đa ${max}). Đợi request trước xong rồi thử lại.`;
+/** The cap for a request paid by a plan with this RPM (null = none set). */
+export function concurrencyCapFor(rpm) {
+  const n = Number(rpm);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallbackMaxConcurrent();
+}
+
+/**
+ * The slot key: per (user, plan template id), the same scope RPM is counted in.
+ * Deliberately plans.id, not userPlans.id: two purchases of one plan share one
+ * RPM allowance, so they share one concurrency cap too.
+ */
+export function slotKey(userId, planId) {
+  return `${userId}:${planId ?? "-"}`;
+}
+
+/** `fromRpm`: the cap is the plan's RPM (false = the CUSTOMER_MAX_CONCURRENT_REQUESTS fallback). */
+export function concurrencyLimitMessage(max, { fromRpm = true } = {}) {
+  const why = fromRpm ? `tối đa ${max}, bằng RPM của gói` : `tối đa ${max}`;
+  return `Gói đang có quá nhiều request chạy cùng lúc (${why}). Đợi request trước xong rồi thử lại.`;
 }
 
 // Survives dev hot-reload; shared by every route bundle in the process.
 if (!global._derouterInflight) global._derouterInflight = { byUser: new Map(), seq: 0, als: new AsyncLocalStorage() };
 const state = global._derouterInflight;
 
-function activeLeases(userId, now) {
-  const leases = state.byUser.get(userId);
+function activeLeases(key, now) {
+  const leases = state.byUser.get(key);
   if (!leases) return null;
   for (const [id, acquiredAt] of leases) {
     if (now - acquiredAt >= LEASE_TTL_MS) leases.delete(id);
   }
   if (leases.size === 0) {
-    state.byUser.delete(userId);
+    state.byUser.delete(key);
     return null;
   }
   return leases;
 }
 
-/** Slots held by `userId` right now (diagnostics and tests). */
-export function inflightCount(userId, now = Date.now()) {
-  return activeLeases(userId, now)?.size ?? 0;
+/** Slots held under `key` right now (diagnostics and tests). */
+export function inflightCount(key, now = Date.now()) {
+  return activeLeases(key, now)?.size ?? 0;
 }
 
 /** Open a scope for one request. */
@@ -78,25 +99,27 @@ export function currentScope() {
 }
 
 /**
- * Take a slot for `userId` in the current request scope.
+ * Take a slot under `key` (see slotKey) in the current request scope.
+ * `max` is required; <= 0 means no cap.
  * @returns {{ ok: true } | { ok: false, max: number }}
  */
-export function acquireSlot(userId, { max = maxConcurrentRequests(), now = Date.now(), scope = currentScope() } = {}) {
-  if (!userId || max <= 0 || !scope || scope.released) return { ok: true };
-  if (scope.releases.has(userId)) return { ok: true }; // one slot per request, however many checks it runs
+export function acquireSlot(key, { max, now = Date.now(), scope = currentScope() } = {}) {
+  if (max === undefined) throw new Error("acquireSlot requires max");
+  if (!key || !(max > 0) || !scope || scope.released) return { ok: true };
+  if (scope.releases.has(key)) return { ok: true }; // one slot per request, however many checks it runs
 
-  const leases = activeLeases(userId, now);
+  const leases = activeLeases(key, now);
   if (leases && leases.size >= max) return { ok: false, max };
 
   const id = ++state.seq;
   const map = leases || new Map();
   map.set(id, now);
-  state.byUser.set(userId, map);
-  scope.releases.set(userId, () => {
-    const current = state.byUser.get(userId);
+  state.byUser.set(key, map);
+  scope.releases.set(key, () => {
+    const current = state.byUser.get(key);
     if (!current) return;
     current.delete(id);
-    if (current.size === 0) state.byUser.delete(userId);
+    if (current.size === 0) state.byUser.delete(key);
   });
   return { ok: true };
 }
