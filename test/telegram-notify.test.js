@@ -127,6 +127,51 @@ test("a fresh link clears the refused-delivery marker", () => {
   assert.equal(row.telegramDmBlockedAt, null);
 });
 
+test("every login is announced, a never-seen IP is called out", () => {
+  const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+  const known = notify.messages.login({ ip: "203.0.113.9", userAgent: ua, newIp: false })("derouter");
+  assert.match(known, /Đăng nhập tài khoản/);
+  assert.match(known, /Chrome trên macOS/);
+  assert.doesNotMatch(known, /chưa từng/);
+  const fresh = notify.messages.login({ ip: "198.51.100.1", userAgent: ua, newIp: true })("derouter");
+  assert.match(fresh, /Đăng nhập từ địa chỉ mới/);
+  assert.match(fresh, /chưa từng đăng nhập từ IP này/);
+});
+
+test("a repeat login from the same IP within minutes stays silent", () => {
+  user("u1");
+  const now = Date.now();
+  db.run(`INSERT INTO activityLog(userId, action, ip, createdAt) VALUES('u1', 'login', '203.0.113.9', ?)`, [new Date(now - 5 * 60_000).toISOString()]);
+  assert.equal(notify.recentLoginFromIpSync(db, "u1", "203.0.113.9", { now }), true);
+  assert.equal(notify.recentLoginFromIpSync(db, "u1", "198.51.100.1", { now }), false);
+  assert.equal(notify.recentLoginFromIpSync(db, "u1", "203.0.113.9", { now: now + 20 * 60_000 }), false);
+  assert.equal(notify.recentLoginFromIpSync(db, "u1", null, { now }), false);
+});
+
+test("the admin sign-in alert names the method, identity and IP, escaped", () => {
+  const text = notify.adminLoginText({ method: "oidc", ip: "203.0.113.9", identity: "<b>x</b>@idp", userAgent: "curl/8" });
+  assert.match(text, /Đăng nhập admin/);
+  assert.match(text, /cách: OIDC/);
+  assert.match(text, /&lt;b&gt;x&lt;\/b&gt;@idp/);
+  assert.match(text, /IP: <code>203\.0\.113\.9<\/code>/);
+  assert.match(notify.adminLoginText({}), /cách: mật khẩu/);
+  assert.match(notify.adminLoginText({}), /IP: <code>không rõ<\/code>/);
+  assert.match(notify.messages.login({ ip: null })("s"), /IP: không rõ/);
+});
+
+test("user agents are described in a few words", () => {
+  const d = notify.describeUserAgent;
+  assert.equal(d("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1"), "Safari trên iOS");
+  assert.equal(d("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36 Edg/130.0"), "Edge trên Windows");
+  assert.equal(d("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"), "Chrome trên Android");
+  assert.equal(d("Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"), "Firefox trên Linux");
+  assert.equal(d("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/130.0 Mobile/15E148 Safari/604.1"), "Chrome trên iOS");
+  assert.equal(d("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/128.0 coc_coc_browser/128.0 Safari/537.36"), "Cốc Cốc trên Windows");
+  assert.equal(d("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15"), "Safari trên macOS"); // also iPadOS desktop mode
+  assert.equal(d("curl/8.4.0"), "curl/8.4.0");
+  assert.equal(d(""), "");
+});
+
 test("message text escapes customer-controlled values", () => {
   const text = notify.messages.apiKeyCreated({ name: "<b>x</b> & y" })("derouter");
   assert.match(text, /&lt;b&gt;x&lt;\/b&gt; &amp; y/);

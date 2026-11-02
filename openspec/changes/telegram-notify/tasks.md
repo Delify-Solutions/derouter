@@ -11,7 +11,7 @@
 ## 3. Hooks
 
 - [x] 3.1 Billing: admin approve, SePay webhook, poller, resolve-assign, admin grant, gift redeem, gift assign (create + assign)
-- [x] 3.2 Security: login new IP, password change/reset, key create, admin suspend/reactivate/reset, link confirmation
+- [x] 3.2 Security: every login (new IP called out), password change/reset, key create, admin suspend/reactivate/reset, link confirmation
 - [x] 3.3 Reminders job `planReminders.js`, started in `runHeavyStartup`
 
 ## 4. UI
@@ -25,3 +25,4 @@
 - [x] 5.1 Tests: transport mapping, prefs, marker, link clears marker, escaping, order summary, new IP, reminders (due, dedupe, retry), broadcast audience and counts
 - [x] 5.2 `npm run lint`, `npm test`, `npm run build`
 - [ ] 5.3 Merge deltas into `openspec/specs/` and archive
+- [x] 5.4 Every customer login announced (new IP called out, same-IP repeats within 15 min silent); admin sign-in alerts for password, OIDC, SAML

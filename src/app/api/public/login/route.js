@@ -7,7 +7,13 @@ import { checkLocks, recordFails, recordSuccess, getClientIp, userIpBucket, user
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
-import { fireAndForget, isNewLoginIpSync, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
+import {
+  fireAndForget,
+  isNewLoginIpSync,
+  messages,
+  notifyCustomer,
+  recentLoginFromIpSync,
+} from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 
@@ -102,22 +108,31 @@ export async function POST(request) {
   }
 
   recordSuccess(accountBucket);
-  // Checked before this login is recorded, or the IP would always look known.
+  // Both checked before this login is recorded, or the IP would always look known.
   const loggedIp = getRequestIp(request);
   let newIp = false;
+  let repeat = false;
   try {
-    newIp = isNewLoginIpSync(await getAdapter(), user.id, loggedIp);
+    const db = await getAdapter();
+    newIp = isNewLoginIpSync(db, user.id, loggedIp);
+    repeat = !newIp && recentLoginFromIpSync(db, user.id, loggedIp);
   } catch {
     newIp = false;
   }
   await recordActivity(request, { userId: user.id, action: "login" });
-  if (newIp) {
-    fireAndForget(notifyCustomer(user.id, "security", messages.newLoginIp({ ip: loggedIp, userAgent: getRequestUserAgent(request) })));
-  }
 
   // Persists the session row as well, so logout and password reset can revoke it
   // and the account API can require a live row rather than a bare signature.
   await startUserSession(await cookies(), request, user, { ip });
+
+  // Every sign-in is announced (a never-seen IP is called out), except a repeat
+  // from the same IP within minutes: scripted logins must not drain the bot's
+  // send budget that payment and admin alerts share.
+  if (!repeat) {
+    fireAndForget(
+      notifyCustomer(user.id, "security", messages.login({ ip: loggedIp, userAgent: getRequestUserAgent(request), newIp }))
+    );
+  }
 
   return NextResponse.json(
     {

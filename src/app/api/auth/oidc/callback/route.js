@@ -12,6 +12,8 @@ import {
   verifyOidcState,
 } from "@/lib/auth/oidc";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
+import { notifyAdminLogin } from "@/lib/notify/telegram";
+import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
 
 function clearOidcCookies(cookieStore) {
   cookieStore.delete("oidc_state");
@@ -87,6 +89,12 @@ export async function GET(request) {
       oidcEmail: pickOidcEmail(payload) || null,
       oidcName: pickOidcDisplayName(payload),
     });
+    notifyAdminLogin({
+      method: "oidc",
+      ip: getRequestIp(request),
+      userAgent: getRequestUserAgent(request),
+      identity: pickOidcEmail(payload) || payload.sub || null,
+    }).catch(() => {});
 
     return NextResponse.redirect(new URL("/dashboard", publicOrigin));
   } catch (error) {

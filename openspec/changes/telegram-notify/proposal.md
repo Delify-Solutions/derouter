@@ -7,13 +7,14 @@ Customers can now link their Telegram account (change `new-user-gift-telegram`),
 - Send messages from the configured bot to each linked customer for four groups:
   - **billing**: an order is approved (admin, SePay webhook, payment poller, manual match), the admin grants a plan or credit, a gift code is redeemed or assigned;
   - **expiry**: a plan ends within 3 days, then within 24 hours, unless another plan runs past it; credit across running plans drops under 10%;
-  - **security**: login from an IP never used to sign in or register, password changed or reset, API key created, account suspended or reactivated, Telegram linked;
+  - **security**: every login (an IP never used before is called out; repeats from the same IP within 15 minutes stay silent), password changed or reset, API key created, account suspended or reactivated, Telegram linked;
   - **announcements**: free-text messages composed by the admin.
 - Customers turn billing, expiry and announcements on or off on `/account`; security messages are always sent. A "Gửi tin thử" button sends a test message.
 - When Telegram refuses delivery (bot blocked, never allowed to message), the account is marked and skipped until a test message or a re-link succeeds; `/account` explains how to open the bot.
 - The Mini App asks Telegram for permission to message the user before linking, and the server confirms the link in the chat.
 - New admin page "Thông báo Telegram" (`/dashboard/telegram`): audience counts, compose, send in the background, history with progress.
 - A periodic job (every 10 minutes) sends expiry and credit reminders once each.
+- Every admin dashboard sign-in (password, OIDC, SAML) is announced to the admin chat.
 
 ## Capabilities
 
