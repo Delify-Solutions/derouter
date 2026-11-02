@@ -445,9 +445,9 @@ export function calculateCostFromTokens(tokens, pricing) {
   }
 
   const outputTokens = tokens.completion_tokens || tokens.output_tokens || 0;
-  cost += outputTokens * (pricing.output / 1000000);
-
-  const reasoningTokens = tokens.reasoning_tokens || 0;
+  // reasoning_tokens is a subset of completion_tokens (same rule as costFromTokensNano).
+  const reasoningTokens = Math.min(tokens.reasoning_tokens || 0, outputTokens);
+  cost += (outputTokens - reasoningTokens) * (pricing.output / 1000000);
   if (reasoningTokens > 0) {
     cost += reasoningTokens * ((pricing.reasoning || pricing.output) / 1000000);
   }

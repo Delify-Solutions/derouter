@@ -14,6 +14,10 @@ import {
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
+import { formatVnd } from "@/lib/payments/amounts.js";
+import { topupCreditForAmount } from "@/lib/billing/topup.js";
+import UserPicker from "./components/UserPicker";
+import AssignResults from "./components/AssignResults";
 
 const FILTERS = [
   { value: "all", label: "All" },
@@ -74,7 +78,13 @@ function statusBadge(status) {
 
 function grantLabel(gift) {
   if (gift.grantKind === "plan") {
-    return gift.planName || gift.planId || "Plan";
+    const name = gift.planName || gift.planId || "Plan";
+    // A top-up plan gifted as an amount: "Start · 100.000đ → $40.00".
+    if (gift.amountVnd != null) {
+      const credit = gift.amountCreditNanoUsd ? ` → ${fmtUsdNano(gift.amountCreditNanoUsd)}` : "";
+      return `${name} · ${formatVnd(gift.amountVnd)}${credit}`;
+    }
+    return name;
   }
   return fmtUsdNano(gift.creditNanoUsd ?? 0);
 }
@@ -112,6 +122,7 @@ export default function GiftCodesPageClient() {
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
   const [redemptionsError, setRedemptionsError] = useState("");
   const [rowBusyId, setRowBusyId] = useState(null);
+  const [assignFor, setAssignFor] = useState(null);
 
   const { copied, copy } = useCopyToClipboard(2000);
 
@@ -283,7 +294,7 @@ export default function GiftCodesPageClient() {
                   <tr key={gift.id} className="border-b border-border last:border-b-0 hover:bg-surface-2">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm tracking-wider text-text-main">
+                        <span className="whitespace-nowrap font-mono text-sm tracking-wider text-text-main">
                           {gift.displayCode || gift.code}
                         </span>
                         <button
@@ -347,6 +358,15 @@ export default function GiftCodesPageClient() {
                         <Button
                           size="sm"
                           variant="ghost"
+                          icon="person_add"
+                          disabled={!gift.isActive || status === "exhausted" || status === "expired"}
+                          onClick={() => setAssignFor(gift)}
+                        >
+                          Gắn cho user
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           icon="list_alt"
                           onClick={() => openRedemptions(gift)}
                         >
@@ -371,13 +391,23 @@ export default function GiftCodesPageClient() {
         </div>
       )}
 
+      {assignFor && (
+        <AssignGiftModal
+          gift={assignFor}
+          onClose={() => setAssignFor(null)}
+          onAssigned={(code) => {
+            if (code) setCodes((prev) => prev.map((g) => (g.id === code.id ? code : g)));
+          }}
+        />
+      )}
+
       {createOpen && (
         <NewGiftCodeModal
           plans={plans}
           onClose={() => setCreateOpen(false)}
-          onCreated={async (code) => {
+          onCreated={async (code, assigned) => {
             setCreateOpen(false);
-            setCreatedCode(code);
+            setCreatedCode({ ...code, assigned: assigned ?? null });
             await fetchCodes();
           }}
         />
@@ -393,8 +423,11 @@ export default function GiftCodesPageClient() {
         {createdCode && (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-text-muted">
-              Share this code with whoever should redeem it. It stays visible in the list below.
+              {createdCode.assigned
+                ? "Mã đã được gắn thẳng cho các tài khoản bên dưới; họ không cần nhập mã. Lượt còn lại vẫn dùng được bằng cách nhập mã."
+                : "Share this code with whoever should redeem it. It stays visible in the list below."}
             </p>
+            {createdCode.assigned && <AssignResults results={createdCode.assigned} />}
             <div className="flex items-stretch border border-border bg-surface-2">
               <span className="flex flex-1 items-center px-4 py-4 font-mono text-lg tracking-[0.12em] text-text-main break-all">
                 {createdCode.displayCode || createdCode.code}
@@ -469,6 +502,7 @@ export default function GiftCodesPageClient() {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="meta px-3 py-2 text-text-muted">User</th>
+                    <th className="meta px-3 py-2 text-text-muted">Cách nhận</th>
                     <th className="meta px-3 py-2 text-text-muted">Redeemed</th>
                     <th className="meta px-3 py-2 text-text-muted">Expires</th>
                   </tr>
@@ -478,6 +512,9 @@ export default function GiftCodesPageClient() {
                     <tr key={r.id} className="border-b border-border last:border-b-0">
                       <td className="px-3 py-2 font-mono text-xs text-text-main break-all">
                         {r.userEmail || r.userId}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
+                        {r.assignedBy ? "Admin gắn" : "Tự nhập mã"}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
                         {fmtDateTime(r.redeemedAt)}
@@ -518,8 +555,20 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
   const [perUserLimit, setPerUserLimit] = useState("1");
   const [expiresOn, setExpiresOn] = useState("");
   const [note, setNote] = useState("");
+  const [amountVnd, setAmountVnd] = useState("");
+  const [assignees, setAssignees] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const selectedPlan = activePlans.find((p) => p.id === planId) ?? null;
+  const topupPlan = grantType === "plan" && selectedPlan?.allowCustomAmount === true;
+  const amountCredit = topupPlan && amountVnd ? topupCreditForAmount(selectedPlan, Number(amountVnd)) : 0;
+
+  // Picking accounts raises the total so every one of them can receive the code.
+  const pickAssignees = (next) => {
+    setAssignees(next);
+    if (next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
+  };
 
   const submit = async () => {
     setError("");
@@ -552,6 +601,13 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
         return;
       }
       body.planId = planId;
+      if (topupPlan && String(amountVnd).trim() !== "") {
+        if (!(Number(amountVnd) > 0) || amountCredit <= 0) {
+          setError("Số tiền phải là số đồng nguyên dương, đủ lớn để quy đổi ra credit.");
+          return;
+        }
+        body.amountVnd = Number(amountVnd);
+      }
     } else {
       const usd = Number(creditUsd);
       if (!Number.isFinite(usd) || usd <= 0) {
@@ -567,6 +623,12 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
       body.durationDays = days;
     }
 
+    if (assignees.length > max) {
+      setError("Tổng lượt dùng phải đủ cho số tài khoản được gắn.");
+      return;
+    }
+    if (assignees.length > 0) body.assignUserIds = assignees.map((user) => user.id);
+
     setSaving(true);
     try {
       const res = await fetch("/api/gift-codes", {
@@ -579,7 +641,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
         setError(data.error || "Could not create the code.");
         return;
       }
-      await onCreated(data.code);
+      await onCreated(data.code, data.assigned);
     } catch {
       setError("Could not reach the server.");
     } finally {
@@ -589,7 +651,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
 
   const planOptions = activePlans.map((p) => ({
     value: p.id,
-    label: `${p.name} · ${fmtCreditNano(p.creditNanoUsd, p.unlimitedCredit)} · ${p.durationDays}d`,
+    label: `${p.name} · ${p.allowCustomAmount ? "nạp tùy ý" : fmtCreditNano(p.creditNanoUsd, p.unlimitedCredit)} · ${p.durationDays}d`,
   }));
 
   return (
@@ -636,13 +698,31 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
               No active plans exist yet. Create a plan first, or grant credit instead.
             </p>
           ) : (
-            <Select
-              label="Plan"
-              options={planOptions}
-              value={planId}
-              onChange={(e) => setPlanId(e.target.value)}
-              placeholder="Select a plan"
-            />
+            <div className="flex flex-col gap-4">
+              <Select
+                label="Plan"
+                options={planOptions}
+                value={planId}
+                onChange={(e) => setPlanId(e.target.value)}
+                placeholder="Select a plan"
+              />
+              {topupPlan && (
+                // A custom-amount plan is gifted like a top-up: an amount in đồng,
+                // credited at the plan's own rate, with its duration and limits.
+                <Input
+                  label="Số tiền tặng (đồng)"
+                  inputMode="numeric"
+                  value={amountVnd}
+                  onChange={(e) => setAmountVnd(e.target.value.replace(/\D/g, ""))}
+                  placeholder={selectedPlan?.priceVnd ? String(selectedPlan.priceVnd) : "100000"}
+                  hint={amountVnd
+                    ? (amountCredit > 0
+                        ? `${formatVnd(Number(amountVnd))} = ${fmtUsdNano(amountCredit)} credit theo tỷ lệ của gói (${formatVnd(selectedPlan.priceVnd)} = ${fmtUsdNano(selectedPlan.creditNanoUsd)}), dùng ${selectedPlan.durationDays} ngày.`
+                        : "Số tiền quá nhỏ để quy đổi ra credit.")
+                    : `Để trống = tặng ${fmtUsdNano(selectedPlan.creditNanoUsd)} credit như mua 1 lần với giá gốc.`}
+                />
+              )}
+            </div>
           )
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
@@ -698,6 +778,13 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
           hint="Leave empty for a code that does not expire."
         />
 
+        <UserPicker
+          value={assignees}
+          onChange={pickAssignees}
+          label="Gắn trực tiếp cho tài khoản (tùy chọn)"
+          hint="Tài khoản được chọn nhận quà ngay khi tạo mã, không cần nhập mã. Mỗi tài khoản tính 1 lượt dùng."
+        />
+
         <Input
           label="Note (optional)"
           value={note}
@@ -708,6 +795,85 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
 
         {error && (
           <p className="flex items-center gap-1 text-[11px] text-red-600">
+            <span className="material-symbols-outlined text-[14px]">error</span>
+            {error}
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Give an existing code to accounts without them typing it. */
+function AssignGiftModal({ gift, onClose, onAssigned }) {
+  const [assignees, setAssignees] = useState([]);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const left = Math.max(0, (gift.maxRedemptions ?? 1) - (gift.redeemedCount ?? 0));
+
+  const submit = async () => {
+    setError("");
+    if (assignees.length === 0) {
+      setError("Chọn ít nhất một tài khoản.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/gift-codes/${gift.id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: assignees.map((user) => user.id) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Không gắn được mã.");
+        return;
+      }
+      setResults(data.results || []);
+      setAssignees([]);
+      onAssigned(data.code);
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Gắn mã cho tài khoản"
+      size="md"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{results ? "Đóng" : "Hủy"}</Button>
+          <Button onClick={submit} loading={saving} disabled={assignees.length === 0}>Gắn mã</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-sm tracking-wider text-text-main">{gift.displayCode || gift.code}</span>
+          <span className="text-xs text-text-muted">
+            {grantLabel(gift)} · còn {left} lượt · mỗi tài khoản tối đa {gift.perUserLimit ?? 1} lần
+          </span>
+        </div>
+        <UserPicker
+          id="gift-assign-picker"
+          value={assignees}
+          onChange={setAssignees}
+          hint="Tài khoản nhận quà ngay, không cần nhập mã. Mỗi tài khoản dùng 1 lượt của mã."
+        />
+        {assignees.length > left && (
+          <p className="text-xs text-danger" role="alert">
+            Mã chỉ còn {left} lượt; {assignees.length - left} tài khoản cuối sẽ không nhận được.
+          </p>
+        )}
+        {results && <AssignResults results={results} />}
+        {error && (
+          <p className="flex items-center gap-1 text-[11px] text-red-600" role="alert">
             <span className="material-symbols-outlined text-[14px]">error</span>
             {error}
           </p>

@@ -38,7 +38,7 @@ export default function GetStarted({ models, plans = [], text, baseUrl = "" }) {
     {
       number: "02",
       title: "Tạo API key",
-      body: "Vào mục API key trong tài khoản và tạo key mới. Key chỉ hiện một lần, nên hãy lưu lại ngay.",
+      body: "Vào mục API key trong tài khoản, tạo key mới rồi sao chép key để dán vào ứng dụng.",
     },
     {
       number: "03",

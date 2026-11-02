@@ -3,7 +3,8 @@ import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
-import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
+import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
+import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine, usageOrEstimate } from "./requestDetail.js";
 // readBodyWithTimeout/guardWithTimeout live in nonStreamingHandler (which imports
 // parseSSEToOpenAIResponse from here). The cycle is safe: both are function
 // declarations consumed at call time, never during module evaluation.
@@ -105,6 +106,12 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
       input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
       output_tokens: usage.completion_tokens || usage.output_tokens || 0,
       total_tokens: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      ...(Number(usage.prompt_tokens_details?.cached_tokens) > 0
+        ? { input_tokens_details: { cached_tokens: Number(usage.prompt_tokens_details.cached_tokens) } }
+        : {}),
+      ...(Number(usage.completion_tokens_details?.reasoning_tokens) > 0
+        ? { output_tokens_details: { reasoning_tokens: Number(usage.completion_tokens_details.reasoning_tokens) } }
+        : {}),
     },
   };
 }
@@ -183,7 +190,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
  * Handle case: provider forced streaming but client wants JSON.
  * Supports both Codex/Responses API SSE and standard Chat Completions SSE.
  */
-export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS, bodySignal = null }) {
+export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, trackDone, appendLog, reqTag, log, requestSignal = null, timeoutMs = DEFAULT_BODY_TIMEOUT_MS, bodySignal = null }) {
   const contentType = providerResponse.headers.get("content-type") || "";
   const isSSE = contentType.includes("text/event-stream") || (contentType === "" && isResponsesProvider(provider));
   if (!isSSE) return null; // not handled here
@@ -227,16 +234,15 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
       // client-facing usage can never disagree.
-      const inTokensForLog = (usage.input_tokens || 0)
-        + (usage.cache_read_input_tokens || usage.cached_tokens || 0)
-        + (usage.cache_creation_input_tokens || 0);
+      // Responses input_tokens already INCLUDES cached tokens (details carry the breakdown).
+      const inTokensForLog = usage.input_tokens || 0;
       const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
       const totalLatency = Date.now() - requestStartTime;
 
       saveRequestDetail(buildRequestDetail({
         ...ctx,
         requestedModel,
-        latency: { ttft: totalLatency, total: totalLatency },
+        latency: { ttft: null, total: totalLatency },
         tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
         response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
         status: "success"
@@ -253,9 +259,10 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       // where the real prompt was ~5344 with 5332 served from cache. Fold the cache
       // counters in, and keep them visible in prompt_tokens_details so a client can
       // tell a cache hit from a small prompt.
-      const cacheRead = usage.cache_read_input_tokens || usage.cached_tokens || 0;
-      const cacheCreate = usage.cache_creation_input_tokens || 0;
-      const inTokens = (usage.input_tokens || 0) + cacheRead + cacheCreate;
+      // Responses input_tokens includes the cached part, so it is already the prompt total.
+      const cacheRead = usage.input_tokens_details?.cached_tokens || usage.cached_tokens || 0;
+      const cacheCreate = 0;
+      const inTokens = usage.input_tokens || 0;
       const outTokens = usage.output_tokens || 0;
       const cacheDetails = (cacheRead > 0 || cacheCreate > 0)
         ? { prompt_tokens_details: {
@@ -325,7 +332,8 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
     if (onRequestSuccess) await onRequestSuccess();
 
-    const usage = parsed.usage || {};
+    // Recorded/billed usage; `parsed.usage` (what the client gets) stays the upstream's own.
+    const usage = applyEstimatedCache(usageOrEstimate(parsed.usage || {}, body, parsed), cacheCtx);
     appendLog({ tokens: usage, status: "200 OK" });
     // requestedModel = original client model string (bare combo name when a combo was
     // called, before combo expansion rewrote body.model). Same derivation as the
@@ -339,7 +347,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     saveRequestDetail(buildRequestDetail({
       ...ctx,
       requestedModel,
-      latency: { ttft: totalLatency, total: totalLatency },
+      latency: { ttft: null, total: totalLatency },
       tokens: usage,
       response: {
         content: parsed.choices?.[0]?.message?.content || null,
@@ -349,20 +357,15 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       status: "success"
     }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
-    // Re-attach usage explicitly. This handler already HAS the correct usage — it is
-    // the same object written to the usage DB, and for a cached Claude request that DB
-    // row reads cache_read_input_tokens: 11022 — yet the client was observed receiving
-    // no usage field at all (verified 2026-08-04 with a fingerprinted payload matched
-    // on both sides). Whatever drops it between assembly and serialisation, the client
-    // must not be left unable to account for its own token spend: a caller cannot tell
-    // a 90%-cached request from a cheap one without this.
-    if (usage && Object.keys(usage).length > 0) parsed.usage = usage;
+    // `parsed.usage` is the upstream's own usage object, untouched: the client can tell a
+    // cached request from a cheap one. (Any estimate lives only in the recorded row.)
 
     // Strip reasoning_content only when content is non-empty.
     // When content is empty (e.g. thinking models that used all tokens for reasoning),
     // reasoning_content is the only useful output and must be preserved.
     // Previously this was unconditional, which broke Qwen3.5, Claude extended thinking, etc.
-    if (parsed?.choices) {
+    // Compat only: dropping reasoning the upstream returned is a content edit.
+    if (compat && parsed?.choices) {
       for (const choice of parsed.choices) {
         if (choice?.message?.reasoning_content && choice.message.content) {
           delete choice.message.reasoning_content;

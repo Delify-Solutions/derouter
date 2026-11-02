@@ -45,11 +45,21 @@ An admin notification SHALL be sent for every `matched` and every `needs_review`
 - **THEN** the order is approved
 
 ### Requirement: SePay webhook
-`POST /api/payments/sepay/webhook` SHALL be reachable without a session. It SHALL accept only requests whose `Authorization` header is `Apikey <key>` equal (constant-time comparison) to the webhook key of an active `sepay` provider, else answer 401. It SHALL record and reconcile the transaction (id, `transferType`, `transferAmount`, `content`, `transactionDate`, `accountNumber`) for that provider and answer HTTP 200 `{ "success": true }` for every authenticated request, including duplicates and transactions needing review, so SePay does not retry them.
+`POST /api/payments/sepay/webhook` SHALL be reachable without a session. It SHALL accept only requests whose `Authorization` header is `Apikey <key>` equal (constant-time comparison) to the webhook key of an active `sepay` provider, else answer 401. It SHALL record and reconcile the transaction (id, `transferType`, `transferAmount`, `content`, `transactionDate`, `accountNumber`, `subAccount`) for that provider and answer HTTP 200 `{ "success": true }` for every authenticated request, including duplicates and transactions needing review, so SePay does not retry them.
+
+A transfer SHALL count as received by the provider's account when the configured account number equals, ignoring spaces, punctuation and letter case, either the payload's `accountNumber` (the bank account) or its `subAccount` (the virtual account the customer paid into, e.g. a BIDV VA). When neither matches, the transaction SHALL be stored for review with reason `wrong_provider` and SHALL NOT approve an order, whatever its content. A provider without a configured account number, or a payload reporting neither field, is not checked.
 
 #### Scenario: Wrong key
 - **WHEN** a request carries `Authorization: Apikey wrong`
 - **THEN** the response is HTTP 401 and nothing is stored
+
+#### Scenario: Payment into a virtual account
+- **WHEN** the provider's account number is `96247061103` and SePay delivers a BIDV transfer with `accountNumber` `8857011098`, `subAccount` `96247061103` and the order's code in the content
+- **THEN** the order is approved
+
+#### Scenario: Payment into another account
+- **WHEN** the provider's account number is `96247061103` and the delivery reports `subAccount` `96247000000` and `accountNumber` `8857011098`
+- **THEN** the transaction is stored for review with reason `wrong_provider` and the order stays pending
 
 ### Requirement: Polling providers
 A background poller SHALL fetch recent transactions for every active provider configured for polling (`web2m`, `acb`, `binance`, and `sepay` when an API token is set) no more often than its poll interval (default 30 seconds, minimum 15), with a 15-second request timeout, one fetch per provider at a time, and record the last poll time and last error on the provider. Binance requests SHALL be signed with HMAC-SHA256 over the query string using the provider's secret. Request URLs or headers containing secrets SHALL NOT be written to logs or stored errors.

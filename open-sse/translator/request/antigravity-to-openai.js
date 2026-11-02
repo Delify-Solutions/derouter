@@ -1,6 +1,6 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
-import { adjustMaxTokens } from "../formats/maxTokens.js";
+import { resolveMaxTokens } from "../formats/maxTokens.js";
 import { encodeDataUri } from "../concerns/image.js";
 import { ROLE, GEMINI_ROLE, OPENAI_BLOCK } from "../schema/index.js";
 import { budgetToEffort } from "../concerns/thinking.js";
@@ -8,7 +8,7 @@ import { collapseTextParts } from "../concerns/message.js";
 
 // Convert Antigravity request to OpenAI format
 // Antigravity body: { project, model, userAgent, requestType, requestId, request: { contents, systemInstruction, tools, toolConfig, generationConfig, sessionId } }
-export function antigravityToOpenAIRequest(model, body, stream) {
+export function antigravityToOpenAIRequest(model, body, stream, credentials = null) {
   const req = body.request || body;
   const result = {
     model: model,
@@ -21,7 +21,7 @@ export function antigravityToOpenAIRequest(model, body, stream) {
     const config = req.generationConfig;
     if (config.maxOutputTokens) {
       const tempBody = { max_tokens: config.maxOutputTokens, tools: req.tools };
-      result.max_tokens = adjustMaxTokens(tempBody);
+      result.max_tokens = resolveMaxTokens(tempBody, { compat: credentials?.compatNormalization === true });
     }
     if (config.temperature !== undefined) {
       result.temperature = config.temperature;

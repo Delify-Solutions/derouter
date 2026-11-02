@@ -36,3 +36,10 @@ test("garbage never throws", () => {
   assert.equal(extractGeminiNativeUsage("{not json"), null);
   assert.equal(extractGeminiNativeUsage(null), null);
 });
+
+test("cached prompt tokens are carried so they are priced at the cached rate", () => {
+  const body = JSON.stringify({ usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 5, totalTokenCount: 105, cachedContentTokenCount: 80 } });
+  assert.deepEqual(extractGeminiNativeUsage(body), { prompt_tokens: 100, completion_tokens: 5, cached_tokens: 80 });
+  const bogus = JSON.stringify({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15, cachedContentTokenCount: 99 } });
+  assert.deepEqual(extractGeminiNativeUsage(bogus), { prompt_tokens: 10, completion_tokens: 5 });
+});

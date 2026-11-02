@@ -5,6 +5,34 @@ import {
   getKeyCostSince,
   getKeyRequestCountSince,
 } from "@/lib/localDb";
+import { getAdapter } from "@/lib/db/driver.js";
+import { getQueueSync, getPlanHistorySync } from "@/lib/db/repos/accountPlansRepo.js";
+import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
+import { payingRatesSync } from "@/lib/billing/rates.js";
+import { getDebtNanoSync } from "@/lib/billing/ledger.js";
+
+/**
+ * The account behind a customer key, as /account/plans shows it: every plan in the
+ * queue (limits with their window state, RPM/TPM, start and expiry), recent plans
+ * that stopped, and the rate applied right now. A customer key is billed and
+ * rate-limited by these — not by the key's own budget/RPM fields, which only apply
+ * to admin keys — so the page must show them (spec customer-portal "Public usage
+ * page shows the account's plans").
+ */
+function customerAccountSync(db, userId, rates, used) {
+  const queue = getQueueSync(db, userId);
+  const started = queue.filter((entry) => entry.statusLabel !== "scheduled");
+  const debtNanoUsd = getDebtNanoSync(db, userId);
+  const credit = started.reduce((sum, entry) => sum + Math.max(0, entry.creditRemainingNanoUsd), 0);
+  return {
+    queue,
+    history: getPlanHistorySync(db, userId, { limit: 10 }),
+    availableNanoUsd: Math.max(0, credit - debtNanoUsd),
+    hasUnlimitedCredit: started.some((entry) => entry.unlimitedCredit),
+    debtNanoUsd,
+    rate: { ...rates, requests: used.requests, tokens: used.tokens },
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -98,8 +126,22 @@ export async function GET(request) {
       displayRequests = await getKeyRequestCountSince(key, new Date(0).toISOString());
     }
 
-    // Live last-minute RPM / TPM (requests + tokens in last 60s).
-    const limitCount = await getKeyRateUsage(key, 60_000);
+    // Live last-minute RPM / TPM (requests + tokens in last 60s). A customer key is
+    // limited per ACCOUNT at the paying plan's rates (keyEnforcement), so that is
+    // what is counted and shown; an admin key keeps its own per-key figures.
+    // The allowance is per (user, plan), so a key pinned to a plan shows that plan's.
+    let account = null;
+    if (k.userId) {
+      const accountDb = await getAdapter();
+      const rates = payingRatesSync(accountDb, k.userId, null, { planId: k.planId ?? null });
+      const used = rates.planId
+        ? await getUserRateUsage(k.userId, 60_000, rates.planId)
+        : { requests: 0, tokens: 0 };
+      account = customerAccountSync(accountDb, k.userId, rates, used);
+    }
+    const limitCount = account
+      ? { requests: account.rate.requests, tokens: account.rate.tokens }
+      : await getKeyRateUsage(key, 60_000);
 
     const budgetUsd = resolved.budgetUsd;
     const remainingBudgetUsd =
@@ -112,9 +154,10 @@ export async function GET(request) {
       groupName: group?.name ?? null,
 
       allowedModels: resolved.allowedModels ?? null,
-      rpm: resolved.rpm ?? null,
-      tpm: resolved.tpm ?? null,
-      budgetUsd: budgetUsd ?? null,
+      rpm: account ? account.rate.rpm : resolved.rpm ?? null,
+      tpm: account ? account.rate.tpm : resolved.tpm ?? null,
+      // Budget is an admin-key mechanism; a customer key is bounded by its plans.
+      budgetUsd: account ? null : budgetUsd ?? null,
       resetWindow: resetWindow ?? null,
 
       windowStartedAt: displayWindowStart,
@@ -124,6 +167,9 @@ export async function GET(request) {
       resetAt,
 
       expiresAt: k.expiresAt ?? null,
+
+      // Customer keys only: the account's plans and current rate. null for admin keys.
+      account,
 
       // Live rate counters (last 60s).
       limitCount: {

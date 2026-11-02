@@ -7,6 +7,8 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 // A param is removed only when it is present (!== undefined).
 const STRIP_RULES = [
   // All Claude models: temperature deprecated/rejected upstream (Anthropic 400). #1748
+  // Name-keyed, so it runs for built-in providers (openrouter, claude, ...) and, for a custom
+  // node that merely serves a model called "claude-*", only with compatNormalization.
   { match: /claude/i, drop: ["temperature"] },
   // GitHub Copilot gpt-5.4: temperature unsupported.
   { provider: "github", match: /gpt-5\.4/i, drop: ["temperature"] },
@@ -36,10 +38,14 @@ function clampNumber(body, key, ceiling) {
 }
 
 // Remove unsupported params from body in place; returns body.
-export function stripUnsupportedParams(provider, model, body) {
+// A rule tied to a provider is a requirement of that provider and always applies. A rule with
+// no provider is keyed on the model NAME: `compat` (the legacy-shaping flag, true for every
+// built-in provider and for a custom node only with compatNormalization) says whether it runs.
+export function stripUnsupportedParams(provider, model, body, { compat = true } = {}) {
   if (!model || !body || typeof body !== "object") return body;
   for (const rule of STRIP_RULES) {
-    if (rule.provider && rule.provider !== provider) continue;
+    if (rule.provider && !(Array.isArray(rule.provider) ? rule.provider.includes(provider) : rule.provider === provider)) continue;
+    if (!rule.provider && !compat) continue;
     if (!matches(rule, model)) continue;
     for (const key of rule.drop || []) {
       if (body[key] !== undefined) delete body[key];

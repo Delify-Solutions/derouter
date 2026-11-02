@@ -11,11 +11,13 @@ export default function Tooltip({ text, children, position = "top", color }) {
   const bgStyle = color ? { backgroundColor: color } : {};
   const bgClass = color ? "" : "bg-gray-900";
 
+  // The bubble is display:none until hover/focus: a merely transparent bubble
+  // still takes layout space and, near a screen edge, scrolls the page sideways.
   return (
     <div className="relative inline-flex group/tt">
       {children}
       <div
-        className={`pointer-events-none absolute ${posClass} z-50 w-max max-w-56 rounded-none px-2 py-1 text-[11px] leading-snug ${bgClass} text-white opacity-0 group-hover/tt:opacity-100 transition-opacity duration-150 whitespace-normal`}
+        className={`pointer-events-none absolute ${posClass} z-50 hidden w-max max-w-[min(14rem,calc(100vw-2rem))] rounded-none px-2 py-1 text-[11px] leading-snug ${bgClass} text-white group-hover/tt:block group-focus-within/tt:block whitespace-normal [overflow-wrap:anywhere]`}
         style={bgStyle}
       >
         {text}

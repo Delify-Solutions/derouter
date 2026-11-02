@@ -10,6 +10,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { withErrorLog } from "../utils/withErrorLog.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
@@ -102,7 +103,9 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
         return unavailableResponse(status, `[${provider}/${model}] ${msg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
-      if (excludeConnectionIds.size === 0) return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+      if (excludeConnectionIds.size === 0) return ((modelInfo.inferred || modelInfo.unknownProvider)
+          ? errorResponse(HTTP_STATUS.NOT_FOUND, modelNotFoundMessage(modelStr))
+          : errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`));
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
@@ -9,6 +10,10 @@ import { percentLabel, remainingLabel } from "@/shared/utils/discountFormat";
 import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
+import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
+import LatencyCell from "@/shared/components/LatencyCell";
+import { RateNow } from "@/shared/components/billing";
+import AccountPlansCard from "./AccountPlansCard";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -26,13 +31,7 @@ function maskKeyFull(key) {
 }
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
-
-// Response time: milliseconds under a second, seconds with two decimals above it.
-const fmtDuration = (ms) => {
-  if (ms == null || Number.isNaN(Number(ms))) return "—";
-  const n = Number(ms);
-  return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(2)} s`;
-};
+const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
 
 // 24-hour date and time in the page's language, not the browser's (a US browser gave 12:46:11 AM).
 const fmtDateTime = (value) => {
@@ -100,7 +99,6 @@ export default function UsageClient({ hasUserSession = false }) {
   const [pageSize, setPageSize] = useState(20);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, totalItems: 0, totalPages: 0 });
 
-  const STORAGE_KEY = "derouter.usage.key";
 
   const playgroundKey = loadedKey;
   const transport = useMemo(() => (playgroundKey ? keyTransport(playgroundKey) : null), [playgroundKey]);
@@ -184,7 +182,7 @@ export default function UsageClient({ hasUserSession = false }) {
   const consumeQueryKey = useCallback((k) => {
     if (typeof window === "undefined") return;
     if (k) {
-      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      try { localStorage.setItem(USAGE_KEY_STORAGE, k); } catch {}
       // Strip the key= param so the address bar shows a clean /usage URL.
       // After removing the param (and any trailing ? or &), replaceState
       // with just the pathname leaves no hash and no query.
@@ -264,7 +262,7 @@ export default function UsageClient({ hasUserSession = false }) {
       return;
     }
     let stored = "";
-    try { stored = localStorage.getItem(STORAGE_KEY) || ""; } catch {}
+    try { stored = localStorage.getItem(USAGE_KEY_STORAGE) || ""; } catch {}
     if (stored) {
       setKeyInput(stored);
       lookup(stored, "7d");
@@ -277,7 +275,7 @@ export default function UsageClient({ hasUserSession = false }) {
     if (!k) return;
     // Stash key in storage (not the URL); reload usage for this key.
     if (typeof window !== "undefined") {
-      try { localStorage.setItem(STORAGE_KEY, k); } catch {}
+      try { localStorage.setItem(USAGE_KEY_STORAGE, k); } catch {}
       // Drop any lingering ?key= from the address bar — keep a clean /usage URL.
       window.history.replaceState(null, "", window.location.pathname);
     }
@@ -293,7 +291,7 @@ export default function UsageClient({ hasUserSession = false }) {
     setKeyInput("");
     setError("");
     if (typeof window !== "undefined") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      try { localStorage.removeItem(USAGE_KEY_STORAGE); } catch {}
       window.history.replaceState(null, "", window.location.pathname);
     }
   };
@@ -422,6 +420,8 @@ export default function UsageClient({ hasUserSession = false }) {
   const items = rec?.summary?.items || [];
   const history = rec?.history || [];
   const peakTpm = rec?.summary?.peakTpm || 0;
+  // Customer keys carry their account's plans and rate; admin keys do not.
+  const account = data?.account ?? null;
 
   // Request History filters (client-side): model search + status bucket.
   const filteredHistory = history.filter((r) => {
@@ -525,7 +525,7 @@ export default function UsageClient({ hasUserSession = false }) {
           <div className="rounded-xl border border-border bg-surface-1 p-3 text-sm">
             <div className="flex items-center gap-2 py-1">
               <span className="text-text-muted" style={{ width: 80, flexShrink: 0 }}>Base URL</span>
-              <code className="font-mono text-xs flex-1 truncate">{typeof window !== "undefined" ? `${window.location.origin}/v1` : "/v1"}</code>
+              <code className="min-w-0 font-mono text-xs flex-1 truncate" title={typeof window !== "undefined" ? `${window.location.origin}/v1` : "/v1"}>{typeof window !== "undefined" ? `${window.location.origin}/v1` : "/v1"}</code>
               <button onClick={() => copy(`${typeof window !== "undefined" ? window.location.origin : ""}/v1`)} className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted" title="Copy">
                 <span className="material-symbols-outlined text-[14px]">content_copy</span>
               </button>
@@ -559,7 +559,27 @@ export default function UsageClient({ hasUserSession = false }) {
 
           {/* Budget + RPM/TPM + Peak TPM compact grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* A customer key: the account's credit, then the rate of the paying plan
+                (counted over every key of the account, as enforcement does). */}
+            {/* Credit and a one-line-per-plan summary; full plans open in a panel. */}
+            {account && <AccountPlansCard account={account} />}
+            {account && (
+              <div className="min-w-0 rounded-xl border border-border bg-surface-1 p-4 sm:col-span-1">
+                <RateNow
+                  rate={{
+                    ...account.rate,
+                    requests: rec?.rate?.requests ?? account.rate.requests,
+                    tokens: rec?.rate?.tokens ?? account.rate.tokens,
+                  }}
+                />
+                <div className="mt-2 flex flex-wrap justify-between gap-x-3 text-xs text-text-muted">
+                  <span>Peak TPM {fmt(peakTpm)}</span>
+                  <span>Peak RPM {fmt(rec?.summary?.peakRpm || 0)}</span>
+                </div>
+              </div>
+            )}
             {/* Budget */}
+            {!account && (
             <div className="rounded-xl border border-border bg-surface-1 p-4">
               <h3 className="text-sm font-semibold mb-2">Budget</h3>
               {data.budgetUsd == null ? (
@@ -580,8 +600,10 @@ export default function UsageClient({ hasUserSession = false }) {
                 </>
               )}
             </div>
+            )}
 
             {/* Rate limits (live) */}
+            {!account && (
             <div className="rounded-xl border border-border bg-surface-1 p-4">
               <h3 className="text-sm font-semibold mb-2">Rate (last 60s)</h3>
               <div className="space-y-1.5 text-sm">
@@ -603,6 +625,7 @@ export default function UsageClient({ hasUserSession = false }) {
                 </div>
               </div>
             </div>
+            )}
 
             {/* Totals for period */}
             <div className="rounded-xl border border-border bg-surface-1 p-4">
@@ -637,34 +660,34 @@ export default function UsageClient({ hasUserSession = false }) {
                   <thead>
                     <tr className="text-text-muted border-b border-border">
                       <th className="text-left font-medium px-4 py-2">Model</th>
-                      <th className="text-right font-medium px-4 py-2">Requests</th>
-                      <th className="text-right font-medium px-4 py-2">Input</th>
-                      <th className="text-right font-medium px-4 py-2">Output</th>
-                      <th className="text-right font-medium px-4 py-2">Cache R</th>
-                      <th className="text-right font-medium px-4 py-2">Cache W</th>
-                      <th className="text-right font-medium px-4 py-2">Cost</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Requests</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Input</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Output</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Cache R</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Cache W</th>
+                      <th className="text-right font-medium px-4 py-2 whitespace-nowrap tabular-nums">Cost</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((m) => (
                       <tr key={m.model} className="border-b border-border/50 hover:bg-surface-2/50">
-                        <td className="px-4 py-2 font-mono">{m.model}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.requests)}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.input)}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.output)}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.cacheRead)}</td>
-                        <td className="px-4 py-2 text-right">{fmt(m.cacheCreation)}</td>
-                        <td className="px-4 py-2 text-right">{fmtCost(m.cost)}</td>
+                        <td className="max-w-[14rem] truncate px-4 py-2 font-mono" title={m.model}>{m.model}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(m.requests)}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(m.input)}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(m.output)}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums" title={m.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{m.cacheEstimated ? "≈" : ""}{fmt(m.cacheRead)}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(m.cacheCreation)}</td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmtCost(m.cost)}</td>
                       </tr>
                     ))}
                     <tr className="bg-surface-2 font-semibold">
                       <td className="px-4 py-2">Total</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.requests)}</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.input)}</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.output)}</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.cacheRead)}</td>
-                      <td className="px-4 py-2 text-right">{fmt(totals.cacheCreation)}</td>
-                      <td className="px-4 py-2 text-right">{fmtCost(totals.cost)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(totals.requests)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(totals.input)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(totals.output)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums" title={totals.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{totals.cacheEstimated ? "≈" : ""}{fmt(totals.cacheRead)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmt(totals.cacheCreation)}</td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{fmtCost(totals.cost)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -751,13 +774,13 @@ export default function UsageClient({ hasUserSession = false }) {
                       <th className="text-left font-medium px-3 py-2 whitespace-nowrap">Time</th>
                       <th className="text-left font-medium px-3 py-2">Model</th>
                       <th className="text-center font-medium px-3 py-2">Status</th>
-                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap" title="Total time from receiving the request until the response finished">Response time</th>
-                      <th className="text-right font-medium px-3 py-2">Input</th>
-                      <th className="text-right font-medium px-3 py-2">Output</th>
-                      <th className="text-right font-medium px-3 py-2" title="Input + output tokens">Tokens</th>
-                      <th className="text-right font-medium px-3 py-2">Cache R</th>
-                      <th className="text-right font-medium px-3 py-2">Cache W</th>
-                      <th className="text-right font-medium px-3 py-2">Cost</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums" title="TTFT: time to the first bytes from the upstream (streamed requests). Total: from receiving the request until the response finished">Response time</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Input</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Output</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums" title="Input + output tokens">Tokens</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Cache R</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Cache W</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -779,14 +802,14 @@ export default function UsageClient({ hasUserSession = false }) {
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono tabular-nums whitespace-nowrap">
-                            {fmtDuration(r.latencyMs)}
+                            <LatencyCell totalMs={r.latencyMs} ttftMs={r.ttftMs} />
                           </td>
-                          <td className="px-3 py-1.5 text-right">{fmt(r.input)}</td>
-                          <td className="px-3 py-1.5 text-right">{fmt(r.output)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{fmt(r.tok)}</td>
-                          <td className="px-3 py-1.5 text-right">{fmt(r.cacheRead)}</td>
-                          <td className="px-3 py-1.5 text-right">{fmt(r.cacheCreation)}</td>
-                          <td className="px-3 py-1.5 text-right">
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">{fmt(r.input)}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">{fmt(r.output)}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">{fmt(r.tok)}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums" title={r.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{r.cacheEstimated ? "≈" : ""}{fmt(r.cacheRead)}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">{fmt(r.cacheCreation)}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">
                             <div>{fmtCost(r.cost)}</div>
                             {r.discountBp > 0 && (
                               <div className="text-[10px] text-text-muted" title="Giá niêm yết và mức giảm đã áp dụng">
@@ -831,11 +854,11 @@ export default function UsageClient({ hasUserSession = false }) {
                   <thead>
                     <tr className="text-text-muted border-b border-border">
                       <th className="text-left font-medium px-3 py-2">Model</th>
-                      <th className="text-right font-medium px-3 py-2">Input</th>
-                      <th className="text-right font-medium px-3 py-2">Output</th>
-                      <th className="text-right font-medium px-3 py-2">Cached</th>
-                      <th className="text-right font-medium px-3 py-2" title="Reasoning tokens ($/1M)">Reasoning</th>
-                      <th className="text-right font-medium px-3 py-2" title="Cache creation ($/1M)">Cache W</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Input</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Output</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums">Cached</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums" title="Reasoning tokens ($/1M)">Reasoning</th>
+                      <th className="text-right font-medium px-3 py-2 whitespace-nowrap tabular-nums" title="Cache creation ($/1M)">Cache W</th>
                       <th className="text-center font-medium px-3 py-2"></th>
                     </tr>
                   </thead>
@@ -856,7 +879,7 @@ export default function UsageClient({ hasUserSession = false }) {
                             )}
                           </td>
                           {["input", "output", "cached", "reasoning", "cacheCreation"].map((field) => (
-                            <td key={field} className="px-3 py-2 text-right">
+                            <td key={field} className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                               {m.discounted && (m[field] || 0) > 0 ? (
                                 <>
                                   <div>{fmtUsd(m.discounted[field] || 0)}</div>
@@ -938,7 +961,7 @@ export default function UsageClient({ hasUserSession = false }) {
                         </span>
                       </div>
                       <div><span className="text-text-muted">Time:</span> <span className="text-text-muted">{fmtDateTime(detail.timestamp)}</span></div>
-                      <div><span className="text-text-muted">Latency:</span> <span className="font-mono">TTFT {detail.latency?.ttft ?? 0}ms / Total {detail.latency?.total ?? 0}ms</span></div>
+                      <div><span className="text-text-muted">Latency:</span> <span className="font-mono">{formatLatency(detail.latency?.total, detailTtft(detail.latency))}</span></div>
                       <div><span className="text-text-muted">Key:</span> <span className="font-mono">{detail.apiKey || "—"}</span></div>
                     </div>
 

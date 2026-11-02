@@ -41,6 +41,12 @@ export function orderLimits(db, orderRow) {
   return parseLimits(plan?.limits);
 }
 
+/** Periods an order row bought: NULL (every order before plan-terms) means one. */
+export function orderPeriods(row) {
+  const n = Math.floor(Number(row?.periods));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
 /** One order row (already joined by ORDER_SELECT) in the API/UI shape. */
 export function rowToOrder(row) {
   if (!row) return null;
@@ -52,6 +58,9 @@ export function rowToOrder(row) {
     creditNanoUsd: nano(row.creditNanoUsd),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
+    // Back-to-back periods bought (spec plan-terms); credit/duration are per period.
+    periods: orderPeriods(row),
+    discountPercent: nano(row.discountPercent),
     status: row.status,
     method: row.method ?? "manual",
     // Gateway payment fields (design D1). NULL for a manual order, which pays no
@@ -94,6 +103,8 @@ export function toCustomerOrder(order) {
     creditNanoUsd: order.creditNanoUsd,
     unlimitedCredit: order.unlimitedCredit === true,
     durationDays: order.durationDays,
+    periods: order.periods ?? 1,
+    discountPercent: order.discountPercent ?? 0,
     status: order.status,
     method: order.method ?? "manual",
     paymentCode: order.paymentCode ?? null,
@@ -183,6 +194,8 @@ export function approveOrderSync(db, orderId, {
     creditNanoUsd: nano(row.creditNanoUsd),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
+    // N periods = N back-to-back purchases (spec plan-terms).
+    periods: orderPeriods(row),
     // The snapshot taken at order time; an order created before GĐ1 has none and
     // falls back to the plan's current limits, which is the only thing it could
     // possibly mean.
@@ -195,6 +208,7 @@ export function approveOrderSync(db, orderId, {
     alreadyApproved: false,
     order: rowToOrder(getOrderRowSync(db, orderId)),
     userPlan: granted.userPlan,
+    userPlans: granted.userPlans,
     appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
     paidAt,
   };

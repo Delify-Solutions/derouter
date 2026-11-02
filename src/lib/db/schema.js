@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 23;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -364,6 +364,11 @@ export const TABLES = {
       // Purchases allowed per calendar month. NULL or 0 = unlimited. Counted
       // over orders, not userPlans, so a refund re-opens the slot.
       purchaseLimitPerMonth: "INTEGER",
+      // Longer terms sold besides the single period (spec plan-terms): a JSON
+      // array of { periods, discountPercent }, e.g. [{"periods":3,"discountPercent":5}].
+      // NULL/[] = only one period at a time. Buying N periods grants N back-to-back
+      // purchases, each with the plan's own credit, duration and limits.
+      termOptions: "TEXT",
       // Per-window spending limits: a JSON array of { hours, maxNanoUsd } sorted
       // by hours. NULL/[] = no limits (the purchase drains its credit freely).
       // Snapshotted into the order and the granted purchase, so editing a plan
@@ -439,6 +444,12 @@ export const TABLES = {
       // Snapshot of plans.unlimitedCredit at order creation, like the limits above.
       unlimitedCredit: "INTEGER DEFAULT 0",
       durationDays: "INTEGER",
+      // Number of back-to-back periods bought (spec plan-terms). NULL = 1.
+      // creditNanoUsd and durationDays above are PER period; amountNanoUsd and
+      // payAmount are the total paid for all of them.
+      periods: "INTEGER",
+      // Term discount applied to the price, snapshotted for display. NULL = 0.
+      discountPercent: "INTEGER",
       status: "TEXT NOT NULL",
       method: "TEXT DEFAULT 'manual'",
       // ── Gateway payment (design D1) ───────────────────────────────────────
@@ -613,6 +624,11 @@ export const TABLES = {
       grantKind: "TEXT NOT NULL",
       planId: "TEXT",
       creditNanoUsd: "INTEGER",
+      // A plan gift for a custom-amount (top-up) plan may carry an amount in đồng:
+      // the redeemer gets credit for that amount at the plan's own rate, with the
+      // plan's duration and limits — as if they had topped up that much. NULL =
+      // the plan's own credit.
+      amountVnd: "INTEGER",
       durationDays: "INTEGER",
       maxRedemptions: "INTEGER DEFAULT 1",
       redeemedCount: "INTEGER DEFAULT 0",
@@ -635,6 +651,9 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       userPlanId: "TEXT",
       redeemedAt: "TEXT",
+      // Admin identity when the admin gave this code straight to the account
+      // (no code typed by the customer). NULL = redeemed by the customer.
+      assignedBy: "TEXT",
     },
     // No UNIQUE(giftId, userId) here on purpose: a code may be redeemed up to
     // giftCodes.perUserLimit times by the same account, and that limit is

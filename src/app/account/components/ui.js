@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/shared/utils/cn";
+import { fitFigureStyle } from "@/shared/utils/fitFigure";
 
 // Presentational primitives for the customer area (openspec/ui-dna.md §8).
 // No hooks and no "use client": they render from server and client components
@@ -44,11 +45,12 @@ export function Page({ title, description, actions, children }) {
 
 /**
  * Two-column section: title and description on the left, content on the right.
- * Collapses to one column below `lg`.
+ * Collapses to one column below `xl`: at `lg` the sidebar already takes 256px,
+ * and a 280px title column left plan cards and figures too narrow to fit.
  */
 export function Section({ title, description, children, id }) {
   return (
-    <section id={id} className="grid gap-6 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)] lg:gap-10">
+    <section id={id} className="grid gap-6 xl:grid-cols-[minmax(0,280px)_minmax(0,1fr)] xl:gap-10">
       <div className="flex flex-col gap-2">
         <Heading as="h2" size="sm">{title}</Heading>
         {description && <p className="text-sm leading-6 text-text-muted">{description}</p>}
@@ -70,14 +72,23 @@ export function Panel({ children, className, as: Tag = "div", ...rest }) {
   );
 }
 
-/** One figure with its label: the number is the loudest thing in the block. */
+/**
+ * One figure with its label: the number is the loudest thing in the block.
+ * The block is a size container so a long figure ("$1234567.89",
+ * "7,363,001,391") scales down to the tile instead of spilling out of it.
+ */
 export function Stat({ label, value, unit, hint }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="@container flex min-w-0 flex-col gap-3">
       <Eyebrow>{label}</Eyebrow>
-      <p className="flex items-baseline gap-2 text-text-main">
-        <span className="font-sans text-4xl font-semibold leading-none tracking-tight">{value}</span>
-        {unit && <span className="font-mono text-sm text-text-muted">{unit}</span>}
+      <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
+        <span
+          className="max-w-full font-sans text-4xl font-semibold leading-none tracking-tight tabular-nums break-words"
+          style={fitFigureStyle(value)}
+        >
+          {value}
+        </span>
+        {unit && <span className="whitespace-nowrap font-mono text-sm text-text-muted">{unit}</span>}
       </p>
       {hint && <p className="text-sm leading-6 text-text-muted">{hint}</p>}
     </div>
@@ -117,7 +128,9 @@ export function buttonClass({ tone = "outline", size = "md", className } = {}) {
   return cn(
     "inline-flex items-center justify-center gap-2 border font-mono font-medium transition-colors duration-150",
     "disabled:cursor-not-allowed disabled:opacity-50",
-    size === "sm" ? "h-8 px-3 text-xs" : "h-10 px-4 text-[13px]",
+    // Minimum, not fixed, height: a long label ("Binance USDT · $4987.65") wraps
+    // inside the button instead of spilling out of it.
+    size === "sm" ? "min-h-8 px-3 py-1 text-center text-xs" : "min-h-10 px-4 py-2 text-center text-[13px]",
     BUTTON_TONES[tone] || BUTTON_TONES.outline,
     className
   );
@@ -196,13 +209,18 @@ export function IconBox({ icon }) {
 /** Row in a list: grey fill, one line of identity, an optional line of detail. */
 export function ListRow({ title, detail, tags, actions }) {
   return (
-    <li className="flex items-center justify-between gap-4 border border-border bg-surface-2 px-5 py-4">
+    <li className="flex flex-col gap-3 border border-border bg-surface-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate font-mono text-sm text-text-main">{title}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span
+            className="min-w-0 max-w-full truncate font-mono text-sm text-text-main"
+            title={typeof title === "string" ? title : undefined}
+          >
+            {title}
+          </span>
           {tags}
         </div>
-        {detail && <p className="text-sm text-text-muted">{detail}</p>}
+        {detail && <p className="text-sm text-text-muted [overflow-wrap:anywhere]">{detail}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </li>

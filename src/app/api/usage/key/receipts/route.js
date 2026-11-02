@@ -11,6 +11,7 @@ import {
 import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { applyBpToPricing } from "@/lib/billing/discounts.js";
 import { nanoToUsd } from "@/shared/utils/money";
+import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -51,9 +52,11 @@ function periodToRange(period) {
  *   summary:  { items: [{model, input, output, cacheRead, cacheCreation, requests, cost}],
  *               totals: {input, output, cacheRead, cacheCreation, requests, cost},
  *               peakTpm },
- *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM)
+ *   rate:     { requests: number, tokens: number },          // live last-60s (RPM/TPM); for a
+ *                                                            // customer key, over every key of the account
  *   history:  [{ timestamp, model, status, cost, input, output, tok,
  *                latencyMs,          // total time of the request in ms; null when not measured
+ *                ttftMs,             // time to the first streamed chunk in ms; null for non-streams and older rows
  *                cacheRead, cacheCreation }] // recent requests, NO raw payloads
  * }
  *
@@ -96,7 +99,8 @@ export async function GET(request) {
 
     const [summary, rate, historyRaw, combos, comboPricing] = await Promise.all([
       getKeyUsageSummary(key, { startDate, endDate }),
-      getKeyRateUsage(key, 60_000),
+      // A customer is rate-limited per account (keyEnforcement), so count the account.
+      auth.key.userId ? getUserRateUsage(auth.key.userId, 60_000) : getKeyRateUsage(key, 60_000),
       getUsageHistory({ apiKey: key, startDate, endDate }),
       getCombos(),
       getComboPricing(),
@@ -158,8 +162,13 @@ export async function GET(request) {
           output,
           tok,
           latencyMs,
+          ttftMs: Number.isFinite(meta?.ttftMs) ? meta.ttftMs : null,
           cacheRead: t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0,
           cacheCreation: t.cache_creation_input_tokens ?? 0,
+          // True when the upstream reported no usage and these figures are the router's estimate.
+          estimated: meta?.estimated === true,
+          // True when the cached figure is the router's prefix-reuse estimate (combo option).
+          cacheEstimated: meta?.cacheEstimated === true,
         };
       });
 

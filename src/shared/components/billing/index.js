@@ -4,5 +4,6 @@
 export { default as PlanQueue } from "./PlanQueue";
 export { default as QueueEntryCard } from "./QueueEntryCard";
 export { default as LimitMeter } from "./LimitMeter";
-export { default as StatusTag, timeOf, dateOf } from "./StatusTag";
+export { default as StatusTag, timeOf, dateOf, dateTimeOf, spanText } from "./StatusTag";
 export { default as CreditBar } from "./CreditBar";
+export { default as RateNow } from "./RateNow";

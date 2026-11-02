@@ -25,7 +25,7 @@ const CAPACITY_ADAPTER_CAPS = [
   { key: "audioInput", label: "Audio", icon: "graphic_eq", desc: "Audio input" },
 ];
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.5-free";
-const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [] };
+const EMPTY_CAP_ENTRY = { enabled: true, roundRobin: false, models: [], scope: "all", targets: [] };
 const EMPTY_CAPACITY_ADAPTER = {
   vision: { ...EMPTY_CAP_ENTRY },
   pdf: { ...EMPTY_CAP_ENTRY },
@@ -35,13 +35,16 @@ const EMPTY_CAPACITY_ADAPTER = {
 // Backward-compat: legacy stored form was an array of {model, enabled}.
 function normalizeCapEntry(entry) {
   if (Array.isArray(entry)) {
-    return { enabled: true, roundRobin: false, models: entry.map((e) => e?.model || e).filter(Boolean) };
+    return { enabled: true, roundRobin: false, models: entry.map((e) => e?.model || e).filter(Boolean), scope: "all", targets: [] };
   }
   if (entry && typeof entry === "object") {
     return {
       enabled: entry.enabled !== false,
       roundRobin: !!entry.roundRobin,
       models: Array.isArray(entry.models) ? entry.models.filter(Boolean) : [],
+      // Which requested models the adapter covers: every one, or only `targets`.
+      scope: entry.scope === "selected" ? "selected" : "all",
+      targets: Array.isArray(entry.targets) ? entry.targets.filter(Boolean) : [],
     };
   }
   return { ...EMPTY_CAP_ENTRY };
@@ -325,6 +328,7 @@ export default function CombosPage() {
         onChange={handleSetCapacityAdapter}
         activeProviders={activeProviders}
         getCaps={getCaps}
+        comboNames={combos.filter((c) => !c.kind || c.kind === "llm").map((c) => c.name)}
       />
 
       {/* Create Modal - Use key to force remount and reset state */}
@@ -495,14 +499,14 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
           </div>
           <div className="min-w-0 flex-1">
-            <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
+            <code className="block truncate font-mono text-sm font-medium" title={combo.name}>{combo.name}</code>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {combo.models.length === 0 ? (
                 <span className="text-xs text-text-muted italic">No models</span>
               ) : (
                 combo.models.slice(0, 3).map((model, index) => (
-                  <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
-                    <span>{model}</span>
+                  <code key={index} className="inline-flex min-w-0 max-w-full items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
+                    <span className="min-w-0 truncate" title={model}>{model}</span>
                     <CapacityBadges caps={getCaps?.(model)} />
                   </code>
                 ))
@@ -635,7 +639,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
   );
 }
 
-function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, getCaps }) {
+function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, getCaps, comboNames = [] }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -648,6 +652,10 @@ function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, ge
             <li><span className="font-medium text-text-main">Vision</span> — images (png, jpg, webp, …)</li>
             <li><span className="font-medium text-text-main">Audio</span> — audio input</li>
           </ul>
+          <p className="text-[11px] text-text-muted mt-1.5">
+            Combo đã khai báo hỗ trợ (Capabilities trong form combo) không bao giờ bị chuyển. Dùng &quot;Chỉ model chọn&quot; để
+            adapter chỉ áp cho vài model không đọc được ảnh/âm thanh.
+          </p>
         </div>
       </div>
       <div className="flex flex-col gap-4">
@@ -659,6 +667,7 @@ function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, ge
             onChange={(entry) => onChange({ ...capacityAdapter, [cap.key]: entry })}
             activeProviders={activeProviders}
             getCaps={getCaps}
+            comboNames={comboNames}
           />
         ))}
       </div>
@@ -666,9 +675,20 @@ function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, ge
   );
 }
 
-function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) {
+function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps, comboNames = [] }) {
   const [showModelSelect, setShowModelSelect] = useState(false);
+  const [targetDraft, setTargetDraft] = useState("");
   const { enabled, roundRobin, models } = entry;
+  const scope = entry.scope === "selected" ? "selected" : "all";
+  const targets = Array.isArray(entry.targets) ? entry.targets : [];
+  const addTarget = (name) => {
+    const value = String(name || "").trim();
+    if (!value || targets.includes(value)) return;
+    onChange({ ...entry, targets: [...targets, value] });
+    setTargetDraft("");
+  };
+  const removeTarget = (name) => onChange({ ...entry, targets: targets.filter((t) => t !== name) });
+  const listId = `adapter-targets-${cap.key}`;
 
   const patch = (p) => onChange({ ...entry, ...p });
 
@@ -715,9 +735,9 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
                 models.slice(0, 3).map((model, index) => (
                   <code
                     key={`${model}-${index}`}
-                    className="group/chip inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5"
+                    className="group/chip inline-flex min-w-0 max-w-full items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5"
                   >
-                    <span>{model}</span>
+                    <span className="min-w-0 truncate" title={model}>{model}</span>
                     <CapacityBadges caps={getCaps?.(model)} />
                     <button onClick={() => handleMove(index, -1)} disabled={index === 0} className={`leading-none opacity-0 group-hover/chip:opacity-100 ${index === 0 ? "text-text-muted/20" : "text-text-muted hover:text-primary"}`}>
                       <span className="material-symbols-outlined text-[12px]">arrow_upward</span>
@@ -760,6 +780,77 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
             Add Model
           </Button>
         </div>
+      </div>
+
+      {/* Which requested models this adapter covers. */}
+      <div className={`mt-3 flex flex-col gap-2 border-t border-border pt-3 ${!enabled ? "pointer-events-none" : ""}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-text-muted">Áp dụng cho</span>
+          <div className="inline-flex border border-border" role="radiogroup" aria-label={`Phạm vi ${cap.label} adapter`}>
+            {[
+              { value: "all", label: "Mọi model" },
+              { value: "selected", label: "Chỉ model chọn" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={scope === opt.value}
+                disabled={!enabled}
+                onClick={() => patch({ scope: opt.value })}
+                className={`h-7 px-3 text-xs transition-colors ${scope === opt.value ? "bg-text-main text-bg" : "text-text-muted hover:text-text-main"}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {scope === "selected" && (
+          <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {targets.length === 0 ? (
+                <span className="text-xs text-amber-700 dark:text-amber-400">
+                  Chưa chọn model nào — adapter sẽ không chuyển request nào.
+                </span>
+              ) : (
+                targets.map((name) => (
+                  <span key={name} className="inline-flex min-w-0 max-w-full items-center gap-1 border border-border bg-surface-2 pl-2 font-mono text-xs text-text-main">
+                    <span className="truncate" title={name}>{name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeTarget(name)}
+                      aria-label={`Bỏ ${name}`}
+                      className="flex size-6 shrink-0 items-center justify-center text-text-muted hover:text-red-500"
+                    >
+                      <span className="material-symbols-outlined text-[13px]" aria-hidden="true">close</span>
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <form
+              className="flex min-w-0 flex-wrap gap-2"
+              onSubmit={(event) => { event.preventDefault(); addTarget(targetDraft); }}
+            >
+              <input
+                list={listId}
+                value={targetDraft}
+                onChange={(event) => setTargetDraft(event.target.value)}
+                placeholder="Tên combo hoặc provider/model khách gọi"
+                aria-label={`Thêm model cho ${cap.label} adapter`}
+                className="h-8 min-w-0 flex-1 basis-56 border border-border bg-surface px-2 font-mono text-xs text-text-main focus:border-text-main focus:outline-none"
+              />
+              <datalist id={listId}>
+                {comboNames.filter((name) => !targets.includes(name)).map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <Button type="submit" size="sm" variant="secondary" icon="add" disabled={!targetDraft.trim()}>
+                Thêm
+              </Button>
+            </form>
+          </div>
+        )}
       </div>
 
       {showModelSelect && (
@@ -899,6 +990,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
   const existingCaps = combo?.meta?.capabilities || null;
   const [caps, setCaps] = useState(() => existingCaps ? { ...DEFAULT_CAPABILITIES, ...existingCaps } : { ...DEFAULT_CAPABILITIES });
   const [capsTouched, setCapsTouched] = useState(!!existingCaps);
+
+  // Estimated cache (meta.cacheEstimation): off unless the combo already has it on.
+  const [cacheEstimation, setCacheEstimation] = useState(combo?.meta?.cacheEstimation === true);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1067,6 +1161,8 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
     if (capsTouched) {
       payload.capabilities = caps;
     }
+    // Sent on create only when on, always on edit (so it can be switched off).
+    if (!isImage && (combo || cacheEstimation)) payload.cacheEstimation = cacheEstimation;
     await onSave(payload);
     setSaving(false);
   };
@@ -1221,6 +1317,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
               onChange={handleCapChange}
               onAutofill={autofillCaps}
             />
+          )}
+
+          {/* Estimated cache: only meaningful for LLM combos. */}
+          {!isImage && (
+            <div className="flex items-start justify-between gap-3 border-t border-black/10 pt-3 dark:border-white/10">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Ước lượng cache theo prefix</p>
+                <p className="text-xs text-text-muted">
+                  Chỉ áp dụng khi upstream không trả usage. Đây là số ước lượng, chỉ nên bật cho upstream thật sự có cache.
+                </p>
+              </div>
+              <Toggle checked={cacheEstimation} onChange={(v) => setCacheEstimation(v)} aria-label="Ước lượng cache theo prefix" />
+            </div>
           )}
 
           {/* Actions */}

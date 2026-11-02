@@ -50,9 +50,9 @@ const REASON_LABELS = {
 
 function SummaryCard({ label, value, sub, tone }) {
   return (
-    <Card className="p-4">
+    <Card className="min-w-0 p-4 [overflow-wrap:anywhere]">
       <p className="text-xs text-text-muted uppercase tracking-wide">{label}</p>
-      <p className={`text-xl font-semibold mt-1 ${tone || ""}`}>{value}</p>
+      <p className={`text-xl font-semibold mt-1 tabular-nums ${tone || ""}`}>{value}</p>
       {sub && <p className="text-xs text-text-muted mt-0.5">{sub}</p>}
     </Card>
   );
@@ -118,7 +118,7 @@ export default function PxpipeClient() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <SummaryCard
           label="Status"
           value={statusLabel}
@@ -135,7 +135,7 @@ export default function PxpipeClient() {
       <Card className="p-4">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h3 className="font-medium">Token savings (estimated)</h3>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1">
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1">
             {WINDOW_TABS.map((tab) => (
               <button
                 key={tab.id}

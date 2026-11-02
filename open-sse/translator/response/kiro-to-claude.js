@@ -74,7 +74,12 @@ export function kiroToClaudeResponse(chunk, state) {
       typeof data.usage.completion_tokens === "number"
         ? data.usage.completion_tokens
         : 0;
-    state.usage = { input_tokens: promptTokens, output_tokens: outputTokens };
+    // Chat-shaped usage: prompt_tokens INCLUDES the cached part (reported in the nested
+    // details), while Anthropic's input_tokens excludes it. Top-level cache_* fields are
+    // already Anthropic-shaped, so only the nested form is subtracted.
+    const nestedRead = typeof data.usage.prompt_tokens_details?.cached_tokens === "number" ? data.usage.prompt_tokens_details.cached_tokens : 0;
+    const nestedCreate = typeof data.usage.prompt_tokens_details?.cache_creation_tokens === "number" ? data.usage.prompt_tokens_details.cache_creation_tokens : 0;
+    state.usage = { input_tokens: Math.max(0, promptTokens - nestedRead - nestedCreate), output_tokens: outputTokens };
     // Claude clients read cache_read/cache_creation to price a turn and to size
     // their prompt cache. Both spellings are accepted because the Kiro executor
     // emits the Chat shape and passthrough responses use the nested details form.
@@ -261,7 +266,7 @@ export function kiroToClaudeNonStreaming(data) {
     model: data?.model || "kiro",
     stop_reason: convertFinishReason(choice?.finish_reason || "stop"),
     usage: {
-      input_tokens: usage.prompt_tokens || 0,
+      input_tokens: Math.max(0, (usage.prompt_tokens || 0) - (usage.prompt_tokens_details?.cached_tokens || 0) - (usage.prompt_tokens_details?.cache_creation_tokens || 0)),
       output_tokens: usage.completion_tokens || 0,
       // Same cache preservation as the streaming path above.
       ...(typeof (usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens) === "number"

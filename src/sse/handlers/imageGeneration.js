@@ -14,6 +14,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
@@ -161,7 +162,9 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+        return ((modelInfo.inferred || modelInfo.unknownProvider)
+          ? errorResponse(HTTP_STATUS.NOT_FOUND, modelNotFoundMessage(modelStr))
+          : errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`));
       }
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }

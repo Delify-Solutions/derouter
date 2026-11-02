@@ -51,6 +51,10 @@ export function extractGeminiNativeUsage(text) {
     if (!Number.isSafeInteger(prompt) || prompt < 0) continue;
     if (!Number.isSafeInteger(completion) || completion < 0) continue;
     usage = { prompt_tokens: prompt, completion_tokens: completion };
+    // promptTokenCount already includes the cached part; reporting it lets it be priced at the
+    // cached rate instead of the full input rate.
+    const cached = Number(meta.cachedContentTokenCount);
+    if (Number.isSafeInteger(cached) && cached > 0 && cached <= prompt) usage.cached_tokens = cached;
   }
   if (!usage || (usage.prompt_tokens === 0 && usage.completion_tokens === 0)) return null;
   return usage;

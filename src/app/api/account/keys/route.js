@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAccountUser } from "@/lib/auth/userSession";
-import { getApiKeys, createApiKey } from "@/lib/localDb";
+import { getApiKeys, createApiKey, getKeysLastUsedAt } from "@/lib/db/index.js";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getAdapter } from "@/lib/db/driver.js";
 import { listBindablePlansSync, resolveKeyPlanInputSync } from "@/lib/db/repos/accountPlansRepo.js";
@@ -23,23 +23,31 @@ export async function GET(request) {
     db.all(`SELECT id, name FROM plans`).map((plan) => [plan.id, plan.name])
   );
 
-  const keys = (await getApiKeys())
-    .filter((key) => key.userId === session.userId)
-    .map((key) => ({
-      id: key.id,
-      name: key.name,
-      keyPrefix: key.keyPrefix,
-      isActive: key.isActive,
-      createdAt: key.createdAt,
-      groupId: key.groupId ?? null,
-      // null = the key may be paid by any plan; otherwise plans.id it is pinned to.
-      planId: key.planId ?? null,
-      planName: key.planId ? pinnedNames.get(key.planId) ?? null : null,
-      // False when the pinned plan has no live purchase: the key cannot pay until
-      // the plan is renewed or the key is moved.
-      planHeld: key.planId ? heldIds.has(key.planId) : true,
-      // Never the full secret: it is shown once, at creation.
-    }));
+  const owned = (await getApiKeys()).filter((key) => key.userId === session.userId);
+  // Best effort: a failed lookup leaves "last used" blank instead of failing the list.
+  let lastUsed = {};
+  try {
+    lastUsed = await getKeysLastUsedAt(owned);
+  } catch {
+    lastUsed = {};
+  }
+  const keys = owned.map((key) => ({
+    id: key.id,
+    name: key.name,
+    keyPrefix: key.keyPrefix,
+    isActive: key.isActive,
+    createdAt: key.createdAt,
+    lastUsedAt: lastUsed[key.id] ?? null,
+    groupId: key.groupId ?? null,
+    // null = the key may be paid by any plan; otherwise plans.id it is pinned to.
+    planId: key.planId ?? null,
+    planName: key.planId ? pinnedNames.get(key.planId) ?? null : null,
+    // False when the pinned plan has no live purchase: the key cannot pay until
+    // the plan is renewed or the key is moved.
+    planHeld: key.planId ? heldIds.has(key.planId) : true,
+    // Never the full secret in the list: it is sent only on an explicit show,
+    // copy or open-usage press (POST /api/account/keys/{id}/secret).
+  }));
 
   return NextResponse.json(
     { keys, plans: held.map(({ id, name, code, rpm, tpm }) => ({ id, name, code, rpm, tpm })) },

@@ -2,6 +2,7 @@
 import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb";
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
+import { comboHasCacheEstimation } from "@/lib/combos/cacheEstimation.js";
 
 // Local provider alias overrides (HMR-friendly, applied on top of open-sse map)
 const LOCAL_PROVIDER_ALIASES = {
@@ -62,7 +63,10 @@ export async function getModelInfo(modelStr) {
     }
     return {
       provider: parsed.provider,
-      model: parsed.model
+      model: parsed.model,
+      // An explicit "prefix/model" whose prefix is no built-in provider and no
+      // provider node: there is nothing to route to.
+      unknownProvider: !RESERVED_PROVIDER_PREFIXES.has(parsed.providerAlias),
     };
   }
 
@@ -79,16 +83,30 @@ export async function getModelInfo(modelStr) {
 }
 
 /**
- * Check if model is a combo and get models list
- * @returns {Promise<string[]|null>} Array of models or null if not a combo
+ * One lookup for a combo: its models and its options.
+ * @returns {Promise<{ models: string[], cacheEstimation: boolean }|null>} null if not a combo
  */
-export async function getComboModels(modelStr) {
+export async function getComboInfo(modelStr) {
   // Only check if it's not in provider/model format
   if (modelStr.includes("/")) return null;
 
   const combo = await getComboByName(modelStr);
   if (combo && combo.models && combo.models.length > 0) {
-    return combo.models;
+    return {
+      models: combo.models,
+      cacheEstimation: comboHasCacheEstimation(combo),
+      // Capabilities the admin declared for the combo (the values /v1/models
+      // advertises); the capacity adapter respects them.
+      capabilities: combo.meta?.capabilities ?? null,
+    };
   }
   return null;
+}
+
+/**
+ * Check if model is a combo and get models list
+ * @returns {Promise<string[]|null>} Array of models or null if not a combo
+ */
+export async function getComboModels(modelStr) {
+  return (await getComboInfo(modelStr))?.models ?? null;
 }

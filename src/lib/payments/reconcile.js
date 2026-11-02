@@ -80,7 +80,7 @@ export function ingestTransactionSync(db, {
   // 3–4. Decide what this transaction means, using the same rules a dry run
   //      reports, so "Chạy thử" cannot disagree with what a real poll would do.
   // A caller that already knows this money cannot belong to an order (the SePay
-  // webhook sees the payload's `accountNumber`) short-circuits the match instead
+  // webhook sees the payload's `accountNumber` and `subAccount`) short-circuits the match instead
   // of letting a coincidental code in the memo approve it.
   const decision = forceReason
     ? { outcome: "needs_review", reason: forceReason, orderId: null }

@@ -238,14 +238,14 @@ export default function TranslatorPage() {
           <Card key={step.id}>
             <div className="p-4 space-y-3">
               {/* Step header */}
-              <div className="flex items-center justify-between">
-                <button onClick={() => toggle(step.id)} className="flex items-center gap-2 flex-1 text-left group">
+              <div className="flex items-center justify-between gap-2">
+                <button onClick={() => toggle(step.id)} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 flex-1 text-left group">
                   <span className="material-symbols-outlined text-[20px] text-text-muted group-hover:text-primary transition-colors">
                     {isExpanded ? "expand_more" : "chevron_right"}
                   </span>
                   <span className="text-xs font-mono text-text-muted/60 w-4">{step.id}</span>
                   <h3 className="text-sm font-semibold text-text-main">{step.label}</h3>
-                  <span className="text-xs text-text-muted/60 font-mono">{step.file}</span>
+                  <span className="text-xs text-text-muted/60 font-mono break-all">{step.file}</span>
                   {content && <span className="text-xs text-green-500">({content.length} chars)</span>}
                 </button>
                 {!isExpanded && (

@@ -5,7 +5,7 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { buildChunk } from "../concerns/chunk.js";
-import { buildUsage } from "../concerns/usage.js";
+import { buildUsage, responsesUsageFromChat } from "../concerns/usage.js";
 import { fallbackToolCallId } from "../concerns/toolCall.js";
 import { reasoningDelta, extractReasoningText } from "../concerns/reasoning.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM, OPENAI_FINISH, MODEL_FALLBACK } from "../schema/index.js";
@@ -19,7 +19,12 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
     return flushEvents(state);
   }
   
-  if (!chunk.choices?.length) return [];
+  if (!chunk.choices?.length) {
+    // A usage-only chunk (stream_options.include_usage) that was not held back with the finish.
+    if (chunk.usage && typeof chunk.usage === "object") state.chatUsage = chunk.usage;
+    return [];
+  }
+  if (chunk.usage && typeof chunk.usage === "object") state.chatUsage = chunk.usage;
   
   const events = [];
   const nextSeq = () => ++state.seq;
@@ -117,6 +122,7 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
 
   return events;
 }
+
 
 // Helper functions
 function startReasoning(state, emit, idx) {
@@ -368,6 +374,7 @@ function closeToolCall(state, emit, idx) {
 function sendCompleted(state, emit) {
   if (!state.completedSent) {
     state.completedSent = true;
+    const usage = responsesUsageFromChat(state.chatUsage);
     emit("response.completed", {
       type: "response.completed",
       response: {
@@ -376,7 +383,9 @@ function sendCompleted(state, emit) {
         created_at: state.created,
         status: "completed",
         background: false,
-        error: null
+        error: null,
+        // The upstream's own figures; the field is simply absent when it reported none.
+        ...(usage ? { usage } : {})
       }
     });
   }
@@ -510,7 +519,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       // Cache info is in input_tokens_details.cached_tokens
       const cacheReadTokens = responseUsage.input_tokens_details?.cached_tokens || responseUsage.cache_read_input_tokens || 0;
       
-      state.usage = buildUsage({ promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens, cachedTokens: cacheReadTokens });
+      state.usage = buildUsage({ promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: Number.isFinite(Number(responseUsage.total_tokens)) ? Number(responseUsage.total_tokens) : inputTokens + outputTokens, cachedTokens: cacheReadTokens, reasoningTokens: Number(responseUsage.output_tokens_details?.reasoning_tokens) || 0 });
     }
     
     if (!state.finishReasonSent) {

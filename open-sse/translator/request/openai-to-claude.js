@@ -1,7 +1,7 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { CLAUDE_SYSTEM_PROMPT } from "../../config/appConstants.js";
-import { adjustMaxTokens } from "../formats/maxTokens.js";
+import { resolveMaxTokens } from "../formats/maxTokens.js";
 import { safeParseJSON } from "../concerns/json.js";
 import { parseDataUri } from "../concerns/image.js";
 import { extractTextContent } from "../formats/gemini.js";
@@ -13,7 +13,7 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 const CLAUDE_OAUTH_TOOL_PREFIX = "";
 
 // Convert OpenAI request to Claude format
-export function openaiToClaudeRequest(model, body, stream) {
+export function openaiToClaudeRequest(model, body, stream, credentials = null) {
   // Tool name mapping for Claude OAuth (capitalizedName → originalName)
   const toolNameMap = new Map();
   // Cap max_tokens at the model's real output ceiling (e.g. Opus 4.8 = 128000),
@@ -22,7 +22,7 @@ export function openaiToClaudeRequest(model, body, stream) {
   const modelCeiling = getCapabilitiesForModel(null, model).maxOutput || undefined;
   const result = {
     model: model,
-    max_tokens: adjustMaxTokens(body, modelCeiling),
+    max_tokens: resolveMaxTokens(body, { compat: credentials?.compatNormalization === true, ceiling: modelCeiling, required: true }),
     stream: stream
   };
 
@@ -129,16 +129,21 @@ Respond ONLY with the JSON object, no other text.`);
     }
   }
 
-  // System with Claude Code prompt and cache_control
+  // The "You are Claude Code" identity prompt is what Anthropic requires in front of an OAuth
+  // (Claude Code subscription) credential. For a plain API key or a custom Anthropic-compatible
+  // node it is an instruction the client never wrote: it changes the model's behaviour and adds
+  // billed input, so it is only injected for OAuth or when compatNormalization is on.
+  const credentialKey = credentials?.accessToken || credentials?.apiKey || "";
+  const needsIdentityPrompt = credentials?.compatNormalization === true || String(credentialKey).includes("sk-ant-oat");
   const claudeCodePrompt = { type: CLAUDE_BLOCK.TEXT, text: CLAUDE_SYSTEM_PROMPT };
 
   if (systemParts.length > 0) {
     const systemText = systemParts.join("\n");
     result.system = [
-      claudeCodePrompt,
+      ...(needsIdentityPrompt ? [claudeCodePrompt] : []),
       { type: CLAUDE_BLOCK.TEXT, text: systemText, cache_control: { type: "ephemeral", ttl: "1h" } }
     ];
-  } else {
+  } else if (needsIdentityPrompt) {
     result.system = [claudeCodePrompt];
   }
 

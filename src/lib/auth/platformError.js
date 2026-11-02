@@ -108,6 +108,16 @@ export function pinnedPlanUnavailableMessage(planName) {
   return `Key này chỉ dùng gói ${name} nhưng gói chưa có credit hoặc đã hết hạn — gia hạn gói hoặc đổi gói cho key tại /account/keys.`;
 }
 
+/**
+ * `Model <model> không tồn tại hoặc chưa được mở trên router này.` — a name that is
+ * no combo, no alias and no configured provider/model. Said instead of the internal
+ * "No active credentials for provider: openai" the router used to answer, which
+ * named a provider the caller never asked for.
+ */
+export function modelNotFoundMessage(model) {
+  return `Model ${model} không tồn tại hoặc chưa được mở trên router này. Xem danh sách model tại /v1/models.`;
+}
+
 /** `Các gói đang chạm hạn mức, mở lại sau <relativeWaitVi>.` */
 export function planLimitMessage(resetAt) {
   const wait = resetAt ? relativeWaitVi(new Date(resetAt).getTime() - Date.now()) : relativeWaitVi(0);
@@ -134,7 +144,7 @@ export async function logPlatformDenial({ apiKey, model, status, message, resetA
       status: statusText,
       errorSource: "platform",
       response: { error: message, resetAt: resetAt ?? undefined },
-    }, { latency: { ttft: 0, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+    }, { latency: { ttft: null, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
     saveUsageError({
       provider: "platform",
       model: model || "unknown",

@@ -67,9 +67,13 @@ function applyDeepSeekV4ProAlias({ provider, model, body }) {
   return nextBody;
 }
 
-export function injectReasoningContent({ provider, model, body }) {
+export function injectReasoningContent({ provider, model, body, compat = true }) {
   const providerRule = providerRuleFor(provider);
-  const modelRule = MODEL_RULES.find(r => r.match(model));
+  // The registry rule is a requirement of that provider. The model-name rules (kimi-*, deepseek)
+  // keep working for built-in providers such as Kimi; for a custom node that merely serves such
+  // a model they would rewrite the assistant turns, so there they need `compat` (the
+  // legacy-shaping flag: true for built-ins, compatNormalization for custom nodes).
+  const modelRule = compat ? MODEL_RULES.find(r => r.match(model)) : undefined;
   const rule = providerRule || modelRule;
   const nextBody = applyDeepSeekV4ProAlias({ provider, model, body });
   return applyRule(nextBody, rule);

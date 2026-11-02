@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eyebrow, SelectField, Stat, fieldClass } from "@/app/account/components/ui";
+import LatencyCell from "@/shared/components/LatencyCell";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
+const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
 
 function statusClass(status) {
   const s = String(status || "");
@@ -63,7 +65,7 @@ export default function AccountUsageTable({
             value: key.id,
             label: `${key.name} · ${key.keyPrefix}…${key.isActive ? "" : " (đã tắt)"}`,
           }))}
-          className="min-w-[260px]"
+          className="w-full sm:w-auto sm:min-w-[260px] sm:max-w-md"
         />
 
         <div className="flex flex-col gap-2">
@@ -90,14 +92,14 @@ export default function AccountUsageTable({
       </div>
 
       {/* Totals */}
-      <dl className="grid grid-cols-2 gap-px border border-border bg-border lg:grid-cols-4">
+      <dl className="grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
         {[
           { label: "Số request", value: fmt(totals.requests) },
           { label: "Tổng token", value: fmt(totals.tokens) },
           { label: "Token vào", value: fmt(totals.input) },
           { label: "Chi phí", value: totals.costLabel },
         ].map((item) => (
-          <div key={item.label} className="bg-surface p-5">
+          <div key={item.label} className="min-w-0 bg-surface p-5">
             <Stat label={item.label} value={item.value} />
           </div>
         ))}
@@ -116,14 +118,14 @@ export default function AccountUsageTable({
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input
               type="text"
               value={filterModel}
               onChange={(event) => setFilterModel(event.target.value)}
               placeholder="Lọc theo model"
               aria-label="Lọc theo model"
-              className={`${fieldClass} w-48`}
+              className={`${fieldClass} w-full sm:w-48`}
             />
             <SelectField
               id="account-usage-status"
@@ -136,7 +138,7 @@ export default function AccountUsageTable({
                 { value: "4", label: "4xx" },
                 { value: "5", label: "5xx" },
               ]}
-              className="w-44"
+              className="w-full sm:w-44"
             />
             {(filterModel || filterStatus) && (
               <button
@@ -167,13 +169,13 @@ export default function AccountUsageTable({
                   <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Thời điểm</th>
                   <th className="px-4 py-3 text-left font-medium">Model</th>
                   <th className="px-4 py-3 text-center font-medium">Trạng thái</th>
-                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap" title="Tổng thời gian từ lúc nhận request đến khi trả xong">Thời gian phản hồi</th>
-                  <th className="px-4 py-3 text-right font-medium">Input</th>
-                  <th className="px-4 py-3 text-right font-medium">Output</th>
-                  <th className="px-4 py-3 text-right font-medium">Tổng</th>
-                  <th className="px-4 py-3 text-right font-medium">Input cache</th>
-                  <th className="px-4 py-3 text-right font-medium">Cache write</th>
-                  <th className="px-4 py-3 text-right font-medium">Chi phí</th>
+                  <th className="px-4 py-3 text-right font-medium whitespace-nowrap" title="TTFT: thời gian tới byte đầu tiên từ upstream (request stream). Tổng: từ lúc nhận request đến khi trả xong">Thời gian phản hồi</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Input</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Output</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Tổng</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Input cache</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Cache write</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Chi phí</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,15 +188,15 @@ export default function AccountUsageTable({
                       {row.model}
                     </td>
                     <td className={`px-4 py-3 text-center font-mono ${statusClass(row.status)}`}>{row.status}</td>
-                    <td className="px-4 py-3 text-right font-mono text-text-muted">
-                      {row.latencyMs != null ? (row.latencyMs < 1000 ? `${Math.round(row.latencyMs)} ms` : `${(row.latencyMs / 1000).toFixed(2)} s`) : "—"}
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-text-muted">
+                      <LatencyCell totalMs={row.latencyMs} ttftMs={row.ttftMs} />
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.input)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.output)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.tok)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheRead)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(row.cacheCreation)}</td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.input)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.output)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.tok)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums" title={row.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{row.cacheEstimated ? "≈" : ""}{fmt(row.cacheRead)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.cacheCreation)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
                       {row.costLabel}
                       {row.discountLabel && (
                         <span className="block text-[11px] text-text-muted">

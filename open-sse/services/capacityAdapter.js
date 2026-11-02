@@ -14,20 +14,41 @@ const CAPABILITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 const HARD_CAPS = new Set(CAPABILITY_KEYS);
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.5-free";
 
-// Normalize a capability entry to { enabled, roundRobin, models }. Backward-compat:
-// accept the legacy array form [{model, enabled}] (treated as enabled, fallback).
+// Normalize a capability entry to { enabled, roundRobin, models, scope, targets }.
+// Backward-compat: accept the legacy array form [{model, enabled}] (treated as
+// enabled, fallback). `scope` decides which requested models the adapter covers:
+//   "all"      every model the client may call (the original behaviour)
+//   "selected" only the names in `targets` — combo names or provider/model strings
+//              exactly as the client sends them in `model`
 function normalizeCapEntry(entry) {
   if (Array.isArray(entry)) {
-    return { enabled: true, roundRobin: false, models: entry.map((e) => e?.model || e).filter(Boolean) };
+    return { enabled: true, roundRobin: false, models: entry.map((e) => e?.model || e).filter(Boolean), scope: "all", targets: [] };
   }
   if (entry && typeof entry === "object") {
+    const targets = Array.isArray(entry.targets)
+      ? [...new Set(entry.targets.map((t) => String(t ?? "").trim()).filter(Boolean))]
+      : [];
     return {
       enabled: entry.enabled !== false,
       roundRobin: !!entry.roundRobin,
       models: Array.isArray(entry.models) ? entry.models.filter(Boolean) : [],
+      scope: entry.scope === "selected" ? "selected" : "all",
+      targets,
     };
   }
-  return { enabled: false, roundRobin: false, models: [] };
+  return { enabled: false, roundRobin: false, models: [], scope: "all", targets: [] };
+}
+
+/**
+ * Does this capability's adapter cover the model the client asked for? Always
+ * true for scope "all"; for "selected" only when the requested name is listed.
+ * A request with no known name (internal callers) is covered only by "all".
+ */
+export function adapterCoversModel(cap, settings, requestedModel) {
+  const { enabled, scope, targets } = normalizeCapEntry(settings?.capacityAdapter?.[cap]);
+  if (!enabled) return false;
+  if (scope !== "selected") return true;
+  return Boolean(requestedModel) && targets.includes(String(requestedModel));
 }
 
 // Resolve one capability's full config. Enabled pools with no models fall back
@@ -40,11 +61,12 @@ export function getCapacityAdapterConfig(cap, settings) {
   return entry;
 }
 
-// Flatten enabled models across all capability pools, in priority order, deduped.
-export function getCapacityAdapterModels(settings) {
+// Flatten enabled models across the capability pools (all of them, or only `caps`),
+// in priority order, deduped.
+export function getCapacityAdapterModels(settings, caps = CAPABILITY_KEYS) {
   const seen = new Set();
   const models = [];
-  for (const cap of CAPABILITY_KEYS) {
+  for (const cap of CAPABILITY_KEYS.filter((c) => caps.includes(c))) {
     const { enabled, models: pool } = getCapacityAdapterConfig(cap, settings);
     if (!enabled) continue;
     for (const m of pool) {
@@ -89,12 +111,22 @@ function modelSatisfies(modelStr, requiredHard) {
 // original models follow as fallback. Leaves `models` untouched when the
 // original list already covers it (combo.js's reorderByCapabilities handles
 // that case via autoSwitch).
-export function augmentModelsWithCapacityAdapter(models, requiredCapabilities, settings) {
+//
+// `requestedModel` is the name the client sent (a combo name or provider/model);
+// `declaredCaps` are the capabilities the admin declared for it (a combo's
+// meta.capabilities, the same values /v1/models advertises). A capability the
+// requested model declares is never adapted — the admin said it handles it, so
+// switching would hand the request to a weaker model for nothing. A capability
+// whose adapter is scoped to other models leaves the request on its own models.
+export function augmentModelsWithCapacityAdapter(models, requiredCapabilities, settings, { requestedModel = null, declaredCaps = null } = {}) {
   const hard = [...(requiredCapabilities || [])].filter((c) => HARD_CAPS.has(c));
   if (hard.length === 0 || !Array.isArray(models) || models.length === 0) return models;
-  if (models.some((m) => modelSatisfies(m, hard))) return models;
+  const needed = hard.filter((c) => declaredCaps?.[c] !== true);
+  if (needed.length === 0) return models;
+  if (models.some((m) => modelSatisfies(m, needed))) return models;
+  if (!needed.every((c) => adapterCoversModel(c, settings, requestedModel))) return models;
 
-  const pool = getCapacityAdapterModels(settings).filter((m) => !models.includes(m) && modelSatisfies(m, hard));
+  const pool = getCapacityAdapterModels(settings, needed).filter((m) => !models.includes(m) && modelSatisfies(m, needed));
   if (pool.length === 0) return models;
   return [...pool, ...models];
 }

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionButton, ButtonLink, Empty, Eyebrow, Heading, Panel, Tag } from "@/app/account/components/ui";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { fitFigureStyle } from "@/shared/utils/fitFigure";
+import { termLabel } from "@/lib/billing/terms.js";
 
 /**
  * The payment page for one gateway order (spec payment-checkout "Order page").
@@ -180,6 +182,9 @@ export default function OrderPaymentClient({ orderId }) {
         <div className="flex flex-col gap-2">
           <Heading>{order?.planName || order?.planCode || "Đơn hàng"}</Heading>
           <p className="text-sm text-text-muted">
+            {order?.periods > 1
+              ? `Kỳ hạn ${termLabel(order.durationDays, order.periods)}${order.discountPercent > 0 ? ` (giảm ${order.discountPercent}%)` : ""} · `
+              : ""}
             Tạo lúc {fmtDate(order?.createdAt)}
             {order?.paidAt ? ` · thanh toán lúc ${fmtDate(order.paidAt)}` : ""}
           </p>
@@ -232,7 +237,7 @@ export default function OrderPaymentClient({ orderId }) {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
           {/* QR. The copyable fields below carry the same information, so a failed
               image is an inconvenience, not a blocker. */}
-          <Panel as="section" className="flex flex-col gap-3 p-6">
+          <Panel as="section" className="flex min-w-0 flex-col gap-3 p-6">
             <Eyebrow>{payment.method === "vietqr" ? "Quét VietQR" : "Quét Binance Pay"}</Eyebrow>
             {payment.qrUrl || payment.qrImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -264,10 +269,13 @@ export default function OrderPaymentClient({ orderId }) {
             </p>
           </Panel>
 
-          <Panel as="section" className="flex flex-col gap-5 p-6">
-            <div className="flex flex-col gap-1">
+          <Panel as="section" className="flex min-w-0 flex-col gap-5 p-6">
+            <div className="@container flex flex-col gap-1">
               <Eyebrow>Số tiền cần chuyển</Eyebrow>
-              <span className="text-4xl font-semibold leading-none tracking-tight text-text-main">
+              <span
+                className="text-4xl font-semibold leading-none tracking-tight tabular-nums text-text-main [overflow-wrap:anywhere]"
+                style={fitFigureStyle(payment.amountText)}
+              >
                 {payment.amountText}
               </span>
               <span className="text-[12px] text-text-muted">

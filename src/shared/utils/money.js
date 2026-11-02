@@ -117,9 +117,13 @@ export function costFromTokensNano(tokens, pricing) {
   if (cachedTokens > 0) {
     nano += cachedTokens * rate(pricing.cached || pricing.input) * NANO_PER_RATE_UNIT;
   }
-  nano += outputTokens * rate(pricing.output) * NANO_PER_RATE_UNIT;
-  if (reasoningTokens > 0) {
-    nano += reasoningTokens * rate(pricing.reasoning || pricing.output) * NANO_PER_RATE_UNIT;
+  // reasoning_tokens is a SUBSET of completion_tokens (see canonicalizeUsage): the reasoning
+  // part is charged at the reasoning rate and only the rest at the output rate, so a
+  // reasoning token is never charged twice.
+  const reasoningPart = Math.min(reasoningTokens, outputTokens);
+  nano += (outputTokens - reasoningPart) * rate(pricing.output) * NANO_PER_RATE_UNIT;
+  if (reasoningPart > 0) {
+    nano += reasoningPart * rate(pricing.reasoning || pricing.output) * NANO_PER_RATE_UNIT;
   }
   if (cacheCreationTokens > 0) {
     nano += cacheCreationTokens * rate(pricing.cache_creation || pricing.input) * NANO_PER_RATE_UNIT;

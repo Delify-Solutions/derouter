@@ -7,6 +7,7 @@ import { buildClineHeaders } from "../shared/clineAuth.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
+import { isCustomNodeProvider } from "../utils/transparency.js";
 
 // Auth header descriptors — derived from registry transport.auth, fallback to hardcoded defaults.
 const BEARER = { combined: true, header: "Authorization", scheme: "bearer" };
@@ -67,18 +68,37 @@ export class DefaultExecutor extends BaseExecutor {
     super(provider, PROVIDERS[provider] || PROVIDERS.openai);
   }
 
-  transformRequest(model, body) {
-    const transformed = this.applyJsonSchemaFallback(body);
+  transformRequest(model, body, stream, credentials) {
+    // Strict transparency is for custom nodes only, unless the operator enabled
+    // compatNormalization (chatCore sets the flag); a built-in provider keeps its shims.
+    const compat = credentials?.compatNormalization === true || !isCustomNodeProvider(this.provider);
+    let transformed = compat ? this.applyJsonSchemaFallback(body) : body;
+
+    // An OpenAI-standard upstream reports usage on a stream only when asked. Without it the
+    // router has nothing but an estimate to bill from (no cached-token count, wrong totals), and
+    // a client could force that by sending include_usage:false. So the router always asks; the
+    // stream handler then withholds the extra usage-only chunk from a client that did not ask
+    // for it (spec usage-accuracy), so the client sees what the upstream would have sent it.
+    if (
+      stream === true && transformed && typeof transformed === "object"
+      // OpenAI rejects stream_options on a request that is not itself streaming.
+      && transformed.stream === true
+      && this.provider?.startsWith?.("openai-compatible-")
+      && resolveOpenAICompatibleApiType(this.provider, credentials) !== "responses"
+      && transformed.stream_options?.include_usage !== true
+    ) {
+      transformed = { ...transformed, stream_options: { ...(transformed.stream_options || {}), include_usage: true } };
+    }
 
     if (transformed && typeof transformed === "object") {
       // quirk: some openai-compatible providers reject Anthropic's client_metadata field
       if (this.config.quirks?.dropClientMetadata) {
         delete transformed.client_metadata;
       }
-      stripUnsupportedParams(this.provider, model, transformed);
+      stripUnsupportedParams(this.provider, model, transformed, { compat });
     }
 
-    return injectReasoningContent({ provider: this.provider, model, body: transformed });
+    return injectReasoningContent({ provider: this.provider, model, body: transformed, compat });
   }
 
   // Fallback json_schema → json_object for openai-compatible providers without native Structured Output.

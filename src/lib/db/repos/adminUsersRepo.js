@@ -82,13 +82,13 @@ export async function listUsersAdmin(query = {}) {
         u.overdraftNanoUsd,
         g.name AS groupName,
         COALESCE((SELECT SUM(up.creditRemainingNanoUsd) FROM userPlans up
-                   WHERE up.userId = u.id AND up.status = 'active' AND up.expiresAt > ?), 0) AS liveCredit,
+                   WHERE up.userId = u.id AND up.status = 'active' AND up.expiresAt > ? AND up.startsAt <= ?), 0) AS liveCredit,
         COALESCE(u.overdraftNanoUsd, 0) AS debt,
         (SELECT COUNT(*) FROM userPlans up
           WHERE up.userId = u.id AND up.status = 'active' AND up.expiresAt > ?) AS queuedPlans,
         EXISTS(SELECT 1 FROM userPlans up
                 WHERE up.userId = u.id AND up.status = 'active' AND up.unlimitedCredit = 1
-                  AND up.expiresAt > ?) AS hasUnlimited,
+                  AND up.expiresAt > ? AND up.startsAt <= ?) AS hasUnlimited,
         COALESCE((SELECT SUM(uh.costNanoUsd) FROM usageHistory uh
                    WHERE uh.timestamp >= ?
                      AND uh.apiKeyId IN (SELECT k.id FROM apiKeys k WHERE k.userId = u.id)), 0) AS spend30d,
@@ -120,9 +120,10 @@ export async function listUsersAdmin(query = {}) {
   const sortColumn = SORTABLE[query.sort] ?? SORTABLE.createdAt;
   const dir = String(query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
 
-  // The CTE parameters are bound in textual order: the four `?` in `agg`, then the
-  // filter parameters, then LIMIT/OFFSET.
-  const cteParams = [at, at, at, spendSince];
+  // The CTE parameters are bound in textual order: the six `?` in `agg`, then the
+  // filter parameters, then LIMIT/OFFSET. Live credit and "has unlimited" leave out
+  // periods that have not started (spec plan-terms); the queued count keeps them.
+  const cteParams = [at, at, at, at, at, spendSince];
 
   const rows = db.all(
     `${base}${derived}
@@ -177,11 +178,11 @@ export async function getUserSummary(userId) {
   const creditRow = db.get(
     `SELECT
        COALESCE((SELECT SUM(creditRemainingNanoUsd) FROM userPlans
-                  WHERE userId = ? AND status = 'active' AND expiresAt > ?), 0) AS credit,
+                  WHERE userId = ? AND status = 'active' AND expiresAt > ? AND startsAt <= ?), 0) AS credit,
        EXISTS(SELECT 1 FROM userPlans WHERE userId = ? AND status = 'active'
-                AND unlimitedCredit = 1 AND expiresAt > ?) AS hasUnlimited,
+                AND unlimitedCredit = 1 AND expiresAt > ? AND startsAt <= ?) AS hasUnlimited,
        COALESCE((SELECT overdraftNanoUsd FROM users WHERE id = ?), 0) AS debt`,
-    [userId, at, userId, at, userId]
+    [userId, at, at, userId, at, at, userId]
   );
 
   const spend = (since) =>

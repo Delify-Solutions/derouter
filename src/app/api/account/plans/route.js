@@ -6,6 +6,8 @@ import { getQueueSync, getPlanHistorySync, toCatalogPlan } from "@/lib/db/repos/
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 import { offeredMethodsSync } from "@/lib/payments/checkout.js";
 import { getDebtNanoSync } from "@/lib/billing/ledger.js";
+import { payingRatesSync } from "@/lib/billing/rates.js";
+import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -27,9 +29,12 @@ export async function GET(request) {
   try {
     const db = await getAdapter();
     const queue = getQueueSync(db, session.userId);
-    const [plans, availableNanoUsd] = await Promise.all([
+    // The allowance is per (user, plan): count the paying plan's own usage.
+    const rates = payingRatesSync(db, session.userId);
+    const [plans, availableNanoUsd, used] = await Promise.all([
       listPlans({ onlyActive: true }),
       getAvailableNanoUsd(session.userId),
+      rates.planId ? getUserRateUsage(session.userId, 60_000, rates.planId) : { requests: 0, tokens: 0 },
     ]);
 
     // Buyability is decided in one place (planPurchaseBlocker) so the catalogue,
@@ -54,8 +59,11 @@ export async function GET(request) {
         debtNanoUsd: getDebtNanoSync(db, session.userId),
         // An unlimited plan adds no credit to the sum above, so the page needs to
         // know one is live to say "Không giới hạn" instead of a misleading "$0".
-        hasUnlimitedCredit: queue.some((entry) => entry.unlimitedCredit),
+        hasUnlimitedCredit: queue.some((entry) => entry.unlimitedCredit && entry.statusLabel !== "scheduled"),
         queue,
+        // The RPM/TPM applied right now: the paying plan's, counted over every key
+        // of the account in the last 60 seconds — the same numbers enforcement uses.
+        rate: { ...rates, requests: used.requests, tokens: used.tokens },
         history: getPlanHistorySync(db, session.userId),
         plans: catalogue,
       },
