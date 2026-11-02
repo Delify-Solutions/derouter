@@ -2,17 +2,20 @@ import { handleChat } from "@/sse/handlers/chat.js";
 import {
   clearAccountError,
   enforceKeyAccess,
+  refuseUnpricedModelResponse,
   getProviderCredentials,
   isValidApiKey,
   markAccountUnavailable,
 } from "@/sse/services/auth.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { withInflightScope } from "@/lib/billing/inflight.js";
 import { extractGeminiNativeUsage } from "@/lib/usage/geminiNativeUsage.js";
 import { transformOpenAISSEToGeminiSSE, geminiUsageFromOpenAI, FINISH_REASON_MAP } from "@/lib/usage/geminiOpenAIStream.js";
 import { getSettings } from "@/lib/localDb";
 import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS } from "open-sse/config/runtimeConfig.js";
 import { initTranslators } from "open-sse/translator/index.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 let initialized = false;
 const GEMINI_NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -54,7 +57,7 @@ export async function OPTIONS() {
  * The upstream handleChat returns OpenAI SSE format; we transform it to
  * Gemini SSE format on the fly via transformOpenAISSEToGeminiSSE().
  */
-export async function POST(request, { params }) {
+async function handlePost(request, { params }) {
   await ensureInitialized();
 
   try {
@@ -241,7 +244,7 @@ const GEMINI_NATIVE_METER_LIMIT_CHARS = 64 * 1024 * 1024;
  * `usageMetadata` is recorded; a client that disconnects early records nothing,
  * as on the translator path.
  */
-function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint }) {
+function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint, clientIp = null }) {
   if (!body || !apiKey) return body;
 
   const decoder = new TextDecoder();
@@ -271,6 +274,7 @@ function meterGeminiNativeBody(body, { apiKey, connectionId, modelId, endpoint }
         endpoint,
         tokens,
         status: "success",
+        clientIp,
       }).catch(() => {});
     },
   }));
@@ -290,8 +294,11 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   // suspended, unverified or out-of-credit key could still spend provider quota.
   const clientApiKey = extractGeminiClientApiKey(request);
   if (clientApiKey) {
-    const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`);
+    const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`, { clientIp: getRequestIp(request) });
     if (denied) return denied;
+    // Billed per token as provider "gemini": an unpriced model would be free.
+    const unpriced = await refuseUnpricedModelResponse(clientApiKey, { provider: "gemini", model: modelId, clientIp: getRequestIp(request) });
+    if (unpriced) return unpriced;
   }
   const excludeConnectionIds = new Set();
   const bodyText = JSON.stringify(body);
@@ -379,6 +386,7 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
           connectionId: credentials.connectionId,
           modelId,
           endpoint: new URL(request.url).pathname,
+          clientIp: getRequestIp(request),
         }),
         {
           status: upstreamResponse.status,
@@ -515,3 +523,8 @@ async function convertOpenAIResponseToGemini(response, model) {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
 }
+
+// The native Gemini path enforces the key itself, so it needs its own request
+// scope for the concurrent-request cap (handleChat, used for other actions,
+// shares this scope instead of opening one).
+export const POST = withInflightScope(handlePost);

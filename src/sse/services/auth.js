@@ -380,7 +380,7 @@ export async function isValidApiKey(apiKey) {
  * enforceKeyLimits so the order — status, group, expiry, RPM, TPM, model, quota —
  * is decided in ONE place and is testable without a Next.js runtime.
  */
-export async function enforceKeyAccess(apiKey, model) {
+export async function enforceKeyAccess(apiKey, model, { clientIp = null } = {}) {
   if (!apiKey) return null;
   const { enforceKeyLimits } = await import("@/lib/auth/keyEnforcement.js");
   const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
@@ -396,6 +396,7 @@ export async function enforceKeyAccess(apiKey, model) {
       status: limit.status,
       message: limit.message,
       resetAt: limit.resetAt ?? null,
+      clientIp,
     });
     return platformErrorResponse({
       status: limit.status,
@@ -407,4 +408,37 @@ export async function enforceKeyAccess(apiKey, model) {
   }
 
   return null;
+}
+/**
+ * Refuse a customer key on a model with no token price (it would be billed $0).
+ * Admin and local keys pass. Returns an error Response, or null.
+ */
+export async function refuseUnpricedModelResponse(apiKey, { provider, model, requestedModel = null, clientIp = null, logDenial = true } = {}) {
+  if (!apiKey) return null;
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const { resolvePrice } = await import("@/lib/db/repos/pricingRepo.js");
+  const { refuseUnpricedModel } = await import("@/lib/billing/unpricedModels.js");
+  const denial = await refuseUnpricedModel(await getAdapter(), { apiKey, provider, model, requestedModel, resolvePrice });
+  if (!denial) return null;
+  const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
+  if (logDenial) {
+    await logPlatformDenial({ apiKey, model: requestedModel || `${provider}/${model}`, status: denial.status, message: denial.message, clientIp });
+  }
+  return platformErrorResponse(denial);
+}
+
+/**
+ * Refuse a customer key on an endpoint that is not metered yet (TTS, STT, search,
+ * web fetch, video): those requests would never be charged. Admin and local keys
+ * pass. Returns an error Response, or null when the call may proceed.
+ */
+export async function refuseUnmeteredEndpoint(apiKey, { model = null, clientIp = null } = {}) {
+  if (!apiKey) return null;
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const { refuseUnmeteredSync } = await import("@/lib/auth/unmeteredEndpoints.js");
+  const denial = refuseUnmeteredSync(await getAdapter(), apiKey);
+  if (!denial) return null;
+  const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
+  await logPlatformDenial({ apiKey, model, status: denial.status, message: denial.message, clientIp });
+  return platformErrorResponse(denial);
 }

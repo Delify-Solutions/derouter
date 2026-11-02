@@ -7,6 +7,7 @@ import { createGatewayOrderSync, offeredMethodsSync, MAX_PENDING_GATEWAY_ORDERS 
 import { toCustomerOrder } from "@/lib/billing/orders.js";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money.js";
 import { termLabel } from "@/lib/billing/terms.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -136,6 +137,11 @@ export async function POST(request) {
         [order.id]
       );
       const updated = await getOrderById(order.id);
+      await recordActivity(request, {
+        userId: session.userId,
+        action: "order_create",
+        details: { orderId: order.id, planId, method: "manual" },
+      });
       await notifyNewOrder({
         email: session.email,
         planName: plan.name || plan.code,
@@ -163,6 +169,11 @@ export async function POST(request) {
       return NextResponse.json({ error: created.error }, { status: created.status, headers: NO_STORE });
     }
 
+    await recordActivity(request, {
+      userId: session.userId,
+      action: "order_create",
+      details: { orderId: created.order.id, planId, method },
+    });
     await notifyNewOrder({
       email: session.email,
       planName: plan.name || plan.code,

@@ -29,10 +29,12 @@ export async function GET(request) {
   try {
     const db = await getAdapter();
     const queue = getQueueSync(db, session.userId);
+    // The allowance is per (user, plan): count the paying plan's own usage.
+    const rates = payingRatesSync(db, session.userId);
     const [plans, availableNanoUsd, used] = await Promise.all([
       listPlans({ onlyActive: true }),
       getAvailableNanoUsd(session.userId),
-      getUserRateUsage(session.userId, 60_000),
+      rates.planId ? getUserRateUsage(session.userId, 60_000, rates.planId) : { requests: 0, tokens: 0 },
     ]);
 
     // Buyability is decided in one place (planPurchaseBlocker) so the catalogue,
@@ -61,7 +63,7 @@ export async function GET(request) {
         queue,
         // The RPM/TPM applied right now: the paying plan's, counted over every key
         // of the account in the last 60 seconds — the same numbers enforcement uses.
-        rate: { ...payingRatesSync(db, session.userId), requests: used.requests, tokens: used.tokens },
+        rate: { ...rates, requests: used.requests, tokens: used.tokens },
         history: getPlanHistorySync(db, session.userId),
         plans: catalogue,
       },

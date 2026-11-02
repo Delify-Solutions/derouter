@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 27;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -99,6 +99,10 @@ export const TABLES = {
       userId: "TEXT",
       keyHash: "TEXT",
       keyPrefix: "TEXT",
+      // Customer keys only: plans.id this key is pinned to. NULL = the key may be
+      // paid by any plan of its owner (the queue head pays). A pinned key is paid
+      // by purchases of that plan alone and never falls back to another plan.
+      planId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
@@ -169,9 +173,17 @@ export const TABLES = {
       status: "TEXT",
       tokens: "TEXT",
       meta: "TEXT",
+      // plans.id whose RPM/TPM allowance this request counted against (the key's
+      // pinned plan, else the plan paying at that moment). NULL for admin keys,
+      // credit without a plan and rows written before this column existed.
+      ratePlanId: "TEXT",
+      // Client IP of the API request (spec activity-ip-log). NULL when no trusted
+      // address was available and for rows written before this column existed.
+      clientIp: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_ip_ts ON usageHistory(clientIp, timestamp DESC)",
       "CREATE INDEX IF NOT EXISTS idx_uh_provider ON usageHistory(provider)",
       "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
       "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
@@ -264,8 +276,24 @@ export const TABLES = {
       createdAt: "TEXT",
       updatedAt: "TEXT",
       lastLoginAt: "TEXT",
+      // Linked Telegram user (spec telegram-link), set through the Mini App.
+      // The id is a string: Telegram ids exceed 32 bits. NULL = not linked.
+      telegramUserId: "TEXT",
+      telegramUsername: "TEXT",
+      telegramLinkedAt: "TEXT",
+      // Customer notifications over the linked Telegram (spec telegram-notify).
+      // JSON {billing, expiry, announcements}: false turns a group off; a missing
+      // key means on. Security messages ignore it.
+      telegramNotifyPrefs: "TEXT",
+      // Set when Telegram refuses to deliver to this user (bot blocked, never
+      // allowed to message). Sending stops until a test message or a re-link works.
+      telegramDmBlockedAt: "TEXT",
     },
-    indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+      // One Telegram user per account; unlinked accounts (NULL) do not collide.
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram ON users(telegramUserId) WHERE telegramUserId IS NOT NULL",
+    ],
   },
   // Every admin or system action on a customer account, with who did it and why.
   //
@@ -628,6 +656,10 @@ export const TABLES = {
       startsAt: "TEXT",
       expiresAt: "TEXT",
       isActive: "INTEGER DEFAULT 1",
+      // 1 = welcome code (spec gift-codes "New-user codes"): only accounts with
+      // no purchase and a linked Telegram user, one per Telegram user across
+      // every new-user code. perUserLimit is pinned to 1.
+      newUserOnly: "INTEGER DEFAULT 0",
       note: "TEXT",
       createdBy: "TEXT",
       createdAt: "TEXT",
@@ -646,6 +678,9 @@ export const TABLES = {
       // Admin identity when the admin gave this code straight to the account
       // (no code typed by the customer). NULL = redeemed by the customer.
       assignedBy: "TEXT",
+      // Telegram user of the account at redemption time. For new-user codes this
+      // snapshot (not the account's current link) is what blocks a second claim.
+      telegramUserId: "TEXT",
     },
     // No UNIQUE(giftId, userId) here on purpose: a code may be redeemed up to
     // giftCodes.perUserLimit times by the same account, and that limit is
@@ -655,6 +690,84 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_gr_gift_user ON giftRedemptions(giftId, userId)",
       "CREATE INDEX IF NOT EXISTS idx_gr_user ON giftRedemptions(userId)",
+      "CREATE INDEX IF NOT EXISTS idx_gr_telegram ON giftRedemptions(telegramUserId)",
+    ],
+  },
+  // Account actions with the client IP they came from (spec activity-ip-log), so
+  // an admin can see which IPs an account used and which accounts share an IP.
+  // Append-only; details hold short non-secret facts as JSON.
+  activityLog: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT",
+      action: "TEXT NOT NULL",
+      ip: "TEXT",
+      userAgent: "TEXT",
+      details: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_al_user_ts ON activityLog(userId, createdAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_al_ip_ts ON activityLog(ip, createdAt DESC)",
+    ],
+  },
+  // One-time tokens that bind a Telegram Mini App launch to the account that
+  // asked for it (spec telegram-link). Only the SHA-256 of the token is kept.
+  telegramLinkTokens: {
+    columns: {
+      tokenHash: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
+      usedAt: "TEXT",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_tlt_user ON telegramLinkTokens(userId)"],
+  },
+  // One row per reminder already sent (spec telegram-notify), so the periodic
+  // job never repeats one: kind "expire_3d" | "expire_1d" (refId "<userPlans.id>:<expiresAt>")
+  // | "credit_low" (refId "<userId>:<newest running userPlans.id>").
+  telegramNotices: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      kind: "TEXT NOT NULL",
+      refId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_tn_kind_ref ON telegramNotices(kind, refId)"],
+  },
+  // Admin announcements sent to every linked customer who keeps them on.
+  telegramBroadcasts: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      text: "TEXT NOT NULL",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      status: "TEXT NOT NULL", // sending | done | failed
+      total: "INTEGER DEFAULT 0",
+      sent: "INTEGER DEFAULT 0",
+      failed: "INTEGER DEFAULT 0",
+      // Not attempted: the customer turned announcements off, blocked the bot or
+      // was suspended after the broadcast started.
+      skipped: "INTEGER DEFAULT 0",
+      finishedAt: "TEXT",
+    },
+  },
+  // Owner of a customer key that has been deleted. A request admitted before the
+  // delete is saved (and charged) only when it finishes, so the charge still has
+  // to find who pays: resolveApiKeyOwner falls back to this row once the apiKeys
+  // row is gone. Only the sha256 of the key is kept, never the raw secret. Rows
+  // older than DELETED_KEY_RETENTION_MS are pruned on the next delete.
+  deletedApiKeys: {
+    columns: {
+      keyHash: "TEXT PRIMARY KEY",
+      apiKeyId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      planId: "TEXT",
+      deletedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_dak_deleted_at ON deletedApiKeys(deletedAt)",
     ],
   },
   // Time-limited discounts on the list price of models (spec model-discounts).

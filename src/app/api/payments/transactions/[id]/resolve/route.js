@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { resolveTransactionSync } from "@/lib/payments/reconcile.js";
 import { getTransaction } from "@/lib/db/repos/paymentTransactionsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { fireAndForget, notifyOrderApproved } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -45,6 +46,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: result.error, code: result.code }, { status, headers: NO_STORE });
     }
 
+    if (action === "assign" && result.order?.id) fireAndForget(notifyOrderApproved(result.order.id));
     const transaction = await getTransaction(id);
     return NextResponse.json({ success: true, transaction, order: result.order ?? null }, { headers: NO_STORE });
   } catch (error) {

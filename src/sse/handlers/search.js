@@ -5,6 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
   enforceKeyAccess,
+  refuseUnmeteredEndpoint,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
@@ -15,6 +16,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -60,9 +62,15 @@ async function handleSearchRequest(request) {
     }
   }
 
+  // Not metered yet: a customer key would never be charged here.
+  if (apiKey) {
+    const unmetered = await refuseUnmeteredEndpoint(apiKey, { model: providerInput, clientIp: getRequestIp(request) });
+    if (unmetered) return unmetered;
+  }
+
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, providerInput);
+    const denied = await enforceKeyAccess(apiKey, providerInput, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

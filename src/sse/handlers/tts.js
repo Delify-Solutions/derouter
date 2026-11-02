@@ -1,5 +1,5 @@
 import {
-  extractApiKey, isValidApiKey, enforceKeyAccess,
+  extractApiKey, isValidApiKey, enforceKeyAccess, refuseUnmeteredEndpoint,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
@@ -12,6 +12,7 @@ import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
 const CREDENTIALED_PROVIDERS = new Set(
@@ -45,9 +46,15 @@ async function handleTtsRequest(request) {
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
   }
 
+  // Not metered yet: a customer key would never be charged here.
+  if (apiKey) {
+    const unmetered = await refuseUnmeteredEndpoint(apiKey, { model: modelStr, clientIp: getRequestIp(request) });
+    if (unmetered) return unmetered;
+  }
+
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

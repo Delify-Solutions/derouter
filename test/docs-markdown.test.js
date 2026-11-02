@@ -123,5 +123,22 @@ test("tab titles cannot inject markup or handlers", () => {
 
 test("raw HTML inside a tab body is still sanitised", () => {
   const html = renderMarkdown(":::tabs\n::tab[A]\n<script>alert(1)</script><a href=\"javascript:x\">x</a>\n::tab[B]\nb\n:::");
-  assert.doesNotMatch(html, /<script|javascript:/i);
+  // Raw HTML is now escaped to text, so the words may appear — but never as a
+  // live tag or a link target.
+  assert.doesNotMatch(html, /<script|<a\s|href="javascript:/i);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test("raw HTML in docs Markdown is shown as text, never parsed", () => {
+  // A stray quote once made the regex sanitiser miss the tag while the browser
+  // still parsed it, so the onerror handler ran on /docs.
+  for (const src of [
+    '<div><img src=x onerror=alert(document.domain) a"b>\n</div>',
+    'inline <img src=x onerror=alert(1) a"b> text',
+    '<details open ontoggle=alert(1)><summary>x</summary></details>',
+  ]) {
+    const html = renderMarkdown(src);
+    assert.doesNotMatch(html, /<img|<details|<div/i, src);
+    assert.match(html, /&lt;/, src);
+  }
 });

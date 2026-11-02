@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
 import {
   createUser,
   isValidEmailShape,
@@ -7,11 +8,13 @@ import {
 } from "@/lib/localDb";
 import { notifyAdminNewUser } from "@/lib/notify/telegram";
 import { checkLimits, getClientIp } from "@/lib/auth/actionLimiter.js";
+import { startUserSession } from "@/lib/auth/userSession";
 import {
   loadAccountSettings,
   sendVerificationEmail,
   validatePassword,
 } from "@/lib/users/register";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +32,8 @@ function fail(message, status, extra = {}) {
 export async function POST(request) {
   // Rate limit BEFORE any work: an over-limit attempt must not create a user, hash
   // a password or send mail.
-  const gate = checkLimits([{ bucket: `register:ip:${getClientIp(request)}`, ...REGISTER_LIMIT }]);
+  const ip = getClientIp(request);
+  const gate = checkLimits([{ bucket: `register:ip:${ip}`, ...REGISTER_LIMIT }]);
   if (!gate.allowed) {
     return NextResponse.json(
       { error: `Bạn đã thử đăng ký quá nhiều lần. Vui lòng thử lại sau ${Math.ceil(gate.retryAfterSec / 60)} phút.` },
@@ -83,11 +87,26 @@ export async function POST(request) {
     return fail("Could not create the account", 500);
   }
 
+  await recordActivity(request, { userId: user.id, action: "register" });
+
   const needsVerification = user.status === "unverified";
   if (needsVerification) {
     // `next` is optional and validated downstream; an invalid value is simply not
     // carried into the mail.
     await sendVerificationEmail({ user, request, settings, next: body?.next ?? null });
+  }
+
+  // Without email verification the new account is already active, so sign the
+  // visitor in now instead of telling them to check an inbox that will stay
+  // empty. Only `active` qualifies: any other status still goes through login.
+  let signedIn = false;
+  if (user.status === "active") {
+    try {
+      await startUserSession(await cookies(), request, user, { ip });
+      signedIn = true;
+    } catch (error) {
+      console.error("[public/register] auto sign-in failed:", error?.message || error);
+    }
   }
 
   notifyAdminNewUser({
@@ -100,7 +119,12 @@ export async function POST(request) {
     {
       ok: true,
       // Never includes the user id or status: registration responses must not be
-      // usable to probe account existence.
+      // usable to probe account existence. `signedIn` only mirrors the instance's
+      // verification setting for a brand-new account.
+      signedIn,
+      // Lets the form tell "check your inbox" apart from "account ready, sign in"
+      // (the latter only when auto sign-in itself failed).
+      verificationSent: needsVerification,
       message: needsVerification
         ? "Check your email for the verification link"
         : "Account created. You can sign in now.",

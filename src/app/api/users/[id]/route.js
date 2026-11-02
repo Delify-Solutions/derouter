@@ -5,6 +5,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { validatePassword } from "@/lib/users/register";
 import { getUserSummary } from "@/lib/db/repos/adminUsersRepo.js";
+import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 import {
   changeGroupSync,
   changeStatusSync,
@@ -208,6 +209,18 @@ export async function PATCH(request, { params }) {
     }
     console.error("[users] patch failed:", error?.message || error);
     return NextResponse.json({ error: "Không cập nhật được tài khoản" }, { status: 500, headers: NO_STORE });
+  }
+
+  // Security messages to the customer (spec telegram-notify).
+  if (outcome.results.status && outcome.results.status !== existing.status) {
+    if (outcome.results.status === "suspended") {
+      fireAndForget(notifyCustomer(id, "security", messages.accountSuspended()));
+    } else if (outcome.results.status === "active" && existing.status === "suspended") {
+      fireAndForget(notifyCustomer(id, "security", messages.accountReactivated()));
+    }
+  }
+  if (outcome.results.passwordReset) {
+    fireAndForget(notifyCustomer(id, "security", messages.passwordChanged({ reset: true })));
   }
 
   const updated = await getUserById(id);

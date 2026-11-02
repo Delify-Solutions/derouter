@@ -15,14 +15,18 @@ function positive(value) {
 }
 
 /**
+ * RPM/TPM allowances are counted per (user, plan): callers count usage with the
+ * returned `planId` (see getUserRateUsage).
+ *
  * @returns {{ userPlanId: string|null, planId: string|null, planName: string|null,
  *             rpm: number|null, tpm: number|null }}
  *          null rpm/tpm = no limit (no paying plan, or the plan sets none)
  */
-export function payingRatesSync(db, userId, nowIso = null) {
+export function payingRatesSync(db, userId, nowIso = null, { planId = null } = {}) {
   const none = { userPlanId: null, planId: null, planName: null, rpm: null, tpm: null };
   if (!db || !userId) return none;
-  const admitted = admitSync(db, userId, nowIso);
+  // `planId` = the plan a pinned key is paid by; omitted = the head of the queue.
+  const admitted = admitSync(db, userId, nowIso, { planId });
   if (!admitted.ok) return none;
   const row = db.get(
     `SELECT p.id AS planId, p.name AS name, p.code AS code, p.rpm AS rpm, p.tpm AS tpm

@@ -41,6 +41,8 @@ function rowToKey(row) {
     // Tenant ownership + hash-based lookup metadata.
     userId: row.userId ?? null,
     keyPrefix: row.keyPrefix ?? keyPrefixOf(row.key),
+    // plans.id the key is pinned to; null = any plan of the owner.
+    planId: row.planId ?? null,
   };
 }
 
@@ -98,15 +100,17 @@ export async function createApiKey(name, machineId, options = {}) {
     userId: options.userId ?? null,
     keyPrefix: keyPrefixOf(result.key),
     keyHash: hashApiKey(result.key),
+    // Only a customer key can be pinned to a plan; an admin key has no plan queue.
+    planId: options.userId ? options.planId ?? null : null,
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix, planId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt,
       apiKey.groupId, apiKey.rpm, apiKey.tpm, apiKey.budgetUsd, apiKey.resetWindow,
       apiKey.expiresAt, stringifyJson(apiKey.allowedModels),
       apiKey.windowStartedAt, apiKey.windowCostUsd, apiKey.updatedAt,
-      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix,
+      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix, apiKey.planId,
     ]
   );
   return apiKey;
@@ -123,28 +127,72 @@ export async function updateApiKey(id, data) {
     ...data,
     groupId: null,
     allowedModels: data.allowedModels !== undefined ? data.allowedModels : current.allowedModels,
+    // Pinning only exists for customer keys.
+    planId: current.userId ? (data.planId !== undefined ? data.planId || null : current.planId) : null,
     updatedAt: new Date().toISOString(),
   };
   // Keep the hash/prefix derived columns in lockstep with the plaintext key.
   const keyHash = hashApiKey(merged.key);
   const keyPrefix = keyPrefixOf(merged.key);
   db.run(
-    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ?, keyHash = COALESCE(?, keyHash), keyPrefix = COALESCE(?, keyPrefix) WHERE id = ?`,
+    `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, groupId = ?, rpm = ?, tpm = ?, budgetUsd = ?, resetWindow = ?, expiresAt = ?, allowedModels = ?, windowStartedAt = ?, windowCostUsd = ?, updatedAt = ?, keyHash = COALESCE(?, keyHash), keyPrefix = COALESCE(?, keyPrefix), planId = ? WHERE id = ?`,
     [
       merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0,
       merged.groupId, merged.rpm, merged.tpm, merged.budgetUsd, merged.resetWindow,
       merged.expiresAt, stringifyJson(merged.allowedModels),
       merged.windowStartedAt, merged.windowCostUsd ?? 0, merged.updatedAt,
-      keyHash, keyPrefix, id,
+      keyHash, keyPrefix, merged.planId, id,
     ]
   );
   return merged;
 }
 
+// How long the owner of a deleted customer key stays resolvable. It only has to
+// outlive the longest request admitted before the delete; a day is far beyond any
+// stream the router serves.
+export const DELETED_KEY_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delete a key. For a customer key the owner is kept in `deletedApiKeys` (keyHash
+ * only), in the same transaction, because usage is charged when a request
+ * FINISHES: a stream started before the delete must still find who pays, or
+ * "start long requests, then delete the key" would make them free.
+ */
+export function deleteApiKeySync(db, id, nowIso = new Date().toISOString()) {
+  let deleted = false;
+  db.transaction(() => {
+    deleted = deleteApiKeyInTransactionSync(db, id, nowIso);
+  });
+  return deleted;
+}
+
+/**
+ * The body of deleteApiKeySync for a caller that already holds a transaction
+ * (the admin per-user key delete writes its audit row in the same one). Every
+ * path that deletes a single key must go through this, or the tombstone is
+ * skipped and in-flight requests of that key go unbilled.
+ */
+export function deleteApiKeyInTransactionSync(db, id, nowIso = new Date().toISOString()) {
+  const row = db.get(`SELECT id, key, keyHash, userId, planId FROM apiKeys WHERE id = ?`, [id]);
+  if (!row) return false;
+  const keyHash = row.keyHash || hashApiKey(row.key);
+  if (row.userId && keyHash) {
+    db.run(
+      `INSERT INTO deletedApiKeys(keyHash, apiKeyId, userId, planId, deletedAt) VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(keyHash) DO UPDATE SET apiKeyId = excluded.apiKeyId, userId = excluded.userId,
+         planId = excluded.planId, deletedAt = excluded.deletedAt`,
+      [keyHash, row.id, row.userId, row.planId ?? null, nowIso]
+    );
+  }
+  const res = db.run(`DELETE FROM apiKeys WHERE id = ?`, [id]);
+  const cutoff = new Date(new Date(nowIso).getTime() - DELETED_KEY_RETENTION_MS).toISOString();
+  db.run(`DELETE FROM deletedApiKeys WHERE deletedAt < ?`, [cutoff]);
+  return (res?.changes ?? 0) > 0;
+}
+
 export async function deleteApiKey(id) {
   const db = await getAdapter();
-  const res = db.run(`DELETE FROM apiKeys WHERE id = ?`, [id]);
-  return (res?.changes ?? 0) > 0;
+  return deleteApiKeySync(db, id);
 }
 
 export async function validateApiKey(key) {

@@ -86,6 +86,10 @@ const DEFAULT_SETTINGS = {
   smtpFrom: "no-reply@localhost",
   telegramBotToken: "",
   telegramChatId: "",
+  // Mini App used to link customer accounts (spec telegram-link): the bot's
+  // username (without @) and the app's short name set in BotFather /newapp.
+  telegramBotUsername: "",
+  telegramMiniAppName: "link",
 
   // ── Payments (design D1 / spec payment-provider-admin "Payment settings") ──
   // Prefix of every order payment code written in the transfer content. 2–6

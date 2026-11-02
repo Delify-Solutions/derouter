@@ -40,11 +40,16 @@ function normalizeStatus(s) {
  * `id` (optional): if supplied, returns the single matching detail (still
  * scoped to the key). Useful when the history list links to a deep view.
  *
- * `includeRaw=1` (optional): return the stored providerRequest / providerResponse
- * / request bodies verbatim (they're already truncated to
- * observabilityMaxJsonSize in storage). Without it, those payload fields are
- * replaced with `{redacted:true}` — sensitive conversation content isn't shown
- * by default, but the owner CAN opt in to audit their own usage.
+ * `includeRaw=1` (optional): return the stored client request / response bodies
+ * verbatim (they're already truncated to observabilityMaxJsonSize in storage).
+ * Without it, those payload fields are replaced with `{redacted:true}` —
+ * sensitive conversation content isn't shown by default, but the owner CAN opt
+ * in to audit their own usage.
+ *
+ * The UPSTREAM payloads (providerRequest / providerResponse) are never returned
+ * here: they are the router's translated request, carrying the provider
+ * account's project id, the real upstream model and any injected system prompt.
+ * Only the admin request-details view shows them.
  */
 export async function GET(request) {
   try {
@@ -151,8 +156,6 @@ function scrubDetailForList(d, includeRaw) {
   };
   if (includeRaw) {
     out.request = d.request ?? null;
-    out.providerRequest = d.providerRequest ?? null;
-    out.providerResponse = d.providerResponse ?? null;
     out.response = d.response ?? null;
   }
   return out;
@@ -165,5 +168,5 @@ function scrubDetail(d, includeRaw) {
     return base; // already has payloads
   }
   // Without raw: still return the summary; payloads redacted marker for UI.
-  return { ...base, request: { redacted: true }, providerRequest: { redacted: true }, providerResponse: { redacted: true }, response: { redacted: true } };
+  return { ...base, request: { redacted: true }, response: { redacted: true } };
 }

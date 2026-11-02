@@ -162,6 +162,13 @@ function fetcherFor(provider) {
  * dynamically and fully wrapped: the money is already recorded.
  */
 async function sendNotification({ outcome, provider, tx, orderId }) {
+  // The customer hears about their own payment (spec telegram-notify),
+  // independently of the admin alert below.
+  if (outcome.outcome === "matched" && orderId) {
+    import("../notify/customerTelegram.js")
+      .then(({ notifyOrderApproved }) => notifyOrderApproved(orderId))
+      .catch(() => {});
+  }
   try {
     const mod = await import("@/lib/notify/telegram");
     const amountText = tx.currency === "VND"

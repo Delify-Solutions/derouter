@@ -51,6 +51,10 @@ function rowToUser(row) {
     // Operator-only. Customer routes build their `user` payload field by field, so
     // this never reaches the account area; admin routes show and edit it.
     adminNote: row.adminNote ?? null,
+    // Linked Telegram user (spec telegram-link); null when not linked.
+    telegramUserId: row.telegramUserId ?? null,
+    telegramUsername: row.telegramUsername ?? null,
+    telegramLinkedAt: row.telegramLinkedAt ?? null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
     lastLoginAt: row.lastLoginAt ?? null,
@@ -277,6 +281,8 @@ export async function deleteUser(id, { actor = "system" } = {}) {
     const email = row.email ?? null;
     const keyCount = Number(db.get(`SELECT COUNT(*) AS n FROM apiKeys WHERE userId = ?`, [id])?.n ?? 0);
 
+    // No deletedApiKeys tombstones here: the account itself is gone, so an
+    // in-flight request of these keys has nobody left to charge.
     db.run(`DELETE FROM apiKeys WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userSessions WHERE userId = ?`, [id]);
     db.run(`DELETE FROM emailVerifications WHERE userId = ?`, [id]);

@@ -43,13 +43,26 @@ export default function RegisterForm() {
           email: email.trim(),
           password,
           displayName: displayName.trim() || undefined,
-          // The API validates it again and only the verification mail carries it.
+          // The API validates it again; only the verification mail carries it.
           ...(nextTarget ? { next: nextTarget } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || "Registration is unavailable right now");
+        return;
+      }
+      if (data.signedIn) {
+        // No email verification on this instance: the session cookie is already
+        // set, so land where a login would have (validated `next`, else /account).
+        router.replace(nextTarget ?? "/account");
+        router.refresh();
+        return;
+      }
+      if (data.verificationSent === false) {
+        // Active account but auto sign-in failed: no mail is coming, so send the
+        // visitor to sign in instead of the inbox screen.
+        router.replace(nextTarget ? `/login?next=${encodeURIComponent(nextTarget)}` : "/login");
         return;
       }
       setDone(data.message || "Check your email for the verification link");

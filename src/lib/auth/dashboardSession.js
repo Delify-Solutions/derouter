@@ -27,6 +27,27 @@ function loadJwtSecret() {
 
 const SECRET = new TextEncoder().encode(loadJwtSecret());
 
+// Settings key: unix seconds. A dashboard token issued before it is rejected, so
+// changing or resetting the admin password signs out every existing session — a
+// leaked 30-day token used to stay valid until it expired.
+export const SESSIONS_VALID_AFTER_KEY = "dashboardSessionsValidAfter";
+
+/** Value to store under SESSIONS_VALID_AFTER_KEY to revoke every token issued so far. */
+export function revokeAllDashboardSessionsValue(nowMs = Date.now()) {
+  return Math.floor(nowMs / 1000);
+}
+
+// A failed settings read rejects the token: the admin console must fail closed.
+async function issuedBeforeRevocation(payload) {
+  try {
+    const settings = await getSettings();
+    const validAfter = Number(settings?.[SESSIONS_VALID_AFTER_KEY]) || 0;
+    return Number(payload?.iat ?? 0) < validAfter;
+  } catch {
+    return true;
+  }
+}
+
 export function shouldUseSecureCookie(request) {
   const forceSecureCookie = process.env.AUTH_COOKIE_SECURE === "true";
   const forwardedProto = request?.headers?.get?.("x-forwarded-proto");
@@ -45,8 +66,8 @@ export async function createDashboardAuthToken(claims = {}) {
 export async function verifyDashboardAuthToken(token) {
   if (!token) return false;
   try {
-    await jwtVerify(token, SECRET);
-    return true;
+    const { payload } = await jwtVerify(token, SECRET);
+    return !(await issuedBeforeRevocation(payload));
   } catch {
     return false;
   }
@@ -56,6 +77,7 @@ export async function getDashboardAuthSession(token) {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, SECRET);
+    if (await issuedBeforeRevocation(payload)) return null;
     return payload;
   } catch {
     return null;

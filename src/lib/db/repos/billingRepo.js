@@ -1006,6 +1006,10 @@ function ownerCacheFor(db) {
  * tenant key (legacy keys have no userId; those are not billed). Synchronous and
  * cached for 60s per key string, because the post-charge hook runs on every
  * request and this lookup is otherwise a duplicate of what auth just did.
+ *
+ * A customer key deleted while its requests were still running resolves from
+ * `deletedApiKeys` and carries `deleted: true` plus the plan it was pinned to, so
+ * those requests are charged when they finish (see deleteApiKeySync).
  */
 export function resolveApiKeyOwner(db, apiKey) {
   if (!db || !apiKey) return null;
@@ -1016,11 +1020,16 @@ export function resolveApiKeyOwner(db, apiKey) {
   let value = null;
   try {
     let row = db.get(`SELECT id, userId FROM apiKeys WHERE key = ?`, [apiKey]);
-    if (!row) {
-      const hash = hashApiKey(apiKey);
-      if (hash) row = db.get(`SELECT id, userId FROM apiKeys WHERE keyHash = ?`, [hash]);
+    const hash = row ? null : hashApiKey(apiKey);
+    if (!row && hash) row = db.get(`SELECT id, userId FROM apiKeys WHERE keyHash = ?`, [hash]);
+    if (row?.userId) {
+      value = { userId: row.userId, apiKeyId: row.id };
+    } else if (!row && hash) {
+      const gone = db.get(`SELECT apiKeyId, userId, planId FROM deletedApiKeys WHERE keyHash = ?`, [hash]);
+      if (gone?.userId) {
+        value = { userId: gone.userId, apiKeyId: gone.apiKeyId, deleted: true, planId: gone.planId ?? null };
+      }
     }
-    if (row?.userId) value = { userId: row.userId, apiKeyId: row.id };
   } catch {
     return null;
   }

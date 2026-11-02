@@ -72,6 +72,35 @@ export async function setUserCookie(cookieStore, request, payload = {}) {
   return token;
 }
 
+/**
+ * Sign a customer in: set the `user_token` cookie, persist the session row (so
+ * logout and password reset can revoke it) and stamp lastLoginAt. Shared by
+ * login and by signup when no email verification is required. A failed session
+ * write is logged without the token and does not block the response.
+ */
+export async function startUserSession(cookieStore, request, user, { ip = null } = {}) {
+  const token = await setUserCookie(cookieStore, request, { userId: user.id, email: user.email });
+  const { createSession, touchLastLogin } = await import("@/lib/db/repos/userRepo.js");
+  try {
+    await createSession({
+      userId: user.id,
+      ip,
+      userAgent: request.headers.get("user-agent") || null,
+      ttlMs: USER_TOKEN_TTL_SECONDS * 1000,
+      token,
+    });
+  } catch (error) {
+    console.error("[userSession] session persist failed:", error?.message || error);
+  }
+  // A missed timestamp must not undo a sign-in whose cookie is already set.
+  try {
+    await touchLastLogin(user.id);
+  } catch (error) {
+    console.error("[userSession] lastLoginAt update failed:", error?.message || error);
+  }
+  return token;
+}
+
 export function clearUserCookie(cookieStore) {
   cookieStore.delete(USER_COOKIE);
 }

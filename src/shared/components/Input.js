@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { cn } from "@/shared/utils/cn";
 
 export default function Input({
@@ -15,12 +16,16 @@ export default function Input({
   required = false,
   className,
   inputClassName,
+  id,
   ...props
 }) {
+  // Tie the visible label to the field so it is the field's accessible name.
+  const autoId = useId();
+  const inputId = id || autoId;
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
-        <label className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
+        <label htmlFor={inputId} className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
           {label}
           {required && <span className="text-red-600 ml-1">*</span>}
         </label>
@@ -32,6 +37,7 @@ export default function Input({
           </div>
         )}
         <input
+          id={inputId}
           type={type}
           placeholder={placeholder}
           value={value}

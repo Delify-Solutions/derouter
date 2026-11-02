@@ -1,5 +1,5 @@
 import {
-  extractApiKey, isValidApiKey, enforceKeyAccess,
+  extractApiKey, isValidApiKey, enforceKeyAccess, refuseUnmeteredEndpoint,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
@@ -10,6 +10,8 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
 import { modelNotFoundMessage } from "@/lib/auth/platformError";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
+import { withInflightScope } from "@/lib/billing/inflight.js";
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -18,7 +20,11 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
-export async function handleStt(request) {
+// Not wrapped in withErrorLog (the body is multipart), but it still needs a
+// request scope so the customer concurrent-request cap applies here too.
+export const handleStt = withInflightScope(handleSttRequest);
+
+async function handleSttRequest(request) {
   let formData;
   try {
     formData = await request.formData();
@@ -39,9 +45,15 @@ export async function handleStt(request) {
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
   }
 
+  // Not metered yet: a customer key would never be charged here.
+  if (apiKey) {
+    const unmetered = await refuseUnmeteredEndpoint(apiKey, { model: modelStr, clientIp: getRequestIp(request) });
+    if (unmetered) return unmetered;
+  }
+
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 

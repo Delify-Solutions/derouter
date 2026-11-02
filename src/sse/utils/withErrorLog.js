@@ -2,6 +2,7 @@
 // See spec error-log.
 
 import { createWithErrorLog } from "@/lib/errorLog/wrap.js";
+import { withInflightScope } from "@/lib/billing/inflight.js";
 import { getApiKeyByKey } from "@/lib/db/repos/apiKeysRepo.js";
 import { getUserById } from "@/lib/db/repos/userRepo.js";
 import { extractApiKey } from "../services/auth.js";
@@ -24,4 +25,11 @@ async function resolveKey(request) {
   }
 }
 
-export const withErrorLog = createWithErrorLog({ resolveKey });
+const withErrorLogOnly = createWithErrorLog({ resolveKey });
+
+// Every LLM handler goes through here, so this is also where a request gets its
+// concurrency scope: a customer slot taken during enforcement is released when
+// the response body finishes (src/lib/billing/inflight.js).
+export function withErrorLog(handler, opts) {
+  return withInflightScope(withErrorLogOnly(handler, opts));
+}

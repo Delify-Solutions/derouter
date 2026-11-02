@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { redeemGiftCode, listUserRedemptions } from "@/lib/db/repos/giftRepo.js";
+import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,11 @@ const FAILURE = {
   exhausted: { status: 404, error: "This code is not valid." },
   already_redeemed: { status: 409, error: "You have already used this code." },
   invalid_plan: { status: 409, error: "This code cannot be applied to your account." },
+  // New-user codes (spec gift-codes "New-user codes"). Only `telegram_required`
+  // carries a code: it is the one refusal the page offers to fix (link Telegram).
+  not_new_user: { status: 409, error: GIFT_REASON_TEXT.not_new_user },
+  telegram_required: { status: 403, error: GIFT_REASON_TEXT.telegram_required, code: "telegram_required" },
+  telegram_used: { status: 409, error: GIFT_REASON_TEXT.telegram_used },
 };
 
 async function requireSession(request) {
@@ -58,11 +65,27 @@ export async function POST(request) {
       redeemGiftCode(db, { userId: session.userId, code: body.code })
     );
 
+    const giftCode = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
     if (!result?.ok) {
+      // Refusals are kept too: repeated guessing or welcome-code farming shows up here.
+      await recordActivity(request, {
+        userId: session.userId,
+        action: "gift_refused",
+        details: { code: giftCode, reason: result?.reason || "not_found" },
+      });
       const mapped = FAILURE[result?.reason] || FAILURE.not_found;
-      return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      return NextResponse.json(
+        { error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) },
+        { status: mapped.status }
+      );
     }
 
+    await recordActivity(request, {
+      userId: session.userId,
+      action: "gift_redeem",
+      details: { code: giftCode, userPlanId: result.userPlan?.id ?? null },
+    });
+    if (result.userPlan?.id) fireAndForget(notifyPlanReceived(result.userPlan.id, "gift"));
     return NextResponse.json({
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,

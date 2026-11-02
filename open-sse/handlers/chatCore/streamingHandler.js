@@ -176,7 +176,7 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
     // TTFT = time to the first bytes from the upstream; null when none were seen.
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
     }
   };

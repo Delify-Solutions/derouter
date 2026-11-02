@@ -4,7 +4,7 @@ import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import { costFromTokensNano, costFromImagesNano, nanoToUsd } from "../../../shared/utils/money.js";
 import { resolveApiKeyOwner } from "./billingRepo.js";
-import { chargeSync } from "../../billing/planQueue.js";
+import { chargeSync, ratePlanIdSync } from "../../billing/planQueue.js";
 import { applyRequestDiscountSync } from "../../billing/discounts.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 
@@ -430,6 +430,26 @@ export async function saveRequestUsage(entry) {
         return;
       }
 
+      // The plan a customer key is pinned to (null = any plan). Read by id, not from
+      // the 60 s owner cache, so a change applies to the key's very next request. It
+      // decides which plan's discounts apply, who is charged and whose RPM/TPM
+      // allowance the request counts against.
+      // A key deleted mid-request has no row left: its tombstone kept the pin.
+      let keyPlanId = null;
+      if (owner?.deleted) {
+        keyPlanId = owner.planId ?? null;
+      } else if (owner) {
+        try {
+          // The owner may come from the 60 s cache, filled before the key was
+          // deleted: with the row gone, the tombstone still holds the pin.
+          const keyRow = db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])
+            ?? db.get(`SELECT planId FROM deletedApiKeys WHERE apiKeyId = ?`, [owner.apiKeyId]);
+          keyPlanId = keyRow?.planId ?? null;
+        } catch (e) {
+          console.error("[rates] could not read key plan", e.message);
+        }
+      }
+
       // Time-limited model discounts (spec model-discounts): the list cost computed
       // above is lowered here, in the same transaction that writes the row and the
       // charge, so the usage cost, the ledger and every report share one figure.
@@ -441,6 +461,7 @@ export async function saveRequestUsage(entry) {
           at: entry.timestamp,
           requestedModel: entry.requestedModel,
           userId: owner?.userId ?? null,
+          planId: keyPlanId ?? undefined,
         });
         if (discounted.discountBp > 0) {
           discountMeta.listCostNanoUsd = discounted.listCostNanoUsd;
@@ -455,17 +476,31 @@ export async function saveRequestUsage(entry) {
         console.error("[discounts] could not apply, charging list price", e.message);
       }
 
+      // Plan allowance this request counts against (RPM/TPM are per user and plan,
+      // shared by all keys).
+      let ratePlanId = null;
+      if (owner) {
+        try {
+          ratePlanId = ratePlanIdSync(db, owner.userId, keyPlanId, entry.timestamp || null);
+        } catch (e) {
+          console.error("[rates] could not resolve rate plan", e.message);
+        }
+      }
+
       // `apiKey` is the deprecated column: only a key with no owning apiKeys row
       // still needs its raw value to stay attributable. Tenant keys store their
       // apiKeyId and leave the secret out of the database entirely.
       const insertedUsage = db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
           entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(Number.isFinite(entry.ttftMs) ? { ttftMs: entry.ttftMs } : {}), ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
+          ratePlanId,
+          // Spec activity-ip-log: the trusted client IP of the API request, or null.
+          typeof entry.clientIp === "string" && entry.clientIp ? entry.clientIp.slice(0, 64) : null,
         ]
       );
 
@@ -486,6 +521,7 @@ export async function saveRequestUsage(entry) {
             requestKey: "usage:" + insertedUsage.lastInsertRowid,
             costNanoUsd: entry.costNanoUsd || 0,
             nowIso: entry.timestamp || new Date().toISOString(),
+            planId: keyPlanId,
           });
         } catch (e) {
           console.error("[billing] charge failed", e.message);
@@ -1475,6 +1511,12 @@ export async function getProviderRateUsage(windowMs = 60000) {
   return out;
 }
 
+// Every key id the user has held, including keys deleted within the tombstone
+// window: without the deleted ones, "burst, delete the key, mint a new one" would
+// drop the burst out of the per-minute count and reset RPM/TPM. Binds userId twice.
+const USER_KEY_IDS_SQL =
+  "SELECT id FROM apiKeys WHERE userId = ? UNION SELECT apiKeyId FROM deletedApiKeys WHERE userId = ?";
+
 /**
  * Requests and tokens over the last `windowMs` across EVERY key owned by a user
  * (design D7).
@@ -1487,17 +1529,19 @@ export async function getProviderRateUsage(windowMs = 60000) {
  *
  * @returns {{ requests: number, tokens: number }}
  */
-export async function getUserRateUsage(userId, windowMs = 60000) {
+export async function getUserRateUsage(userId, windowMs = 60000, planId = null) {
   if (!userId) return { requests: 0, tokens: 0 };
   const db = await getAdapter();
   const since = new Date(Date.now() - windowMs).toISOString();
+  // `planId` narrows the count to one plan's allowance (all keys of the user that
+  // were counted against that plan); omitted = every request of the user.
   const row = db.get(
     `SELECT COUNT(*) AS requests,
             COALESCE(SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)), 0) AS tokens
        FROM usageHistory
-      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
-        AND timestamp >= ?`,
-    [userId, since]
+      WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
+        AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
+    planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return { requests: row?.requests ?? 0, tokens: row?.tokens ?? 0 };
 }
@@ -1506,16 +1550,16 @@ export async function getUserRateUsage(userId, windowMs = 60000) {
  * Oldest usage timestamp in the rolling window across every key of a user — the
  * TPM wait-loop sleeps until that request falls out of the minute.
  */
-export async function getUserOldestTokenAt(userId, windowMs = 60000) {
+export async function getUserOldestTokenAt(userId, windowMs = 60000, planId = null) {
   if (!userId) return null;
   const db = await getAdapter();
   const since = new Date(Date.now() - windowMs).toISOString();
   const row = db.get(
     `SELECT MIN(timestamp) AS oldest
        FROM usageHistory
-      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
-        AND timestamp >= ?`,
-    [userId, since]
+      WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
+        AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
+    planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return row?.oldest ?? null;
 }
