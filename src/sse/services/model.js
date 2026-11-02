@@ -92,7 +92,13 @@ export async function getComboInfo(modelStr) {
 
   const combo = await getComboByName(modelStr);
   if (combo && combo.models && combo.models.length > 0) {
-    return { models: combo.models, cacheEstimation: comboHasCacheEstimation(combo) };
+    return {
+      models: combo.models,
+      cacheEstimation: comboHasCacheEstimation(combo),
+      // Capabilities the admin declared for the combo (the values /v1/models
+      // advertises); the capacity adapter respects them.
+      capabilities: combo.meta?.capabilities ?? null,
+    };
   }
   return null;
 }

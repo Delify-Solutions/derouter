@@ -117,7 +117,10 @@ async function handleChatRequest(request, clientRawRequest = null) {
     const comboStrategies = settings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
     const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
-    const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings);
+    const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings, {
+      requestedModel: modelStr,
+      declaredCaps: comboInfo.capabilities,
+    });
     const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
 
     if (comboStrategy === "fusion") {
@@ -158,7 +161,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
 
   // Single model request — may still switch to a capacity-adapter model if the
   // target lacks a capability the request needs (e.g. no vision, request has an image).
-  const soloAugmented = augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, settings);
+  const soloAugmented = augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, settings, { requestedModel: modelStr });
   if (soloAugmented.length > 1) {
     const adapterAdded = soloAugmented.filter((m) => m !== modelStr);
     log.info("CHAT", `Capacity adapter for [${[...requiredCapabilities].join(",")}] on "${modelStr}" → trying ${soloAugmented.join(", ")}`);
@@ -201,7 +204,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
       const comboStrategy = comboSpecificStrategy || chatSettings.comboStrategy || "fallback";
       const requiredCapabilities = detectRequiredCapabilities(body);
-      const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings);
+      const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings, {
+        requestedModel: modelStr,
+        declaredCaps: nestedInfo.capabilities,
+      });
       const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
 
       if (comboStrategy === "fusion") {
