@@ -90,6 +90,7 @@ function rowToGiftCode(row) {
     startsAt: row.startsAt ?? null,
     expiresAt: row.expiresAt ?? null,
     isActive: row.isActive === 1 || row.isActive === true,
+    newUserOnly: Number(row.newUserOnly) === 1,
     note: row.note ?? null,
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt ?? null,
@@ -192,7 +193,9 @@ export async function createGiftCode(input) {
   const db = await getAdapter();
   const grant = validateGrantInput(input || {});
   const maxRedemptions = Number(input?.maxRedemptions ?? 1);
-  const perUserLimit = validatePerUserLimit(input?.perUserLimit);
+  const newUserOnly = input?.newUserOnly === true;
+  // A new-user code is one per account by definition (design D5).
+  const perUserLimit = newUserOnly ? 1 : validatePerUserLimit(input?.perUserLimit);
   if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {
     throw new Error("maxRedemptions must be at least 1");
   }
@@ -231,6 +234,7 @@ export async function createGiftCode(input) {
     startsAt: input?.startsAt || null,
     expiresAt: input?.expiresAt || null,
     isActive: input?.isActive === false ? 0 : 1,
+    newUserOnly: newUserOnly ? 1 : 0,
     note: input?.note || null,
     createdBy: input?.createdBy || null,
     createdAt: now,
@@ -238,12 +242,12 @@ export async function createGiftCode(input) {
   };
 
   db.run(
-    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, note, createdBy, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, note, createdBy, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.amountVnd, gift.durationDays,
       gift.maxRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
-      gift.isActive, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
+      gift.isActive, gift.newUserOnly, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
     ]
   );
 
@@ -302,8 +306,11 @@ export async function updateGiftCode(id, patch = {}) {
       startsAt: patch.startsAt !== undefined ? (patch.startsAt || null) : row.startsAt,
       expiresAt: patch.expiresAt !== undefined ? (patch.expiresAt || null) : row.expiresAt,
       isActive: patch.isActive !== undefined ? (patch.isActive ? 1 : 0) : row.isActive,
+      newUserOnly: patch.newUserOnly !== undefined ? (patch.newUserOnly === true ? 1 : 0) : (Number(row.newUserOnly) === 1 ? 1 : 0),
       note: patch.note !== undefined ? (patch.note || null) : row.note,
     };
+    // A new-user code is one per account by definition (design D5).
+    if (next.newUserOnly === 1) next.perUserLimit = 1;
     if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
       throw new Error("maxRedemptions must be at least 1");
     }
@@ -331,11 +338,11 @@ export async function updateGiftCode(id, patch = {}) {
       `UPDATE giftCodes
           SET grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
               maxRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
-              note = ?, updatedAt = ?
+              newUserOnly = ?, note = ?, updatedAt = ?
         WHERE id = ?`,
       [
         grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
-        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.note, nowIso(), id,
+        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.note, nowIso(), id,
       ]
     );
     updated = rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
@@ -353,7 +360,8 @@ export async function deleteGiftCode(id) {
 /** Redemption log. Pass a giftId to scope it to one code. */
 export async function listRedemptions(giftId) {
   const db = await getAdapter();
-  const base = `SELECT r.*, u.email AS userEmail, g.code AS giftCode, up.expiresAt AS planExpiresAt
+  const base = `SELECT r.*, u.email AS userEmail, u.telegramUsername AS userTelegramUsername,
+                       u.telegramUserId AS userTelegramUserId, g.code AS giftCode, up.expiresAt AS planExpiresAt
                   FROM giftRedemptions r
                   LEFT JOIN users u ON u.id = r.userId
                   LEFT JOIN giftCodes g ON g.id = r.giftId
@@ -372,6 +380,12 @@ export async function listRedemptions(giftId) {
     redeemedAt: row.redeemedAt ?? null,
     // Set when the admin gave the code straight to this account.
     assignedBy: row.assignedBy ?? null,
+    // Telegram user recorded at redemption; the username is the account's
+    // current one, shown only while it still belongs to that same Telegram user.
+    telegramUserId: row.telegramUserId ?? null,
+    telegramUsername: row.telegramUserId && row.telegramUserId === row.userTelegramUserId
+      ? row.userTelegramUsername ?? null
+      : null,
   }));
 }
 
@@ -410,12 +424,39 @@ export async function listUserRedemptions(userId) {
 }
 
 /**
+ * Why `userId` may not take a new-user code, or null when it may (design D3).
+ * Ordered so that only a refusal linking Telegram can fix says
+ * "telegram_required": an account that already bought a plan is told so first.
+ */
+export function newUserRefusalSync(db, userId, telegramUserId) {
+  const purchased = db.get(
+    `SELECT 1 AS x FROM userPlans WHERE userId = ? AND source = 'purchase' LIMIT 1`,
+    [userId]
+  );
+  const priorWelcome = db.get(
+    `SELECT 1 AS x FROM giftRedemptions r JOIN giftCodes g ON g.id = r.giftId
+      WHERE r.userId = ? AND g.newUserOnly = 1 LIMIT 1`,
+    [userId]
+  );
+  if (purchased || priorWelcome) return "not_new_user";
+  if (!telegramUserId) return "telegram_required";
+  const claimed = db.get(
+    `SELECT 1 AS x FROM giftRedemptions r JOIN giftCodes g ON g.id = r.giftId
+      WHERE r.telegramUserId = ? AND g.newUserOnly = 1 LIMIT 1`,
+    [String(telegramUserId)]
+  );
+  if (claimed) return "telegram_used";
+  return null;
+}
+
+/**
  * Redeem a code for a user. Fully synchronous: call it inside the caller's
  * `db.transaction(...)` so the redemption row, the counter bump and the billing
  * grant commit (or roll back) together.
  *
  * @returns {{ok: true, userPlan: object, appliedToOverdraftNanoUsd: number}
- *          | {ok: false, reason: "not_found"|"not_active"|"exhausted"|"already_redeemed"|"invalid_plan"}}
+ *          | {ok: false, reason: "not_found"|"not_active"|"exhausted"|"already_redeemed"|"invalid_plan"
+ *                       |"not_new_user"|"telegram_required"|"telegram_used"}}
  */
 export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
   if (!db) throw new Error("redeemGiftCode requires a db adapter");
@@ -479,9 +520,18 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
       );
       if ((mine?.c ?? 0) >= perUser) return { ok: false, reason: "already_redeemed" };
 
+      const telegramUserId = db.get(`SELECT telegramUserId FROM users WHERE id = ?`, [userId])?.telegramUserId ?? null;
+      // New-user codes (spec gift-codes "New-user codes"). Inside the savepoint so
+      // two accounts sharing one Telegram user cannot both pass. An admin
+      // assignment skips them (design D4) but still records the Telegram user.
+      if (Number(row.newUserOnly) === 1 && !assignedBy) {
+        const refusal = newUserRefusalSync(db, userId, telegramUserId);
+        if (refusal) return { ok: false, reason: refusal };
+      }
+
       db.run(
-        `INSERT INTO giftRedemptions(id, giftId, userId, userPlanId, redeemedAt, assignedBy) VALUES(?, ?, ?, NULL, ?, ?)`,
-        [redemptionId, row.id, userId, now, assignedBy]
+        `INSERT INTO giftRedemptions(id, giftId, userId, userPlanId, redeemedAt, assignedBy, telegramUserId) VALUES(?, ?, ?, NULL, ?, ?, ?)`,
+        [redemptionId, row.id, userId, now, assignedBy, telegramUserId]
       );
       // Conditional bump: the last slot cannot be sold twice even if the
       // counter read above was stale.
@@ -541,6 +591,9 @@ export const GIFT_REASON_TEXT = {
   exhausted: "Mã đã hết lượt dùng",
   already_redeemed: "Tài khoản đã dùng mã này đủ số lần cho phép",
   invalid_plan: "Gói của mã không còn bán hoặc không quy đổi được",
+  not_new_user: "Mã này chỉ dành cho tài khoản mới.",
+  telegram_required: "Mã dành cho tài khoản mới, cần liên kết Telegram để nhận.",
+  telegram_used: "Tài khoản Telegram này đã nhận ưu đãi người mới.",
   user_not_found: "Không tìm thấy tài khoản",
 };
 

@@ -751,6 +751,8 @@ export default function ProfilePage() {
     smtpFrom: "",
     telegramBotToken: "",
     telegramChatId: "",
+    telegramBotUsername: "",
+    telegramMiniAppName: "link",
   });
   const [notifyStatus, setNotifyStatus] = useState({ type: "", message: "" });
   const [notifyLoading, setNotifyLoading] = useState(false);
@@ -770,6 +772,8 @@ export default function ProfilePage() {
       smtpFrom: settings.smtpFrom || "",
       telegramBotToken: settings.telegramBotToken || "",
       telegramChatId: settings.telegramChatId || "",
+      telegramBotUsername: settings.telegramBotUsername || "",
+      telegramMiniAppName: settings.telegramMiniAppName || "link",
     }));
   }, [
     settings.siteName,
@@ -781,6 +785,8 @@ export default function ProfilePage() {
     settings.smtpFrom,
     settings.telegramBotToken,
     settings.telegramChatId,
+    settings.telegramBotUsername,
+    settings.telegramMiniAppName,
   ]);
 
   useEffect(() => {
@@ -820,6 +826,8 @@ export default function ProfilePage() {
         smtpFrom: notifyForm.smtpFrom.trim(),
         telegramBotToken: notifyForm.telegramBotToken.trim(),
         telegramChatId: notifyForm.telegramChatId.trim(),
+        telegramBotUsername: notifyForm.telegramBotUsername.trim(),
+        telegramMiniAppName: notifyForm.telegramMiniAppName.trim(),
       };
       // Empty token = keep the stored one (the API strips secrets from responses).
       if (notifyForm.smtpRelayToken.trim()) payload.smtpRelayToken = notifyForm.smtpRelayToken.trim();
@@ -1866,7 +1874,7 @@ export default function ProfilePage() {
               <div>
                 <p className="meta text-text-muted">Telegram</p>
                 <p className="mt-1 text-xs text-text-muted">
-                  New registrations are announced to this chat.
+                  New registrations are announced to this chat. The same bot links customer accounts.
                 </p>
               </div>
               <Input
@@ -1887,6 +1895,38 @@ export default function ProfilePage() {
                 inputClassName="font-mono"
                 disabled={loading || notifyLoading}
               />
+              <div className="flex flex-col gap-1 border-t border-border pt-4">
+                <p className="meta text-text-muted">Liên kết tài khoản khách</p>
+                <p className="text-xs text-text-muted">
+                  Khách liên kết Telegram qua Mini App của bot này (dùng cho mã quà người mới). Tạo một lần trong
+                  BotFather: gửi <span className="font-mono">/newapp</span>, chọn bot, đặt short name như ô bên dưới
+                  và Web App URL là{" "}
+                  <span className="font-mono break-all">
+                    {(notifyForm.publicBaseUrl || "https://<domain>").replace(/\/+$/, "")}/telegram/link
+                  </span>
+                  . Bỏ trống bot username để tắt tính năng.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="Bot username"
+                  value={notifyForm.telegramBotUsername}
+                  onChange={(e) => updateNotifyField("telegramBotUsername", e.target.value)}
+                  placeholder="derouter_bot"
+                  inputClassName="font-mono"
+                  autoComplete="off"
+                  disabled={loading || notifyLoading}
+                />
+                <Input
+                  label="Mini App short name"
+                  value={notifyForm.telegramMiniAppName}
+                  onChange={(e) => updateNotifyField("telegramMiniAppName", e.target.value)}
+                  placeholder="link"
+                  inputClassName="font-mono"
+                  autoComplete="off"
+                  disabled={loading || notifyLoading}
+                />
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-border">

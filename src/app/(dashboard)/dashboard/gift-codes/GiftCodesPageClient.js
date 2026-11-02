@@ -10,6 +10,7 @@ import {
   ConfirmModal,
   Badge,
   CardSkeleton,
+  Toggle,
 } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -308,6 +309,12 @@ export default function GiftCodesPageClient() {
                           </span>
                         </button>
                       </div>
+                      {gift.newUserOnly && (
+                        <span className="mt-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
+                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">person_add</span>
+                          Người mới
+                        </span>
+                      )}
                       {gift.note && <p className="mt-1 text-xs text-text-subtle">{gift.note}</p>}
                     </td>
                     <td className="px-4 py-3">
@@ -503,6 +510,7 @@ export default function GiftCodesPageClient() {
                   <tr className="border-b border-border">
                     <th className="meta px-3 py-2 text-text-muted">User</th>
                     <th className="meta px-3 py-2 text-text-muted">Cách nhận</th>
+                    <th className="meta px-3 py-2 text-text-muted">Telegram</th>
                     <th className="meta px-3 py-2 text-text-muted">Redeemed</th>
                     <th className="meta px-3 py-2 text-text-muted">Expires</th>
                   </tr>
@@ -515,6 +523,11 @@ export default function GiftCodesPageClient() {
                       </td>
                       <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
                         {r.assignedBy ? "Admin gắn" : "Tự nhập mã"}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
+                        {r.telegramUserId
+                          ? `${r.telegramUsername ? `@${r.telegramUsername} · ` : ""}${r.telegramUserId}`
+                          : "—"}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
                         {fmtDateTime(r.redeemedAt)}
@@ -553,6 +566,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
   const [durationDays, setDurationDays] = useState("30");
   const [maxRedemptions, setMaxRedemptions] = useState("1");
   const [perUserLimit, setPerUserLimit] = useState("1");
+  const [newUserOnly, setNewUserOnly] = useState(false);
   const [expiresOn, setExpiresOn] = useState("");
   const [note, setNote] = useState("");
   const [amountVnd, setAmountVnd] = useState("");
@@ -578,7 +592,8 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
       setError("Total redemptions must be at least 1.");
       return;
     }
-    const perUser = Number(perUserLimit);
+    // A new-user code is one per account; the server pins it too.
+    const perUser = newUserOnly ? 1 : Number(perUserLimit);
     if (!Number.isInteger(perUser) || perUser < 1) {
       setError("Per-user limit must be at least 1.");
       return;
@@ -591,6 +606,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
     const body = {
       maxRedemptions: max,
       perUserLimit: perUser,
+      newUserOnly,
       expiresAt: dateInputToExpiryIso(expiresOn),
       note: note.trim() || null,
     };
@@ -764,10 +780,23 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
             type="number"
             min="1"
             step="1"
-            value={perUserLimit}
+            value={newUserOnly ? "1" : perUserLimit}
             onChange={(e) => setPerUserLimit(e.target.value)}
-            hint="Each account can redeem this code up to this many times."
+            disabled={newUserOnly}
+            hint={newUserOnly ? "Mã người mới: mỗi tài khoản 1 lần." : "Each account can redeem this code up to this many times."}
           />
+        </div>
+
+        <div className="flex flex-col gap-1 border border-border p-3">
+          <Toggle
+            checked={newUserOnly}
+            onChange={setNewUserOnly}
+            label="Mã người mới (cần liên kết Telegram)"
+          />
+          <p className="text-xs text-text-muted">
+            Chỉ tài khoản chưa từng mua gói và đã liên kết Telegram mới nhập được. Mỗi Telegram chỉ nhận một mã
+            người mới, tính chung mọi mã người mới. Gắn trực tiếp cho tài khoản thì bỏ qua các điều kiện này.
+          </p>
         </div>
 
         <Input

@@ -9,6 +9,7 @@ import { buildModelsList } from "@/app/api/v1/models/route.js";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { Page, Section, Panel, Stat, Tag, IconBox, ButtonLink, Eyebrow } from "./components/ui";
 import CopyBlock from "./components/CopyBlock";
+import { TelegramLinkCard } from "./components/TelegramLink";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Tổng quan - derouter" };
@@ -233,7 +234,7 @@ export default async function AccountOverviewPage() {
         </Panel>
       </Section>
 
-      <Section title="Tài khoản" description="Thông tin đăng ký của bạn.">
+      <Section title="Tài khoản" description="Thông tin đăng ký và liên kết của bạn.">
         <Panel>
           <dl className="divide-y divide-border">
             {[
@@ -248,6 +249,7 @@ export default async function AccountOverviewPage() {
               </div>
             ))}
           </dl>
+          <TelegramLinkCard className="border-t border-border" />
         </Panel>
       </Section>
     </Page>
