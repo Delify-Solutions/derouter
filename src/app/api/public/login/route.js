@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import {
-  getUserByEmailWithPassword,
-  createSession,
-  touchLastLogin,
-} from "@/lib/localDb";
-import { setUserCookie, USER_TOKEN_TTL_SECONDS } from "@/lib/auth/userSession";
+import { getUserByEmailWithPassword } from "@/lib/localDb";
+import { startUserSession } from "@/lib/auth/userSession";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
 
 export const dynamic = "force-dynamic";
@@ -87,24 +83,9 @@ export async function POST(request) {
 
   recordSuccess(ip);
 
-  const cookieStore = await cookies();
-  const token = await setUserCookie(cookieStore, request, { userId: user.id, email: user.email });
-
-  // Persist the session so logout and password reset can revoke it, and so the
-  // account API can require a live row rather than trusting a bare signature.
-  try {
-    await createSession({
-      userId: user.id,
-      ip,
-      userAgent: request.headers.get("user-agent") || null,
-      ttlMs: USER_TOKEN_TTL_SECONDS * 1000,
-      token,
-    });
-  } catch (error) {
-    console.error("[public/login] session persist failed:", error?.message || error);
-  }
-
-  await touchLastLogin(user.id);
+  // Persists the session row as well, so logout and password reset can revoke it
+  // and the account API can require a live row rather than a bare signature.
+  await startUserSession(await cookies(), request, user, { ip });
 
   return NextResponse.json(
     {
