@@ -280,7 +280,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
                         fallbackText={crumb.label.slice(0, 2).toUpperCase()}
                       />
                     )}
-                    <h1 className="text-base lg:text-xl font-semibold text-text-main tracking-tight truncate">
+                    <h1 className="text-base lg:text-xl font-semibold text-text-main tracking-tight truncate" title={translate(crumb.label)}>
                       {translate(crumb.label)}
                     </h1>
                   </div>
@@ -289,19 +289,19 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
             ))}
           </div>
         ) : title ? (
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
               {icon && (
                 <span className="material-symbols-outlined text-brand-500 text-xl lg:text-2xl">
                   {icon}
                 </span>
               )}
-              <h1 className="text-base lg:text-xl font-semibold tracking-tight truncate">
+              <h1 className="text-base lg:text-xl font-semibold tracking-tight truncate" title={translate(title)}>
                 {translate(title)}
               </h1>
             </div>
             {description && (
-              <p className="hidden lg:block text-sm text-text-muted truncate">
+              <p className="hidden lg:block text-sm text-text-muted truncate" title={translate(description)}>
                 {translate(description)}
               </p>
             )}
@@ -350,7 +350,7 @@ function HeaderSearch() {
   if (!visible) return null;
 
   return (
-    <div className="relative w-[160px] sm:w-[220px]">
+    <div className="relative w-24 sm:w-[220px]">
       <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-text-muted text-[16px] pointer-events-none">
         search
       </span>

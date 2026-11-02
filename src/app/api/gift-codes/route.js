@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { listGiftCodes, createGiftCode, listGiftPlans } from "@/lib/db/repos/giftRepo.js";
+import { listGiftCodes, createGiftCode, listGiftPlans, assignGiftCode, getGiftCodeById } from "@/lib/db/repos/giftRepo.js";
+import { getAdminIdentity } from "@/lib/auth/adminIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ export async function GET() {
   }
 }
 
-// POST /api/gift-codes — mint a code.
+// POST /api/gift-codes — mint a code. `amountVnd` gifts that amount of a custom-amount
+// plan; `assignUserIds` gives the new code straight to those accounts (spec gift-codes).
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -64,6 +66,9 @@ export async function POST(request) {
       grantKind: planId ? "plan" : "credit",
       planId,
       creditNanoUsd,
+      amountVnd: planId && body.amountVnd !== undefined && body.amountVnd !== null && body.amountVnd !== ""
+        ? Number(body.amountVnd)
+        : null,
       durationDays,
       maxRedemptions,
       perUserLimit,
@@ -72,6 +77,20 @@ export async function POST(request) {
       note: body.note || null,
       createdBy: body.createdBy || "admin",
     });
+
+    // Optional: give the new code to accounts right away. Each one is an ordinary
+    // redemption, so the code's limits apply; the results say who got it.
+    const assignUserIds = Array.isArray(body.assignUserIds)
+      ? body.assignUserIds.map((id) => String(id ?? "").trim()).filter(Boolean).slice(0, 200)
+      : [];
+    if (assignUserIds.length > 0) {
+      const actor = `admin:${(await getAdminIdentity(request)) || "admin"}`;
+      const assigned = await assignGiftCode(code.id, { userIds: assignUserIds, actor });
+      return NextResponse.json(
+        { code: await getGiftCodeById(code.id), assigned: assigned.ok ? assigned.results : [] },
+        { status: 201 }
+      );
+    }
 
     return NextResponse.json({ code }, { status: 201 });
   } catch (error) {

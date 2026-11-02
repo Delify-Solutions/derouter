@@ -37,20 +37,20 @@ export default function Pagination({
   return (
     <div
       className={cn(
-        "flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-2",
+        "flex min-w-0 flex-col sm:flex-row items-center justify-between gap-4 py-4 px-2",
         className
       )}
     >
       {/* Info text */}
       {totalItems > 0 && (
-        <div className="text-sm text-text-muted">
+        <div className="max-w-full text-center text-sm text-text-muted tabular-nums sm:text-left">
           Showing <span className="font-medium text-text-main">{startItem}</span> to{" "}
           <span className="font-medium text-text-main">{endItem}</span> of{" "}
           <span className="font-medium text-text-main">{totalItems}</span> results
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-2 sm:gap-4">
         {/* Page size selector */}
         {onPageSizeChange && (
           <div className="flex items-center gap-2">
@@ -75,7 +75,7 @@ export default function Pagination({
         )}
 
         {totalPages > 1 && (
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-1">
             <Button
               variant="outline"
               size="sm"

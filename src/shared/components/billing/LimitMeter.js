@@ -27,9 +27,9 @@ export default function LimitMeter({ window: limit, className = "" }) {
     // The maximum is part of what was sold, so it is shown even before the
     // window opens: "Tối đa $20 mỗi 5 giờ · chưa dùng".
     return (
-      <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm ${className}`}>
+      <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm ${className}`}>
         <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
-        <span className="font-mono text-xs text-text-subtle">chưa dùng</span>
+        <span className="whitespace-nowrap font-mono text-xs text-text-subtle">chưa dùng</span>
       </div>
     );
   }
@@ -38,12 +38,13 @@ export default function LimitMeter({ window: limit, className = "" }) {
 
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
         <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
-        <span className="font-mono text-xs text-text-main tabular-nums">
-          {fmtUsdNano(spent)}
-          <span className="text-text-subtle"> / {fmtUsdNano(max)}</span>
-          {limit.resetAt ? <span className="text-text-subtle"> · reset {timeOf(limit.resetAt)}</span> : null}
+        {/* Each piece stays whole; the line breaks between pieces, never inside one. */}
+        <span className="flex max-w-full flex-wrap justify-end gap-x-1 font-mono text-xs tabular-nums text-text-main">
+          <span className="whitespace-nowrap">{fmtUsdNano(spent)}</span>
+          <span className="whitespace-nowrap text-text-subtle">/ {fmtUsdNano(max)}</span>
+          {limit.resetAt ? <span className="whitespace-nowrap text-text-subtle">· reset {timeOf(limit.resetAt)}</span> : null}
         </span>
       </div>
       <div

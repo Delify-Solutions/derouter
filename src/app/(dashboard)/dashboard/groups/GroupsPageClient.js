@@ -195,9 +195,9 @@ export default function GroupsPageClient() {
             {groups.map((group) => (
               <div
                 key={group.id}
-                className={`group flex items-start justify-between py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${group.isActive === false ? "opacity-60" : ""}`}
+                className={`group flex flex-wrap items-start justify-between gap-x-3 gap-y-2 py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${group.isActive === false ? "opacity-60" : ""}`}
               >
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 basis-48">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium truncate" title={group.name}>{group.name}</p>
                     {group.isDefault && (
@@ -223,7 +223,7 @@ export default function GroupsPageClient() {
                     Created {new Date(group.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   <button
                     onClick={() => setDiscountGroup(group)}
                     className="flex items-center gap-1 px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"

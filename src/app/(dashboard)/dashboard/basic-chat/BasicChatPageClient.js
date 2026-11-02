@@ -742,18 +742,18 @@ export default function BasicChatPageClient() {
     <div className="relative flex-1 flex flex-col h-full min-h-0 min-w-0 bg-[#212121] text-white overflow-hidden">
       <div className="relative mx-auto flex flex-1 h-full min-h-0 w-full max-w-4xl flex-col">
         <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 lg:px-6">
-          <div ref={modelMenuRef} className="relative">
+          <div ref={modelMenuRef} className="relative min-w-0">
             <button
               type="button"
               onClick={() => setModelMenuOpen((value) => !value)}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/8"
+              className="flex max-w-full min-w-0 items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/8"
             >
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-white">{modelLabel}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-white" title={modelLabel}>{modelLabel}</span>
                   <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
                 </div>
-                <p className="truncate text-xs text-white/55">{modelSubLabel}</p>
+                <p className="truncate text-xs text-white/55" title={modelSubLabel}>{modelSubLabel}</p>
               </div>
             </button>
 
