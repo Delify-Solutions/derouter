@@ -27,6 +27,10 @@ const SOURCE_LABEL = {
 export default function QueueEntryCard({ entry, renderActions = null, dragHandle = null, position = null, className = "" }) {
   if (!entry) return null;
 
+  // The server decides whether a period has started (queueViewSync), like every
+  // other status on this card.
+  const notStarted = entry.statusLabel === "scheduled";
+
   const daysLeft = (() => {
     const expires = entry.expiresAt ? new Date(entry.expiresAt).getTime() : NaN;
     if (!Number.isFinite(expires)) return null;
@@ -51,8 +55,14 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
               <span>{SOURCE_LABEL[entry.source] || entry.source || "—"}</span>
               <span aria-hidden="true" className="text-text-subtle">·</span>
-              <span>hết hạn {dateOf(entry.expiresAt)}</span>
-              {daysLeft != null && (
+              {notStarted && (
+                <>
+                  <span className="whitespace-nowrap">bắt đầu {dateOf(entry.startsAt)}</span>
+                  <span aria-hidden="true" className="text-text-subtle">·</span>
+                </>
+              )}
+              <span className="whitespace-nowrap">hết hạn {dateOf(entry.expiresAt)}</span>
+              {daysLeft != null && !notStarted && (
                 <>
                   <span aria-hidden="true" className="text-text-subtle">·</span>
                   <span>còn {daysLeft} ngày</span>

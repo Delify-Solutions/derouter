@@ -8,6 +8,7 @@ import { generatePaymentCode, isValidPrefix } from "./codes.js";
 import { snapshotLimitsOf } from "../billing/orders.js";
 import { nano } from "../billing/ledger.js";
 import { quoteTopup } from "../billing/topup.js";
+import { findTerm, termPrice } from "../billing/terms.js";
 
 export const METHOD_LABELS = {
   vietqr: "Chuyển khoản VietQR",
@@ -171,6 +172,7 @@ export function createGatewayOrderSync(db, {
   settings = {},
   nowIso = null,
   amountVnd = null,
+  periods = 1,
 } = {}) {
   if (!userId) return { ok: false, code: "invalid", error: "Thiếu người dùng", status: 400 };
   if (!plan) return { ok: false, code: "invalid", error: "Gói không tồn tại", status: 400 };
@@ -178,7 +180,17 @@ export function createGatewayOrderSync(db, {
     return { ok: false, code: "invalid", error: "Phương thức thanh toán không hợp lệ", status: 400 };
   }
 
-  const offered = offeredMethodsSync(db, plan, settings).find((entry) => entry.method === method);
+  // A term of N periods (spec plan-terms) is priced here, once, and every amount
+  // below — the offered method's amount included — comes from the priced plan.
+  const term = findTerm(plan, periods);
+  if (!term) return { ok: false, code: "bad_term", error: "Gói này không bán kỳ hạn đã chọn", status: 400 };
+  if (term.periods !== 1 && amountVnd != null) {
+    return { ok: false, code: "bad_term", error: "Nạp số tiền tùy ý chỉ mua một kỳ", status: 400 };
+  }
+  const price = termPrice(plan, term);
+  const pricedPlan = { ...plan, priceNanoUsd: price.priceNanoUsd, priceVnd: price.priceVnd };
+
+  const offered = offeredMethodsSync(db, pricedPlan, settings).find((entry) => entry.method === method);
   if (!offered) {
     return {
       ok: false,
@@ -255,10 +267,12 @@ export function createGatewayOrderSync(db, {
     // `amountNanoUsd` keeps its existing meaning (the USD price of this order: the
     // plan's price, or for a custom-amount top-up the quoted price of the typed
     // amount) so every finance/statistics query built on it keeps working unchanged.
-    amountNanoUsd: quote ? quote.priceNanoUsd : nano(plan.priceNanoUsd),
+    amountNanoUsd: quote ? quote.priceNanoUsd : price.priceNanoUsd,
     creditNanoUsd: quote ? quote.creditNanoUsd : nano(plan.creditNanoUsd),
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: nano(plan.durationDays),
+    periods: term.periods,
+    discountPercent: term.discountPercent,
     status: "pending",
     method,
     paymentCode,
@@ -273,13 +287,13 @@ export function createGatewayOrderSync(db, {
 
   db.run(
     `INSERT INTO orders(
-       id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, status, method,
-       paymentCode, payCurrency, payAmount, paymentProviderId, expiresAt,
+       id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent,
+       status, method, paymentCode, payCurrency, payAmount, paymentProviderId, expiresAt,
        emailSnapshot, limits, createdAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.unlimitedCredit, order.durationDays, order.status, order.method, order.paymentCode, order.payCurrency,
+      order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.paymentCode, order.payCurrency,
       order.payAmount, order.paymentProviderId, order.expiresAt, order.emailSnapshot,
       order.limits, order.createdAt,
     ]
@@ -313,6 +327,8 @@ export function readGatewayOrder(db, orderId) {
     creditNanoUsd: nano(row.creditNanoUsd),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
+    periods: Number(row.periods) >= 1 ? Math.floor(Number(row.periods)) : 1,
+    discountPercent: nano(row.discountPercent),
     status: row.status,
     method: row.method ?? "manual",
     paymentCode: row.paymentCode ?? null,

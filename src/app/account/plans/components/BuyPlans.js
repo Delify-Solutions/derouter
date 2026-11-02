@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { fmtUsdNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { quoteTopup, topupBounds, topupEnabled } from "@/lib/billing/topup.js";
+import { planTerms, termLabel, termPrice } from "@/lib/billing/terms.js";
+import TermPicker from "@/shared/components/billing/TermPicker";
 import { ActionButton, Empty, Section } from "@/app/account/components/ui";
 
 /**
@@ -20,6 +22,10 @@ import { ActionButton, Empty, Section } from "@/app/account/components/ui";
  *
  * The blocking reason is shown instead of a dead button: "Gói này chỉ dành cho một
  * số nhóm" is actionable ("ask the admin"), an unexplained 403 is not.
+ *
+ * A plan sold in longer terms shows a term picker (spec plan-terms): the headline,
+ * the struck-through full price and every button follow the chosen term, priced by
+ * the same `termPrice` the server charges with.
  *
  * `?plan=<code>` from the landing page highlights and scrolls to that card.
  */
@@ -38,6 +44,8 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
   const containerRef = highlightRef ?? localRef;
   // What the customer typed per top-up plan, as digits. Unset = the plan's own price.
   const [typed, setTyped] = useState({});
+  // Chosen number of periods per plan. Unset = one period.
+  const [chosen, setChosen] = useState({});
 
   useEffect(() => {
     if (!highlightCode) return;
@@ -76,10 +84,15 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
           const highlighted = highlightCode && String(plan.code).toLowerCase() === highlightCode;
           const limits = Array.isArray(plan.limitsText) ? plan.limitsText : [];
           const methods = Array.isArray(plan.offeredMethods) ? plan.offeredMethods : [];
-          const vndText = methods.find((entry) => entry.method === "vietqr")?.amountText
-            ?? (plan.priceVndText || null);
-          const usdText = methods.find((entry) => entry.method === "binance")?.amountText
-            ?? fmtUsdNano(plan.priceNanoUsd);
+          const terms = planTerms(plan);
+          const term = terms.find((entry) => entry.periods === chosen[plan.id]) ?? terms[0];
+          const price = termPrice(plan, term);
+          const vndText = price.priceVnd ? formatVnd(price.priceVnd) : null;
+          const usdText = fmtUsdNano(price.priceNanoUsd);
+          // The undiscounted price, struck through next to a discounted term.
+          const fullText = term.discountPercent > 0
+            ? (vndText ? formatVnd(price.fullPriceVnd) : fmtUsdNano(price.fullPriceNanoUsd))
+            : null;
           // The headline is the price the customer is most likely to pay: VietQR
           // when the plan has one, otherwise USD. The other sits underneath.
           // A top-up plan prices whatever amount is typed, so its headline, credit
@@ -98,10 +111,10 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
           const quotedUsd = quote?.ok && quote.priceNanoUsd > 0 ? fmtUsdNano(quote.priceNanoUsd) : null;
           const headline = topup
             ? (quotedVnd || "—")
-            : vndText || (plan.priceNanoUsd > 0 ? usdText : "Miễn phí");
+            : vndText || (price.priceNanoUsd > 0 ? usdText : "Miễn phí");
           const secondary = topup
             ? (quotedVnd && quotedUsd ? quotedUsd : null)
-            : vndText && plan.priceNanoUsd > 0 ? usdText : null;
+            : vndText && price.priceNanoUsd > 0 ? usdText : null;
           const inputId = `topup-${plan.id}`;
 
           return (
@@ -124,20 +137,44 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                 {plan.description && <p className="text-sm leading-6 text-text-muted">{plan.description}</p>}
               </div>
 
-              <div className="px-6 pt-5">
-                <p className="flex items-baseline gap-2 text-text-main">
-                  <span className="text-3xl font-semibold leading-none tracking-tight">{headline}</span>
-                  <span className="font-mono text-xs text-text-muted">/ {plan.durationDays} ngày</span>
+              {terms.length > 1 && (
+                <div className="px-6 pt-5">
+                  <TermPicker
+                    name={`term-${plan.id}`}
+                    durationDays={plan.durationDays}
+                    terms={terms}
+                    value={term.periods}
+                    onChange={(periods) => setChosen((prev) => ({ ...prev, [plan.id]: periods }))}
+                  />
+                </div>
+              )}
+
+              <div className="min-w-0 px-6 pt-5">
+                <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
+                  <span className="break-all text-3xl font-semibold leading-none tracking-tight tabular-nums">{headline}</span>
+                  <span className="font-mono text-xs text-text-muted">/ {termLabel(plan.durationDays, term.periods)}</span>
                 </p>
+                {fullText && (
+                  <p className="mt-1 font-mono text-xs text-text-muted">
+                    <span className="line-through">{fullText}</span> · tiết kiệm {term.discountPercent}%
+                  </p>
+                )}
                 {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
                 <p className="mt-3 text-sm font-medium text-text-main">
                   {plan.unlimitedCredit
                     ? "Credit không giới hạn"
                     : topup
                       ? (quote?.ok ? `Nhận ${fmtUsdNano(quote.creditNanoUsd)} credit` : "Nhập số tiền để xem credit nhận được")
-                      : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
+                      : term.periods > 1
+                        ? `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit mỗi ${termLabel(plan.durationDays, 1)} × ${term.periods}`
+                        : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
                   <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
                 </p>
+                {term.periods > 1 && (
+                  <p className="mt-1 text-xs text-text-muted">
+                    {term.periods} kỳ nối tiếp nhau, mỗi kỳ {termLabel(plan.durationDays, 1)} với credit và hạn mức riêng.
+                  </p>
+                )}
               </div>
 
               {topup && (
@@ -200,7 +237,9 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                     ? (quote?.ok
                         ? (entry.method === "vietqr" ? quotedVnd : quotedUsd)
                         : null)
-                    : entry.amountText;
+                    : entry.method === "vietqr"
+                      ? (vndText ?? entry.amountText)
+                      : usdText;
                   const busy = buyingId === key;
                   // Gateway buttons are the primary action; manual is deliberately
                   // the quiet one, because it needs a human and should not compete.
@@ -212,7 +251,7 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                       fullWidth
                       loading={busy}
                       disabled={topup && !quote?.ok}
-                      onClick={() => onBuy(plan, entry.method, topup ? quote.amountVnd : undefined)}
+                      onClick={() => onBuy(plan, entry.method, topup ? quote.amountVnd : undefined, term.periods)}
                     >
                       {!busy && (
                         <span className="material-symbols-outlined text-[18px]" aria-hidden="true">

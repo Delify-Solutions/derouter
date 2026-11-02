@@ -7,6 +7,8 @@ import { formatVnd } from "@/lib/payments/amounts.js";
 import { windowLabel } from "@/lib/billing/limits.js";
 import { topupBounds } from "@/lib/billing/topup.js";
 import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
+import TermsEditor, { termsToDraft, draftToTerms, draftTermsError } from "./components/TermsEditor";
+import { termLabel } from "@/lib/billing/terms.js";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 
@@ -36,8 +38,10 @@ const EMPTY_FORM = {
   isFeatured: false,
   // Empty array = any group may buy. Stored in the plan row as JSON.
   allowedGroupIds: [],
-  // "" = unlimited. Counted per calendar month over orders.
+  // "" = unlimited. Counted per calendar month over orders and gifts of the plan.
   purchaseLimitPerMonth: "",
+  // Longer terms besides the single period, as draft rows (spec plan-terms).
+  termOptions: [],
   sortOrder: "",
   // Request / token rate while this plan is the one paying. "" = unlimited.
   rpm: "",
@@ -97,6 +101,11 @@ function validateDraft(draft) {
   });
   if (limitsError) errors.limits = limitsError;
 
+  const termsError = draftTermsError(draft.termOptions, {
+    allowCustomAmount: draft.allowCustomAmount && !draft.unlimitedCredit,
+  });
+  if (termsError) errors.termOptions = termsError;
+
   if (draft.allowCustomAmount && !draft.unlimitedCredit) {
     if (!(Number(draft.priceVnd) > 0)) {
       errors.customAmount = "Nạp số tiền tùy ý cần giá VND của gói để tính tỷ lệ quy đổi";
@@ -147,6 +156,7 @@ function planToDraft(plan) {
     isFeatured: plan.isFeatured === true,
     allowedGroupIds: Array.isArray(plan.allowedGroupIds) ? plan.allowedGroupIds : [],
     purchaseLimitPerMonth: plan.purchaseLimitPerMonth == null ? "" : String(plan.purchaseLimitPerMonth),
+    termOptions: termsToDraft(plan.termOptions),
     sortOrder: plan.sortOrder == null ? "" : String(plan.sortOrder),
     rpm: plan.rpm == null ? "" : String(plan.rpm),
     tpm: plan.tpm == null ? "" : String(plan.tpm),
@@ -249,6 +259,8 @@ export default function PlansPageClient() {
       isFeatured: draft.isFeatured,
       allowedGroupIds: draft.allowedGroupIds.length ? draft.allowedGroupIds : null,
       purchaseLimitPerMonth: draft.purchaseLimitPerMonth === "" ? null : Number(draft.purchaseLimitPerMonth),
+      // A custom-amount plan sells one period only.
+      termOptions: draft.allowCustomAmount && !draft.unlimitedCredit ? [] : draftToTerms(draft.termOptions),
       sortOrder: draft.sortOrder === "" ? null : Number(draft.sortOrder),
       rpm: String(draft.rpm).trim() === "" ? null : Number(draft.rpm),
       tpm: String(draft.tpm).trim() === "" ? null : Number(draft.tpm),
@@ -424,6 +436,14 @@ export default function PlansPageClient() {
                   <dt className="meta text-text-subtle">Giới hạn / tháng</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">
                     {plan.purchaseLimitPerMonth ? `${plan.purchaseLimitPerMonth} lần` : "Không"}
+                  </dd>
+                </div>
+                <div className="col-span-full bg-surface px-4 py-3">
+                  <dt className="meta text-text-subtle">Kỳ hạn</dt>
+                  <dd className="font-mono text-sm text-text-main mt-1">
+                    {[{ periods: 1, discountPercent: 0 }, ...(plan.termOptions ?? [])]
+                      .map((term) => `${termLabel(plan.durationDays, term.periods)}${term.discountPercent ? ` −${term.discountPercent}%` : ""}`)
+                      .join(" · ")}
                   </dd>
                 </div>
               </dl>
@@ -804,7 +824,7 @@ export default function PlansPageClient() {
                 onChange={(e) => setField("purchaseLimitPerMonth", e.target.value)}
                 placeholder="Để trống = không giới hạn"
                 inputMode="numeric"
-                hint="Tính theo tháng dương lịch. Đơn đã hủy không tính."
+                hint="Tính theo tháng dương lịch, gồm cả gói được tặng (mã quà, admin cấp). Đơn đã hủy không tính; mua nhiều kỳ một lần tính 1 lần."
               />
             </div>
           </div>
@@ -829,6 +849,19 @@ export default function PlansPageClient() {
               hint="Vượt TPM thì request chờ tối đa 30 giây rồi mới báo 429."
             />
           </div>
+
+          {!(draft.allowCustomAmount && !draft.unlimitedCredit) && (
+            <div className="border-t border-border pt-4">
+              <TermsEditor
+                rows={draft.termOptions}
+                onChange={(rows) => setField("termOptions", rows)}
+                priceUsd={draft.priceUsd}
+                priceVnd={draft.priceVnd}
+                durationDays={draft.durationDays}
+                error={touched ? errors.termOptions : null}
+              />
+            </div>
+          )}
 
           <div className="border-t border-border pt-4 flex flex-col gap-3">
             <LimitsEditor
