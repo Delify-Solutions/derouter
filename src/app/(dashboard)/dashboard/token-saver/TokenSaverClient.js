@@ -484,7 +484,7 @@ export default function TokenSaverClient() {
     <div className="space-y-6 p-6">
       <Card id="transparency">
         <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="material-symbols-outlined text-primary">swap_horiz</span>
               Chế độ tương thích (compat)

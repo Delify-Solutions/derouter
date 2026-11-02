@@ -36,10 +36,12 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
 
   return (
     <article className={`flex flex-col gap-5 border border-border bg-surface p-5 ${className}`}>
-      <header className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+      {/* The status tag drops under the name on a narrow card instead of
+          squeezing the plan name down to a few letters. */}
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
           {dragHandle}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="flex items-baseline gap-2 truncate text-base font-semibold text-text-main" title={entry.planName || entry.planCode || ""}>
               {position != null && (
                 <span className="font-mono text-xs font-normal text-text-subtle" aria-label={`Vị trí ${position}`}>
@@ -48,15 +50,19 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
               )}
               <span className="truncate">{entry.planName || entry.planCode || "Gói"}</span>
             </h3>
+            {/* A separator travels with the item after it, so a wrapped line
+                never starts or ends with a lone "·". */}
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
-              <span>{SOURCE_LABEL[entry.source] || entry.source || "—"}</span>
-              <span aria-hidden="true" className="text-text-subtle">·</span>
-              <span>hết hạn {dateOf(entry.expiresAt)}</span>
+              <span className="whitespace-nowrap">{SOURCE_LABEL[entry.source] || entry.source || "—"}</span>
+              <span className="whitespace-nowrap">
+                <span aria-hidden="true" className="mr-2 text-text-subtle">·</span>
+                hết hạn {dateOf(entry.expiresAt)}
+              </span>
               {daysLeft != null && (
-                <>
-                  <span aria-hidden="true" className="text-text-subtle">·</span>
-                  <span>còn {daysLeft} ngày</span>
-                </>
+                <span className="whitespace-nowrap">
+                  <span aria-hidden="true" className="mr-2 text-text-subtle">·</span>
+                  còn {daysLeft} ngày
+                </span>
               )}
             </p>
           </div>
@@ -66,7 +72,7 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
 
       {entry.unlimitedCredit ? (
         // No ceiling to draw a bar against: the limits below are what bound it.
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
           <span className="text-sm text-text-muted">Credit</span>
           <span className="text-2xl font-semibold leading-none tracking-tight text-text-main">{UNLIMITED_CREDIT_LABEL}</span>
         </div>

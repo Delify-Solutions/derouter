@@ -198,9 +198,9 @@ export default async function AccountOverviewPage() {
       >
         <Panel>
           <div className="flex items-center justify-between gap-4 p-6">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <IconBox icon="group" />
-              <div>
+              <div className="min-w-0 [overflow-wrap:anywhere]">
                 <Eyebrow>Nhóm của bạn</Eyebrow>
                 <p className="mt-1 text-sm font-medium text-text-main">{group?.name || "Chưa được gán nhóm"}</p>
               </div>
@@ -241,8 +241,8 @@ export default async function AccountOverviewPage() {
               ["Đăng nhập gần nhất", user.lastLoginAt ? `${fmtDate(user.lastLoginAt)} ${fmtTime(user.lastLoginAt)}` : "—"],
             ].map(([label, value]) => (
               <div key={label} className="flex items-center justify-between gap-4 px-6 py-4">
-                <dt className="text-sm text-text-muted">{label}</dt>
-                <dd className="min-w-0 truncate font-mono text-xs text-text-main">{value}</dd>
+                <dt className="shrink-0 text-sm text-text-muted">{label}</dt>
+                <dd className="min-w-0 text-right font-mono text-xs text-text-main [overflow-wrap:anywhere]">{value}</dd>
               </div>
             ))}
           </dl>

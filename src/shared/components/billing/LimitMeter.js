@@ -24,9 +24,9 @@ export default function LimitMeter({ window: limit, className = "" }) {
 
   if (!open) {
     return (
-      <div className={`flex items-baseline justify-between gap-3 text-sm ${className}`}>
-        <span className="text-text-muted">{label}</span>
-        <span className="font-mono text-xs text-text-subtle">chưa dùng</span>
+      <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm ${className}`}>
+        <span className="whitespace-nowrap text-text-muted">{label}</span>
+        <span className="whitespace-nowrap font-mono text-xs text-text-subtle">chưa dùng</span>
       </div>
     );
   }
@@ -35,12 +35,13 @@ export default function LimitMeter({ window: limit, className = "" }) {
 
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="text-text-muted">{label}</span>
-        <span className="font-mono text-xs text-text-main">
-          {fmtUsdNano(spent)}
-          <span className="text-text-subtle"> / {fmtUsdNano(max)}</span>
-          {limit.resetAt ? <span className="text-text-subtle"> · reset {timeOf(limit.resetAt)}</span> : null}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
+        <span className="whitespace-nowrap text-text-muted">{label}</span>
+        {/* Each piece stays whole; the line breaks between pieces, never inside one. */}
+        <span className="flex max-w-full flex-wrap justify-end gap-x-1 font-mono text-xs tabular-nums text-text-main">
+          <span className="whitespace-nowrap">{fmtUsdNano(spent)}</span>
+          <span className="whitespace-nowrap text-text-subtle">/ {fmtUsdNano(max)}</span>
+          {limit.resetAt ? <span className="whitespace-nowrap text-text-subtle">· reset {timeOf(limit.resetAt)}</span> : null}
         </span>
       </div>
       <div

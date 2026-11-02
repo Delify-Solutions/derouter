@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fmtUsdNano } from "@/shared/utils/money";
+import { fitFigureStyle } from "@/shared/utils/fitFigure";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { quoteTopup, topupBounds, topupEnabled } from "@/lib/billing/topup.js";
 import { ActionButton, Empty, Section } from "@/app/account/components/ui";
@@ -119,15 +120,15 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
               )}
 
               <div className="flex flex-col gap-1 px-6 pt-6">
-                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">{plan.code}</span>
-                <h3 className="text-base font-semibold text-text-main">{plan.name}</h3>
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle [overflow-wrap:anywhere]">{plan.code}</span>
+                <h3 className="text-base font-semibold text-text-main [overflow-wrap:anywhere]">{plan.name}</h3>
                 {plan.description && <p className="text-sm leading-6 text-text-muted">{plan.description}</p>}
               </div>
 
-              <div className="px-6 pt-5">
-                <p className="flex items-baseline gap-2 text-text-main">
-                  <span className="text-3xl font-semibold leading-none tracking-tight">{headline}</span>
-                  <span className="font-mono text-xs text-text-muted">/ {plan.durationDays} ngày</span>
+              <div className="@container px-6 pt-5">
+                <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
+                  <span className="max-w-full text-3xl font-semibold leading-none tracking-tight tabular-nums break-words" style={fitFigureStyle(headline, { maxRem: 1.875 })}>{headline}</span>
+                  <span className="whitespace-nowrap font-mono text-xs text-text-muted">/ {plan.durationDays} ngày</span>
                 </p>
                 {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
                 <p className="mt-3 text-sm font-medium text-text-main">
