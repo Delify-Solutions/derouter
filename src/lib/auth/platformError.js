@@ -102,6 +102,16 @@ export function modelNotAllowedMessage(model) {
   return `Model ${model} không nằm trong nhóm của bạn.`;
 }
 
+/**
+ * `Model <model> không tồn tại hoặc chưa được mở trên router này.` — a name that is
+ * no combo, no alias and no configured provider/model. Said instead of the internal
+ * "No active credentials for provider: openai" the router used to answer, which
+ * named a provider the caller never asked for.
+ */
+export function modelNotFoundMessage(model) {
+  return `Model ${model} không tồn tại hoặc chưa được mở trên router này. Xem danh sách model tại /v1/models.`;
+}
+
 /** `Các gói đang chạm hạn mức, mở lại sau <relativeWaitVi>.` */
 export function planLimitMessage(resetAt) {
   const wait = resetAt ? relativeWaitVi(new Date(resetAt).getTime() - Date.now()) : relativeWaitVi(0);

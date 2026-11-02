@@ -16,6 +16,7 @@ import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
 import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
 import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
@@ -266,6 +267,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
+        // A guessed provider (bare unknown name) or an unknown prefix means the model
+        // does not exist here: say that, not which provider lacks credentials.
+        if (modelInfo.inferred || modelInfo.unknownProvider) {
+          log.warn("CHAT", `Unknown model: ${modelStr} (guessed provider ${provider})`);
+          return errorResponse(HTTP_STATUS.NOT_FOUND, modelNotFoundMessage(modelStr));
+        }
         log.warn("AUTH", `No active credentials for provider: ${provider}`);
         return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
       }

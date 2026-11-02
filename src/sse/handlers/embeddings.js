@@ -12,6 +12,7 @@ import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
+import { modelNotFoundMessage } from "@/lib/auth/platformError";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
@@ -115,7 +116,9 @@ async function handleEmbeddingsRequest(request) {
       }
       if (excludeConnectionIds.size === 0) {
         log.error("AUTH", `No credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+        return ((modelInfo.inferred || modelInfo.unknownProvider)
+          ? errorResponse(HTTP_STATUS.NOT_FOUND, modelNotFoundMessage(modelStr))
+          : errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`));
       }
       log.warn("EMBEDDINGS", "No more accounts available", { provider });
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");

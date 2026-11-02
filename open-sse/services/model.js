@@ -115,10 +115,13 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
     return resolved;
   }
 
-  // Fallback: infer provider from model name prefix
+  // Fallback: infer provider from model name prefix. `inferred` tells the caller
+  // the provider was a guess (a bare name that is no combo or alias), so a missing
+  // connection means "no such model here", not "provider X has no credentials".
   return {
     provider: inferProviderFromModelName(parsed.model),
     model: parsed.model,
+    inferred: true,
   };
 }
 

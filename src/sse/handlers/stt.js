@@ -9,6 +9,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
+import { modelNotFoundMessage } from "@/lib/auth/platformError";
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -74,7 +75,9 @@ export async function handleStt(request) {
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
         return unavailableResponse(status, `[${provider}/${model}] ${msg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
-      if (excludeConnectionIds.size === 0) return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+      if (excludeConnectionIds.size === 0) return ((modelInfo.inferred || modelInfo.unknownProvider)
+          ? errorResponse(HTTP_STATUS.NOT_FOUND, modelNotFoundMessage(modelStr))
+          : errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`));
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 

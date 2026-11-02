@@ -63,7 +63,10 @@ export async function getModelInfo(modelStr) {
     }
     return {
       provider: parsed.provider,
-      model: parsed.model
+      model: parsed.model,
+      // An explicit "prefix/model" whose prefix is no built-in provider and no
+      // provider node: there is nothing to route to.
+      unknownProvider: !RESERVED_PROVIDER_PREFIXES.has(parsed.providerAlias),
     };
   }
 
