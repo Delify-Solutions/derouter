@@ -100,3 +100,18 @@ export function checkLimits(limits, now = Date.now()) {
 }
 
 export { getClientIp };
+
+/**
+ * Would `bucket` refuse an attempt right now? Read-only: nothing is recorded, so a
+ * caller can gate on the limit and count only the attempts that should count
+ * (e.g. failures).
+ * @returns {{ limited:boolean, retryAfterSec:number }}
+ */
+export function peekLimit(bucket, { limit, windowMs, now = Date.now() } = {}) {
+  const max = Math.max(1, Math.floor(Number(limit) || 1));
+  const window = Math.max(1, Math.floor(Number(windowMs) || 3_600_000));
+  const existing = store.buckets.get(bucket);
+  const hits = existing ? pruneExpired(existing, now, window) : [];
+  if (hits.length < max) return { limited: false, retryAfterSec: 0 };
+  return { limited: true, retryAfterSec: Math.max(1, Math.ceil((hits[0] + window - now) / 1000)) };
+}

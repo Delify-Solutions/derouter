@@ -281,6 +281,8 @@ export async function deleteUser(id, { actor = "system" } = {}) {
     const email = row.email ?? null;
     const keyCount = Number(db.get(`SELECT COUNT(*) AS n FROM apiKeys WHERE userId = ?`, [id])?.n ?? 0);
 
+    // No deletedApiKeys tombstones here: the account itself is gone, so an
+    // in-flight request of these keys has nobody left to charge.
     db.run(`DELETE FROM apiKeys WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userSessions WHERE userId = ?`, [id]);
     db.run(`DELETE FROM emailVerifications WHERE userId = ?`, [id]);

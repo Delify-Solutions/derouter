@@ -5,6 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
   enforceKeyAccess,
+  refuseUnmeteredEndpoint,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
@@ -62,6 +63,12 @@ async function handleFetchRequest(request) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
     }
+  }
+
+  // Not metered yet: a customer key would never be charged here.
+  if (apiKey) {
+    const unmetered = await refuseUnmeteredEndpoint(apiKey, { model: providerInput, clientIp: getRequestIp(request) });
+    if (unmetered) return unmetered;
   }
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.

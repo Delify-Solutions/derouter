@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { insertAuditSync } from "@/lib/billing/audit.js";
 import { validateReason } from "@/lib/billing/adminActions.js";
+import { deleteApiKeyInTransactionSync } from "@/lib/db/repos/apiKeysRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -99,7 +100,9 @@ export async function DELETE(request, { params }) {
   const outcome = db.transaction(() => {
     const key = loadKey(db, id, keyId);
     if (!key) return null;
-    db.run(`DELETE FROM apiKeys WHERE id = ?`, [keyId]);
+    // Through the shared delete so the owner tombstone is written: requests
+    // still running on this key must be charged when they finish.
+    deleteApiKeyInTransactionSync(db, keyId);
     insertAuditSync(db, {
       userId: id,
       actor,

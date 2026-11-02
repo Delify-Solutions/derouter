@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -715,6 +715,23 @@ export const TABLES = {
       usedAt: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_tlt_user ON telegramLinkTokens(userId)"],
+  },
+  // Owner of a customer key that has been deleted. A request admitted before the
+  // delete is saved (and charged) only when it finishes, so the charge still has
+  // to find who pays: resolveApiKeyOwner falls back to this row once the apiKeys
+  // row is gone. Only the sha256 of the key is kept, never the raw secret. Rows
+  // older than DELETED_KEY_RETENTION_MS are pruned on the next delete.
+  deletedApiKeys: {
+    columns: {
+      keyHash: "TEXT PRIMARY KEY",
+      apiKeyId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      planId: "TEXT",
+      deletedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_dak_deleted_at ON deletedApiKeys(deletedAt)",
+    ],
   },
   // Time-limited discounts on the list price of models (spec model-discounts).
   // One row is one rule; rules that apply to the same request stack additively,

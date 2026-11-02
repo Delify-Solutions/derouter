@@ -9,14 +9,16 @@ import {
   validateSamlResponse,
 } from "@/lib/auth/saml.js";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
-import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
+import { checkLock, recordFail, recordSuccess, getClientIp, adminIpBucket } from "@/lib/auth/loginLimiter";
 
 export async function POST(request) {
   const settings = await getSettings();
   const origin = getSamlBaseUrl(request, settings);
-  const ip = getClientIp(request);
+  // Admin-only bucket, shared with the admin password login.
+  const bucket = adminIpBucket(getClientIp(request));
+  const limiterKey = bucket.key;
 
-  const lock = checkLock(ip);
+  const lock = checkLock(limiterKey);
   if (lock.locked) {
     return NextResponse.redirect(
       new URL(
@@ -36,7 +38,7 @@ export async function POST(request) {
   // in this browser. Such an assertion is either unsolicited (attacker-initiated
   // login) or a replay; refuse it before touching the SAML library.
   if (!storedRequestId) {
-    recordFail(ip);
+    recordFail(limiterKey, { maxFails: bucket.maxFails });
     return NextResponse.json(
       { error: "Missing SAML state" },
       { status: 403, headers: { "Cache-Control": "no-store" } }
@@ -48,12 +50,12 @@ export async function POST(request) {
     const SAMLResponse = formData.get("SAMLResponse");
 
     if (!SAMLResponse) {
-      recordFail(ip);
+      recordFail(limiterKey, { maxFails: bucket.maxFails });
       return NextResponse.redirect(new URL("/admin/ss?error=saml_missing_response", origin));
     }
 
     if (!isSamlConfigured(settings)) {
-      recordFail(ip);
+      recordFail(limiterKey, { maxFails: bucket.maxFails });
       return NextResponse.redirect(new URL("/admin/ss?error=saml_not_configured", origin));
     }
 
@@ -62,7 +64,7 @@ export async function POST(request) {
     const samlEmail = pickSamlEmail(profile, settings) || null;
     const samlName = pickSamlDisplayName(profile, settings) || "SAML user";
 
-    recordSuccess(ip);
+    recordSuccess(limiterKey);
 
     await setDashboardAuthCookie(cookieStore, request, {
       saml: true,
@@ -72,7 +74,7 @@ export async function POST(request) {
 
     return NextResponse.redirect(new URL("/dashboard", origin));
   } catch (error) {
-    recordFail(ip);
+    recordFail(limiterKey, { maxFails: bucket.maxFails });
     return NextResponse.redirect(
       new URL(`/admin/ss?error=${encodeURIComponent(error.message || "saml_acs_failed")}`, origin)
     );

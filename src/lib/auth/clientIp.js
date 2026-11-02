@@ -15,6 +15,19 @@ function clean(value) {
   return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
 }
 
+/**
+ * The address the nearest trusted proxy saw, same rule as custom-server.js:
+ * X-Real-IP (nginx sets it to $remote_addr), else the LAST X-Forwarded-For hop.
+ * The FIRST hop is whatever the client sent — $proxy_add_x_forwarded_for appends
+ * the real peer after it — so reading it let a client pick its own IP.
+ */
+export function forwardedClientIp(xRealIp, xff) {
+  const real = String(xRealIp || "").trim();
+  if (real) return real;
+  const hops = String(xff || "").split(",").map((hop) => hop.trim()).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : "";
+}
+
 /** Trusted client IP of a Request (custom-server stamp, or TRUST_PROXY), else null. */
 export function getRequestIp(request) {
   const headers = request?.headers;
@@ -24,8 +37,8 @@ export function getRequestIp(request) {
     if (stamped) return stamped;
   }
   if (process.env.TRUST_PROXY === "true") {
-    const xff = headers.get("x-forwarded-for");
-    if (xff) return clean(xff.split(",")[0]);
+    const forwarded = forwardedClientIp(headers.get("x-real-ip"), headers.get("x-forwarded-for"));
+    if (forwarded) return clean(forwarded);
   }
   return null;
 }
