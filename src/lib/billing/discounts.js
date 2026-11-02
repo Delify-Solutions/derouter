@@ -18,7 +18,7 @@
 // The cost is computed with BigInt — no float ever touches a balance.
 import { v4 as uuidv4 } from "uuid";
 import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
-import { listQueueSync, evaluatePlan } from "./planQueue.js";
+import { listQueueSync, evaluatePlan, hasStarted } from "./planQueue.js";
 import { nano } from "./ledger.js";
 
 export const MAX_BP = 10000;
@@ -457,7 +457,8 @@ export function resolvePayerContextSync(db, userId, at) {
   const queue = listQueueSync(db, userId, new Date(nowMs).toISOString());
   let paying = queue.find((entry) => evaluatePlan(entry, nowMs).eligible) ?? null;
   if (!paying) {
-    paying = queue.find((entry) => entry.unlimitedCredit === true || nano(entry.creditRemainingNanoUsd) > 0) ?? null;
+    paying = queue.find((entry) => hasStarted(entry, nowMs)
+      && (entry.unlimitedCredit === true || nano(entry.creditRemainingNanoUsd) > 0)) ?? null;
   }
   return { groupId: groupRow?.groupId ?? null, planId: paying?.planId ?? null };
 }

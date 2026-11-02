@@ -49,6 +49,16 @@ function hasCredit(entry) {
   return entry.unlimitedCredit === true || nano(entry.creditRemainingNanoUsd) > 0;
 }
 
+/**
+ * Has this purchase started? A later period of a multi-period term, or an unlimited
+ * plan queued behind another of the same plan, is `active` with a future `startsAt`
+ * and pays for nothing until then (spec plan-terms).
+ */
+export function hasStarted(entry, nowMs) {
+  const startsMs = new Date(entry?.startsAt).getTime();
+  return !Number.isFinite(startsMs) || startsMs <= nowMs;
+}
+
 function rowToEntry(row, windowsByPlan) {
   const limits = parseLimits(row.limits);
   const stored = windowsByPlan.get(row.id) ?? new Map();
@@ -63,6 +73,10 @@ function rowToEntry(row, windowsByPlan) {
     planId: row.planId ?? null,
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
+    // The plan's request/token rate, read live (never snapshotted): it applies
+    // while this purchase is the one paying. null = no limit.
+    rpm: Number(row.planRpm) > 0 ? Number(row.planRpm) : null,
+    tpm: Number(row.planTpm) > 0 ? Number(row.planTpm) : null,
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
@@ -93,7 +107,7 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
   const at = nowIsoArg || nowIso();
 
   const rows = db.all(
-    `SELECT up.*, p.code AS planCode, p.name AS planName
+    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm
        FROM userPlans up
        LEFT JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
@@ -171,8 +185,11 @@ export function evaluatePlan(entry, nowMs) {
   }
 
   const expiresMs = new Date(entry.expiresAt).getTime();
+  const started = hasStarted(entry, now);
   return {
-    eligible: hasCredit(entry) && Number.isFinite(expiresMs) && expiresMs > now && !blocked,
+    eligible: started && hasCredit(entry) && Number.isFinite(expiresMs) && expiresMs > now && !blocked,
+    // Not started yet: neither paying nor blocked, just waiting for its start.
+    scheduled: !started,
     blocked,
     reopenAt: reopenMs == null ? null : isoOf(reopenMs),
     roomNanoUsd,
@@ -200,7 +217,7 @@ export function admitSync(db, userId, nowIsoArg = null) {
     const state = evaluatePlan(entry, nowMs);
     if (state.eligible) return { ok: true, planId: entry.id };
     // "Only blocked" = has credit and is unexpired, but a window is full.
-    if (hasCredit(entry) && state.blocked) {
+    if (!state.scheduled && hasCredit(entry) && state.blocked) {
       anyOnlyBlocked = true;
       const reopenMs = state.reopenAt ? new Date(state.reopenAt).getTime() : null;
       if (reopenMs != null && (earliestReopenMs == null || reopenMs < earliestReopenMs)) {
@@ -358,6 +375,7 @@ export function chargeSync(db, {
     if (remaining <= 0) break;
     if (!hasCredit(entry)) continue;
     const state = evaluatePlan(entry, nowMs);
+    if (state.scheduled) continue;
     const room = state.roomNanoUsd; // null = unlimited
     const capacity = room == null ? remaining : Math.min(remaining, room);
     // Only a finite plan is also bounded by what it has left.
@@ -374,6 +392,8 @@ export function chargeSync(db, {
   if (remaining > 0) {
     for (const entry of queue) {
       if (remaining <= 0) break;
+      // A period that has not started cannot pay, even past its windows.
+      if (!hasStarted(entry, nowMs)) continue;
       // applyTake already wrote the post-pass-1 balance back into the entry, so
       // this is the LIVE remainder. Subtracting pass 1 again here (as an earlier
       // version did) double-counted it — pass 1 was deducted twice from a base
@@ -471,7 +491,8 @@ export function reorderSync(db, userId, orderedIds, { actor = "customer", nowIso
  * one status label the row shows.
  *
  * `statusLabel` is `paying` for the plan admission would pick now, `blocked` for a
- * window-blocked one and `waiting` otherwise. No UI computes eligibility itself —
+ * window-blocked one, `scheduled` for one whose start is still ahead (its
+ * `startsAt` says when) and `waiting` otherwise. No UI computes eligibility itself —
  * the dashboard and the customer page must never disagree with the request path.
  */
 export function queueViewSync(db, userId, nowIsoArg = null) {
@@ -486,7 +507,9 @@ export function queueViewSync(db, userId, nowIsoArg = null) {
 
   return queue.map((entry) => {
     const state = evaluatePlan(entry, nowMs);
-    const statusLabel = entry.id === payingId ? "paying" : state.blocked ? "blocked" : "waiting";
+    const statusLabel = entry.id === payingId
+      ? "paying"
+      : state.scheduled ? "scheduled" : state.blocked ? "blocked" : "waiting";
     return { ...entry, ...state, statusLabel };
   });
 }

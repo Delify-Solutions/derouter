@@ -69,7 +69,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                   <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
                     <span className="max-w-full text-4xl font-semibold leading-none tracking-tight tabular-nums break-words" style={fitFigureStyle(headline)}>{headline}</span>
                     {plan.priceVndText || plan.priceUsdText ? (
-                      <span className="whitespace-nowrap font-mono text-xs text-text-muted">/ {plan.durationDays} ngày</span>
+                      <span className="whitespace-nowrap font-mono text-xs text-text-muted">/ {plan.periodLabel || `${plan.durationDays} ngày`}</span>
                     ) : null}
                   </p>
                   {secondary ? (
@@ -81,6 +81,24 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                       : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`}
                   </p>
                   <p className="mt-1 text-sm text-text-muted">Dùng {plan.durationDays} ngày</p>
+                  {plan.terms?.length > 0 ? (
+                    // Longer terms (spec plan-terms): the price for each, with its
+                    // discount written out. The term is picked at checkout.
+                    <dl className="mt-4 flex flex-col border border-border">
+                      {plan.terms.map((term, index) => (
+                        <div
+                          key={term.periods}
+                          className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2 ${index > 0 ? "border-t border-border" : ""}`}
+                        >
+                          <dt className="text-sm text-text-muted">{term.label}</dt>
+                          <dd className="font-mono text-sm text-text-main tabular-nums">
+                            {term.priceText || "—"}
+                            {term.discountPercent > 0 ? <span className="ml-2 text-xs text-text-muted">−{term.discountPercent}%</span> : null}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
                 </div>
 
                 <ul className="mt-6 flex flex-1 flex-col gap-2.5 border-t border-border px-6 py-5">

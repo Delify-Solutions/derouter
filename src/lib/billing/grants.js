@@ -82,23 +82,52 @@ export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = n
 }
 
 /**
- * Create a userPlans row for a purchase/gift/admin grant.
+ * When a new grant of this plan may start (spec plan-terms "Unlimited plans of the
+ * same plan never overlap").
+ *
+ * Two unlimited purchases of the SAME plan running side by side would double its
+ * window limits — the customer would get twice the plan for the overlap. So an
+ * unlimited grant starts when the last still-active unlimited purchase of that plan
+ * ends; anything else (a finite plan, a different plan, nothing running) starts now.
+ */
+export function stackedStartMsSync(db, { userId, planId, unlimited, nowMs }) {
+  if (!unlimited || !planId || planId === NO_PLAN_ID) return nowMs;
+  const row = db.get(
+    `SELECT MAX(expiresAt) AS lastEnd FROM userPlans
+      WHERE userId = ? AND planId = ? AND unlimitedCredit = 1 AND status = 'active' AND expiresAt > ?`,
+    [userId, planId, new Date(nowMs).toISOString()]
+  );
+  const lastEndMs = row?.lastEnd ? new Date(row.lastEnd).getTime() : NaN;
+  return Number.isFinite(lastEndMs) && lastEndMs > nowMs ? lastEndMs : nowMs;
+}
+
+/**
+ * Create the userPlans rows for a purchase/gift/admin grant.
  * SYNCHRONOUS — call inside an existing db.transaction.
+ *
+ * `periods` (default 1) grants that many back-to-back purchases of `durationDays`
+ * each: period k starts when period k−1 ends, and each has the full credit and its
+ * own limits (spec plan-terms "A term grants back-to-back periods"). A later period
+ * is `active` with a future `startsAt` and pays for nothing until then.
  *
  * The granted credit first repays whatever the account owes
  * (users.overdraftNanoUsd); only the remainder lands on the new plan, so a grant
- * can never leave a user both funded and in debt.
+ * can never leave a user both funded and in debt. With several periods the debt is
+ * repaid from the first period's credit, then the next.
  *
  * `unlimitedCredit` grants a plan with no credit ceiling: both credit columns are
  * 0 and nothing is repaid out of it, so an existing debt stays on the account (the
- * plan never runs dry, so admission does not look at the debt).
+ * plan never runs dry, so admission does not look at the debt). An unlimited grant
+ * is queued behind any running unlimited purchase of the same plan
+ * (`stackedStartMsSync`).
  *
  * `limits` is the normalised/serialisable snapshot of the plan's per-window limits
  * (spec plan-queue-billing "Each grant creates an independent purchased plan").
  * Credit-only grants pass `[]`. `priority` is always NULL: a new plan joins the
  * queue at its expiry position, never ahead of an order the customer chose.
  *
- * @returns {{ userPlan: object, appliedToOverdraftNanoUsd: number }}
+ * @returns {{ userPlan: object, userPlans: object[], appliedToOverdraftNanoUsd: number }}
+ *          `userPlan` is the first period.
  */
 export function grantUserPlan(db, {
   userId,
@@ -108,6 +137,7 @@ export function grantUserPlan(db, {
   creditNanoUsd,
   unlimitedCredit = false,
   durationDays,
+  periods = 1,
   limits = [],
   meta = null,
   now = null,
@@ -120,8 +150,42 @@ export function grantUserPlan(db, {
   if (!source) throw new Error("grantUserPlan requires a source");
 
   const unlimited = unlimitedCredit === true || Number(unlimitedCredit) === 1;
-  const credit = unlimited ? 0 : Math.max(0, nano(creditNanoUsd));
-  const startsAt = now || nowIso();
+  const count = Math.max(1, Math.floor(Number(periods) || 1));
+  // When the grant happens: the ledger rows, createdAt and the overdraft paydown
+  // are dated now even when the first period starts later.
+  const at = now || nowIso();
+  const planIdValue = planId != null && planId !== NO_PLAN_ID
+    ? planId
+    : planIdIsNullable(db) ? null : NO_PLAN_ID;
+
+  const atMs = new Date(at).getTime();
+  let startMs = stackedStartMsSync(db, { userId, planId: planIdValue, unlimited, nowMs: atMs });
+  const userPlans = [];
+  let appliedToOverdraftNanoUsd = 0;
+  for (let index = 0; index < count; index += 1) {
+    const granted = insertPeriodSync(db, {
+      userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
+      credit: unlimited ? 0 : Math.max(0, nano(creditNanoUsd)),
+      // Keep the caller's own timestamp string when the period starts right away.
+      startsAt: startMs === atMs ? at : new Date(startMs).toISOString(),
+      durationDays,
+      at,
+      period: count > 1 ? { index: index + 1, of: count } : null,
+    });
+    userPlans.push(granted.userPlan);
+    appliedToOverdraftNanoUsd += granted.paydown;
+    startMs = new Date(granted.userPlan.expiresAt).getTime();
+  }
+
+  return { userPlan: userPlans[0], userPlans, appliedToOverdraftNanoUsd };
+}
+
+/** One period of a grant: debt paydown, the userPlans row and its ledger row. */
+function insertPeriodSync(db, {
+  userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
+  credit, startsAt, durationDays, at, period,
+}) {
+  const planId = planIdValue;
   const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
 
   // 1. Repay overdraft out of the granted credit.
@@ -135,15 +199,12 @@ export function grantUserPlan(db, {
       deltaNanoUsd: paydown,
       kind: "adjust",
       meta: { reason: "overdraft_paydown", source, orderId, planId, appliedToOverdraftNanoUsd: paydown },
-      createdAt: startsAt,
+      createdAt: at,
     });
   }
 
   // 2. The remainder becomes the plan's credit.
   const planCredit = credit - paydown;
-  const planIdValue = planId != null && planId !== NO_PLAN_ID
-    ? planId
-    : planIdIsNullable(db) ? null : NO_PLAN_ID;
   const userPlan = {
     id: uuidv4(),
     userId,
@@ -158,7 +219,7 @@ export function grantUserPlan(db, {
     status: "active",
     priority: null,
     limits: serializeLimits(limits),
-    createdAt: startsAt,
+    createdAt: at,
   };
 
   db.run(
@@ -172,16 +233,21 @@ export function grantUserPlan(db, {
     ]
   );
 
+  const extra = {
+    ...(unlimited ? { unlimited: true } : {}),
+    ...(period ? { period: period.index, periods: period.of } : {}),
+    ...(startsAt !== at ? { startsAt } : {}),
+  };
   insertLedgerSync(db, {
     userId,
     userPlanId: userPlan.id,
     deltaNanoUsd: planCredit,
     kind: ledgerKind,
     meta: meta && typeof meta === "object"
-      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...(unlimited ? { unlimited: true } : {}) }
-      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...(unlimited ? { unlimited: true } : {}) },
-    createdAt: startsAt,
+      ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...extra }
+      : { source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...extra },
+    createdAt: at,
   });
 
-  return { userPlan, appliedToOverdraftNanoUsd: paydown };
+  return { userPlan, paydown };
 }

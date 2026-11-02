@@ -4,7 +4,7 @@ import PropTypes from "prop-types";
 import CreditBar from "./CreditBar";
 import { UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import LimitMeter from "./LimitMeter";
-import StatusTag, { dateOf } from "./StatusTag";
+import StatusTag, { dateTimeOf, spanText } from "./StatusTag";
 
 // Source labels (spec customer-portal "Plan queue page"). A customer asks "where
 // did this plan come from?" — the answer changes what they expect: a purchase can
@@ -27,12 +27,18 @@ const SOURCE_LABEL = {
 export default function QueueEntryCard({ entry, renderActions = null, dragHandle = null, position = null, className = "" }) {
   if (!entry) return null;
 
-  const daysLeft = (() => {
-    const expires = entry.expiresAt ? new Date(entry.expiresAt).getTime() : NaN;
-    if (!Number.isFinite(expires)) return null;
-    const days = Math.ceil((expires - Date.now()) / 86_400_000);
-    return Number.isFinite(days) ? Math.max(0, days) : null;
-  })();
+  // The server decides whether a period has started (queueViewSync), like every
+  // other status on this card.
+  const notStarted = entry.statusLabel === "scheduled";
+
+  // Remaining time to the end (or, for a scheduled period, to its start), in
+  // words next to the exact date and time.
+  const nowMs = Date.now();
+  const expiresMs = entry.expiresAt ? new Date(entry.expiresAt).getTime() : NaN;
+  const startsMs = entry.startsAt ? new Date(entry.startsAt).getTime() : NaN;
+  const untilEnd = Number.isFinite(expiresMs) ? `còn ${spanText(expiresMs - nowMs)}` : null;
+  const untilStart = notStarted && Number.isFinite(startsMs) ? `sau ${spanText(startsMs - nowMs)}` : null;
+  const rateText = (value, unit) => (value ? `${Number(value).toLocaleString("vi-VN")} ${unit}/phút` : "Không giới hạn");
 
   return (
     <article className={`flex flex-col gap-5 border border-border bg-surface p-5 ${className}`}>
@@ -50,25 +56,34 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
               )}
               <span className="truncate">{entry.planName || entry.planCode || "Gói"}</span>
             </h3>
-            {/* A separator travels with the item after it, so a wrapped line
-                never starts or ends with a lone "·". */}
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
-              <span className="whitespace-nowrap">{SOURCE_LABEL[entry.source] || entry.source || "—"}</span>
-              <span className="whitespace-nowrap">
-                <span aria-hidden="true" className="mr-2 text-text-subtle">·</span>
-                hết hạn {dateOf(entry.expiresAt)}
-              </span>
-              {daysLeft != null && (
-                <span className="whitespace-nowrap">
-                  <span aria-hidden="true" className="mr-2 text-text-subtle">·</span>
-                  còn {daysLeft} ngày
-                </span>
-              )}
-            </p>
+            <p className="mt-1 text-sm text-text-muted">{SOURCE_LABEL[entry.source] || entry.source || "—"}</p>
           </div>
         </div>
-        <StatusTag status={entry.statusLabel} reopenAt={entry.reopenAt} />
+        <StatusTag status={entry.statusLabel} reopenAt={entry.reopenAt} className="shrink-0" />
       </header>
+
+      {/* Validity and rate, always spelled out: when the plan starts and ends (date
+          and time), and the RPM/TPM that apply while it is the one paying. */}
+      <dl className="grid grid-cols-2 gap-px border border-border bg-border">
+        <div className="min-w-0 bg-surface px-3 py-2">
+          <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">Bắt đầu</dt>
+          <dd className="mt-0.5 break-words font-mono text-[13px] text-text-main tabular-nums">{dateTimeOf(entry.startsAt)}</dd>
+          {untilStart && <dd className="text-xs text-text-muted">{untilStart}</dd>}
+        </div>
+        <div className="min-w-0 bg-surface px-3 py-2">
+          <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">Hết hạn</dt>
+          <dd className="mt-0.5 break-words font-mono text-[13px] text-text-main tabular-nums">{dateTimeOf(entry.expiresAt)}</dd>
+          {untilEnd && !notStarted && <dd className="text-xs text-text-muted">{untilEnd}</dd>}
+        </div>
+        <div className="min-w-0 bg-surface px-3 py-2">
+          <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">RPM</dt>
+          <dd className="mt-0.5 break-words font-mono text-[13px] text-text-main tabular-nums">{rateText(entry.rpm, "request")}</dd>
+        </div>
+        <div className="min-w-0 bg-surface px-3 py-2">
+          <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-subtle">TPM</dt>
+          <dd className="mt-0.5 break-words font-mono text-[13px] text-text-main tabular-nums">{rateText(entry.tpm, "token")}</dd>
+        </div>
+      </dl>
 
       {entry.unlimitedCredit ? (
         // No ceiling to draw a bar against: the limits below are what bound it.

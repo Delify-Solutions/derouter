@@ -35,6 +35,7 @@ import {
 } from "../../billing/ledger.js";
 import { grantUserPlan, closeUserPlanSync, NO_PLAN_ID } from "../../billing/grants.js";
 import { insertAuditSync } from "../../billing/audit.js";
+import { parseTermOptions, serializeTermOptions, validateTermOptions, findTerm, termPrice } from "../../billing/terms.js";
 import {
   ORDER_SELECT,
   approveOrderSync,
@@ -126,7 +127,8 @@ export async function walletSummary(userId) {
   let hasUnlimitedCredit = false;
   for (const plan of plans) {
     totalGrantedNanoUsd += plan.creditTotalNanoUsd;
-    if (plan.status === "active" && plan.expiresAt > now) {
+    // A period whose start is still ahead (spec plan-terms) cannot be spent yet.
+    if (plan.status === "active" && plan.expiresAt > now && !(plan.startsAt > now)) {
       liveCredit += plan.creditRemainingNanoUsd;
       if (plan.unlimitedCredit) hasUnlimitedCredit = true;
     }
@@ -148,12 +150,13 @@ export async function walletSummary(userId) {
 export async function getAvailableNanoUsd(userId) {
   if (!userId) return 0;
   const db = await getAdapter();
+  const at = nowIso();
   const row = db.get(
     `SELECT
        COALESCE((SELECT SUM(creditRemainingNanoUsd) FROM userPlans
-                  WHERE userId = ? AND status = 'active' AND expiresAt > ?), 0) AS credit,
+                  WHERE userId = ? AND status = 'active' AND expiresAt > ? AND startsAt <= ?), 0) AS credit,
        COALESCE((SELECT overdraftNanoUsd FROM users WHERE id = ?), 0) AS overdraft`,
-    [userId, nowIso(), userId]
+    [userId, at, at, userId]
   );
   const available = nano(row?.credit) - nano(row?.overdraft);
   return available > 0 ? available : 0;
@@ -336,6 +339,8 @@ function rowToPlan(row) {
     isPurchasable: row.isPurchasable == null ? true : row.isPurchasable === 1 || row.isPurchasable === true,
     allowedGroupIds,
     purchaseLimitPerMonth: row.purchaseLimitPerMonth == null ? null : nano(row.purchaseLimitPerMonth),
+    // Longer terms besides the single period (spec plan-terms); [] = one period only.
+    termOptions: parseTermOptions(row.termOptions),
     isFeatured: row.isFeatured === 1 || row.isFeatured === true,
     sortOrder: row.sortOrder == null ? null : nano(row.sortOrder),
     // Per-window limits (empty array = none). Snapshotted into orders and grants.
@@ -470,6 +475,12 @@ export function validatePlanInput(input = {}) {
       return "purchaseLimitPerMonth must be a non-negative integer (0 = unlimited)";
     }
   }
+
+  // termOptions (spec plan-terms): extra multi-period terms with their discount.
+  const termsError = validateTermOptions(input.termOptions, {
+    allowCustomAmount: isUnlimitedInput(input.allowCustomAmount) && !unlimited,
+  });
+  if (termsError) return termsError;
   return null;
 }
 
@@ -618,6 +629,7 @@ export async function createPlan(input = {}) {
     purchaseLimitPerMonth: input.purchaseLimitPerMonth == null || Number(input.purchaseLimitPerMonth) === 0
       ? null
       : nano(input.purchaseLimitPerMonth),
+    termOptions: serializeTermOptions(input.termOptions),
     isFeatured: input.isFeatured === true,
     sortOrder: input.sortOrder == null ? null : nano(input.sortOrder),
     limits: serializeLimits(input.limits ?? []),
@@ -627,14 +639,14 @@ export async function createPlan(input = {}) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
       plan.unlimitedCredit ? 1 : 0, plan.allowCustomAmount ? 1 : 0, plan.customMinVnd, plan.customMaxVnd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
-      plan.purchaseLimitPerMonth, plan.isFeatured ? 1 : 0,
+      plan.purchaseLimitPerMonth, plan.termOptions, plan.isFeatured ? 1 : 0,
       plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
     ]
   );
@@ -666,7 +678,7 @@ export function updatePlanSync(db, id, patch = {}) {
   if (clash) throw new Error("A plan with this code already exists");
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
@@ -684,6 +696,8 @@ export function updatePlanSync(db, id, patch = {}) {
       merged.purchaseLimitPerMonth == null || Number(merged.purchaseLimitPerMonth) === 0
         ? null
         : nano(merged.purchaseLimitPerMonth),
+      // A custom-amount plan sells one period only, so it never keeps stale terms.
+      topupColumns.allowCustomAmount ? null : serializeTermOptions(merged.termOptions),
       merged.isFeatured ? 1 : 0,
       merged.sortOrder == null ? null : nano(merged.sortOrder),
       serializeLimits(merged.limits ?? []),
@@ -749,9 +763,11 @@ export async function getOrderById(id) {
  *
  * Two independent gates, both derived from the plan row:
  *  1. group membership — a plan can be restricted to specific keyGroups.
- *  2. per-month purchase count — counted over orders in the current calendar
- *     month, so a refunded/cancelled order re-opens the slot rather than
- *     permanently consuming it.
+ *  2. per-month purchase count — orders in the current calendar month (a
+ *     cancelled or expired order re-opens its slot) PLUS the times this plan
+ *     was given without an order (gift code, admin grant) in that month, so a
+ *     gifted plan uses the slot a purchase would have (spec plan-terms "Gifts
+ *     count toward the monthly purchase limit"). A multi-period order counts once.
  *
  * Kept separate from createOrder so the catalogue route can ask the same
  * question without creating anything, and so the answer can be shown as a
@@ -782,7 +798,15 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
         WHERE userId = ? AND planId = ? AND createdAt >= ? AND status NOT IN ('cancelled', 'expired')`,
       [user.id, plan.id, start]
     );
-    const used = Number(row?.n ?? 0);
+    // Grants without an order. A purchase's own rows carry its orderId and are
+    // already counted above; a gift the admin later revoked gives its slot back.
+    const given = db.get(
+      `SELECT COUNT(*) AS n FROM userPlans
+        WHERE userId = ? AND planId = ? AND orderId IS NULL AND createdAt >= ?
+          AND source IN ('gift', 'admin') AND status NOT IN ('revoked', 'refunded')`,
+      [user.id, plan.id, start]
+    );
+    const used = Number(row?.n ?? 0) + Number(given?.n ?? 0);
     if (used >= limit) {
       return {
         code: "purchase_limit",
@@ -796,7 +820,7 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
   return null;
 }
 
-export async function createOrder({ userId, planId, payerNote = null, method = "manual", amountVnd = null } = {}) {
+export async function createOrder({ userId, planId, payerNote = null, method = "manual", amountVnd = null, periods = 1 } = {}) {
   if (!userId) throw new Error("createOrder requires a userId");
   if (!planId) throw new Error("createOrder requires a planId");
   const db = await getAdapter();
@@ -812,9 +836,14 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
 
   // A custom-amount top-up is priced from the typed amount at the plan's own rate;
   // anything else keeps the plan's fixed price and credit.
-  let priceNanoUsd = plan.priceNanoUsd;
+  // A term of N periods is priced from the plan with its discount (spec plan-terms);
+  // credit and duration stay per period.
+  const term = findTerm(plan, periods);
+  if (!term) throw new Error("Gói này không bán kỳ hạn đã chọn");
+  let priceNanoUsd = termPrice(plan, term).priceNanoUsd;
   let creditNanoUsd = plan.creditNanoUsd;
   if (amountVnd != null) {
+    if (term.periods !== 1) throw new Error("Nạp số tiền tùy ý chỉ mua một kỳ");
     const quote = quoteTopup(plan, amountVnd);
     if (!quote.ok) throw new Error(quote.error);
     priceNanoUsd = quote.priceNanoUsd;
@@ -829,6 +858,8 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     creditNanoUsd,
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: plan.durationDays,
+    periods: term.periods,
+    discountPercent: term.discountPercent,
     status: "pending",
     method: method || "manual",
     payerNote: payerNote == null || String(payerNote).trim() === "" ? null : String(payerNote).trim(),
@@ -841,11 +872,11 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     createdAt: nowIso(),
   };
   db.run(
-    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, status, method, payerNote, emailSnapshot, limits, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.unlimitedCredit, order.durationDays, order.status, order.method, order.payerNote, order.emailSnapshot,
+      order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.payerNote, order.emailSnapshot,
       order.limits, order.createdAt,
     ]
   );

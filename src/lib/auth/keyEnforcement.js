@@ -33,6 +33,7 @@ import {
   getUserOldestTokenAt,
 } from "../db/repos/usageRepo.js";
 import { admitSync } from "../billing/planQueue.js";
+import { payingRatesSync } from "../billing/rates.js";
 import { usdToNano } from "../../shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
 import { PLATFORM_MESSAGES, modelNotAllowedMessage, planLimitMessage } from "./platformError.js";
@@ -100,15 +101,6 @@ function statusDenial(owner) {
   // not call" answer; naming it suspended would be a lie, so use the group message
   // only for a missing group and this generic one otherwise.
   return deny(403, "account_unverified", PLATFORM_MESSAGES.account_unverified);
-}
-
-/** RPM/TPM of the plan a purchase (`userPlans.id`) was bought from; nulls when none is set. */
-function planRates(db, userPlanId) {
-  const row = db.get(
-    `SELECT p.rpm AS rpm, p.tpm AS tpm FROM userPlans up JOIN plans p ON p.id = up.planId WHERE up.id = ?`,
-    [userPlanId]
-  );
-  return { rpm: row?.rpm ?? null, tpm: row?.tpm ?? null };
 }
 
 /**
@@ -211,9 +203,9 @@ export async function enforceKeyLimits(apiKey, model) {
     // 4-5. RPM then TPM, per user, at the rates of the plan paying right now
     //    (the head of the queue). With no plan able to pay there is no rate to
     //    apply; the admission step below then explains why with 402/429.
+    //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
-    const paying = admitSync(db, key.userId);
-    const rate = await enforceRate({ kind: "user", userId: key.userId }, paying.ok ? planRates(db, paying.planId) : {});
+    const rate = await enforceRate({ kind: "user", userId: key.userId }, payingRatesSync(db, key.userId));
     if (!rate.ok) return rate;
 
     // 6. Model allow-list from the owner's group. Skipped when no model was given

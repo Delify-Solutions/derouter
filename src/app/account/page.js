@@ -101,10 +101,12 @@ export default async function AccountOverviewPage() {
 
   const baseUrl = await apiBaseUrl();
 
-  const availableNanoUsd = queue.reduce((sum, entry) => sum + Math.max(0, entry.creditRemainingNanoUsd), 0);
+  // Periods that have not started yet (spec plan-terms) are not spendable today.
+  const started = queue.filter((entry) => entry.statusLabel !== "scheduled");
+  const availableNanoUsd = started.reduce((sum, entry) => sum + Math.max(0, entry.creditRemainingNanoUsd), 0);
   // An unlimited plan adds nothing to that sum, so a live one is what the headline
   // reports instead of a misleading figure.
-  const hasUnlimitedCredit = queue.some((entry) => entry.unlimitedCredit);
+  const hasUnlimitedCredit = started.some((entry) => entry.unlimitedCredit);
   const nearestReset = paying
     ? paying.windows
         .filter((window) => window.open && window.resetAt)

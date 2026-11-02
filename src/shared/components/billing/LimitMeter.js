@@ -2,6 +2,7 @@
 
 import { fmtUsdNano } from "@/shared/utils/money";
 import { timeOf } from "./StatusTag";
+import { fmtLimitAmount } from "@/lib/billing/limits.js";
 
 /**
  * One limit of one purchase, as a labelled meter.
@@ -23,9 +24,11 @@ export default function LimitMeter({ window: limit, className = "" }) {
   const full = limit.full === true;
 
   if (!open) {
+    // The maximum is part of what was sold, so it is shown even before the
+    // window opens: "Tối đa $20 mỗi 5 giờ · chưa dùng".
     return (
       <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm ${className}`}>
-        <span className="whitespace-nowrap text-text-muted">{label}</span>
+        <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
         <span className="whitespace-nowrap font-mono text-xs text-text-subtle">chưa dùng</span>
       </div>
     );
@@ -36,7 +39,7 @@ export default function LimitMeter({ window: limit, className = "" }) {
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
-        <span className="whitespace-nowrap text-text-muted">{label}</span>
+        <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
         {/* Each piece stays whole; the line breaks between pieces, never inside one. */}
         <span className="flex max-w-full flex-wrap justify-end gap-x-1 font-mono text-xs tabular-nums text-text-main">
           <span className="whitespace-nowrap">{fmtUsdNano(spent)}</span>

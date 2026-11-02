@@ -39,6 +39,8 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     planId: entry.planId,
     planCode: entry.planCode,
     planName: entry.planName,
+    rpm: entry.rpm ?? null,
+    tpm: entry.tpm ?? null,
     source: entry.source,
     creditTotalNanoUsd: entry.creditTotalNanoUsd,
     creditRemainingNanoUsd: entry.creditRemainingNanoUsd,

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionButton, ButtonLink, Empty, Eyebrow, Heading, Panel, Tag } from "@/app/account/components/ui";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { fitFigureStyle } from "@/shared/utils/fitFigure";
+import { termLabel } from "@/lib/billing/terms.js";
 
 /**
  * The payment page for one gateway order (spec payment-checkout "Order page").
@@ -181,6 +182,9 @@ export default function OrderPaymentClient({ orderId }) {
         <div className="flex flex-col gap-2">
           <Heading>{order?.planName || order?.planCode || "Đơn hàng"}</Heading>
           <p className="text-sm text-text-muted">
+            {order?.periods > 1
+              ? `Kỳ hạn ${termLabel(order.durationDays, order.periods)}${order.discountPercent > 0 ? ` (giảm ${order.discountPercent}%)` : ""} · `
+              : ""}
             Tạo lúc {fmtDate(order?.createdAt)}
             {order?.paidAt ? ` · thanh toán lúc ${fmtDate(order.paidAt)}` : ""}
           </p>

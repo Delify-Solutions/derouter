@@ -6,6 +6,7 @@ import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 import { createGatewayOrderSync, offeredMethodsSync, MAX_PENDING_GATEWAY_ORDERS } from "@/lib/payments/checkout.js";
 import { toCustomerOrder } from "@/lib/billing/orders.js";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money.js";
+import { termLabel } from "@/lib/billing/terms.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -34,6 +35,8 @@ function decorate(order) {
     ...visible,
     amountUsd: fmtUsdNano(visible.amountNanoUsd),
     creditUsd: fmtCreditNano(visible.creditNanoUsd, visible.unlimitedCredit),
+    // "3 tháng" — credit and duration above are per period (spec plan-terms).
+    termText: termLabel(visible.durationDays, visible.periods),
   };
 }
 
@@ -86,6 +89,13 @@ export async function POST(request) {
   const hasAmount = body?.amountVnd !== undefined && body?.amountVnd !== null && body?.amountVnd !== "";
   const amountVnd = hasAmount ? body.amountVnd : null;
 
+  // Number of back-to-back periods (spec plan-terms). Absent = one, as before.
+  const hasPeriods = body?.periods !== undefined && body?.periods !== null && body?.periods !== "";
+  const periods = hasPeriods ? Number(body.periods) : 1;
+  if (!Number.isInteger(periods) || periods < 1) {
+    return NextResponse.json({ error: "Kỳ hạn không hợp lệ" }, { status: 400, headers: NO_STORE });
+  }
+
   const payerNote = typeof body?.payerNote === "string" && body.payerNote.trim()
     ? body.payerNote.trim().slice(0, 500)
     : null;
@@ -118,7 +128,7 @@ export async function POST(request) {
     }
 
     if (method === "manual") {
-      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual", amountVnd });
+      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual", amountVnd, periods });
       // The manual path records what the customer was quoted, in the same columns a
       // gateway order uses, so a single order list can show both.
       db.run(
@@ -146,6 +156,7 @@ export async function POST(request) {
       method,
       settings,
       amountVnd,
+      periods,
     }));
 
     if (!created.ok) {

@@ -5,13 +5,15 @@ import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
-import { fmtUsd } from "@/shared/utils/money";
+import { fmtUsd, fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { percentLabel, remainingLabel } from "@/shared/utils/discountFormat";
 import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
 import LatencyCell from "@/shared/components/LatencyCell";
+import { QueueEntryCard, RateNow } from "@/shared/components/billing";
+import PlanHistory from "@/app/account/plans/components/PlanHistory";
 
 const WINDOW_LABELS = { "5h": "every 5h", day: "every day", week: "every week" };
 const PERIOD_PRESETS = [
@@ -418,6 +420,8 @@ export default function UsageClient({ hasUserSession = false }) {
   const items = rec?.summary?.items || [];
   const history = rec?.history || [];
   const peakTpm = rec?.summary?.peakTpm || 0;
+  // Customer keys carry their account's plans and rate; admin keys do not.
+  const account = data?.account ?? null;
 
   // Request History filters (client-side): model search + status bucket.
   const filteredHistory = history.filter((r) => {
@@ -555,7 +559,41 @@ export default function UsageClient({ hasUserSession = false }) {
 
           {/* Budget + RPM/TPM + Peak TPM compact grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* A customer key: the account's credit, then the rate of the paying plan
+                (counted over every key of the account, as enforcement does). */}
+            {account && (
+              <div className="min-w-0 rounded-xl border border-border bg-surface-1 p-4">
+                <h3 className="text-sm font-semibold mb-2">Credit khả dụng</h3>
+                <p className="text-lg font-semibold tabular-nums break-words">
+                  {account.hasUnlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(account.availableNanoUsd)}
+                </p>
+                <p className="text-xs text-text-muted mt-1.5">
+                  {account.hasUnlimitedCredit
+                    ? "Có gói không giới hạn credit; chỉ hạn mức của gói được áp dụng."
+                    : "Tổng credit còn lại của các gói đang chạy."}
+                </p>
+                {account.debtNanoUsd > 0 && (
+                  <p className="text-xs text-text-muted mt-1">Đang nợ {fmtUsdNano(account.debtNanoUsd)}</p>
+                )}
+              </div>
+            )}
+            {account && (
+              <div className="min-w-0 rounded-xl border border-border bg-surface-1 p-4 sm:col-span-1">
+                <RateNow
+                  rate={{
+                    ...account.rate,
+                    requests: rec?.rate?.requests ?? account.rate.requests,
+                    tokens: rec?.rate?.tokens ?? account.rate.tokens,
+                  }}
+                />
+                <div className="mt-2 flex flex-wrap justify-between gap-x-3 text-xs text-text-muted">
+                  <span>Peak TPM {fmt(peakTpm)}</span>
+                  <span>Peak RPM {fmt(rec?.summary?.peakRpm || 0)}</span>
+                </div>
+              </div>
+            )}
             {/* Budget */}
+            {!account && (
             <div className="rounded-xl border border-border bg-surface-1 p-4">
               <h3 className="text-sm font-semibold mb-2">Budget</h3>
               {data.budgetUsd == null ? (
@@ -576,8 +614,10 @@ export default function UsageClient({ hasUserSession = false }) {
                 </>
               )}
             </div>
+            )}
 
             {/* Rate limits (live) */}
+            {!account && (
             <div className="rounded-xl border border-border bg-surface-1 p-4">
               <h3 className="text-sm font-semibold mb-2">Rate (last 60s)</h3>
               <div className="space-y-1.5 text-sm">
@@ -599,6 +639,7 @@ export default function UsageClient({ hasUserSession = false }) {
                 </div>
               </div>
             </div>
+            )}
 
             {/* Totals for period */}
             <div className="rounded-xl border border-border bg-surface-1 p-4">
@@ -619,6 +660,42 @@ export default function UsageClient({ hasUserSession = false }) {
               </div>
             </div>
           </div>
+
+          {/* The account's plans (customer keys): every plan with its limits, RPM/TPM,
+              start and expiry — the same cards as /account/plans. */}
+          {account && (
+            <section className="flex flex-col gap-3" aria-labelledby="usage-plans-title">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 id="usage-plans-title" className="text-sm font-semibold">Gói của tài khoản</h3>
+                <span className="text-xs text-text-muted">
+                  {account.queue.length} gói đang hoạt động · gói trên cùng trả trước
+                </span>
+              </div>
+              {account.queue.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
+                  Tài khoản chưa có gói nào đang hoạt động — request sẽ bị từ chối cho tới khi mua hoặc nhận gói.
+                </p>
+              ) : (
+                <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {account.queue.map((entry, index) => (
+                    <li key={entry.id} className="min-w-0">
+                      <QueueEntryCard entry={entry} position={index + 1} className="h-full" />
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {account.history.length > 0 && (
+                <details className="group">
+                  <summary className="cursor-pointer text-xs text-text-muted hover:text-text-main">
+                    Gói đã ngừng hoạt động ({account.history.length} gần nhất)
+                  </summary>
+                  <div className="mt-2">
+                    <PlanHistory history={account.history} />
+                  </div>
+                </details>
+              )}
+            </section>
+          )}
 
           {/* Per-model summary */}
           <div className="rounded-xl border border-border bg-surface-1 overflow-hidden">
