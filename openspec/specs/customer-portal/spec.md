@@ -98,3 +98,14 @@ The public `/usage` page, once a key is loaded, SHALL show a "Thử" button on e
 #### Scenario: Unknown key
 - **WHEN** `/api/usage/key/models` is called with a key that does not exist
 - **THEN** the response is HTTP 404 and nothing about other keys is revealed
+
+### Requirement: Plan details on the account and usage pages
+Every active plan shown on `/account/plans`, on the admin user `Gói` tab and on the public `/usage` page (for a customer key) SHALL show its start and expiry as date and time with the time remaining (or, for a scheduled period, the time until it starts), every window limit with its maximum even before the window opens, and the plan's RPM and TPM ("Không giới hạn" when unset). `/account/plans` and `/usage` SHALL also show the rate applied right now: last-60-second requests and tokens counted over every key of the account against the RPM/TPM of the plan that is paying, resolved by the same function request enforcement uses, and naming that plan. For a customer key, `/usage` SHALL show the account's available credit instead of the key budget, every active plan, and the 10 most recent inactive plans; admin keys keep their per-key budget and rate.
+
+#### Scenario: Rate follows the paying plan
+- **WHEN** a customer's first plan "Go" (RPM 60) is window-blocked and the next plan "Pro" has RPM 120
+- **THEN** both pages show "RPM … / 120" and name "Pro" as the paying plan, and requests are limited at 120
+
+#### Scenario: Unopened window still shows its maximum
+- **WHEN** a plan has a 5-hour limit of $20 that has not been used yet
+- **THEN** the card reads "Tối đa $20 mỗi 5 giờ · chưa dùng"

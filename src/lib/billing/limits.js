@@ -43,7 +43,7 @@ export function windowLabel(hours) {
  * dollar amount reads "$20" (as the spec's examples do) while a fractional one
  * keeps its cents ("$19.50").
  */
-function fmtLimitAmount(nanoUsd) {
+export function fmtLimitAmount(nanoUsd) {
   return fmtUsdNano(nanoUsd).replace(/\.00$/, "");
 }
 
