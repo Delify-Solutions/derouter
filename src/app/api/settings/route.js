@@ -4,6 +4,13 @@ import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
 import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
+import {
+  SESSIONS_VALID_AFTER_KEY,
+  revokeAllDashboardSessionsValue,
+  getDashboardAuthSession,
+  setDashboardAuthCookie,
+} from "@/lib/auth/dashboardSession";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,7 +20,8 @@ const SETTINGS_RESPONSE_HEADERS = {
 };
 
 // Secrets must never be mass-assigned from request body (CWE-915)
-const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted"];
+// The session cut-off is only ever moved by a password change below.
+const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted", SESSIONS_VALID_AFTER_KEY];
 
 export async function GET() {
   try {
@@ -38,6 +46,8 @@ export async function GET() {
 export async function PATCH(request) {
   try {
     const body = await request.json();
+    // Set by a password change: the session to re-issue once old ones are revoked.
+    let reissueCookieFor = null;
 
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
@@ -104,6 +114,10 @@ export async function PATCH(request) {
 
       const salt = await bcrypt.genSalt(10);
       body.password = await bcrypt.hash(body.newPassword, salt);
+      // Sign out every dashboard session issued so far; the caller gets a fresh
+      // cookie after the update so changing the password does not log them out.
+      reissueCookieFor = await getDashboardAuthSession((await cookies()).get("auth_token")?.value);
+      body[SESSIONS_VALID_AFTER_KEY] = revokeAllDashboardSessionsValue();
       delete body.newPassword;
       delete body.currentPassword;
     }
@@ -149,6 +163,10 @@ export async function PATCH(request) {
     }
 
     const settings = await updateSettings(body);
+    if (reissueCookieFor) {
+      const { authenticated, iat, exp, ...claims } = reissueCookieFor;
+      await setDashboardAuthCookie(await cookies(), request, claims);
+    }
 
     // Switching verification off must also release accounts that signed up while it
     // was on: their status was fixed at creation and nothing else would clear it.

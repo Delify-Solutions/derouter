@@ -1,6 +1,7 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
+import { stripDateSuffix } from "../../auth/modelMatching.js";
 
 const pricingKv = makeKv("pricing");
 const CACHE_TTL_MS = 5000;
@@ -79,32 +80,47 @@ export async function resolvePrice({ provider, model, requestedModel } = {}) {
     if (comboPricing) return { pricing: comboPricing, source: "combo" };
   }
 
+  if (!model) return none;
+
+  // A dated id ("gpt-4o-2024-11-20") is also tried without its date. The model
+  // allow-list already treats the two as the same model (modelMatching.js), so
+  // pricing must too: otherwise the dated name fell through to a cheaper glob
+  // ("gpt-4o-*", meant for gpt-4o-mini) and was charged a fraction of the price.
+  // Each tier tries the exact id first, then the undated one.
+  const ids = [model];
+  const undated = stripDateSuffix(model);
+  if (undated && undated !== model) ids.push(undated);
+
   // 2. User per-provider exact override.
-  if (provider && model) {
+  if (provider) {
     const userPricing = await getUserPricing();
-    if (userPricing[provider]?.[model]) {
-      return { pricing: userPricing[provider][model], source: "user" };
+    for (const id of ids) {
+      if (userPricing[provider]?.[id]) return { pricing: userPricing[provider][id], source: "user" };
     }
   }
 
   const sse = await import("open-sse/providers/pricing.js");
 
   // 3. Built-in provider-specific override.
-  if (provider && model && sse.PROVIDER_PRICING[provider]?.[model]) {
-    return { pricing: sse.PROVIDER_PRICING[provider][model], source: "provider" };
+  if (provider) {
+    for (const id of ids) {
+      if (sse.PROVIDER_PRICING[provider]?.[id]) return { pricing: sse.PROVIDER_PRICING[provider][id], source: "provider" };
+    }
   }
 
-  if (!model) return none;
-
   // 4. Canonical model price ("deepseek/deepseek-chat" → "deepseek-chat").
-  const baseModel = model.includes("/") ? model.split("/").pop() : model;
-  if (sse.MODEL_PRICING[baseModel]) return { pricing: sse.MODEL_PRICING[baseModel], source: "model" };
-  if (sse.MODEL_PRICING[model]) return { pricing: sse.MODEL_PRICING[model], source: "model" };
+  const bases = ids.map((id) => (id.includes("/") ? id.split("/").pop() : id));
+  for (let i = 0; i < ids.length; i += 1) {
+    if (sse.MODEL_PRICING[bases[i]]) return { pricing: sse.MODEL_PRICING[bases[i]], source: "model" };
+    if (sse.MODEL_PRICING[ids[i]]) return { pricing: sse.MODEL_PRICING[ids[i]], source: "model" };
+  }
 
-  // 5. Glob pattern fallback.
-  for (const { pattern, pricing } of sse.PATTERN_PRICING) {
-    if (sse.matchPattern(pattern, baseModel) || sse.matchPattern(pattern, model)) {
-      return { pricing, source: "pattern" };
+  // 5. Glob pattern fallback — undated id first, for the reason above.
+  for (let i = ids.length - 1; i >= 0; i -= 1) {
+    for (const { pattern, pricing } of sse.PATTERN_PRICING) {
+      if (sse.matchPattern(pattern, bases[i]) || sse.matchPattern(pattern, ids[i])) {
+        return { pricing, source: "pattern" };
+      }
     }
   }
 

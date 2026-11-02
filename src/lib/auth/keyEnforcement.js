@@ -37,6 +37,7 @@ import { admitSync } from "../billing/planQueue.js";
 import { payingRatesSync } from "../billing/rates.js";
 import { usdToNano } from "../../shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
+import { acquireSlot, concurrencyCapFor, concurrencyLimitMessage, slotKey } from "../billing/inflight.js";
 import {
   PLATFORM_MESSAGES,
   modelNotAllowedMessage,
@@ -252,6 +253,20 @@ export async function enforceKeyLimits(apiKey, model) {
         return deny(402, "insufficient_quota", pinnedPlanUnavailableMessage(plan?.name));
       }
       return deny(402, "insufficient_quota", PLATFORM_MESSAGES.insufficient_quota);
+    }
+
+    // 8. Concurrent requests, at most the paying plan's RPM, per (user, plan).
+    //    Admission and RPM cannot see requests still running (both count finished
+    //    ones), so without a cap a parallel burst is admitted on the same credit
+    //    and overruns it into debt, or past an unlimited plan's window limits. The
+    //    slot is released when the response body ends (src/lib/billing/inflight.js).
+    //    Re-read the paying plan: like admission, it may have moved on during a
+    //    TPM wait, and the cap must be the plan that will actually pay.
+    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const capFromRpm = Number(payer.rpm) > 0;
+    const slot = acquireSlot(slotKey(key.userId, payer.planId), { max: concurrencyCapFor(payer.rpm) });
+    if (!slot.ok) {
+      return deny(429, "concurrency_limit", concurrencyLimitMessage(slot.max, { fromRpm: capFromRpm }), { retryAfterSec: 5 });
     }
 
     return { ok: true, auth };
