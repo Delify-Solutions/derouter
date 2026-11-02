@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -177,9 +177,13 @@ export const TABLES = {
       // pinned plan, else the plan paying at that moment). NULL for admin keys,
       // credit without a plan and rows written before this column existed.
       ratePlanId: "TEXT",
+      // Client IP of the API request (spec activity-ip-log). NULL when no trusted
+      // address was available and for rows written before this column existed.
+      clientIp: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_ip_ts ON usageHistory(clientIp, timestamp DESC)",
       "CREATE INDEX IF NOT EXISTS idx_uh_provider ON usageHistory(provider)",
       "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
       "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
@@ -680,6 +684,24 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_gr_gift_user ON giftRedemptions(giftId, userId)",
       "CREATE INDEX IF NOT EXISTS idx_gr_user ON giftRedemptions(userId)",
       "CREATE INDEX IF NOT EXISTS idx_gr_telegram ON giftRedemptions(telegramUserId)",
+    ],
+  },
+  // Account actions with the client IP they came from (spec activity-ip-log), so
+  // an admin can see which IPs an account used and which accounts share an IP.
+  // Append-only; details hold short non-secret facts as JSON.
+  activityLog: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT",
+      action: "TEXT NOT NULL",
+      ip: "TEXT",
+      userAgent: "TEXT",
+      details: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_al_user_ts ON activityLog(userId, createdAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_al_ip_ts ON activityLog(ip, createdAt DESC)",
     ],
   },
   // One-time tokens that bind a Telegram Mini App launch to the account that

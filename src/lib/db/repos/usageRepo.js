@@ -484,7 +484,7 @@ export async function saveRequestUsage(entry) {
       // still needs its raw value to stay attributable. Tenant keys store their
       // apiKeyId and leave the secret out of the database entirely.
       const insertedUsage = db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
@@ -492,6 +492,8 @@ export async function saveRequestUsage(entry) {
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(Number.isFinite(entry.ttftMs) ? { ttftMs: entry.ttftMs } : {}), ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
           ratePlanId,
+          // Spec activity-ip-log: the trusted client IP of the API request, or null.
+          typeof entry.clientIp === "string" && entry.clientIp ? entry.clientIp.slice(0, 64) : null,
         ]
       );
 

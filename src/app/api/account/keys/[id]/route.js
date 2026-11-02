@@ -3,6 +3,7 @@ import { resolveAccountUser } from "@/lib/auth/userSession";
 import { getApiKeyById, deleteApiKey, updateApiKey } from "@/lib/localDb";
 import { getAdapter } from "@/lib/db/driver.js";
 import { resolveKeyPlanInputSync } from "@/lib/db/repos/accountPlansRepo.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -43,6 +44,11 @@ export async function PATCH(request, { params }) {
   if (!updated) {
     return NextResponse.json({ error: "Key not found" }, { status: 404, headers: NO_STORE });
   }
+  await recordActivity(request, {
+    userId: session.userId,
+    action: "key_update",
+    details: { keyId: id, name: key.name ?? null, planId: updated.planId ?? null },
+  });
   return NextResponse.json({ ok: true, planId: updated.planId ?? null }, { headers: NO_STORE });
 }
 
@@ -68,5 +74,6 @@ export async function DELETE(request, { params }) {
   if (!deleted) {
     return NextResponse.json({ error: "Key not found" }, { status: 404, headers: NO_STORE });
   }
+  await recordActivity(request, { userId: session.userId, action: "key_delete", details: { keyId: id, name: key.name ?? null } });
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }

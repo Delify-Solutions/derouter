@@ -15,8 +15,9 @@ import KeysTab from "./components/KeysTab";
 import SessionsTab from "./components/SessionsTab";
 import GiftsTab from "./components/GiftsTab";
 import AuditTab from "./components/AuditTab";
+import IpTab from "./components/IpTab";
 
-// The nine tabs of the spec, in its order. `?tab=<id>` selects one; an unknown value
+// The tabs of the spec, in its order (IP: spec activity-ip-log). `?tab=<id>` selects one; an unknown value
 // falls back to the overview rather than a blank screen.
 const TABS = [
   { id: "overview", label: "Tổng quan" },
@@ -26,6 +27,7 @@ const TABS = [
   { id: "usage", label: "Usage" },
   { id: "keys", label: "API key" },
   { id: "sessions", label: "Phiên đăng nhập" },
+  { id: "ip", label: "IP" },
   { id: "gifts", label: "Mã quà tặng" },
   { id: "audit", label: "Nhật ký" },
 ];
@@ -174,6 +176,7 @@ export default function UserDetailClient() {
           {activeTab === "usage" && <UsageTab userId={id} />}
           {activeTab === "keys" && <KeysTab userId={id} />}
           {activeTab === "sessions" && <SessionsTab userId={id} />}
+          {activeTab === "ip" && <IpTab userId={id} />}
           {activeTab === "gifts" && <GiftsTab userId={id} />}
           {activeTab === "audit" && <AuditTab userId={id} />}
         </>

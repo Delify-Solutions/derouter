@@ -465,6 +465,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // the error did not come back from the upstream API.
     saveUsageError({
       provider, model, connectionId, apiKey, requestedModel,
+      clientIp: clientRawRequest?.clientIp,
       status: error.name === "AbortError" ? 499 : 502,
       errorSource: "platform",
       latencyMs: Date.now() - requestStartTime
@@ -544,6 +545,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // "upstream" lets the admin details tab distinguish API-returned errors.
     saveUsageError({
       provider, model, connectionId, apiKey, requestedModel,
+      clientIp: clientRawRequest?.clientIp,
       status: statusCode,
       errorSource: "upstream",
       latencyMs: Date.now() - requestStartTime

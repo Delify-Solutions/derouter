@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { getUserByEmailWithPassword } from "@/lib/localDb";
 import { startUserSession } from "@/lib/auth/userSession";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,12 @@ export async function POST(request) {
   }
 
   const passwordOk = await bcrypt.compare(password, user.passwordHash);
-  if (!passwordOk) return fail("Invalid email or password");
+  if (!passwordOk) {
+    // A wrong password on a real account is the signal worth keeping for abuse
+    // checks; unknown emails are not logged (no account to attach them to).
+    await recordActivity(request, { userId: user.id, action: "login_failed" });
+    return fail("Invalid email or password");
+  }
 
   if (user.status === "unverified") {
     // Correct credentials, so this is not a lockout-triggering failure.
@@ -68,6 +74,7 @@ export async function POST(request) {
   }
   if (user.status === "suspended") {
     recordSuccess(ip);
+    await recordActivity(request, { userId: user.id, action: "login_blocked", details: { status: "suspended" } });
     return NextResponse.json(
       { error: "This account is suspended", code: "suspended" },
       { status: 403, headers: NO_STORE }
@@ -82,6 +89,7 @@ export async function POST(request) {
   }
 
   recordSuccess(ip);
+  await recordActivity(request, { userId: user.id, action: "login" });
 
   // Persists the session row as well, so logout and password reset can revoke it
   // and the account API can require a live row rather than a bare signature.

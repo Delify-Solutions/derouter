@@ -21,6 +21,7 @@ import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 import { costFromImagesNano } from "@/shared/utils/money";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -46,7 +47,7 @@ async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) 
 }
 
 /** Record a finished image request so it is priced and charged like any other. */
-function recordImageUsage({ provider, model, connectionId = null, apiKey, requestedModel, result }) {
+function recordImageUsage({ provider, model, connectionId = null, apiKey, requestedModel, result, clientIp = null }) {
   if (!apiKey) return;
   saveRequestUsage({
     provider,
@@ -58,6 +59,7 @@ function recordImageUsage({ provider, model, connectionId = null, apiKey, reques
     imageCount: Math.max(1, Number(result?.imageCount) || 0),
     status: "success",
     requestedModel,
+    clientIp,
   }).catch(() => {});
 }
 
@@ -89,7 +91,7 @@ async function handleImageGenerationRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr);
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 
@@ -106,7 +108,7 @@ async function handleImageGenerationRequest(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, requestedModel: modelStr }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, requestedModel: modelStr, clientIp: getRequestIp(request) }),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -120,10 +122,11 @@ async function handleImageGenerationRequest(request) {
     preferredConnectionId,
     apiKey,
     requestedModel: modelStr.includes("/") ? null : modelStr,
+    clientIp: getRequestIp(request),
   });
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey = null, requestedModel = null } = {}) {
+async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey = null, requestedModel = null, clientIp = null } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -141,7 +144,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       binaryOutput,
     });
     if (result.success) {
-      recordImageUsage({ provider, model, apiKey, requestedModel, result });
+      recordImageUsage({ provider, model, apiKey, requestedModel, result, clientIp });
       return result.response;
     }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
@@ -191,7 +194,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
     });
 
     if (result.success) {
-      recordImageUsage({ provider, model, connectionId: credentials.connectionId, apiKey, requestedModel, result });
+      recordImageUsage({ provider, model, connectionId: credentials.connectionId, apiKey, requestedModel, result, clientIp });
       return result.response;
     }
 

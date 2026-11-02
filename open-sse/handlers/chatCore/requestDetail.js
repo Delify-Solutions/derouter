@@ -125,7 +125,7 @@ export function formatDoneLine({ usage, latency }) {
   return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, label = "USAGE", silent = false }) {
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, clientIp, label = "USAGE", silent = false }) {
   if (!tokens || typeof tokens !== "object") return;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -160,7 +160,9 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // change. Null for callers that don't track timing (e.g. platform denials).
     latencyMs: latencyMs ?? null,
     // Time to the first bytes from the upstream stream, in ms. Streams only; null otherwise.
-    ttftMs: Number.isFinite(ttftMs) ? ttftMs : null
+    ttftMs: Number.isFinite(ttftMs) ? ttftMs : null,
+    // Trusted client IP of the request (spec activity-ip-log), or null.
+    clientIp: clientIp || null
   }).catch(() => {});
 }
 
@@ -180,7 +182,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
  * still applies — repeated identical errors within the same minute collapse to
  * one row, same as successful duplicates already do.
  */
-export async function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource, latencyMs }) {
+export async function saveUsageError({ provider, model, connectionId, apiKey, endpoint, requestedModel, status, errorSource, latencyMs, clientIp }) {
   // Always returns a promise: every caller chains `.catch()` onto the result, so
   // an early `return` of undefined turned a harmless "no status" skip into a
   // TypeError that replaced the real provider error in the response.
@@ -198,5 +200,6 @@ export async function saveUsageError({ provider, model, connectionId, apiKey, en
     errorSource: errorSource || undefined,
     // How long the failed request took, so slow failures (a timeout, a reset) can be told from instant ones.
     latencyMs: Number.isFinite(latencyMs) ? latencyMs : undefined,
+    clientIp: clientIp || null,
   }).catch(() => {});
 }

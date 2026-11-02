@@ -4,6 +4,7 @@ import { checkLimits, getClientIp } from "@/lib/auth/actionLimiter.js";
 import { verifyInitData } from "@/lib/telegram/initData.js";
 import { consumeLinkTokenSync, LINK_ERROR_TEXT, maskEmail } from "@/lib/db/repos/telegramLinkRepo.js";
 import { loadTelegramLinkConfig, NOT_CONFIGURED_TEXT } from "@/lib/telegram/config.js";
+import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,13 @@ export async function POST(request) {
   }
   if (!result.ok) return fail(LINK_ERROR_TEXT[result.reason] || LINK_ERROR_TEXT.invalid_token, STATUS[result.reason] || 400);
 
+  // The request comes from Telegram's in-app browser: its IP is the customer's
+  // phone, which is worth keeping next to their web IPs.
+  await recordActivity(request, {
+    userId: result.userId,
+    action: "telegram_link",
+    details: { telegramUserId: verified.user.id, telegramUsername: verified.user.username },
+  });
   return NextResponse.json(
     { ok: true, email: maskEmail(result.email), telegramUsername: verified.user.username },
     { headers: NO_STORE }

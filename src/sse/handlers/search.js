@@ -15,6 +15,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { getRequestIp } from "@/lib/auth/clientIp.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -62,7 +63,7 @@ async function handleSearchRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, providerInput);
+    const denied = await enforceKeyAccess(apiKey, providerInput, { clientIp: getRequestIp(request) });
     if (denied) return denied;
   }
 
