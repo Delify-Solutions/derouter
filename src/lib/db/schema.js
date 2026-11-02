@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 26;
+export const SCHEMA_VERSION = 27;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -281,6 +281,13 @@ export const TABLES = {
       telegramUserId: "TEXT",
       telegramUsername: "TEXT",
       telegramLinkedAt: "TEXT",
+      // Customer notifications over the linked Telegram (spec telegram-notify).
+      // JSON {billing, expiry, announcements}: false turns a group off; a missing
+      // key means on. Security messages ignore it.
+      telegramNotifyPrefs: "TEXT",
+      // Set when Telegram refuses to deliver to this user (bot blocked, never
+      // allowed to message). Sending stops until a test message or a re-link works.
+      telegramDmBlockedAt: "TEXT",
     },
     indexes: [
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
@@ -715,6 +722,36 @@ export const TABLES = {
       usedAt: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_tlt_user ON telegramLinkTokens(userId)"],
+  },
+  // One row per reminder already sent (spec telegram-notify), so the periodic
+  // job never repeats one: kind "expire_3d" | "expire_1d" (refId "<userPlans.id>:<expiresAt>")
+  // | "credit_low" (refId "<userId>:<newest running userPlans.id>").
+  telegramNotices: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      kind: "TEXT NOT NULL",
+      refId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_tn_kind_ref ON telegramNotices(kind, refId)"],
+  },
+  // Admin announcements sent to every linked customer who keeps them on.
+  telegramBroadcasts: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      text: "TEXT NOT NULL",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      status: "TEXT NOT NULL", // sending | done | failed
+      total: "INTEGER DEFAULT 0",
+      sent: "INTEGER DEFAULT 0",
+      failed: "INTEGER DEFAULT 0",
+      // Not attempted: the customer turned announcements off, blocked the bot or
+      // was suspended after the broadcast started.
+      skipped: "INTEGER DEFAULT 0",
+      finishedAt: "TEXT",
+    },
   },
   // Owner of a customer key that has been deleted. A request admitted before the
   // delete is saved (and charged) only when it finishes, so the charge still has

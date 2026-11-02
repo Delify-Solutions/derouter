@@ -62,17 +62,23 @@ export function consumeLinkTokenSync(db, token, telegramUser, { now = Date.now()
   if (holder && holder.id !== user.id) return { ok: false, reason: "telegram_taken" };
 
   db.run(
-    `UPDATE users SET telegramUserId = ?, telegramUsername = ?, telegramLinkedAt = ?, updatedAt = ? WHERE id = ?`,
+    // A fresh link clears the "Telegram refuses delivery" marker of any earlier one.
+    `UPDATE users SET telegramUserId = ?, telegramUsername = ?, telegramLinkedAt = ?, telegramDmBlockedAt = NULL, updatedAt = ?
+      WHERE id = ?`,
     [telegramUserId, telegramUser.username ?? null, nowIso, nowIso, user.id]
   );
   db.run(`UPDATE telegramLinkTokens SET usedAt = ? WHERE tokenHash = ?`, [nowIso, row.tokenHash]);
   return { ok: true, userId: user.id, email: user.email };
 }
 
-/** `{ linked, telegramUserId, telegramUsername, linkedAt }` for one account. */
+/**
+ * `{ linked, telegramUserId, telegramUsername, linkedAt, notifyPrefs, dmBlockedAt }`
+ * for one account. notifyPrefs is the raw JSON text (see src/lib/notify/customerTelegram.js).
+ */
 export function getTelegramLinkSync(db, userId) {
   const row = db.get(
-    `SELECT telegramUserId, telegramUsername, telegramLinkedAt FROM users WHERE id = ?`,
+    `SELECT telegramUserId, telegramUsername, telegramLinkedAt, telegramNotifyPrefs, telegramDmBlockedAt
+       FROM users WHERE id = ?`,
     [userId]
   );
   return {
@@ -80,14 +86,25 @@ export function getTelegramLinkSync(db, userId) {
     telegramUserId: row?.telegramUserId ?? null,
     telegramUsername: row?.telegramUsername ?? null,
     linkedAt: row?.telegramLinkedAt ?? null,
+    notifyPrefs: row?.telegramNotifyPrefs ?? null,
+    dmBlockedAt: row?.telegramDmBlockedAt ?? null,
   };
+}
+
+/** Store the customer's notification groups (JSON object of booleans). */
+export function setTelegramNotifyPrefsSync(db, userId, prefs) {
+  db.run(`UPDATE users SET telegramNotifyPrefs = ?, updatedAt = ? WHERE id = ?`, [
+    JSON.stringify(prefs),
+    new Date().toISOString(),
+    userId,
+  ]);
 }
 
 /** Clear the account's link. Past gift redemptions keep their Telegram snapshot. */
 export function unlinkTelegramSync(db, userId) {
   const nowIso = new Date().toISOString();
   const res = db.run(
-    `UPDATE users SET telegramUserId = NULL, telegramUsername = NULL, telegramLinkedAt = NULL, updatedAt = ?
+    `UPDATE users SET telegramUserId = NULL, telegramUsername = NULL, telegramLinkedAt = NULL, telegramDmBlockedAt = NULL, updatedAt = ?
       WHERE id = ? AND telegramUserId IS NOT NULL`,
     [nowIso, userId]
   );

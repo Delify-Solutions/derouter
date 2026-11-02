@@ -5,6 +5,7 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getAdapter } from "@/lib/db/driver.js";
 import { listBindablePlansSync, resolveKeyPlanInputSync } from "@/lib/db/repos/accountPlansRepo.js";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -91,6 +92,7 @@ export async function POST(request) {
       action: "key_create",
       details: { keyId: apiKey.id, name: apiKey.name, planId: apiKey.planId ?? null },
     });
+    fireAndForget(notifyCustomer(session.userId, "security", messages.apiKeyCreated({ name: apiKey.name })));
     return NextResponse.json(
       {
         key: {

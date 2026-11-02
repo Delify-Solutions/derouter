@@ -24,6 +24,29 @@ function readInitData() {
   }
 }
 
+/**
+ * Ask Telegram to let the bot message this user, so account notifications can
+ * reach them (spec telegram-notify). Resolves true/false, or null when the client
+ * cannot ask (old Telegram, SDK missing). Never blocks linking for long.
+ */
+function requestWriteAccess() {
+  const app = webApp();
+  if (!app?.requestWriteAccess || !app.isVersionAtLeast?.("6.9")) return Promise.resolve(null);
+  if (app.initDataUnsafe?.user?.allows_write_to_pm) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 60_000);
+    try {
+      app.requestWriteAccess((granted) => {
+        clearTimeout(timer);
+        resolve(Boolean(granted));
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
 export default function TelegramLinkClient() {
   const [state, setState] = useState({ phase: "waiting" }); // waiting | linking | done | error
   const started = useRef(false);
@@ -35,6 +58,8 @@ export default function TelegramLinkClient() {
     started.current = true;
     webApp()?.ready?.();
     setState({ phase: "linking" });
+    // Before linking: the server sends a confirmation message right after.
+    await requestWriteAccess();
     try {
       const res = await fetch("/api/public/telegram/link", {
         method: "POST",

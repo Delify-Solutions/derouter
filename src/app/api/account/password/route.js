@@ -9,6 +9,7 @@ import {
 } from "@/lib/localDb";
 import { validatePassword } from "@/lib/users/register";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -53,6 +54,7 @@ export async function POST(request) {
   // change should evict whoever else is holding a copy of the old credential.
   await revokeOtherUserSessions(user.id, getUserTokenFromRequest(request));
   await recordActivity(request, { userId: user.id, action: "password_change" });
+  fireAndForget(notifyCustomer(user.id, "security", messages.passwordChanged()));
 
   const refreshed = await getUserById(user.id);
   return NextResponse.json({ ok: true, user: refreshed ? { id: refreshed.id, email: refreshed.email } : null }, {

@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { getQueueSync, getPlanHistorySync } from "@/lib/db/repos/accountPlansRepo.js";
 import { grantPlanSync, grantCreditSync } from "@/lib/billing/adminActions.js";
+import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -68,6 +69,7 @@ export async function POST(request, { params }) {
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status, headers: NO_STORE });
   }
+  if (result.userPlan?.id) fireAndForget(notifyPlanReceived(result.userPlan.id, "admin"));
 
   return NextResponse.json(
     { userPlan: result.userPlan, queue: getQueueSync(db, id) },

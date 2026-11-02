@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,7 @@ export async function POST(request) {
       action: "gift_redeem",
       details: { code: giftCode, userPlanId: result.userPlan?.id ?? null },
     });
+    if (result.userPlan?.id) fireAndForget(notifyPlanReceived(result.userPlan.id, "gift"));
     return NextResponse.json({
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,
