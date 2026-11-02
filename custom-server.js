@@ -81,6 +81,53 @@ function forwardedClientIp(xRealIp, xff) {
   return hops.length ? hops[hops.length - 1] : "";
 }
 
+// Prerendered pages ship `Cache-Control: s-maxage=31536000`: Next assumes a CDN
+// that is purged on every deploy. A reverse proxy with a cache in front of us
+// (nginx proxy_cache) is never purged, so it would keep serving the previous
+// build's pages after an update. Pages are cheap to revalidate (ETag → 304), so
+// shared caches must not store them at all. Hashed assets
+// (`public, max-age=31536000, immutable`) carry no s-maxage and are left alone.
+// Done here rather than with next.config headers(): this covers every route,
+// RSC payloads and redirects included, without listing page sources.
+function shareableCacheControl(value) {
+  const text = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+  if (!/\bs-maxage\b/i.test(text) || /\bimmutable\b/i.test(text)) return null;
+  return "private, no-cache";
+}
+
+// Copy of writeHead's headers argument with a shareable Cache-Control rewritten.
+// Accepts the object form and the flat [name, value, name, value] array form.
+function rewriteHeadersArg(headers) {
+  if (Array.isArray(headers)) {
+    if (headers.length && Array.isArray(headers[0])) return headers; // [[k, v]] is not a writeHead form
+    const copy = headers.slice();
+    for (let i = 0; i + 1 < copy.length; i += 2) {
+      if (String(copy[i]).toLowerCase() !== "cache-control") continue;
+      const fixed = shareableCacheControl(copy[i + 1]);
+      if (fixed) copy[i + 1] = fixed;
+    }
+    return copy;
+  }
+  const copy = { ...headers };
+  for (const key of Object.keys(copy)) {
+    if (key.toLowerCase() !== "cache-control") continue;
+    const fixed = shareableCacheControl(copy[key]);
+    if (fixed) copy[key] = fixed;
+  }
+  return copy;
+}
+
+function keepPagesOutOfSharedCaches(res) {
+  const origWriteHead = res.writeHead;
+  // Node routes implicit headers (res.end without writeHead) through writeHead too.
+  res.writeHead = function (statusCode, ...rest) {
+    const replacement = shareableCacheControl(res.getHeader("cache-control"));
+    if (replacement) res.setHeader("cache-control", replacement);
+    const args = rest.map((arg) => (arg && typeof arg === "object" ? rewriteHeadersArg(arg) : arg));
+    return origWriteHead.call(this, statusCode, ...args);
+  };
+}
+
 // Wrap Next standalone HTTP server: derive client IP from the TCP socket
 // (unspoofable) and strip client-supplied forwarding headers so downstream
 // rate-limiting keys on the real peer address instead of attacker-controlled XFF.
@@ -104,6 +151,7 @@ http.createServer = (...args) => {
     req.headers["x-dr-real-ip"] = ip;
     req.headers["x-dr-peer-token"] = PEER_TOKEN;
     if (viaProxy) req.headers["x-dr-via-proxy"] = "1";
+    keepPagesOutOfSharedCaches(res);
     return handler(req, res);
   };
   const server = origCreate(...rest, wrapped);
@@ -160,7 +208,7 @@ http.createServer = (...args) => {
 };
 
 // Exposed for tests; the server itself only uses them inside the wrapper above.
-module.exports = { isTrustedProxyPeer, forwardedClientIp };
+module.exports = { isTrustedProxyPeer, forwardedClientIp, shareableCacheControl };
 
 if (require.main === module) {
   const standalone = path.join(__dirname, "server.js");
