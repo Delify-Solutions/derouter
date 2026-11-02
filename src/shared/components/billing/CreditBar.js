@@ -17,11 +17,15 @@ export default function CreditBar({ totalNanoUsd = 0, remainingNanoUsd = 0, labe
 
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
-      <div className="flex items-end justify-between gap-3">
-        <span className="text-sm text-text-muted">{label}</span>
-        <span className="flex items-baseline gap-1.5 text-text-main">
-          <span className="text-2xl font-semibold leading-none tracking-tight">{fmtUsdNano(remaining)}</span>
-          <span className="font-mono text-xs text-text-subtle">/ {fmtUsdNano(total)}</span>
+      {/* Wraps instead of overflowing: label, figure and total each stay on one
+          line, and the total drops under the figure when the card is narrow. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+        <span className="whitespace-nowrap text-sm text-text-muted">{label}</span>
+        <span className="flex max-w-full flex-wrap items-baseline justify-end gap-x-1.5 text-text-main">
+          <span className="max-w-full text-2xl font-semibold leading-none tracking-tight tabular-nums break-words">
+            {fmtUsdNano(remaining)}
+          </span>
+          <span className="whitespace-nowrap font-mono text-xs text-text-subtle">/ {fmtUsdNano(total)}</span>
         </span>
       </div>
       <div

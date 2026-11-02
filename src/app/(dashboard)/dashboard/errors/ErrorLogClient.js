@@ -501,7 +501,7 @@ export default function ErrorLogClient() {
           <Select label="Mã trạng thái" options={STATUSES} value={filters.status} onChange={setFilter("status")} />
           <Select label="Khoảng thời gian" options={RANGES} value={filters.range} onChange={setFilter("range")} />
         </div>
-        <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           <label className="flex flex-col gap-1.5 sm:w-56">
             <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Model</span>
             <input value={search.model} onChange={(e) => setSearch((s) => ({ ...s, model: e.target.value }))} placeholder="vd. GLM-5.3"
@@ -512,7 +512,7 @@ export default function ErrorLogClient() {
             <input value={search.q} onChange={(e) => setSearch((s) => ({ ...s, q: e.target.value }))} placeholder="báo lỗi, chủ key hoặc mã lỗi, vd. context_length"
               className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
           </label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="secondary" icon="search">Tìm</Button>
             <Button type="button" variant="ghost" icon="refresh" onClick={() => load(filters)}>Làm mới</Button>
             <Button type="button" variant="ghost" icon="tune" onClick={() => setShowSettings((v) => !v)}>Cài đặt</Button>

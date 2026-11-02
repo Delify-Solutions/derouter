@@ -11,8 +11,8 @@ export default function MitmLinkCard({ tool }) {
   return (
     <Link href="/dashboard/mitm" className="block">
       <Card padding="sm" className="overflow-hidden hover:border-primary/50 transition-colors cursor-pointer">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="size-8 flex items-center justify-center shrink-0">
               <Image
                 src={tool.image}
@@ -27,14 +27,14 @@ export default function MitmLinkCard({ tool }) {
               />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-medium text-sm">{tool.name}</h3>
-                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full">MITM</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="truncate font-medium text-sm" title={tool.name}>{tool.name}</h3>
+                <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full">MITM</span>
               </div>
-              <p className="text-xs text-text-muted truncate">{tool.description}</p>
+              <p className="text-xs text-text-muted truncate" title={tool.description}>{tool.description}</p>
             </div>
           </div>
-          <span className="material-symbols-outlined text-text-muted text-[20px]">chevron_right</span>
+          <span className="material-symbols-outlined shrink-0 text-text-muted text-[20px]">chevron_right</span>
         </div>
       </Card>
     </Link>

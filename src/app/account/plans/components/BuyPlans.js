@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fmtUsdNano } from "@/shared/utils/money";
+import { fitFigureStyle } from "@/shared/utils/fitFigure";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { quoteTopup, topupBounds, topupEnabled } from "@/lib/billing/topup.js";
 import { planTerms, termLabel, termPrice } from "@/lib/billing/terms.js";
@@ -132,8 +133,8 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
               )}
 
               <div className="flex flex-col gap-1 px-6 pt-6">
-                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">{plan.code}</span>
-                <h3 className="text-base font-semibold text-text-main">{plan.name}</h3>
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle [overflow-wrap:anywhere]">{plan.code}</span>
+                <h3 className="text-base font-semibold text-text-main [overflow-wrap:anywhere]">{plan.name}</h3>
                 {plan.description && <p className="text-sm leading-6 text-text-muted">{plan.description}</p>}
               </div>
 
@@ -149,10 +150,10 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                 </div>
               )}
 
-              <div className="min-w-0 px-6 pt-5">
+              <div className="@container min-w-0 px-6 pt-5">
                 <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
-                  <span className="break-all text-3xl font-semibold leading-none tracking-tight tabular-nums">{headline}</span>
-                  <span className="font-mono text-xs text-text-muted">/ {termLabel(plan.durationDays, term.periods)}</span>
+                  <span className="max-w-full text-3xl font-semibold leading-none tracking-tight tabular-nums break-words" style={fitFigureStyle(headline, { maxRem: 1.875 })}>{headline}</span>
+                  <span className="whitespace-nowrap font-mono text-xs text-text-muted">/ {termLabel(plan.durationDays, term.periods)}</span>
                 </p>
                 {fullText && (
                   <p className="mt-1 font-mono text-xs text-text-muted">

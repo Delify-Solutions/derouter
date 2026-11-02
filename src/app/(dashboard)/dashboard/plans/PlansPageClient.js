@@ -375,14 +375,14 @@ export default function PlansPageClient() {
           {plans.map((plan) => (
             <li
               key={plan.id}
-              className={`flex flex-col border border-border bg-surface ${plan.isActive ? "" : "opacity-60"}`}
+              className={`flex min-w-0 flex-col border border-border bg-surface ${plan.isActive ? "" : "opacity-60"}`}
             >
               <div className="flex items-start justify-between gap-3 px-6 pt-6">
                 <div className="flex flex-col gap-1 min-w-0">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle truncate">
+                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle truncate" title={plan.code}>
                     {plan.code}
                   </span>
-                  <h2 className="text-base font-semibold text-text-main truncate">{plan.name}</h2>
+                  <h2 className="text-base font-semibold text-text-main truncate" title={plan.name}>{plan.name}</h2>
                 </div>
                 <span
                   className={`font-mono text-[10px] uppercase tracking-wider border px-2 py-0.5 shrink-0 ${
@@ -399,42 +399,42 @@ export default function PlansPageClient() {
                 <p className="px-6 pt-3 text-sm text-text-muted">{plan.description}</p>
               )}
 
-              <dl className="grid grid-cols-2 lg:grid-cols-3 gap-px bg-border mx-6 my-5 border border-border">
-                <div className="bg-surface px-4 py-3">
+              <dl className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-px bg-border mx-6 my-5 border border-border">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Giá USD</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">{fmtUsdNano(plan.priceNanoUsd)}</dd>
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{fmtUsdNano(plan.priceNanoUsd)}</dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Giá VND</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {plan.priceVnd ? formatVnd(plan.priceVnd) : "—"}
                   </dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Credit</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">{fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}</dd>
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}</dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Duration</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {plan.durationDays} {plan.durationDays === 1 ? "day" : "days"}
                   </dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Sort</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">{plan.sortOrder ?? "—"}</dd>
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{plan.sortOrder ?? "—"}</dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Nhóm</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {Array.isArray(plan.allowedGroupIds) && plan.allowedGroupIds.length
                       ? `${plan.allowedGroupIds.length} nhóm`
                       : "Mọi nhóm"}
                   </dd>
                 </div>
-                <div className="bg-surface px-4 py-3">
+                <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Giới hạn / tháng</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1">
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {plan.purchaseLimitPerMonth ? `${plan.purchaseLimitPerMonth} lần` : "Không"}
                   </dd>
                 </div>
@@ -451,7 +451,7 @@ export default function PlansPageClient() {
               {plan.allowCustomAmount && (
                 <div className="px-6 pb-4">
                   <p className="meta text-text-subtle mb-1">Nạp tùy ý</p>
-                  <p className="font-mono text-[12px] text-text-muted">
+                  <p className="font-mono text-[12px] text-text-muted [overflow-wrap:anywhere]">
                     {formatVnd(topupBounds(plan).minVnd)} – {formatVnd(topupBounds(plan).maxVnd)} · {formatVnd(plan.priceVnd)} = {fmtUsdNano(plan.creditNanoUsd)}
                   </p>
                 </div>
@@ -482,30 +482,30 @@ export default function PlansPageClient() {
 
               {/* Số liệu của spec plan-templates "Plan statistics" + doanh thu
                   tách theo tiền tệ (spec plan-dual-pricing "Revenue per currency"). */}
-              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-border mx-6 mb-5 border border-border">
-                <div className="bg-surface px-3 py-2">
+              <dl className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-px bg-border mx-6 mb-5 border border-border">
+                <div className="min-w-0 bg-surface px-3 py-2">
                   <dt className="meta text-text-subtle">Gói chạy</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1">{plan.stats?.activeCount ?? 0}</dd>
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{plan.stats?.activeCount ?? 0}</dd>
                 </div>
-                <div className="bg-surface px-3 py-2">
+                <div className="min-w-0 bg-surface px-3 py-2">
                   <dt className="meta text-text-subtle">Khách</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1">{plan.stats?.activeUsers ?? 0}</dd>
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{plan.stats?.activeUsers ?? 0}</dd>
                 </div>
-                <div className="bg-surface px-3 py-2">
+                <div className="min-w-0 bg-surface px-3 py-2">
                   <dt className="meta text-text-subtle">Thu VND</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1">
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {formatVnd(plan.stats?.revenueVnd ?? 0)}
                   </dd>
                 </div>
-                <div className="bg-surface px-3 py-2">
+                <div className="min-w-0 bg-surface px-3 py-2">
                   <dt className="meta text-text-subtle">Thu USD</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1">
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
                     {fmtUsdNano(plan.stats?.revenueUsdNano ?? 0)}
                   </dd>
                 </div>
-                <div className="bg-surface px-3 py-2">
+                <div className="min-w-0 bg-surface px-3 py-2">
                   <dt className="meta text-text-subtle">Đã dùng</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1">{fmtUsdNano(plan.stats?.consumedNanoUsd ?? 0)}</dd>
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{fmtUsdNano(plan.stats?.consumedNanoUsd ?? 0)}</dd>
                 </div>
               </dl>
 

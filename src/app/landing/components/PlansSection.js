@@ -1,6 +1,7 @@
 import Link from "next/link";
 import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
+import { fitFigureStyle } from "@/shared/utils/fitFigure";
 import { fmtUsd, interpolate, DEFAULT_PERKS } from "./salesData";
 
 /**
@@ -57,18 +58,18 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                 ) : null}
 
                 <div className="flex flex-col gap-1 px-6 pt-6">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle">{plan.code}</span>
-                  <h3 className="text-xl font-semibold tracking-tight text-text-main">{plan.name}</h3>
+                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle [overflow-wrap:anywhere]">{plan.code}</span>
+                  <h3 className="text-xl font-semibold tracking-tight text-text-main [overflow-wrap:anywhere]">{plan.name}</h3>
                   {plan.summary ? <p className="text-sm leading-6 text-text-muted">{plan.summary}</p> : null}
                 </div>
 
                 {/* Both rails, each labelled: the admin prices them separately and
                     there is no exchange rate between them (spec plan-dual-pricing). */}
-                <div className="px-6 pt-6">
+                <div className="@container px-6 pt-6">
                   <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-text-main">
-                    <span className="break-all text-4xl font-semibold leading-none tracking-tight tabular-nums">{headline}</span>
+                    <span className="max-w-full text-4xl font-semibold leading-none tracking-tight tabular-nums break-words" style={fitFigureStyle(headline)}>{headline}</span>
                     {plan.priceVndText || plan.priceUsdText ? (
-                      <span className="font-mono text-xs text-text-muted">/ {plan.periodLabel || `${plan.durationDays} ngày`}</span>
+                      <span className="whitespace-nowrap font-mono text-xs text-text-muted">/ {plan.periodLabel || `${plan.durationDays} ngày`}</span>
                     ) : null}
                   </p>
                   {secondary ? (
@@ -113,7 +114,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                   {plan.purchasable && !plan.soldOut ? (
                     <Link
                       href={checkoutHref(plan, signedIn)}
-                      className={`inline-flex h-11 w-full items-center justify-center border font-mono text-sm font-medium transition-colors duration-150 ${
+                      className={`inline-flex min-h-11 w-full items-center justify-center border px-3 py-2 text-center font-mono text-sm font-medium transition-colors duration-150 ${
                         plan.highlighted
                           ? "border-text-main bg-text-main text-bg hover:bg-text-main/85"
                           : "border-border bg-surface text-text-main hover:bg-surface-2"

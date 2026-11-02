@@ -42,10 +42,12 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
 
   return (
     <article className={`flex flex-col gap-5 border border-border bg-surface p-5 ${className}`}>
-      <header className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+      {/* The status tag drops under the name on a narrow card instead of
+          squeezing the plan name down to a few letters. */}
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
           {dragHandle}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="flex items-baseline gap-2 truncate text-base font-semibold text-text-main" title={entry.planName || entry.planCode || ""}>
               {position != null && (
                 <span className="font-mono text-xs font-normal text-text-subtle" aria-label={`Vị trí ${position}`}>
@@ -85,7 +87,7 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
 
       {entry.unlimitedCredit ? (
         // No ceiling to draw a bar against: the limits below are what bound it.
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
           <span className="text-sm text-text-muted">Credit</span>
           <span className="text-2xl font-semibold leading-none tracking-tight text-text-main">{UNLIMITED_CREDIT_LABEL}</span>
         </div>
