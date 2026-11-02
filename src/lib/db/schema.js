@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -99,6 +99,10 @@ export const TABLES = {
       userId: "TEXT",
       keyHash: "TEXT",
       keyPrefix: "TEXT",
+      // Customer keys only: plans.id this key is pinned to. NULL = the key may be
+      // paid by any plan of its owner (the queue head pays). A pinned key is paid
+      // by purchases of that plan alone and never falls back to another plan.
+      planId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
@@ -169,6 +173,10 @@ export const TABLES = {
       status: "TEXT",
       tokens: "TEXT",
       meta: "TEXT",
+      // plans.id whose RPM/TPM allowance this request counted against (the key's
+      // pinned plan, else the plan paying at that moment). NULL for admin keys,
+      // credit without a plan and rows written before this column existed.
+      ratePlanId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",

@@ -236,6 +236,37 @@ function formatVnd(value) {
   return `${out}đ`;
 }
 
+/**
+ * Plans the user holds right now (an active, unexpired purchase) — the ones an API
+ * key may be pinned to. One row per plan however many purchases of it exist.
+ */
+export function listBindablePlansSync(db, userId, nowIsoArg = null) {
+  if (!userId) return [];
+  return db.all(
+    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name, p.rpm AS rpm, p.tpm AS tpm
+       FROM userPlans up
+       JOIN plans p ON p.id = up.planId
+      WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
+      ORDER BY p.name ASC, p.id ASC`,
+    [userId, nowIsoArg || nowIso()]
+  );
+}
+
+/**
+ * Validate the plan a customer chose for a key. Empty / "all" / null mean "any
+ * plan"; anything else must be a plan the user currently holds, so a key can never
+ * be pinned to somebody else's plan or one the user never bought.
+ *
+ * @returns {{ok:true, planId:string|null}|{ok:false, error:string}}
+ */
+export function resolveKeyPlanInputSync(db, userId, raw) {
+  if (raw === undefined || raw === null || raw === "" || raw === "all") return { ok: true, planId: null };
+  if (typeof raw !== "string") return { ok: false, error: "Gói không hợp lệ" };
+  const held = listBindablePlansSync(db, userId).find((plan) => plan.id === raw);
+  if (!held) return { ok: false, error: "Bạn chưa có gói này hoặc gói đã hết hạn" };
+  return { ok: true, planId: held.id };
+}
+
 /** Adapter accessor for routes that need the raw handle (reorder, purchase). */
 export async function adapter() {
   return getAdapter();

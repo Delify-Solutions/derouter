@@ -91,8 +91,8 @@ export const PLATFORM_MESSAGES = {
   account_suspended: "Tài khoản đang bị khóa — liên hệ admin.",
   account_unverified: "Tài khoản chưa xác minh email.",
   group_missing: "Tài khoản chưa được gán nhóm hợp lệ — liên hệ admin.",
-  rate_limit_rpm: "Vượt giới hạn RPM của nhóm, thử lại sau 60 giây.",
-  rate_limit_tpm: "Vượt giới hạn TPM của nhóm, thử lại sau 60 giây.",
+  rate_limit_rpm: "Vượt giới hạn RPM của gói, thử lại sau 60 giây.",
+  rate_limit_tpm: "Vượt giới hạn TPM của gói, thử lại sau 60 giây.",
   budget_exhausted: "Key đã dùng hết ngân sách.",
   insufficient_quota: "Hết quota — mua gói hoặc nhập mã quà tặng tại /account/plans.",
 };
@@ -100,6 +100,12 @@ export const PLATFORM_MESSAGES = {
 /** `Model <model> không nằm trong nhóm của bạn.` */
 export function modelNotAllowedMessage(model) {
   return `Model ${model} không nằm trong nhóm của bạn.`;
+}
+
+/** A key pinned to a plan whose purchases cannot pay (none held, expired or out of credit). */
+export function pinnedPlanUnavailableMessage(planName) {
+  const name = planName ? `"${planName}"` : "đã chọn";
+  return `Key này chỉ dùng gói ${name} nhưng gói chưa có credit hoặc đã hết hạn — gia hạn gói hoặc đổi gói cho key tại /account/keys.`;
 }
 
 /**

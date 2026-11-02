@@ -8,9 +8,10 @@
 //     access question (is the account allowed to call at all? is the model in
 //     their plan-of-record?) is answered before the quota question, because
 //     "you are suspended" and "buy a plan" call for different actions from the
-//     customer. RPM/TPM are counted across all of the customer's keys, so minting
-//     a second key never widens the allowance, and they come from the plan that is
-//     paying (not from the group, which only decides the models).
+//     customer. RPM/TPM are counted per (user, plan) across all of the customer's
+//     keys, so minting a second key never widens the allowance, and they come from
+//     the plan that is paying (not from the group, which only decides the models).
+//     A key pinned to a plan (`apiKeys.planId`) is paid by that plan alone.
 //
 //   ADMIN KEY / no key
 //     Unchanged: per-key counters, per-key budget window, no admission check
@@ -36,7 +37,12 @@ import { admitSync } from "../billing/planQueue.js";
 import { payingRatesSync } from "../billing/rates.js";
 import { usdToNano } from "../../shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
-import { PLATFORM_MESSAGES, modelNotAllowedMessage, planLimitMessage } from "./platformError.js";
+import {
+  PLATFORM_MESSAGES,
+  modelNotAllowedMessage,
+  planLimitMessage,
+  pinnedPlanUnavailableMessage,
+} from "./platformError.js";
 
 // Max time (ms) to hold a request waiting for TPM room before returning 429.
 // Default 30s — balances giving the 60s rolling window time to drain vs not
@@ -104,16 +110,18 @@ function statusDenial(owner) {
 }
 
 /**
- * RPM/TPM for a customer, counted per user.
+ * RPM/TPM for a customer, counted per (user, plan): every key of the user that is
+ * paid by the same plan shares one allowance, and another plan of the same user has
+ * its own. Minting more keys therefore never widens an allowance.
  *
- * @param {{ kind:"user", userId:string }|{ kind:"key", apiKey:string, keyId:string }} scope
+ * @param {{ kind:"user", userId:string, planId:string }|{ kind:"key", apiKey:string, keyId:string }} scope
  */
 async function enforceRate(scope, resolved) {
   const read = scope.kind === "user"
-    ? () => getUserRateUsage(scope.userId, RATE_WINDOW_MS)
+    ? () => getUserRateUsage(scope.userId, RATE_WINDOW_MS, scope.planId)
     : () => getKeyRateUsage(scope.apiKey, RATE_WINDOW_MS);
   const readOldest = scope.kind === "user"
-    ? () => getUserOldestTokenAt(scope.userId, RATE_WINDOW_MS)
+    ? () => getUserOldestTokenAt(scope.userId, RATE_WINDOW_MS, scope.planId)
     : () => getKeyOldestTokenAt(scope.apiKey, RATE_WINDOW_MS);
 
   if (resolved.rpm != null) {
@@ -127,7 +135,7 @@ async function enforceRate(scope, resolved) {
   // token ceiling isn't interrupted mid-work. Serialized per identity; capped at
   // TPM_MAX_WAIT_MS, then a hard 429.
   if (resolved.tpm != null) {
-    const lockKey = scope.kind === "user" ? `user:${scope.userId}` : `key:${scope.keyId}`;
+    const lockKey = scope.kind === "user" ? `user:${scope.userId}:plan:${scope.planId}` : `key:${scope.keyId}`;
     const tpmDenial = deny(429, "rate_limit", PLATFORM_MESSAGES.rate_limit_tpm, { retryAfterSec: 60 });
     const tpmCheck = async () => {
       if (TPM_MAX_WAIT_MS <= 0) {
@@ -200,12 +208,18 @@ export async function enforceKeyLimits(apiKey, model) {
       }
     }
 
-    // 4-5. RPM then TPM, per user, at the rates of the plan paying right now
-    //    (the head of the queue). With no plan able to pay there is no rate to
-    //    apply; the admission step below then explains why with 402/429.
+    // 4-5. RPM then TPM, per (user, plan), at the rates of the plan paying right
+    //    now. A key pinned to a plan is paid by that plan alone; an unpinned key by
+    //    the head of the queue. With no plan able to pay (or a purchase with no plan
+    //    behind it) there is no rate to apply; the admission step below then
+    //    explains why with 402/429.
     //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
-    const rate = await enforceRate({ kind: "user", userId: key.userId }, payingRatesSync(db, key.userId));
+    const pinnedPlanId = key.planId ?? null;
+    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const rate = rates.planId
+      ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.planId }, rates)
+      : { ok: true };
     if (!rate.ok) return rate;
 
     // 6. Model allow-list from the owner's group. Skipped when no model was given
@@ -223,13 +237,19 @@ export async function enforceKeyLimits(apiKey, model) {
     //    queued plan has credit left.
     //    Re-read after the rate step: a TPM wait can last seconds, and the queue may
     //    have moved on in that time.
-    const admitted = admitSync(db, key.userId);
+    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId });
     if (!admitted.ok) {
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {
           retryAfterSec: admitted.retryAfterSec,
           resetAt: admitted.resetAt,
         });
+      }
+      // A pinned key is told which plan it is waiting for, so the customer knows to
+      // renew that plan or move the key rather than buy "a plan".
+      if (pinnedPlanId) {
+        const plan = db.get(`SELECT name FROM plans WHERE id = ?`, [pinnedPlanId]);
+        return deny(402, "insufficient_quota", pinnedPlanUnavailableMessage(plan?.name));
       }
       return deny(402, "insufficient_quota", PLATFORM_MESSAGES.insufficient_quota);
     }

@@ -19,7 +19,7 @@ import { getDebtNanoSync } from "@/lib/billing/ledger.js";
  * to admin keys — so the page must show them (spec customer-portal "Public usage
  * page shows the account's plans").
  */
-function customerAccountSync(db, userId, used) {
+function customerAccountSync(db, userId, rates, used) {
   const queue = getQueueSync(db, userId);
   const started = queue.filter((entry) => entry.statusLabel !== "scheduled");
   const debtNanoUsd = getDebtNanoSync(db, userId);
@@ -30,7 +30,7 @@ function customerAccountSync(db, userId, used) {
     availableNanoUsd: Math.max(0, credit - debtNanoUsd),
     hasUnlimitedCredit: started.some((entry) => entry.unlimitedCredit),
     debtNanoUsd,
-    rate: { ...payingRatesSync(db, userId), requests: used.requests, tokens: used.tokens },
+    rate: { ...rates, requests: used.requests, tokens: used.tokens },
   };
 }
 
@@ -129,9 +129,16 @@ export async function GET(request) {
     // Live last-minute RPM / TPM (requests + tokens in last 60s). A customer key is
     // limited per ACCOUNT at the paying plan's rates (keyEnforcement), so that is
     // what is counted and shown; an admin key keeps its own per-key figures.
-    const account = k.userId
-      ? customerAccountSync(await getAdapter(), k.userId, await getUserRateUsage(k.userId, 60_000))
-      : null;
+    // The allowance is per (user, plan), so a key pinned to a plan shows that plan's.
+    let account = null;
+    if (k.userId) {
+      const accountDb = await getAdapter();
+      const rates = payingRatesSync(accountDb, k.userId, null, { planId: k.planId ?? null });
+      const used = rates.planId
+        ? await getUserRateUsage(k.userId, 60_000, rates.planId)
+        : { requests: 0, tokens: 0 };
+      account = customerAccountSync(accountDb, k.userId, rates, used);
+    }
     const limitCount = account
       ? { requests: account.rate.requests, tokens: account.rate.tokens }
       : await getKeyRateUsage(key, 60_000);

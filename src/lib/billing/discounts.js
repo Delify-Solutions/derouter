@@ -529,12 +529,14 @@ export function resolveDiscountSync(db, {
  * @returns {{ listCostNanoUsd:number, costNanoUsd:number, discountBp:number,
  *             ruleIds:string[], capped:boolean, rawBp:number }}
  */
-export function applyRequestDiscountSync(db, { listCostNanoUsd, at = null, requestedModel = null, userId = null } = {}) {
+export function applyRequestDiscountSync(db, { listCostNanoUsd, at = null, requestedModel = null, userId = null, planId = undefined } = {}) {
   const list = Math.max(0, nano(listCostNanoUsd));
   if (list === 0) {
     return { listCostNanoUsd: 0, costNanoUsd: 0, discountBp: 0, ruleIds: [], capped: false, rawBp: 0 };
   }
-  const found = resolveDiscountSync(db, { at, requestedModel, userId });
+  // `planId` = the plan a pinned key is paid by: plan-scoped rules then follow that
+  // plan instead of the head of the queue. Omitted (undefined) = look the payer up.
+  const found = resolveDiscountSync(db, planId ? { at, requestedModel, userId, planId } : { at, requestedModel, userId });
   return {
     listCostNanoUsd: list,
     costNanoUsd: applyBp(list, found.totalBp),
