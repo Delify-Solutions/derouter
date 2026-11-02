@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { getUserByEmailWithPassword } from "@/lib/localDb";
 import { startUserSession } from "@/lib/auth/userSession";
-import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
+import { checkLocks, recordFails, recordSuccess, getClientIp, userIpBucket, userAccountBucket } from "@/lib/auth/loginLimiter";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
@@ -13,15 +13,17 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
+function tooMany(retryAfter) {
+  return NextResponse.json(
+    { error: `Too many failed attempts. Try again in ${retryAfter}s.`, retryAfter },
+    { status: 429, headers: { ...NO_STORE, "Retry-After": String(retryAfter) } }
+  );
+}
+
 export async function POST(request) {
   const ip = getClientIp(request);
-  const lock = checkLock(ip);
-  if (lock.locked) {
-    return NextResponse.json(
-      { error: `Too many failed attempts. Try again in ${lock.retryAfter}s.`, retryAfter: lock.retryAfter },
-      { status: 429, headers: { ...NO_STORE, "Retry-After": String(lock.retryAfter) } }
-    );
-  }
+  const ipLock = checkLocks([userIpBucket(ip)]);
+  if (ipLock.locked) return tooMany(ipLock.retryAfter);
 
   let body;
   try {
@@ -36,9 +38,17 @@ export async function POST(request) {
     return NextResponse.json({ error: "Email and password are required" }, { status: 400, headers: NO_STORE });
   }
 
+  // Failures count per client AND per account. A correct password clears only the
+  // account bucket: signing in to your own account must not wipe the failures this
+  // client piled up against someone else's (or against the admin login).
+  const buckets = [userIpBucket(ip), userAccountBucket(email)];
+  const accountBucket = buckets[1].key;
+  const lock = checkLocks(buckets);
+  if (lock.locked) return tooMany(lock.retryAfter);
+
   const fail = (message, status = 401) => {
-    const { remainingBeforeLock } = recordFail(ip);
-    const postLock = checkLock(ip);
+    const { remainingBeforeLock } = recordFails(buckets);
+    const postLock = checkLocks(buckets);
     const headers = postLock.locked
       ? { ...NO_STORE, "Retry-After": String(postLock.retryAfter) }
       : NO_STORE;
@@ -69,14 +79,14 @@ export async function POST(request) {
 
   if (user.status === "unverified") {
     // Correct credentials, so this is not a lockout-triggering failure.
-    recordSuccess(ip);
+    recordSuccess(accountBucket);
     return NextResponse.json(
       { error: "Verify your email first", code: "unverified" },
       { status: 403, headers: NO_STORE }
     );
   }
   if (user.status === "suspended") {
-    recordSuccess(ip);
+    recordSuccess(accountBucket);
     await recordActivity(request, { userId: user.id, action: "login_blocked", details: { status: "suspended" } });
     return NextResponse.json(
       { error: "This account is suspended", code: "suspended" },
@@ -84,14 +94,14 @@ export async function POST(request) {
     );
   }
   if (user.status !== "active") {
-    recordSuccess(ip);
+    recordSuccess(accountBucket);
     return NextResponse.json(
       { error: "This account is not active", code: "inactive" },
       { status: 403, headers: NO_STORE }
     );
   }
 
-  recordSuccess(ip);
+  recordSuccess(accountBucket);
   // Checked before this login is recorded, or the IP would always look known.
   const loggedIp = getRequestIp(request);
   let newIp = false;

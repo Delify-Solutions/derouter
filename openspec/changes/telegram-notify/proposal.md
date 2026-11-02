@@ -25,7 +25,7 @@ Customers can now link their Telegram account (change `new-user-gift-telegram`),
 
 ## Impact
 
-- Schema v26: `users.telegramNotifyPrefs`, `users.telegramDmBlockedAt`, tables `telegramNotices`, `telegramBroadcasts`.
+- Schema v27 (v26 was taken by `deletedApiKeys`, #35): `users.telegramNotifyPrefs`, `users.telegramDmBlockedAt`, tables `telegramNotices`, `telegramBroadcasts`.
 - New: `src/lib/notify/telegramApi.js`, `customerTelegram.js`, `planReminders.js`, `broadcast.js`; `/api/account/telegram/test`; `PATCH /api/account/telegram`; `/api/telegram-broadcasts`; `/dashboard/telegram`.
 - Hooks added (fire-and-forget, after commit) in order approval, payment webhook/poller/resolve, admin grants, gift redeem/assign, login, password change/reset, key create, admin user PATCH, Telegram link.
 - `DISABLE_TELEGRAM_REMINDERS=true` turns the periodic job off.

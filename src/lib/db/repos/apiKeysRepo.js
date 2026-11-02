@@ -147,10 +147,52 @@ export async function updateApiKey(id, data) {
   return merged;
 }
 
+// How long the owner of a deleted customer key stays resolvable. It only has to
+// outlive the longest request admitted before the delete; a day is far beyond any
+// stream the router serves.
+export const DELETED_KEY_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delete a key. For a customer key the owner is kept in `deletedApiKeys` (keyHash
+ * only), in the same transaction, because usage is charged when a request
+ * FINISHES: a stream started before the delete must still find who pays, or
+ * "start long requests, then delete the key" would make them free.
+ */
+export function deleteApiKeySync(db, id, nowIso = new Date().toISOString()) {
+  let deleted = false;
+  db.transaction(() => {
+    deleted = deleteApiKeyInTransactionSync(db, id, nowIso);
+  });
+  return deleted;
+}
+
+/**
+ * The body of deleteApiKeySync for a caller that already holds a transaction
+ * (the admin per-user key delete writes its audit row in the same one). Every
+ * path that deletes a single key must go through this, or the tombstone is
+ * skipped and in-flight requests of that key go unbilled.
+ */
+export function deleteApiKeyInTransactionSync(db, id, nowIso = new Date().toISOString()) {
+  const row = db.get(`SELECT id, key, keyHash, userId, planId FROM apiKeys WHERE id = ?`, [id]);
+  if (!row) return false;
+  const keyHash = row.keyHash || hashApiKey(row.key);
+  if (row.userId && keyHash) {
+    db.run(
+      `INSERT INTO deletedApiKeys(keyHash, apiKeyId, userId, planId, deletedAt) VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(keyHash) DO UPDATE SET apiKeyId = excluded.apiKeyId, userId = excluded.userId,
+         planId = excluded.planId, deletedAt = excluded.deletedAt`,
+      [keyHash, row.id, row.userId, row.planId ?? null, nowIso]
+    );
+  }
+  const res = db.run(`DELETE FROM apiKeys WHERE id = ?`, [id]);
+  const cutoff = new Date(new Date(nowIso).getTime() - DELETED_KEY_RETENTION_MS).toISOString();
+  db.run(`DELETE FROM deletedApiKeys WHERE deletedAt < ?`, [cutoff]);
+  return (res?.changes ?? 0) > 0;
+}
+
 export async function deleteApiKey(id) {
   const db = await getAdapter();
-  const res = db.run(`DELETE FROM apiKeys WHERE id = ?`, [id]);
-  return (res?.changes ?? 0) > 0;
+  return deleteApiKeySync(db, id);
 }
 
 export async function validateApiKey(key) {

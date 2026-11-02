@@ -139,7 +139,11 @@ http.createServer = (...args) => {
     const socketIp = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : "";
     const xff = req.headers["x-forwarded-for"];
     const xRealIp = req.headers["x-real-ip"];
-    const viaProxy = !!(xff || xRealIp);
+    // Any forwarding header means a proxy hop: a loopback socket is then the proxy,
+    // not the user. Checking XFF/X-Real-IP alone let a proxy that sets only
+    // X-Forwarded-Proto/Host (or RFC 7239 Forwarded) pass every request as local.
+    const viaProxy = !!(xff || xRealIp || req.headers["x-forwarded-proto"]
+      || req.headers["x-forwarded-host"] || req.headers.forwarded);
     // Trust forwarding headers only when the TCP peer is a local or private-network
     // reverse proxy. Public sockets remain keyed by the unspoofable peer address.
     const proxyIp = forwardedClientIp(xRealIp, xff);

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSettings, validateApiKey } from "@/lib/localDb";
+import { getSettings, validateApiKey, getApiKeyByKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { verifyUserToken } from "@/lib/auth/userSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 import { safeEqual } from "@/lib/auth/internalHeaders";
+import { keyLookupLimited, recordKeyLookupMiss } from "@/lib/auth/keyLookupLimiter";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const CLI_TOKEN_SALT = "dr-cli-auth";
@@ -157,7 +158,39 @@ function extractApiKey(request) {
 async function hasValidApiKey(request) {
   const apiKey = extractApiKey(request);
   if (!apiKey) return false;
-  return await validateApiKey(apiKey);
+  const valid = await validateApiKey(apiKey);
+  if (!valid) await countUnknownKey(request, apiKey);
+  return valid;
+}
+
+// Only a key that does not exist counts toward the guessing limit. A real key
+// that is disabled or expired is refused as before, but its owner retrying it
+// must not get their whole address throttled.
+async function countUnknownKey(request, apiKey) {
+  try {
+    if (!(await getApiKeyByKey(apiKey))) recordKeyLookupMiss(request);
+  } catch {
+    /* a failed lookup is not evidence of guessing */
+  }
+}
+
+function tooManyKeyLookups(retryAfterSec) {
+  return NextResponse.json(
+    { error: "Too many invalid API keys from this address. Try again later." },
+    { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+  );
+}
+
+// The public usage page answers "does this key exist?" without a login, so it
+// is throttled like the LLM API. The route still does its own lookup and 404s.
+const KEY_LOOKUP_API_PREFIX = "/api/usage/key";
+
+async function guardKeyLookupApi(request) {
+  const limited = keyLookupLimited(request);
+  if (limited.limited) return tooManyKeyLookups(limited.retryAfterSec);
+  const apiKey = extractApiKey(request);
+  if (apiKey) await countUnknownKey(request, apiKey);
+  return null;
 }
 
 async function canAccessPublicLlmApi(request) {
@@ -240,12 +273,21 @@ export async function proxy(request) {
   }
 
   if (isPublicLlmApi(pathname)) {
+    // A client that keeps sending unknown keys is refused before any lookup.
+    if (extractApiKey(request) && !isLocalRequest(request)) {
+      const limited = keyLookupLimited(request);
+      if (limited.limited) return tooManyKeyLookups(limited.retryAfterSec);
+    }
     if (await canAccessPublicLlmApi(request)) return NextResponse.next();
     return NextResponse.json({ error: "API key required for remote API access" }, { status: 401 });
   }
 
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
+    if (pathname === KEY_LOOKUP_API_PREFIX || pathname.startsWith(`${KEY_LOOKUP_API_PREFIX}/`)) {
+      const refused = await guardKeyLookupApi(request);
+      if (refused) return refused;
+    }
     if (isPublicApi(pathname)) return NextResponse.next();
 
     // Customer account API: `user_token` only. Checked before the admin JWT/CLI

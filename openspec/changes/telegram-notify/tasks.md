@@ -1,6 +1,6 @@
 ## 1. Data
 
-- [x] 1.1 Schema v26: `users.telegramNotifyPrefs`, `users.telegramDmBlockedAt`, `telegramNotices`, `telegramBroadcasts`
+- [x] 1.1 Schema v27 (v26 was taken by `deletedApiKeys`, #35): `users.telegramNotifyPrefs`, `users.telegramDmBlockedAt`, `telegramNotices`, `telegramBroadcasts`
 - [x] 1.2 Link repo: status returns prefs + marker; link/unlink clear the marker; prefs setter
 
 ## 2. Delivery
