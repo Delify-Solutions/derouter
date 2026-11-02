@@ -1,5 +1,5 @@
 import {
-  extractApiKey, isValidApiKey, enforceKeyAccess,
+  extractApiKey, isValidApiKey, enforceKeyAccess, refuseUnmeteredEndpoint,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
@@ -43,6 +43,12 @@ async function handleSttRequest(request) {
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  }
+
+  // Not metered yet: a customer key would never be charged here.
+  if (apiKey) {
+    const unmetered = await refuseUnmeteredEndpoint(apiKey, { model: modelStr, clientIp: getRequestIp(request) });
+    if (unmetered) return unmetered;
   }
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.

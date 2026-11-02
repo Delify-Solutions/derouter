@@ -434,10 +434,17 @@ export async function saveRequestUsage(entry) {
       // the 60 s owner cache, so a change applies to the key's very next request. It
       // decides which plan's discounts apply, who is charged and whose RPM/TPM
       // allowance the request counts against.
+      // A key deleted mid-request has no row left: its tombstone kept the pin.
       let keyPlanId = null;
-      if (owner) {
+      if (owner?.deleted) {
+        keyPlanId = owner.planId ?? null;
+      } else if (owner) {
         try {
-          keyPlanId = db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])?.planId ?? null;
+          // The owner may come from the 60 s cache, filled before the key was
+          // deleted: with the row gone, the tombstone still holds the pin.
+          const keyRow = db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])
+            ?? db.get(`SELECT planId FROM deletedApiKeys WHERE apiKeyId = ?`, [owner.apiKeyId]);
+          keyPlanId = keyRow?.planId ?? null;
         } catch (e) {
           console.error("[rates] could not read key plan", e.message);
         }
@@ -1504,6 +1511,12 @@ export async function getProviderRateUsage(windowMs = 60000) {
   return out;
 }
 
+// Every key id the user has held, including keys deleted within the tombstone
+// window: without the deleted ones, "burst, delete the key, mint a new one" would
+// drop the burst out of the per-minute count and reset RPM/TPM. Binds userId twice.
+const USER_KEY_IDS_SQL =
+  "SELECT id FROM apiKeys WHERE userId = ? UNION SELECT apiKeyId FROM deletedApiKeys WHERE userId = ?";
+
 /**
  * Requests and tokens over the last `windowMs` across EVERY key owned by a user
  * (design D7).
@@ -1526,9 +1539,9 @@ export async function getUserRateUsage(userId, windowMs = 60000, planId = null) 
     `SELECT COUNT(*) AS requests,
             COALESCE(SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)), 0) AS tokens
        FROM usageHistory
-      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
+      WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
         AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
-    planId ? [userId, since, planId] : [userId, since]
+    planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return { requests: row?.requests ?? 0, tokens: row?.tokens ?? 0 };
 }
@@ -1544,9 +1557,9 @@ export async function getUserOldestTokenAt(userId, windowMs = 60000, planId = nu
   const row = db.get(
     `SELECT MIN(timestamp) AS oldest
        FROM usageHistory
-      WHERE apiKeyId IN (SELECT id FROM apiKeys WHERE userId = ?)
+      WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
         AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
-    planId ? [userId, since, planId] : [userId, since]
+    planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return row?.oldest ?? null;
 }

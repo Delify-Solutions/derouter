@@ -2,14 +2,20 @@ import crypto from "crypto";
 
 const API_KEY_SECRET = process.env.API_KEY_SECRET || "endpoint-proxy-api-key-secret";
 
+// The keyId is the only secret part of a key: machineId is the same for every key
+// on a server and the CRC is derivable whenever API_KEY_SECRET is known. 20 chars
+// from a CSPRNG (~103 bits) cannot be enumerated; the old 6 chars of Math.random
+// (~31 bits) could. Keys minted before this change keep working unchanged.
+export const KEY_ID_LENGTH = 20;
+
 /**
- * Generate 6-char random keyId
+ * Generate a random keyId from a cryptographically secure source.
  */
 function generateKeyId() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < KEY_ID_LENGTH; i++) {
+    result += chars.charAt(crypto.randomInt(chars.length));
   }
   return result;
 }
