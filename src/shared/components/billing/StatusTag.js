@@ -9,6 +9,8 @@
 const STATUS = {
   paying: { label: "Đang trả", icon: "play_circle", cls: "border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-400" },
   waiting: { label: "Chờ", icon: "schedule", cls: "border-border bg-surface-2 text-text-muted" },
+  // A later period of a multi-period term, or a plan queued behind the same one.
+  scheduled: { label: "Chờ kích hoạt", icon: "event_upcoming", cls: "border-border bg-surface-2 text-text-muted" },
   blocked: { label: "Tạm khóa", icon: "lock", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
   exhausted: { label: "Hết credit", icon: "battery_alert", cls: "border-border bg-surface-2 text-text-muted" },
   expired: { label: "Hết hạn", icon: "event_busy", cls: "border-border bg-surface-2 text-text-muted" },
@@ -35,7 +37,8 @@ export function dateOf(iso) {
 export default function StatusTag({ status, reopenAt = null, className = "" }) {
   const spec = STATUS[status] ?? STATUS.waiting;
   // A blocked plan names when it comes back: "Tạm khóa đến 15:30" is the whole
-  // question a customer has at that moment.
+  // question a customer has at that moment. A scheduled one says "Chờ kích hoạt";
+  // its start date is on the card's own line, where it has room.
   const label = status === "blocked" && reopenAt ? `Tạm khóa đến ${timeOf(reopenAt)}` : spec.label;
 
   return (

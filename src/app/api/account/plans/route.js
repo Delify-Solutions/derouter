@@ -54,7 +54,7 @@ export async function GET(request) {
         debtNanoUsd: getDebtNanoSync(db, session.userId),
         // An unlimited plan adds no credit to the sum above, so the page needs to
         // know one is live to say "Không giới hạn" instead of a misleading "$0".
-        hasUnlimitedCredit: queue.some((entry) => entry.unlimitedCredit),
+        hasUnlimitedCredit: queue.some((entry) => entry.unlimitedCredit && entry.statusLabel !== "scheduled"),
         queue,
         history: getPlanHistorySync(db, session.userId),
         plans: catalogue,

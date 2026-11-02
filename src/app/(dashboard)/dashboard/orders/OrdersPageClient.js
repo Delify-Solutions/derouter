@@ -109,7 +109,7 @@ export default function OrdersPageClient() {
     const copy = {
       approve: {
         title: "Approve order",
-        message: `Mark payment received for ${order.userEmail || "this customer"}? Their plan and ${order.unlimitedCredit ? "unlimited credit" : `${fmtUsdNano(order.creditNanoUsd)} of credit`} are granted immediately.`,
+        message: `Mark payment received for ${order.userEmail || "this customer"}? Their plan and ${order.unlimitedCredit ? "unlimited credit" : `${fmtUsdNano(order.creditNanoUsd)} of credit`}${order.periods > 1 ? ` per period × ${order.periods} periods` : ""} are granted immediately.`,
         confirmText: "Approve",
         variant: "success",
       },
@@ -281,6 +281,7 @@ export default function OrdersPageClient() {
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">
                     {fmtCreditNano(order.creditNanoUsd, order.unlimitedCredit)}
+                    {order.periods > 1 ? ` × ${order.periods}` : ""}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <StatusTag status={order.status} />
@@ -405,14 +406,18 @@ export default function OrdersPageClient() {
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Window</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">
+                    {selected.periods > 1 ? `${selected.periods} × ` : ""}
                     {selected.durationDays} {selected.durationDays === 1 ? "day" : "days"}
+                    {selected.discountPercent > 0 ? ` (−${selected.discountPercent}%)` : ""}
                   </dd>
                 </div>
                 <div className="bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Expires</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">
                     {selected.status === "paid" && selected.paidAt
-                      ? formatDate(new Date(new Date(selected.paidAt).getTime() + selected.durationDays * 86400000).toISOString())
+                      // The last period's end; an unlimited plan queued behind
+                      // another of the same plan ends later still (see the user's queue).
+                      ? formatDate(new Date(new Date(selected.paidAt).getTime() + selected.durationDays * (selected.periods || 1) * 86400000).toISOString())
                       : "on approval"}
                   </dd>
                 </div>

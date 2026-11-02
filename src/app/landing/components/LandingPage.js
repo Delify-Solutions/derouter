@@ -15,6 +15,26 @@ import { listPlans } from "@/lib/db/repos/billingRepo.js";
 import { offeredMethodsSync } from "@/lib/payments/checkout.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
+import { planTerms, termLabel, termPrice } from "@/lib/billing/terms.js";
+import { formatVnd } from "@/lib/payments/amounts.js";
+import { fmtUsdNano } from "@/shared/utils/money.js";
+
+/**
+ * The longer terms a plan sells, priced (spec plan-terms "Terms on the landing
+ * page"): one line per term with its discount, in the same currency order as the
+ * card headline.
+ */
+function salesTerms(row) {
+  return planTerms(row).slice(1).map((term) => {
+    const price = termPrice(row, term);
+    return {
+      periods: term.periods,
+      discountPercent: term.discountPercent,
+      label: termLabel(row.durationDays, term.periods),
+      priceText: price.priceVnd ? formatVnd(price.priceVnd) : price.priceNanoUsd > 0 ? fmtUsdNano(price.priceNanoUsd) : null,
+    };
+  });
+}
 
 /**
  * The landing page renders for everyone. It is the customer-facing shop, so the
@@ -57,9 +77,11 @@ export default async function LandingPage({ copy }) {
   // inviting a customer to buy something they cannot pay for.
   const db = await getAdapter();
   const settings = await getSettings();
-  const plans = planRows.map((row) =>
-    toSalesPlan(row, offeredMethodsSync(db, row, settings))
-  );
+  const plans = planRows.map((row) => ({
+    ...toSalesPlan(row, offeredMethodsSync(db, row, settings)),
+    periodLabel: termLabel(row.durationDays, 1),
+    terms: salesTerms(row),
+  }));
 
   // A plan with no credit grants nothing; it has no card worth showing. An
   // unlimited plan stores 0 credit but grants everything its limits allow.
