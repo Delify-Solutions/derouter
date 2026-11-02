@@ -7,6 +7,8 @@ import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { checkLock, recordFail, recordSuccess, getClientIp, adminIpBucket } from "@/lib/auth/loginLimiter";
 import { isLocalRequest } from "@/dashboardGuard";
+import { notifyAdminLogin } from "@/lib/notify/telegram";
+import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
 
 const RESET_HINT = "Forgot password? Reset to default via derouter CLI → Settings → Reset Password to Default.";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
@@ -94,6 +96,8 @@ export async function POST(request) {
       // different keys, and every route reads exactly one of them, so signing in as
       // admin leaves a customer session on this browser untouched.
       await setDashboardAuthCookie(cookieStore, request);
+      // Every admin sign-in is announced to the admin chat (spec telegram-notify).
+      notifyAdminLogin({ method: "password", ip: getRequestIp(request), userAgent: getRequestUserAgent(request) }).catch(() => {});
 
       return NextResponse.json({ success: true, mustChangePassword: false }, { headers: NO_STORE_HEADERS });
     }

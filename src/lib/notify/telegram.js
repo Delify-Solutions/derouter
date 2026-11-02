@@ -119,3 +119,17 @@ export async function notifyPaymentNeedsReview({ amountText, content, reason, pr
     return { ok: false, reason: "error" };
   }
 }
+
+/**
+ * Someone signed in to the admin dashboard (spec telegram-notify). Fire-and-forget:
+ * the sign-in has already succeeded. `method` is "password" | "oidc" | "saml".
+ */
+export async function notifyAdminLogin(details = {}) {
+  try {
+    const { adminLoginText } = await import("./customerTelegram.js");
+    return await notifyAdmin(adminLoginText(details));
+  } catch (error) {
+    console.error(`[notify] admin login notification skipped: ${error?.message || "unknown error"}`);
+    return { ok: false, reason: "error" };
+  }
+}

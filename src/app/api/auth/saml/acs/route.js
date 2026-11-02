@@ -10,6 +10,8 @@ import {
 } from "@/lib/auth/saml.js";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { checkLock, recordFail, recordSuccess, getClientIp, adminIpBucket } from "@/lib/auth/loginLimiter";
+import { notifyAdminLogin } from "@/lib/notify/telegram";
+import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
 
 export async function POST(request) {
   const settings = await getSettings();
@@ -71,6 +73,12 @@ export async function POST(request) {
       samlEmail,
       samlName,
     });
+    notifyAdminLogin({
+      method: "saml",
+      ip: getRequestIp(request),
+      userAgent: getRequestUserAgent(request),
+      identity: samlEmail,
+    }).catch(() => {});
 
     return NextResponse.redirect(new URL("/dashboard", origin));
   } catch (error) {

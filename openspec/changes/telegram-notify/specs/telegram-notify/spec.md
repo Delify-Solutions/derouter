@@ -4,7 +4,7 @@
 The system SHALL send messages from the configured bot to the Telegram user linked to an account, in Vietnamese, for these groups:
 - `billing`: an order approved by an admin, by a payment webhook, by the payment poller or by an admin assigning a payment; a plan or credit granted by an admin; a gift code redeemed by the customer or assigned by an admin;
 - `expiry`: the reminders in "Plan and credit reminders";
-- `security`: a successful login from an IP never seen on an earlier `login` or `register` of the account (not on the first login); a password change or reset (by the customer or an admin); an API key created; the account suspended, or reactivated from suspended; the Telegram account linked;
+- `security`: every successful login, with the IP ("không rõ" when unknown), a short device description ("Chrome trên macOS") and the time, titled "Đăng nhập từ địa chỉ mới" when the IP was never seen on an earlier `login` or `register` of the account (never on the first login), otherwise "Đăng nhập tài khoản"; a repeat login from the same IP within 15 minutes of the previous one SHALL not be announced, so scripted logins cannot exhaust the bot's send budget; a password change or reset (by the customer or an admin); an API key created; the account suspended, or reactivated from suspended; the Telegram account linked;
 - `announcements`: admin broadcasts.
 
 Messages other than `security` SHALL be sent only to active accounts. Sending SHALL happen after the triggering change is committed and SHALL never fail or delay the triggering request. Values inserted into a message SHALL be HTML-escaped.
@@ -20,6 +20,21 @@ Messages other than `security` SHALL be sent only to active accounts. Sending SH
 #### Scenario: Login from a new IP
 - **WHEN** an account that previously logged in from IP A logs in from IP B
 - **THEN** the customer receives "Đăng nhập từ địa chỉ mới" with IP B
+
+#### Scenario: Login from a known IP
+- **WHEN** the same account logs in again from IP A an hour later
+- **THEN** the customer receives "Đăng nhập tài khoản" with IP A
+
+#### Scenario: Repeated logins
+- **WHEN** the same account logs in from IP A twice within 15 minutes
+- **THEN** only the first login is announced
+
+### Requirement: Admin sign-in alerts
+Every successful admin dashboard sign-in (password, OIDC or SAML) SHALL send "Đăng nhập admin" to the admin chat (`telegramChatId`) with the method, the identity when the provider gives one, the IP, a short device description and the time. Sending SHALL not delay or fail the sign-in. Re-issuing the session cookie after a settings change is not a sign-in.
+
+#### Scenario: Password sign-in
+- **WHEN** someone signs in at `/admin/ss` with the admin password
+- **THEN** the admin chat receives "Đăng nhập admin" with "cách: mật khẩu" and the IP
 
 ### Requirement: Notification preferences
 A linked customer SHALL be able to turn `billing`, `expiry` and `announcements` on or off on `/account`; all are on by default. `security` messages SHALL always be sent. `GET /api/account/telegram` SHALL return `notifyPrefs`, `dmBlocked` and `botUsername`; `PATCH /api/account/telegram { notifyPrefs }` SHALL update only known groups with boolean values.

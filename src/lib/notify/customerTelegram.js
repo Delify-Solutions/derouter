@@ -25,6 +25,37 @@ const DATE_FORMAT = new Intl.DateTimeFormat("vi-VN", {
   minute: "2-digit",
 });
 
+/**
+ * "Chrome trên macOS" from a User-Agent; anything unrecognised is shortened
+ * rather than dropped, so a script (curl, python) still shows what it was.
+ */
+export function describeUserAgent(userAgent) {
+  const ua = String(userAgent || "");
+  if (!ua) return "";
+  const browser =
+    /Edg(e|A|iOS)?\//.test(ua) ? "Edge"
+      : /OPR\/|Opera/.test(ua) ? "Opera"
+      : /CocCoc|coc_coc/i.test(ua) ? "Cốc Cốc"
+      : /Telegram/i.test(ua) ? "Telegram"
+      : /Firefox\/|FxiOS\//.test(ua) ? "Firefox"
+      : /Chrome\/|CriOS\//.test(ua) ? "Chrome"
+      : /Safari\//.test(ua) ? "Safari"
+      : null;
+  // iPadOS 13+ in desktop mode sends a Macintosh UA and reads as macOS: the
+  // server cannot tell them apart, so do not try.
+  const os =
+    /iPhone|iPad|iPod/.test(ua) ? "iOS"
+      : /Android/.test(ua) ? "Android"
+      : /Windows/.test(ua) ? "Windows"
+      : /Mac OS X|Macintosh/.test(ua) ? "macOS"
+      : /CrOS/.test(ua) ? "ChromeOS"
+      : /Linux/.test(ua) ? "Linux"
+      : null;
+  if (browser && os) return `${browser} trên ${os}`;
+  if (browser || os) return browser || os;
+  return ua.slice(0, 60);
+}
+
 export function formatDate(iso) {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : DATE_FORMAT.format(date);
@@ -168,11 +199,11 @@ export const messages = {
       `Còn lại: <code>${escapeHtml(fmtCreditNano(remainingNanoUsd))}</code> / ${escapeHtml(fmtCreditNano(totalNanoUsd))}`,
       "Mua thêm hoặc nạp thêm trong trang Tài khoản.",
     ].filter(Boolean).join("\n"),
-  newLoginIp: ({ ip, userAgent }) => (site) =>
+  login: ({ ip, userAgent, newIp = false }) => (site) =>
     [
-      header(site, "Đăng nhập từ địa chỉ mới"),
-      `IP: <code>${escapeHtml(ip)}</code>`,
-      userAgent ? `Thiết bị: ${escapeHtml(String(userAgent).slice(0, 120))}` : null,
+      header(site, newIp ? "Đăng nhập từ địa chỉ mới" : "Đăng nhập tài khoản"),
+      ip ? `IP: <code>${escapeHtml(ip)}</code>${newIp ? " (chưa từng đăng nhập từ IP này)" : ""}` : "IP: không rõ",
+      userAgent ? `Thiết bị: ${escapeHtml(describeUserAgent(userAgent))}` : null,
       `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
       "Không phải bạn? Đổi mật khẩu ngay.",
     ].filter(Boolean).join("\n"),
@@ -259,6 +290,40 @@ export async function notifyPlanReceived(userPlanId, kind = "gift") {
     console.error(`[notify] plan notification skipped: ${error?.message || "unknown error"}`);
     return { ok: false, reason: "error" };
   }
+}
+
+/** How long a repeat login from the same IP stays silent. */
+export const LOGIN_ALERT_QUIET_MS = 15 * 60 * 1000;
+
+/**
+ * True when the account already signed in from `ip` within the quiet window.
+ * Call BEFORE recording the current login. A missing IP compares as "unknown".
+ */
+export function recentLoginFromIpSync(db, userId, ip, { now = Date.now(), windowMs = LOGIN_ALERT_QUIET_MS } = {}) {
+  if (!userId) return false;
+  const since = new Date(now - windowMs).toISOString();
+  const row = ip
+    ? db.get(
+        `SELECT 1 AS x FROM activityLog WHERE userId = ? AND action = 'login' AND ip = ? AND createdAt >= ? LIMIT 1`,
+        [userId, ip, since]
+      )
+    : db.get(
+        `SELECT 1 AS x FROM activityLog WHERE userId = ? AND action = 'login' AND ip IS NULL AND createdAt >= ? LIMIT 1`,
+        [userId, since]
+      );
+  return Boolean(row);
+}
+
+/** Text of the admin-chat alert for a dashboard sign-in (sent by notify/telegram.js). */
+export function adminLoginText({ method = "password", ip = null, userAgent = null, identity = null } = {}) {
+  const methodLabel = { password: "mật khẩu", oidc: "OIDC", saml: "SAML" }[method] || method;
+  const lines = ["<b>Đăng nhập admin</b>"];
+  if (identity) lines.push(`tài khoản: <code>${escapeHtml(identity)}</code>`);
+  lines.push(`cách: ${escapeHtml(methodLabel)}`);
+  lines.push(`IP: <code>${escapeHtml(ip || "không rõ")}</code>`);
+  if (userAgent) lines.push(`thiết bị: ${escapeHtml(describeUserAgent(userAgent))}`);
+  lines.push(`lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`);
+  return lines.join("\n");
 }
 
 /** Admin gave a gift code to accounts: tell each one that received it, one after another. */
