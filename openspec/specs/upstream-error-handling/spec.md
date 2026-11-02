@@ -53,3 +53,10 @@ The router SHALL abort a proxied request whose upstream has sent no response hea
 #### Scenario: Upstream never answers
 - **WHEN** a request body of 1 KB reaches an upstream that never sends headers
 - **THEN** the router makes one attempt and fails the request after about 60 s, instead of retrying three more times and failing after about 249 s
+
+### Requirement: Unknown model
+When a request names a model that is no combo, no alias and no configured provider node — a bare name whose provider the router can only guess from the name, or a `prefix/model` whose prefix is no built-in provider and no provider node — and no connection can serve it, the chat, image, embeddings, speech and transcription endpoints SHALL answer HTTP 404 with code `model_not_found` and the message "Model <model> không tồn tại hoặc chưa được mở trên router này. Xem danh sách model tại /v1/models.", naming the model the caller sent. They SHALL NOT answer with the internal "No active credentials for provider: <guessed provider>". An explicitly named built-in provider with no connection keeps its credentials message for the admin.
+
+#### Scenario: Typo in the model name
+- **WHEN** a client calls `/v1/chat/completions` with `model: "no-such-model-xyz"`
+- **THEN** it receives 404 `model_not_found` saying that model does not exist on this router, and the error log entry carries the same message
