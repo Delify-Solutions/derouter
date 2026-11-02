@@ -49,7 +49,8 @@ test("no plan paying: no RPM/TPM applies", () => {
 
 test("the paying plan's RPM/TPM and name are reported, and each queue entry carries its own", async () => {
   const fast = await plan({ name: "Fast", rpm: 60, tpm: 200000 });
-  const open = await plan({ name: "Open" });
+  // A longer duration puts it second in the queue regardless of grant timing.
+  const open = await plan({ name: "Open", durationDays: 31 });
   const a = grantPlanSync(db, "u1", { planId: fast.id, reason: "test a" }).userPlan;
   grantPlanSync(db, "u1", { planId: open.id, reason: "test b" });
 
@@ -66,7 +67,7 @@ test("the paying plan's RPM/TPM and name are reported, and each queue entry carr
 
 test("when the first plan is window-blocked, the next plan's rates apply", async () => {
   const capped = await plan({ name: "Capped", rpm: 10, limits: [{ hours: 5, maxNanoUsd: USD(1) }] });
-  const backup = await plan({ name: "Backup", rpm: 99 });
+  const backup = await plan({ name: "Backup", rpm: 99, durationDays: 31 });
   grantPlanSync(db, "u1", { planId: capped.id, reason: "test a" });
   grantPlanSync(db, "u1", { planId: backup.id, reason: "test b" });
   chargeSync(db, { userId: "u1", requestKey: "r1", costNanoUsd: USD(1) });
