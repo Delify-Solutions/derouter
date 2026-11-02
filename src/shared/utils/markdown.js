@@ -32,6 +32,15 @@ const marked = new Marked({
   gfm: true,
   breaks: true,
   renderer: {
+    // Raw HTML in the source is shown as text, never parsed. The regex sanitiser
+    // below is only reliable on markup marked itself produced (well-formed tags,
+    // escaped attribute values); hand-written HTML could be shaped so a browser
+    // parses a tag the regex did not see (e.g. a stray `"` in the tag), which let
+    // an `onerror` handler through to every /docs visitor. Docs are Markdown, and
+    // nothing in content/docs uses inline HTML.
+    html({ text }) {
+      return escapeHtml(text);
+    },
     image({ href, title, text }) {
       const caption = escapeHtml(text);
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";

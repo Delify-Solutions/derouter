@@ -2,11 +2,13 @@ import { handleChat } from "@/sse/handlers/chat.js";
 import {
   clearAccountError,
   enforceKeyAccess,
+  refuseUnpricedModelResponse,
   getProviderCredentials,
   isValidApiKey,
   markAccountUnavailable,
 } from "@/sse/services/auth.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { withInflightScope } from "@/lib/billing/inflight.js";
 import { extractGeminiNativeUsage } from "@/lib/usage/geminiNativeUsage.js";
 import { transformOpenAISSEToGeminiSSE, geminiUsageFromOpenAI, FINISH_REASON_MAP } from "@/lib/usage/geminiOpenAIStream.js";
 import { getSettings } from "@/lib/localDb";
@@ -55,7 +57,7 @@ export async function OPTIONS() {
  * The upstream handleChat returns OpenAI SSE format; we transform it to
  * Gemini SSE format on the fly via transformOpenAISSEToGeminiSSE().
  */
-export async function POST(request, { params }) {
+async function handlePost(request, { params }) {
   await ensureInitialized();
 
   try {
@@ -294,6 +296,9 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   if (clientApiKey) {
     const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`, { clientIp: getRequestIp(request) });
     if (denied) return denied;
+    // Billed per token as provider "gemini": an unpriced model would be free.
+    const unpriced = await refuseUnpricedModelResponse(clientApiKey, { provider: "gemini", model: modelId, clientIp: getRequestIp(request) });
+    if (unpriced) return unpriced;
   }
   const excludeConnectionIds = new Set();
   const bodyText = JSON.stringify(body);
@@ -518,3 +523,8 @@ async function convertOpenAIResponseToGemini(response, model) {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
 }
+
+// The native Gemini path enforces the key itself, so it needs its own request
+// scope for the concurrent-request cap (handleChat, used for other actions,
+// shares this scope instead of opening one).
+export const POST = withInflightScope(handlePost);

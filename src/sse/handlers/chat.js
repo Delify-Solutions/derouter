@@ -8,6 +8,7 @@ import {
   extractApiKey,
   isValidApiKey,
   enforceKeyAccess,
+  refuseUnpricedModelResponse,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
@@ -254,6 +255,22 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   }
 
   const { provider, model } = modelInfo;
+
+  // A customer key is billed per token: a model with no price would be free.
+  // Checked per resolved model, so a combo member without a price is skipped by
+  // the combo fallback while a combo-level price still covers every member.
+  if (apiKey) {
+    const rawModel = clientRawRequest?.body?.model;
+    const requestedModel = typeof rawModel === "string" && !rawModel.includes("/") ? rawModel : null;
+    // A combo member skipped for having no price is not a denial the customer
+    // should see in their history: the combo falls through to the next member.
+    // Only log when this model is what the client asked for.
+    const isClientModel = rawModel === modelStr || rawModel === `${provider}/${model}`;
+    const unpriced = await refuseUnpricedModelResponse(apiKey, {
+      provider, model, requestedModel, clientIp: request ? getRequestIp(request) : null, logDenial: isClientModel,
+    });
+    if (unpriced) return unpriced;
+  }
 
   // Routing shown in the unified "▶" line (client model → provider/model)
 

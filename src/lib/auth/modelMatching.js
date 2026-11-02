@@ -25,7 +25,7 @@ function splitProvider(s) {
 }
 
 // Strip a trailing date-like suffix ("-20251001", "-2025-10-01", "-latest") from a model id.
-function stripDateSuffix(id) {
+export function stripDateSuffix(id) {
   if (!id) return id;
   // -20251001 or -2025-10-01 at the end
   const dated = id.replace(/-(?:\d{4}-?\d{2}-?\d{2}|latest)$/, "");

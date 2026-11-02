@@ -5,6 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
   enforceKeyAccess,
+  refuseUnpricedModelResponse,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
@@ -92,6 +93,14 @@ async function handleEmbeddingsRequest(request) {
   }
 
   const { provider, model } = modelInfo;
+
+  // Customer keys pay per token: an unpriced embedding model would be free.
+  if (apiKey) {
+    const unpriced = await refuseUnpricedModelResponse(apiKey, {
+      provider, model, requestedModel: modelStr.includes("/") ? null : modelStr, clientIp: getRequestIp(request),
+    });
+    if (unpriced) return unpriced;
+  }
 
   if (modelStr !== `${provider}/${model}`) {
     log.info("ROUTING", `${modelStr} → ${provider}/${model}`);
