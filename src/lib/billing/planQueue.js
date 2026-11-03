@@ -77,6 +77,10 @@ function rowToEntry(row, windowsByPlan) {
     // while this purchase is the one paying. null = no limit.
     rpm: Number(row.planRpm) > 0 ? Number(row.planRpm) : null,
     tpm: Number(row.planTpm) > 0 ? Number(row.planTpm) : null,
+    // Product line of the plan behind this purchase (spec plan-queue-billing
+    // "Purchases are scoped to the key's product line"). A credit-only grant has
+    // no plan and counts as `api`: gift credit and admin adjustments pay normal keys.
+    productLine: row.planProductLine === "business" ? "business" : "api",
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
@@ -107,7 +111,8 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
   const at = nowIsoArg || nowIso();
 
   const rows = db.all(
-    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm
+    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm,
+            p.productLine AS planProductLine
        FROM userPlans up
        LEFT JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
@@ -197,14 +202,26 @@ export function evaluatePlan(entry, nowMs) {
   };
 }
 
+/** `business` for a bot key, `api` for every other key (spec plan-queue-billing). */
+export function productLineOfKey(key) {
+  return key?.botId ? "business" : "api";
+}
+
 /**
- * The part of a queue a request may use. A key pinned to a plan (`planId` = plans.id)
- * sees only purchases of that plan, in their normal order; an unpinned key sees the
- * whole queue. A pinned key never falls through to another plan: that is the point
- * of pinning it.
+ * The part of a queue a request may use (spec plan-queue-billing "Purchases are
+ * scoped to the key's product line"). Every queue walk funnels through here.
+ *
+ *   1. The product line: a bot key (`business`) sees only purchases of business
+ *      plans; every other key (`api`) sees api purchases and credit-only grants.
+ *      A purchase of the other line is invisible, so it is never admitted against,
+ *      never sets the rate and never pays.
+ *   2. Pinning: a key pinned to a plan (`planId` = plans.id) sees only purchases of
+ *      that plan, in their normal order, and never falls through to another plan.
  */
-export function scopeQueue(queue, planId) {
-  return planId ? queue.filter((entry) => entry.planId === planId) : queue;
+export function scopeQueue(queue, planId, productLine = "api") {
+  const line = productLine === "business" ? "business" : "api";
+  const byLine = queue.filter((entry) => entry.productLine === line);
+  return planId ? byLine.filter((entry) => entry.planId === planId) : byLine;
 }
 
 /**
@@ -214,9 +231,9 @@ export function scopeQueue(queue, planId) {
  * Allowances are per (user, plan) and shared by every key, so minting more keys
  * never opens a second allowance.
  */
-export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
+export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null, productLine = "api") {
   if (keyPlanId) return keyPlanId;
-  const paying = admitSync(db, userId, nowIsoArg);
+  const paying = admitSync(db, userId, nowIsoArg, { productLine });
   if (!paying.ok) return null;
   const row = db.get(`SELECT planId FROM userPlans WHERE id = ?`, [paying.planId]);
   return row?.planId ?? null;
@@ -230,10 +247,10 @@ export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
  *                              seconds until it
  *   nothing with credit      → 402 insufficient_quota
  */
-export function admitSync(db, userId, nowIsoArg = null, { planId = null } = {}) {
+export function admitSync(db, userId, nowIsoArg = null, { planId = null, productLine = "api" } = {}) {
   const at = nowIsoArg || nowIso();
   const nowMs = new Date(at).getTime();
-  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId, productLine);
 
   let earliestReopenMs = null;
   let anyOnlyBlocked = false;
@@ -365,6 +382,7 @@ export function chargeSync(db, {
   costNanoUsd = 0,
   nowIso: atArg = null,
   planId = null,
+  productLine = "api",
 } = {}) {
   if (!db) throw new Error("chargeSync requires the db adapter");
   if (!userId) throw new Error("chargeSync requires a userId");
@@ -386,8 +404,9 @@ export function chargeSync(db, {
   // Fresh read: the queue is re-evaluated at charge time, never pinned at
   // admission (D4), so concurrent streams are bounded by the plan that can pay.
   // `planId` = the key's pinned plan: only purchases of that plan may pay, so a
-  // shortfall becomes debt rather than leaking onto another plan.
-  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
+  // shortfall becomes debt rather than leaking onto another plan. `productLine`
+  // narrows the same way: a charge never takes credit from the other line.
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId, productLine);
 
   const parts = [];
   let remaining = cost;

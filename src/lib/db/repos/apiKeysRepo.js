@@ -43,6 +43,8 @@ function rowToKey(row) {
     keyPrefix: row.keyPrefix ?? keyPrefixOf(row.key),
     // plans.id the key is pinned to; null = any plan of the owner.
     planId: row.planId ?? null,
+    // bizBots.id for a bot key (spec business-bots "Bot keys"); null otherwise.
+    botId: row.botId ?? null,
   };
 }
 
@@ -101,16 +103,19 @@ export async function createApiKey(name, machineId, options = {}) {
     keyPrefix: keyPrefixOf(result.key),
     keyHash: hashApiKey(result.key),
     // Only a customer key can be pinned to a plan; an admin key has no plan queue.
-    planId: options.userId ? options.planId ?? null : null,
+    // A bot key is never pinned: it is paid by the business line as a whole.
+    planId: options.userId && !options.botId ? options.planId ?? null : null,
+    // A bot key belongs to a customer's bot (spec business-bots "Bot keys").
+    botId: options.userId && options.botId ? String(options.botId) : null,
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix, planId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, groupId, rpm, tpm, budgetUsd, resetWindow, expiresAt, allowedModels, windowStartedAt, windowCostUsd, updatedAt, userId, keyHash, keyPrefix, planId, botId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt,
       apiKey.groupId, apiKey.rpm, apiKey.tpm, apiKey.budgetUsd, apiKey.resetWindow,
       apiKey.expiresAt, stringifyJson(apiKey.allowedModels),
       apiKey.windowStartedAt, apiKey.windowCostUsd, apiKey.updatedAt,
-      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix, apiKey.planId,
+      apiKey.userId, apiKey.keyHash, apiKey.keyPrefix, apiKey.planId, apiKey.botId,
     ]
   );
   return apiKey;
@@ -173,15 +178,15 @@ export function deleteApiKeySync(db, id, nowIso = new Date().toISOString()) {
  * skipped and in-flight requests of that key go unbilled.
  */
 export function deleteApiKeyInTransactionSync(db, id, nowIso = new Date().toISOString()) {
-  const row = db.get(`SELECT id, key, keyHash, userId, planId FROM apiKeys WHERE id = ?`, [id]);
+  const row = db.get(`SELECT id, key, keyHash, userId, planId, botId FROM apiKeys WHERE id = ?`, [id]);
   if (!row) return false;
   const keyHash = row.keyHash || hashApiKey(row.key);
   if (row.userId && keyHash) {
     db.run(
-      `INSERT INTO deletedApiKeys(keyHash, apiKeyId, userId, planId, deletedAt) VALUES(?, ?, ?, ?, ?)
+      `INSERT INTO deletedApiKeys(keyHash, apiKeyId, userId, planId, botId, deletedAt) VALUES(?, ?, ?, ?, ?, ?)
        ON CONFLICT(keyHash) DO UPDATE SET apiKeyId = excluded.apiKeyId, userId = excluded.userId,
-         planId = excluded.planId, deletedAt = excluded.deletedAt`,
-      [keyHash, row.id, row.userId, row.planId ?? null, nowIso]
+         planId = excluded.planId, botId = excluded.botId, deletedAt = excluded.deletedAt`,
+      [keyHash, row.id, row.userId, row.planId ?? null, row.botId ?? null, nowIso]
     );
   }
   const res = db.run(`DELETE FROM apiKeys WHERE id = ?`, [id]);
@@ -248,10 +253,24 @@ export async function getApiKeyForAuth(key) {
     const group = owner.groupId ? await getKeyGroupById(owner.groupId) : null;
     const liveGroup = group && group.isActive !== false ? group : null;
 
+    // A bot key carries its bot's switch (spec api-access-enforcement "Bot keys
+    // reach only chat completions"): an inactive bot refuses every request. A bot
+    // row that is gone reads as inactive, so a dangling key can never answer.
+    let bot = null;
+    if (k.botId) {
+      const botRow = db.get(`SELECT id, userId, isActive, modelId FROM bizBots WHERE id = ?`, [k.botId]);
+      bot = {
+        id: k.botId,
+        isActive: Boolean(botRow) && (botRow.isActive === 1 || botRow.isActive === true) && botRow.userId === k.userId,
+        modelId: botRow?.modelId ?? null,
+      };
+    }
+
     return {
       key: k,
       group: liveGroup,
       owner,
+      bot,
       resolved: {
         // Rates belong to the plan paying right now, which only the enforcement
         // layer knows (it reads the queue); null here means "not decided yet".

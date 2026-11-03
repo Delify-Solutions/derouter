@@ -436,15 +436,22 @@ export async function saveRequestUsage(entry) {
       // allowance the request counts against.
       // A key deleted mid-request has no row left: its tombstone kept the pin.
       let keyPlanId = null;
+      // The key's product line (spec plan-queue-billing): a bot key is paid by
+      // business purchases only, every other key by the api line. Read with the
+      // pin, from the row or its tombstone, so a deleted bot key is still charged
+      // to the right line.
+      let productLine = "api";
       if (owner?.deleted) {
         keyPlanId = owner.planId ?? null;
+        productLine = owner.botId ? "business" : "api";
       } else if (owner) {
         try {
           // The owner may come from the 60 s cache, filled before the key was
           // deleted: with the row gone, the tombstone still holds the pin.
-          const keyRow = db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])
-            ?? db.get(`SELECT planId FROM deletedApiKeys WHERE apiKeyId = ?`, [owner.apiKeyId]);
+          const keyRow = db.get(`SELECT planId, botId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])
+            ?? db.get(`SELECT planId, botId FROM deletedApiKeys WHERE apiKeyId = ?`, [owner.apiKeyId]);
           keyPlanId = keyRow?.planId ?? null;
+          productLine = keyRow?.botId ? "business" : "api";
         } catch (e) {
           console.error("[rates] could not read key plan", e.message);
         }
@@ -481,7 +488,7 @@ export async function saveRequestUsage(entry) {
       let ratePlanId = null;
       if (owner) {
         try {
-          ratePlanId = ratePlanIdSync(db, owner.userId, keyPlanId, entry.timestamp || null);
+          ratePlanId = ratePlanIdSync(db, owner.userId, keyPlanId, entry.timestamp || null, productLine);
         } catch (e) {
           console.error("[rates] could not resolve rate plan", e.message);
         }
@@ -522,6 +529,7 @@ export async function saveRequestUsage(entry) {
             costNanoUsd: entry.costNanoUsd || 0,
             nowIso: entry.timestamp || new Date().toISOString(),
             planId: keyPlanId,
+            productLine,
           });
         } catch (e) {
           console.error("[billing] charge failed", e.message);

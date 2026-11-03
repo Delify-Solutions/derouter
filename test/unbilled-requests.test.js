@@ -145,7 +145,7 @@ test("deleting a customer key keeps only the owner and the key hash", () => {
   assert.equal(rows[0].userId, "u1");
   assert.equal(rows[0].planId, "A");
   assert.ok(!JSON.stringify(rows).includes(secret), "the raw secret is never kept");
-  assert.deepEqual(resolveApiKeyOwner(db, secret), { userId: "u1", apiKeyId: "k1", deleted: true, planId: "A" });
+  assert.deepEqual(resolveApiKeyOwner(db, secret), { userId: "u1", apiKeyId: "k1", deleted: true, planId: "A", botId: null });
 });
 
 test("a key with only a plaintext column still leaves a tombstone", () => {

@@ -95,6 +95,13 @@ export const PLATFORM_MESSAGES = {
   rate_limit_tpm: "Vượt giới hạn TPM của gói, thử lại sau 60 giây.",
   budget_exhausted: "Key đã dùng hết ngân sách.",
   insufficient_quota: "Hết quota — mua gói hoặc nhập mã quà tặng tại /account/plans.",
+  // The business line has its own shop (spec plan-queue-billing).
+  insufficient_quota_business: "Hết quota gói AI doanh nghiệp — mua gói tại /doanh-nghiep",
+  // Bot keys (spec api-access-enforcement "Bot keys reach only chat completions").
+  endpoint_not_allowed: "Key chatbot chỉ dùng được với /v1/chat/completions",
+  bot_disabled: "Chatbot này đang tắt",
+  // The business guard cannot run (spec business-guard "Fail-closed availability").
+  guard_unavailable: "Hệ thống kiểm duyệt đang bận, vui lòng thử lại sau",
 };
 
 /** `Model <model> không nằm trong nhóm của bạn.` */

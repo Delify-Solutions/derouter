@@ -347,9 +347,54 @@ function rowToPlan(row) {
     limits: parseLimits(row.limits),
     rpm: row.rpm == null ? null : nano(row.rpm),
     tpm: row.tpm == null ? null : nano(row.tpm),
+    // Product line (spec plan-templates): every plan written before this column
+    // existed reads as `api`, so nothing changes for current customers.
+    productLine: normalizeProductLine(row.productLine),
+    maxBots: row.maxBots == null ? null : nano(row.maxBots),
+    maxKbBytes: row.maxKbBytes == null ? null : nano(row.maxKbBytes),
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
   };
+}
+
+export const PRODUCT_LINES = ["api", "business"];
+export const MAX_BOTS_LIMIT = 1000;
+export const KB_BYTES_MIN = 1024 * 1024; // 1 MB
+export const KB_BYTES_MAX = 10 * 1024 * 1024 * 1024; // 10 GB
+
+/** `api` unless the stored or submitted value is exactly `business`. */
+export function normalizeProductLine(value) {
+  return value === "business" ? "business" : "api";
+}
+
+/**
+ * The two business limits as stored: integers on a business plan, NULL on an api
+ * plan whatever the caller sent (an api plan has no bots to count).
+ */
+function businessColumns(input) {
+  if (normalizeProductLine(input.productLine) !== "business") return { maxBots: null, maxKbBytes: null };
+  return { maxBots: nano(input.maxBots), maxKbBytes: nano(input.maxKbBytes) };
+}
+
+/**
+ * Vietnamese error for the product-line part of a plan input, or null. A business
+ * plan must carry both limits; an api plan ignores them.
+ */
+export function validateProductLineInput(input = {}) {
+  const line = input.productLine;
+  if (line !== undefined && line !== null && line !== "" && !PRODUCT_LINES.includes(line)) {
+    return "Dòng sản phẩm không hợp lệ (api hoặc business)";
+  }
+  if (normalizeProductLine(line) !== "business") return null;
+  const bots = Number(input.maxBots);
+  if (input.maxBots == null || input.maxBots === "" || !Number.isInteger(bots) || bots < 1 || bots > MAX_BOTS_LIMIT) {
+    return `Gói AI doanh nghiệp cần số bot tối đa từ 1 đến ${MAX_BOTS_LIMIT}`;
+  }
+  const bytes = Number(input.maxKbBytes);
+  if (input.maxKbBytes == null || input.maxKbBytes === "" || !Number.isInteger(bytes) || bytes < KB_BYTES_MIN || bytes > KB_BYTES_MAX) {
+    return "Gói AI doanh nghiệp cần dung lượng tài liệu từ 1 MB đến 10 GB";
+  }
+  return null;
 }
 
 /**
@@ -428,6 +473,10 @@ export function validatePlanInput(input = {}) {
   // plan-templates "Limit validation"). Rejected before anything is written.
   const limitsError = validatePlanLimits(input);
   if (limitsError) return limitsError;
+
+  // Product line and the business limits (spec plan-templates "Plan definition").
+  const lineError = validateProductLineInput(input);
+  if (lineError) return lineError;
 
   // rpm / tpm: empty or 0 = unlimited, otherwise a positive integer.
   for (const [field, label] of [["rpm", "RPM"], ["tpm", "TPM"]]) {
@@ -635,19 +684,23 @@ export async function createPlan(input = {}) {
     limits: serializeLimits(input.limits ?? []),
     rpm: normalizeRate(input.rpm),
     tpm: normalizeRate(input.tpm),
+    productLine: normalizeProductLine(input.productLine),
+    ...businessColumns(input),
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, productLine, maxBots, maxKbBytes, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
       plan.unlimitedCredit ? 1 : 0, plan.allowCustomAmount ? 1 : 0, plan.customMinVnd, plan.customMaxVnd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.purchaseLimitPerMonth, plan.termOptions, plan.isFeatured ? 1 : 0,
-      plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
+      plan.sortOrder, plan.limits, plan.rpm, plan.tpm,
+      plan.productLine, plan.maxBots, plan.maxKbBytes,
+      plan.createdAt, plan.updatedAt,
     ]
   );
   return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [plan.id]));
@@ -677,8 +730,9 @@ export function updatePlanSync(db, id, patch = {}) {
   const clash = db.get(`SELECT id FROM plans WHERE code = ? AND id != ?`, [code, id]);
   if (clash) throw new Error("A plan with this code already exists");
 
+  const business = businessColumns(merged);
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, productLine = ?, maxBots = ?, maxKbBytes = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
@@ -702,6 +756,7 @@ export function updatePlanSync(db, id, patch = {}) {
       merged.sortOrder == null ? null : nano(merged.sortOrder),
       serializeLimits(merged.limits ?? []),
       normalizeRate(merged.rpm), normalizeRate(merged.tpm),
+      normalizeProductLine(merged.productLine), business.maxBots, business.maxKbBytes,
       merged.updatedAt, id,
     ]
   );
@@ -1019,15 +1074,15 @@ export function resolveApiKeyOwner(db, apiKey) {
 
   let value = null;
   try {
-    let row = db.get(`SELECT id, userId FROM apiKeys WHERE key = ?`, [apiKey]);
+    let row = db.get(`SELECT id, userId, botId FROM apiKeys WHERE key = ?`, [apiKey]);
     const hash = row ? null : hashApiKey(apiKey);
-    if (!row && hash) row = db.get(`SELECT id, userId FROM apiKeys WHERE keyHash = ?`, [hash]);
+    if (!row && hash) row = db.get(`SELECT id, userId, botId FROM apiKeys WHERE keyHash = ?`, [hash]);
     if (row?.userId) {
-      value = { userId: row.userId, apiKeyId: row.id };
+      value = { userId: row.userId, apiKeyId: row.id, botId: row.botId ?? null };
     } else if (!row && hash) {
-      const gone = db.get(`SELECT apiKeyId, userId, planId FROM deletedApiKeys WHERE keyHash = ?`, [hash]);
+      const gone = db.get(`SELECT apiKeyId, userId, planId, botId FROM deletedApiKeys WHERE keyHash = ?`, [hash]);
       if (gone?.userId) {
-        value = { userId: gone.userId, apiKeyId: gone.apiKeyId, deleted: true, planId: gone.planId ?? null };
+        value = { userId: gone.userId, apiKeyId: gone.apiKeyId, deleted: true, planId: gone.planId ?? null, botId: gone.botId ?? null };
       }
     }
   } catch {

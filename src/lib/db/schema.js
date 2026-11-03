@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 27;
+export const SCHEMA_VERSION = 28;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -103,12 +103,18 @@ export const TABLES = {
       // paid by any plan of its owner (the queue head pays). A pinned key is paid
       // by purchases of that plan alone and never falls back to another plan.
       planId: "TEXT",
+      // bizBots.id when this is a bot key (spec business-bots "Bot keys"). A bot
+      // key is paid by the owner's business-line purchases only, may call only
+      // the business models and only through /v1/chat/completions. NULL = a
+      // normal customer or admin key.
+      botId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
       "CREATE INDEX IF NOT EXISTS idx_ak_group ON apiKeys(groupId)",
       "CREATE INDEX IF NOT EXISTS idx_ak_user ON apiKeys(userId)",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_ak_keyhash ON apiKeys(keyHash)",
+      "CREATE INDEX IF NOT EXISTS idx_ak_bot ON apiKeys(botId)",
     ],
   },
   keyGroups: {
@@ -400,6 +406,16 @@ export const TABLES = {
       // customer bought, so a corrected value should apply to everyone at once.
       rpm: "INTEGER",
       tpm: "INTEGER",
+      // Product line (spec plan-templates "Plan definition"): 'api' (the default,
+      // sold on the main landing page and paying every normal key) or 'business'
+      // (sold on /doanh-nghiep and paying bot keys only). Purchases of one line
+      // never pay for the other (spec plan-queue-billing "Purchases are scoped to
+      // the key's product line").
+      productLine: "TEXT DEFAULT 'api'",
+      // Business plans only: how many bots the customer may own and how many
+      // bytes of extracted knowledge-base text they may store. NULL on api plans.
+      maxBots: "INTEGER",
+      maxKbBytes: "INTEGER",
       // Highlighted card on the landing page ("most popular").
       isFeatured: "INTEGER DEFAULT 0",
       sortOrder: "INTEGER",
@@ -764,6 +780,9 @@ export const TABLES = {
       apiKeyId: "TEXT NOT NULL",
       userId: "TEXT NOT NULL",
       planId: "TEXT",
+      // Kept with the pin so a request admitted before the delete is still charged
+      // to the right product line (a bot key never drains an api purchase).
+      botId: "TEXT",
       deletedAt: "TEXT NOT NULL",
     },
     indexes: [
@@ -798,6 +817,83 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_md_scope ON modelDiscounts(scopeType, scopeId)",
       "CREATE INDEX IF NOT EXISTS idx_md_window ON modelDiscounts(isActive, startsAt, endsAt)",
     ],
+  },
+
+  // ── AI doanh nghiệp (spec business-bots, business-guard) ─────────────────
+  // A customer's chatbot: identity, scope and refusal text. Its keys live in
+  // apiKeys (botId), its knowledge base in bizDocuments/bizChunks.
+  bizBots: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      name: "TEXT NOT NULL",
+      companyName: "TEXT NOT NULL",
+      domainDescription: "TEXT NOT NULL",
+      // strict | flexible
+      mode: "TEXT NOT NULL DEFAULT 'strict'",
+      refusalMessage: "TEXT NOT NULL",
+      extraInstructions: "TEXT",
+      // The business combo this bot answers with (one of settings.business.businessModels).
+      modelId: "TEXT NOT NULL",
+      isActive: "INTEGER DEFAULT 1",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_bb_user ON bizBots(userId)"],
+  },
+  // One knowledge-base document. Only the extracted text is kept, as chunks; the
+  // original file is never stored. `bytes` is the UTF-8 length of that text, which
+  // is what the plan's maxKbBytes quota counts.
+  bizDocuments: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      botId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      title: "TEXT NOT NULL",
+      // file | text | qa
+      sourceType: "TEXT NOT NULL",
+      mime: "TEXT",
+      bytes: "INTEGER NOT NULL DEFAULT 0",
+      // processing | ready | failed ("stale" is computed on read, never stored)
+      status: "TEXT NOT NULL",
+      error: "TEXT",
+      chunkCount: "INTEGER DEFAULT 0",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_bd_bot_ts ON bizDocuments(botId, createdAt)"],
+  },
+  // A chunk of document text with its embedding (Float32 little-endian BLOB).
+  // `embeddingModel` records which model produced it: retrieval only reads chunks
+  // of the current model, so a model change makes documents stale until retried.
+  bizChunks: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      docId: "TEXT NOT NULL",
+      botId: "TEXT NOT NULL",
+      ord: "INTEGER NOT NULL",
+      text: "TEXT NOT NULL",
+      embedding: "BLOB",
+      embeddingModel: "TEXT",
+      dims: "INTEGER",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_bc_bot_model ON bizChunks(botId, embeddingModel)",
+      "CREATE INDEX IF NOT EXISTS idx_bc_doc ON bizChunks(docId)",
+    ],
+  },
+  // Every guarded reply and output violation (spec business-guard "Guard event
+  // log"): the category and the first 200 characters of the user message.
+  bizGuardEvents: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      botId: "TEXT NOT NULL",
+      apiKeyId: "TEXT",
+      category: "TEXT NOT NULL",
+      excerpt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_bge_bot_ts ON bizGuardEvents(botId, createdAt DESC)"],
   },
 };
 
