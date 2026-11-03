@@ -177,6 +177,20 @@ export const LANDING_COPY_DEFAULTS = {
   bannerHref: "",
   bannerEnabled: false,
 
+  // Promotional popup on the landing page (spec promo-popup). Shown after
+  // popupDelaySec seconds when enabled and it has a title, body or code; a
+  // visitor who closes it sees it again after popupRepeatDays days, or as soon
+  // as the content changes. The code is copied on click and carried through
+  // sign-up to /account/gift, prefilled. Numbers are kept as strings like the
+  // rest of the copy and parsed by src/shared/utils/promoPopup.js.
+  popupEnabled: false,
+  popupTitle: "",
+  popupBody: "",
+  popupCode: "",
+  popupCta: "",
+  popupDelaySec: "3",
+  popupRepeatDays: "3",
+
   // Copy describes ONE shared credit per purchase, per-window limits and the plan
   // queue — never a per-model ceiling (spec public-landing "Default copy and FAQ"),
   // because the system has none: a purchase is a single pool drained in queue order.
@@ -208,13 +222,17 @@ export const LANDING_COPY_DEFAULTS = {
   faqSubtitle: "Mua thêm gói không làm mất credit còn lại. Hạn mức theo khung giờ được tính lại khi khung giờ kết thúc.",
 };
 
+/** Copy keys holding a boolean; every other key holds a string. */
+export const LANDING_COPY_BOOLEAN_KEYS = new Set(["bannerEnabled", "popupEnabled"]);
+
 /** Merge stored copy over defaults so a new field appears without a migration. */
 export function mergeLandingCopy(raw) {
   const out = { ...LANDING_COPY_DEFAULTS };
   if (raw && typeof raw === "object") {
     for (const key of Object.keys(LANDING_COPY_DEFAULTS)) {
-      if (typeof raw[key] === "string") out[key] = raw[key];
-      else if (key === "bannerEnabled" && typeof raw[key] === "boolean") out[key] = raw[key];
+      if (LANDING_COPY_BOOLEAN_KEYS.has(key)) {
+        if (typeof raw[key] === "boolean") out[key] = raw[key];
+      } else if (typeof raw[key] === "string") out[key] = raw[key];
     }
   }
   return out;

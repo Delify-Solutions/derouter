@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Input } from "@/shared/components";
 import { ActionButton } from "@/app/account/components/ui";
 import { safeNext } from "@/shared/utils/safeNext";
+import { giftPageHref, readPendingGiftCode } from "@/shared/utils/promoPopup.js";
 import AuthShell, { FormError, FormNotice, ResetPasswordForm } from "./AuthShell";
 
 export default function LoginForm({ resetToken = "" }) {
@@ -14,7 +15,8 @@ export default function LoginForm({ resetToken = "" }) {
   // Validated once, up front: the landing page sends `?next=/account/plans?plan=go`
   // so a customer lands back on the plan they picked. An invalid value is ignored
   // rather than forwarded (open-redirect guard, design D17).
-  const nextTarget = safeNext(searchParams?.get?.("next")) ?? "/account";
+  const explicitNext = safeNext(searchParams?.get?.("next"));
+  const nextTarget = explicitNext ?? "/account";
   const [mode, setMode] = useState("signin"); // signin | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,7 +65,10 @@ export default function LoginForm({ resetToken = "" }) {
         setError(data.error || "Could not sign in");
         return;
       }
-      router.replace(nextTarget);
+      // No explicit destination but a code picked up from the promo popup (for
+      // instance after verifying the email): finish on the gift page with it.
+      const pending = explicitNext ? "" : readPendingGiftCode();
+      router.replace(pending ? giftPageHref(pending) : nextTarget);
       router.refresh();
     } catch {
       setError("Could not reach the server. Try again.");

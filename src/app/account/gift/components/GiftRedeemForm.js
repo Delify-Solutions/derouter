@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionButton, Eyebrow, Stat } from "@/app/account/components/ui";
 import { TelegramLinkPrompt } from "@/app/account/components/TelegramLink";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
-import { formatGiftCode } from "./formatCode";
+import { formatGiftCode, normalizeGiftCode } from "./formatCode";
+import { clearPendingGiftCode, readPendingGiftCode } from "@/shared/utils/promoPopup.js";
 
 // Group in fours as the user types, matching the shape admin codes are minted in.
 function formatAsTyped(raw) {
@@ -28,7 +29,23 @@ export default function GiftRedeemForm({ onRedeemed }) {
   const [result, setResult] = useState(null);   // { ok: true, ... } | { error, needsTelegram? }
   const inputRef = useRef(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  // Prefill from ?code= (the promo popup's link) or the code the visitor copied
+  // from the popup before signing up (spec promo-popup). Read from window rather
+  // than useSearchParams so the page needs no Suspense boundary.
+  useEffect(() => {
+    let prefill = "";
+    try {
+      prefill = new URLSearchParams(window.location.search).get("code") || "";
+    } catch {
+      prefill = "";
+    }
+    if (!prefill) prefill = readPendingGiftCode();
+    // Minted codes (16 characters) read best in fours; a hand-picked code such as
+    // WELCOME2026 is shown as the popup showed it. Redemption ignores dashes.
+    const key = normalizeGiftCode(prefill);
+    if (key) setCode(key.length === 16 ? formatAsTyped(key) : key);
+    inputRef.current?.focus();
+  }, []);
 
   const onChange = (event) => {
     setCode(formatAsTyped(event.target.value));
@@ -53,6 +70,17 @@ export default function GiftRedeemForm({ onRedeemed }) {
       }
       setResult({ ok: true, ...data });
       setCode("");
+      clearPendingGiftCode();
+      // Drop ?code= so a reload does not refill a code that is already used.
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("code")) {
+          url.searchParams.delete("code");
+          window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        }
+      } catch {
+        /* ignore */
+      }
       if (onRedeemed) onRedeemed();
     } catch {
       setResult({ error: "Không kết nối được máy chủ." });

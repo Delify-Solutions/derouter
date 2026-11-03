@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
-import { LANDING_COPY_DEFAULTS, mergeLandingCopy } from "@/lib/db/repos/contentRepo.js";
+import { LANDING_COPY_BOOLEAN_KEYS, LANDING_COPY_DEFAULTS, mergeLandingCopy } from "@/lib/db/repos/contentRepo.js";
+import { popupFieldError, storedPopupValue } from "@/shared/utils/promoPopup.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -36,11 +37,15 @@ export async function PATCH(request) {
   const next = {};
   const incoming = body?.copy && typeof body.copy === "object" ? body.copy : {};
   for (const key of Object.keys(LANDING_COPY_DEFAULTS)) {
-    if (key === "bannerEnabled") {
+    if (LANDING_COPY_BOOLEAN_KEYS.has(key)) {
       if (incoming[key] !== undefined) next[key] = Boolean(incoming[key]);
       continue;
     }
-    if (typeof incoming[key] === "string") next[key] = incoming[key];
+    if (typeof incoming[key] === "string") {
+      const error = popupFieldError(key, incoming[key]);
+      if (error) return NextResponse.json({ error }, { status: 400, headers: NO_STORE });
+      next[key] = storedPopupValue(key, incoming[key]);
+    }
   }
 
   try {
