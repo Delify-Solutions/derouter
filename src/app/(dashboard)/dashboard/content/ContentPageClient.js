@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, Button, Input, ConfirmModal, Badge } from "@/shared/components";
 import BannerCard from "./BannerCard";
+import PopupCard from "./PopupCard";
 import DocEditor, { EMPTY_DOC, downloadDocFile, draftFromFile, readMarkdownFile } from "./DocEditor";
 
 // Field groups mirror the section order of the landing page, so an admin editing
@@ -284,6 +285,7 @@ export default function ContentPageClient() {
           ) : (
             <>
               <BannerCard copy={copy} saved={savedCopy} onChange={setCopyField} />
+              <PopupCard copy={copy} saved={savedCopy} onChange={setCopyField} />
 
               {COPY_GROUPS.map((group) => (
                 <Card key={group.title} className="flex flex-col gap-4 p-5">

@@ -1,0 +1,13 @@
+## Decisions
+
+### D1. Storage
+Popup fields are landing-copy keys (`popupEnabled`, `popupTitle`, `popupBody`, `popupCode`, `popupCta`, `popupDelaySec`, `popupRepeatDays`) in the existing `landingCopy` blob, edited and saved with the rest of the page copy. Numbers stay strings like the other copy and are parsed with bounds (delay 0–120 s, repeat 0–365 days, defaults 3/3). `mergeLandingCopy` gains a set of boolean keys so `popupEnabled` survives like `bannerEnabled`. The PATCH validates lengths (title 120, body 600, code 64, button 40), the code charset (letters, digits, dashes) and the numbers, and stores the code upper-cased.
+
+### D2. Showing
+Rendered by the landing page for everyone; the client component waits `delaySec` and opens unless a dismissal of the same version is younger than `repeatDays` (0 = every visit). The version is a hash of title, body, code and button text, so an edited popup reaches visitors who closed the previous one. Dismissal (close button, Esc, backdrop, or following the button / sign-in link) is stored in `localStorage`; storage failures only mean the popup shows again. Body scroll is locked while it is open.
+
+### D3. Code hand-off
+`promoTargetHref` sends a visitor to `/register?next=/account/gift?code=CODE` (`safeNext` already allows `/account/...` with a query) and a signed-in customer to the gift page. Copying the code or following the button also stores `{code, at}` in `localStorage` for 7 days. After an auto sign-in registration or a customer sign-in without `next`, the register and login forms go to the gift page when a code is pending (covers the email-verification path, which ends in a sign-in). The gift form prefills from `?code=` first, then the pending code; 16-character minted codes are grouped in fours, other codes are shown as is. A successful redemption clears the pending code and removes `?code=` from the address. Redemption is not automatic: the customer presses "Nhập mã".
+
+### D4. Accessibility
+`role="dialog"`, `aria-modal`, labelled by the title; focus moves into the dialog, Tab is kept inside it, Esc closes it and focus returns. The copy button has an accessible name with the code and announces "Đã sao chép mã" through a status region. UI follows ui-dna: square, 1px borders, no shadow, 40% backdrop. The button uses the landing page's primary-CTA treatment (`bg-text-main text-bg`) because white on the brand green is below AA (3.3:1 light, 1.7:1 dark).

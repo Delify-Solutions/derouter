@@ -7,6 +7,7 @@ import { Input } from "@/shared/components";
 import { ActionButton } from "@/app/account/components/ui";
 import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice } from "@/app/login/components/AuthShell";
+import { giftPageHref, readPendingGiftCode } from "@/shared/utils/promoPopup.js";
 
 export default function RegisterForm() {
   const router = useRouter();
@@ -55,7 +56,10 @@ export default function RegisterForm() {
       if (data.signedIn) {
         // No email verification on this instance: the session cookie is already
         // set, so land where a login would have (validated `next`, else /account).
-        router.replace(nextTarget ?? "/account");
+        // A code picked up from the promo popup takes the new customer straight
+        // to the gift page with it prefilled (spec promo-popup).
+        const pending = nextTarget ? "" : readPendingGiftCode();
+        router.replace(nextTarget ?? (pending ? giftPageHref(pending) : "/account"));
         router.refresh();
         return;
       }
