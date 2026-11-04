@@ -121,6 +121,28 @@ export async function notifyPaymentNeedsReview({ amountText, content, reason, pr
 }
 
 /**
+ * A new affiliate withdrawal request (spec affiliate-program "Withdrawal
+ * request"). Fire-and-forget after commit: the reservation already happened.
+ *
+ * `destination` must already be MASKED by the caller — Telegram is a third-party
+ * channel and never receives a full account number or wallet address (design D5).
+ */
+export async function notifyAdminWithdrawalRequest({ email, currency, amountText, destination } = {}) {
+  try {
+    const lines = ["<b>Yêu cầu rút hoa hồng</b>"];
+    if (amountText) lines.push(`số tiền: <code>${escapeHtml(amountText)}</code>`);
+    if (currency) lines.push(`đơn vị: ${escapeHtml(currency)}`);
+    if (destination) lines.push(`nhận về: ${escapeHtml(destination)}`);
+    if (email) lines.push(`CTV: <code>${escapeHtml(email)}</code>`);
+    lines.push("xử lý ở /dashboard/affiliates");
+    return await notifyAdmin(lines.join("\n"));
+  } catch (error) {
+    console.error(`[notify] withdrawal notification skipped: ${error?.message || "unknown error"}`);
+    return { ok: false, reason: "error" };
+  }
+}
+
+/**
  * Someone signed in to the admin dashboard (spec telegram-notify). Fire-and-forget:
  * the sign-in has already succeeded. `method` is "password" | "oidc" | "saml".
  */

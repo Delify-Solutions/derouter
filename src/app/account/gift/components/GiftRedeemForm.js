@@ -23,15 +23,21 @@ function fmtWhen(value) {
   });
 }
 
-export default function GiftRedeemForm({ onRedeemed }) {
+/**
+ * `initialCode` is the referral welcome gift this account was brought in with
+ * (design D7). It sits BELOW `?code=` and the pending popup code, which are
+ * explicit choices the visitor just made, and above an empty field.
+ */
+export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState(null);   // { ok: true, ... } | { error, needsTelegram? }
   const inputRef = useRef(null);
 
-  // Prefill from ?code= (the promo popup's link) or the code the visitor copied
-  // from the popup before signing up (spec promo-popup). Read from window rather
-  // than useSearchParams so the page needs no Suspense boundary.
+  // Prefill from ?code= (the promo popup's link), the code the visitor copied
+  // from the popup before signing up (spec promo-popup), or the referral welcome
+  // gift. Read from window rather than useSearchParams so the page needs no
+  // Suspense boundary.
   useEffect(() => {
     let prefill = "";
     try {
@@ -46,6 +52,15 @@ export default function GiftRedeemForm({ onRedeemed }) {
     if (key) setCode(key.length === 16 ? formatAsTyped(key) : key);
     inputRef.current?.focus();
   }, []);
+
+  // The referral gift arrives after a fetch, possibly while the customer is
+  // already typing. It only ever fills an EMPTY field, so it can neither replace
+  // a ?code= / popup prefill nor overwrite what the customer typed.
+  useEffect(() => {
+    const key = normalizeGiftCode(initialCode || "");
+    if (!key) return;
+    setCode((current) => current || (key.length === 16 ? formatAsTyped(key) : key));
+  }, [initialCode]);
 
   const onChange = (event) => {
     setCode(formatAsTyped(event.target.value));

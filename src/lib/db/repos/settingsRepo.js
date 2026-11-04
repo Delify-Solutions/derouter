@@ -1,5 +1,8 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+// One source of truth for the affiliate defaults: the sync reader used inside
+// `approveOrderSync` merges the same object (design D2, risk "settings in a sync path").
+import { AFFILIATE_SETTING_DEFAULTS } from "../../affiliate/settings.js";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 const DEFAULT_HEADROOM_URL = process.env.HEADROOM_URL || "http://localhost:8787";
@@ -101,6 +104,13 @@ const DEFAULT_SETTINGS = {
   paymentOrderTtlMinutes: 30,
   // Manual (admin-approved) orders are the fallback when no provider is set up.
   allowManualOrders: true,
+
+  // ── Affiliate program (spec affiliate-program "Program settings") ─────────
+  // Off by default: deploying this changes nothing until an admin turns it on,
+  // and turning it off is the rollback. The defaults live in
+  // src/lib/affiliate/settings.js so the sync reader inside order approval
+  // merges exactly the same values.
+  ...AFFILIATE_SETTING_DEFAULTS,
 };
 
 async function readRaw() {

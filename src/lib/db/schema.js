@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 27;
+export const SCHEMA_VERSION = 28;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -288,11 +288,21 @@ export const TABLES = {
       // Set when Telegram refuses to deliver to this user (bot blocked, never
       // allowed to message). Sending stops until a test message or a re-link works.
       telegramDmBlockedAt: "TEXT",
+      // Referral attribution (spec affiliate-program "Registration records the
+      // referrer"): the affiliate user id whose code brought this account in.
+      // Lives on the REFERRED account, not on `affiliates`, because the referrer
+      // is read on every order approval and the referred account may never
+      // become an affiliate itself. NULL = not referred.
+      referredByUserId: "TEXT",
+      referredAt: "TEXT",
     },
     indexes: [
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
       // One Telegram user per account; unlinked accounts (NULL) do not collide.
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram ON users(telegramUserId) WHERE telegramUserId IS NOT NULL",
+      // Referral reporting ("who did A bring in") and the accrual guard only
+      // touch referred rows.
+      "CREATE INDEX IF NOT EXISTS idx_users_referred ON users(referredByUserId) WHERE referredByUserId IS NOT NULL",
     ],
   },
   // Every admin or system action on a customer account, with who did it and why.
@@ -797,6 +807,107 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_md_scope ON modelDiscounts(scopeType, scopeId)",
       "CREATE INDEX IF NOT EXISTS idx_md_window ON modelDiscounts(isActive, startsAt, endsAt)",
+    ],
+  },
+  // Affiliate program (spec affiliate-program, design D1). One row per account
+  // that has a referral code; the code is created lazily the first time the
+  // account opens /account/affiliate. Overrides (rateBp, maxOrders, giftCodeId)
+  // are NULL when the affiliate follows the program default.
+  affiliates: {
+    columns: {
+      userId: "TEXT PRIMARY KEY",
+      // Stored uppercase. UNIQUE so two accounts can never share a link.
+      code: "TEXT NOT NULL UNIQUE",
+      // Basis points (1..10000). NULL = affiliateDefaultRateBp.
+      rateBp: "INTEGER",
+      // First-N override. NULL = affiliateDefaultMaxOrders; 0 = every order.
+      maxOrders: "INTEGER",
+      // Referral welcome gift override. NULL = affiliateDefaultGiftCodeId.
+      giftCodeId: "TEXT",
+      status: "TEXT NOT NULL DEFAULT 'active'", // 'active' | 'blocked'
+      clickCount: "INTEGER DEFAULT 0",
+      // JSON snapshots of the payout destination: VND {bankName, accountNumber,
+      // accountName}, USD {network, address}. Never sent to a third party whole.
+      payoutVnd: "TEXT",
+      payoutUsd: "TEXT",
+      adminNote: "TEXT",
+      createdAt: "TEXT",
+      updatedAt: "TEXT",
+    },
+    // code UNIQUE is inline (auto-indexed) — that covers link lookup.
+    indexes: [],
+  },
+  // One commission per paid order (design D1/D2). `orderId` UNIQUE is the
+  // idempotency boundary: the second approval of the same order inserts nothing.
+  affiliateCommissions: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      orderId: "TEXT NOT NULL UNIQUE",
+      affiliateUserId: "TEXT NOT NULL",
+      referredUserId: "TEXT NOT NULL",
+      currency: "TEXT NOT NULL", // 'VND' | 'USD'
+      // đồng for VND, nano-USD for USD (USDT is taken 1:1).
+      baseAmount: "INTEGER NOT NULL",
+      rateBp: "INTEGER NOT NULL",
+      amount: "INTEGER NOT NULL",
+      status: "TEXT NOT NULL", // 'pending' | 'available' | 'reversed'
+      // Accrual + the hold length fixed at accrual time.
+      availableAt: "TEXT NOT NULL",
+      releasedAt: "TEXT",
+      reversedAt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      // releaseDueSync / releaseAllDueSync walk pending rows by due time; the
+      // admin lists filter one affiliate by status.
+      "CREATE INDEX IF NOT EXISTS idx_ac_affiliate ON affiliateCommissions(affiliateUserId, status, availableAt)",
+      // Referral earnings per buyer (lists). First-N counts the buyer's paid
+      // orders instead (idx_orders_user_status).
+      "CREATE INDEX IF NOT EXISTS idx_ac_referred ON affiliateCommissions(referredUserId, status)",
+    ],
+  },
+  // Append-only wallet ledger (design D1). balance = SUM(delta) per (userId,
+  // currency). Only RELEASED commission writes here; pending money lives in
+  // affiliateCommissions.
+  affiliateLedger: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      currency: "TEXT NOT NULL", // 'VND' | 'USD'
+      delta: "INTEGER NOT NULL", // đồng or nano-USD, signed
+      kind: "TEXT NOT NULL", // commission | reversal | withdrawal | withdrawal_rejected | adjust
+      commissionId: "TEXT",
+      withdrawalId: "TEXT",
+      meta: "TEXT", // JSON {reason, admin}
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_afl_user_currency ON affiliateLedger(userId, currency)",
+      "CREATE INDEX IF NOT EXISTS idx_afl_user_ts ON affiliateLedger(userId, createdAt DESC)",
+    ],
+  },
+  // Withdrawal requests (design D5). `destination` is a snapshot of the payout
+  // details at request time, so a later edit cannot redirect money already
+  // requested.
+  affiliateWithdrawals: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      // Kept for accounting after the account is deleted (design D10).
+      emailSnapshot: "TEXT",
+      currency: "TEXT NOT NULL", // 'VND' | 'USD'
+      amount: "INTEGER NOT NULL", // đồng or nano-USD
+      destination: "TEXT NOT NULL", // JSON snapshot
+      status: "TEXT NOT NULL", // 'pending' | 'paid' | 'rejected'
+      txRef: "TEXT",
+      adminNote: "TEXT",
+      decidedBy: "TEXT",
+      decidedAt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_aw_status ON affiliateWithdrawals(status, createdAt)",
+      "CREATE INDEX IF NOT EXISTS idx_aw_user_ts ON affiliateWithdrawals(userId, createdAt DESC)",
     ],
   },
 };

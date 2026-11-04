@@ -64,6 +64,9 @@ export function parseDocFile(text) {
       excerpt: meta.excerpt || "",
       summary: meta.summary || "",
       sortOrder,
+      // `published: false` ships a page as a draft: it is seeded but hidden until
+      // an admin publishes it (e.g. a page about a feature that ships switched off).
+      isPublished: !/^(false|no|0)$/i.test(String(meta.published ?? "").trim()),
       body,
     },
   };
@@ -111,8 +114,8 @@ export function seedDocsSync(db, { dir = defaultDocsDir() } = {}) {
       seen.add(doc.slug);
       db.run(
         `INSERT INTO docsPages(id, slug, title, summary, excerpt, section, body, isPublished, sortOrder, createdAt, updatedAt)
-         VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-        [uuidv4(), doc.slug, doc.title, doc.summary, doc.excerpt, doc.section, doc.body, doc.sortOrder, now, now]
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uuidv4(), doc.slug, doc.title, doc.summary, doc.excerpt, doc.section, doc.body, doc.isPublished ? 1 : 0, doc.sortOrder, now, now]
       );
       result.inserted.push(doc.slug);
     }

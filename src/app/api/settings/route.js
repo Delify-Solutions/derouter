@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers } from "@/lib/localDb";
+import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById } from "@/lib/localDb";
+import { validateAffiliateSettings } from "@/lib/affiliate/settings.js";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -157,6 +158,32 @@ export async function PATCH(request) {
       if (typeof body.allowManualOrders !== "boolean") {
         return NextResponse.json(
           { error: "allowManualOrders phải là true hoặc false" },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
+      }
+    }
+
+    // Affiliate program settings (spec affiliate-program "Program settings").
+    // Validated here rather than only in the page: an out-of-range rate would
+    // otherwise be stored and applied to every future commission.
+    const affiliatePatch = validateAffiliateSettings(body);
+    if (affiliatePatch.error) {
+      return NextResponse.json(
+        { error: affiliatePatch.error },
+        { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+      );
+    }
+    Object.assign(body, affiliatePatch.value);
+
+    // The default referral gift must be an existing new-user code (design D7).
+    if (
+      Object.prototype.hasOwnProperty.call(body, "affiliateDefaultGiftCodeId") &&
+      body.affiliateDefaultGiftCodeId
+    ) {
+      const gift = await getGiftCodeById(body.affiliateDefaultGiftCodeId);
+      if (!gift || Number(gift.newUserOnly) !== 1) {
+        return NextResponse.json(
+          { error: "Chỉ chọn được mã người mới (bắt buộc liên kết Telegram)" },
           { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
         );
       }

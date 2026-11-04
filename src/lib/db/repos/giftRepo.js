@@ -9,8 +9,13 @@ import { randomInt } from "crypto";
 import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
 import { parseLimits } from "../../billing/limits.js";
+// The redeemability window, shared with the affiliate welcome-gift check so an
+// advertised code is always one redeemGiftCode would accept (design D7).
+import { inWindow } from "../../gift/window.js";
 import { topupCreditForAmount } from "../../billing/topup.js";
 import { insertAuditSync } from "../../billing/audit.js";
+
+export { inWindow };
 
 // Human-typable alphabet: no 0/O/1/I/L, so codes survive being read aloud or
 // copied off a screen by hand.
@@ -45,12 +50,6 @@ export function generateGiftCode() {
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function toMillis(value) {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
 }
 
 function isUniqueViolation(error) {
@@ -134,14 +133,6 @@ const GIFT_SELECT = `SELECT g.*, p.name AS planName, p.priceVnd AS planPriceVnd,
          p.creditNanoUsd AS planCreditNanoUsd, p.unlimitedCredit AS planUnlimited
     FROM giftCodes g
     LEFT JOIN plans p ON p.id = g.planId`;
-
-function inWindow(row, nowMs) {
-  const startsAt = toMillis(row.startsAt);
-  const expiresAt = toMillis(row.expiresAt);
-  if (startsAt !== null && nowMs < startsAt) return false;
-  if (expiresAt !== null && nowMs > expiresAt) return false;
-  return true;
-}
 
 function validateGrantInput(input) {
   const grantKind = input.grantKind || (input.planId ? "plan" : "credit");

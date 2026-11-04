@@ -53,7 +53,9 @@ export async function PATCH(request, { params }) {
       if (result.alreadyApproved) {
         return NextResponse.json({ order: result.order, alreadyApproved: true }, { headers: NO_STORE });
       }
-      if (adminNote) await updateOrderStatus(id, { status: result.order.status, adminNote });
+      // Note only, and only while the order is still in the status the approval
+      // left it in: a refund landing in between must not be flipped back.
+      if (adminNote) await updateOrderStatus(id, { status: result.order.status, fromStatus: result.order.status, adminNote });
       fireAndForget(notifyOrderApproved(id));
       return NextResponse.json(
         {
@@ -88,8 +90,16 @@ export async function PATCH(request, { params }) {
         { status: 409, headers: NO_STORE }
       );
     }
-    const updated = await updateOrderStatus(id, { status: "cancelled", adminNote });
-    return NextResponse.json({ order: updated }, { headers: NO_STORE });
+    // Guarded: a gateway payment approved since the read above must win.
+    const updated = await updateOrderStatus(id, { status: "cancelled", adminNote, fromStatus: "pending" });
+    if (!updated?.changed) {
+      return NextResponse.json(
+        { error: `Cannot cancel an order in status "${updated?.status ?? "unknown"}"` },
+        { status: 409, headers: NO_STORE }
+      );
+    }
+    const { changed: _changed, ...orderOut } = updated;
+    return NextResponse.json({ order: orderOut }, { headers: NO_STORE });
   } catch (error) {
     const message = error?.message || "Action failed";
     return NextResponse.json({ error: message }, { status: 409, headers: NO_STORE });

@@ -15,6 +15,9 @@ import {
   validatePassword,
 } from "@/lib/users/register";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
+import { resolveFirstReferral } from "@/lib/db/repos/affiliateRepo.js";
+// The cookie /r/<CODE> sets. One name, shared with the route that writes it.
+import { REF_COOKIE } from "@/lib/affiliate/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -68,12 +71,29 @@ export async function POST(request) {
     return fail("Could not create the account", 500);
   }
 
+  // Referral attribution (spec affiliate-program "Registration records the
+  // referrer"): the first VALID code of body `ref`, then the cookie — the same
+  // order the register page uses for its banner. Anything else simply means "no
+  // referrer"; the response below is identical either way.
+  const cookieStore = await cookies();
+  let referredByUserId = null;
+  try {
+    const referral = await resolveFirstReferral([
+      typeof body?.ref === "string" ? body.ref : null,
+      cookieStore.get(REF_COOKIE)?.value || null,
+    ]);
+    referredByUserId = referral?.referrerId ?? null;
+  } catch {
+    referredByUserId = null;
+  }
+
   let user;
   try {
     user = await createUser({
       email,
       passwordHash,
       displayName: displayName || null,
+      referredByUserId,
     });
   } catch (error) {
     // UNIQUE(email) is the only expected conflict. The message is deliberately
@@ -115,7 +135,7 @@ export async function POST(request) {
     siteName: settings.siteName,
   }).catch(() => {});
 
-  return NextResponse.json(
+  const response = NextResponse.json(
     {
       ok: true,
       // Never includes the user id or status: registration responses must not be
@@ -131,4 +151,12 @@ export async function POST(request) {
     },
     { headers: NO_STORE }
   );
+
+  // The code has been consumed: a second account from the same browser must not be
+  // attributed by a link the visitor clicked for the first one.
+  if (cookieStore.get(REF_COOKIE)) {
+    response.cookies.set({ name: REF_COOKIE, value: "", path: "/", maxAge: 0, httpOnly: true, sameSite: "lax" });
+  }
+
+  return response;
 }

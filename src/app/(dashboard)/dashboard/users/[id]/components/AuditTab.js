@@ -25,6 +25,13 @@ const ACTION_LABEL = {
   plan_revoked: "Thu hồi gói",
   queue_reordered: "Đổi thứ tự gói",
   user_deleted: "Xóa tài khoản",
+  // Affiliate program (spec affiliate-program).
+  referrer_changed: "Đổi người giới thiệu",
+  affiliate_updated: "Sửa CTV",
+  affiliate_commission_reversed: "Thu hồi hoa hồng",
+  affiliate_withdrawal_paid: "Đã chuyển tiền rút",
+  affiliate_withdrawal_rejected: "Từ chối lệnh rút",
+  affiliate_wallet_adjusted: "Điều chỉnh ví hoa hồng",
 };
 
 /**
