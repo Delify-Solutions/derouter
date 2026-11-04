@@ -305,3 +305,59 @@ test("a gift credit pays down an existing overdraft first", async () => {
   const wallet = await billing.walletSummary(u);
   assert.equal(wallet.availableNanoUsd, USD(3), "only the remainder becomes spendable");
 });
+
+// ── Admin-chosen codes and editing ─────────────────────────────────────────
+
+test("an admin may choose the code; it is stored normalised and shown as typed", async () => {
+  reset();
+  const gift = await gifts.createGiftCode({
+    code: "welcome-2026", grantKind: "credit", creditNanoUsd: USD(5), durationDays: 7,
+  });
+  assert.equal(gift.code, "WELCOME2026");
+  assert.equal(gifts.formatGiftCode(gift.code), "WELCOME2026", "no dashes forced into a chosen code");
+  assert.equal(gifts.formatGiftCode("K7QM3XTP9WFA2BHC"), "K7QM-3XTP-9WFA-2BHC", "generated codes still read in fours");
+
+  const u = insertUser("cu1", "cu1@test.local");
+  const res = db.transaction(() => gifts.redeemGiftCode(db, { userId: u, code: "Welcome2026" }));
+  assert.equal(res.ok, true);
+
+  await assert.rejects(
+    gifts.createGiftCode({ code: "WELCOME2026", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 }),
+    /đã tồn tại/
+  );
+  for (const bad of ["ABC", "x".repeat(33), "TẾT2026", "WELCOME!"]) {
+    await assert.rejects(
+      gifts.createGiftCode({ code: bad, grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 }),
+      /Mã/,
+      bad
+    );
+  }
+});
+
+test("a redeemed code can get more uses, but never fewer than used and never a different gift", async () => {
+  reset();
+  const gift = await gifts.createGiftCode({
+    code: "SUPPORT1", grantKind: "credit", creditNanoUsd: USD(5), durationDays: 7, maxRedemptions: 2,
+  });
+  for (const id of ["eu1", "eu2"]) {
+    insertUser(id, `${id}@test.local`);
+    assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: id, code: "SUPPORT1" })).ok, true);
+  }
+  insertUser("eu3", "eu3@test.local");
+  assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: "eu3", code: "SUPPORT1" })).reason, "exhausted");
+
+  // More uses, a new expiry and a note: allowed after redemptions.
+  const raised = await gifts.updateGiftCode(gift.id, { maxRedemptions: 5, note: "raised", expiresAt: "2099-01-01T00:00:00.000Z" });
+  assert.equal(raised.maxRedemptions, 5);
+  assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: "eu3", code: "SUPPORT1" })).ok, true);
+
+  await assert.rejects(gifts.updateGiftCode(gift.id, { maxRedemptions: 2 }), /không được nhỏ hơn số lượt đã dùng \(3\)/);
+  await assert.rejects(gifts.updateGiftCode(gift.id, { creditNanoUsd: USD(50) }), /không đổi được quà tặng/);
+  await assert.rejects(gifts.updateGiftCode(gift.id, { durationDays: 30 }), /không đổi được quà tặng/);
+  assert.equal(Number(db.get(`SELECT creditNanoUsd FROM giftCodes WHERE id = ?`, [gift.id]).creditNanoUsd), USD(5));
+
+  // Before anyone redeems it, the gift itself is still editable.
+  const fresh = await gifts.createGiftCode({ grantKind: "credit", creditNanoUsd: USD(5), durationDays: 7 });
+  const changed = await gifts.updateGiftCode(fresh.id, { creditNanoUsd: USD(8) });
+  assert.equal(changed.creditNanoUsd, USD(8));
+});
