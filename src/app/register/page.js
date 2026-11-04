@@ -6,6 +6,7 @@ import { REF_COOKIE } from "@/lib/affiliate/constants.js";
 import { resolveFirstReferralSync } from "@/lib/affiliate/core.js";
 import { readAffiliateSettingsSync } from "@/lib/affiliate/settings.js";
 import { referralGiftForSync } from "@/lib/affiliate/gift.js";
+import { buyerBonusTermsForReferrerSync } from "@/lib/affiliate/buyerBonus.js";
 import { formatGiftCode } from "@/lib/db/repos/giftRepo.js";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
  * The referrer's identity is NOT passed on — the banner shows a code, never the
  * affiliate's email.
  *
- * @returns {Promise<{ code: string, giftCode: string|null }|null>}
+ * @returns {Promise<{ code: string, giftCode: string|null, bonus: {bp: number, maxOrders: number}|null }|null>}
  */
 async function resolveReferral(refParam) {
   const cookieStore = await cookies();
@@ -30,7 +31,12 @@ async function resolveReferral(refParam) {
     const referral = resolveFirstReferralSync(db, [refParam, cookieStore.get(REF_COOKIE)?.value], { settings });
     if (!referral) return null;
     const gift = referralGiftForSync(db, referral.referrerId, { settings });
-    return { code: referral.code, giftCode: gift ? formatGiftCode(gift.code) : null };
+    const bonus = buyerBonusTermsForReferrerSync(db, referral.referrerId, settings);
+    return {
+      code: referral.code,
+      giftCode: gift ? formatGiftCode(gift.code) : null,
+      bonus: bonus ? { bp: bonus.bp, maxOrders: bonus.maxOrders } : null,
+    };
   } catch {
     // A database blip must not take the signup page down: the visitor registers
     // without attribution, which is also what an invalid code does.

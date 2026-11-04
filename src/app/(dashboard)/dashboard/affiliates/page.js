@@ -7,7 +7,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 /**
- * `/dashboard/affiliates` — program settings, CTVs, commissions and withdrawals.
+ * `/dashboard/affiliates` — program settings, CTVs, commissions and vouchers.
  * `?tab=affiliates&q=<code>` opens the CTV list filtered to one affiliate (the
  * user detail page links here).
  */

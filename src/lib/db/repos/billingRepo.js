@@ -46,6 +46,7 @@ import {
 // Refund reverses the commission its order earned (design D4); both run inside
 // refundOrder's transaction so money and commission cannot disagree.
 import { reverseCommissionForOrderSync } from "../../affiliate/commission.js";
+import { applyCheckoutDiscountsSync, recordCheckoutDiscountsSync } from "../../affiliate/checkoutDiscounts.js";
 import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
 import { quoteTopup, topupBounds } from "../../billing/topup.js";
@@ -823,7 +824,7 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
   return null;
 }
 
-export async function createOrder({ userId, planId, payerNote = null, method = "manual", amountVnd = null, periods = 1 } = {}) {
+export async function createOrder({ userId, planId, payerNote = null, method = "manual", amountVnd = null, periods = 1, voucherCode = null } = {}) {
   if (!userId) throw new Error("createOrder requires a userId");
   if (!planId) throw new Error("createOrder requires a planId");
   const db = await getAdapter();
@@ -874,15 +875,32 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     limits: serializeLimits(plan.limits ?? []),
     createdAt: nowIso(),
   };
-  db.run(
-    `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
-      order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.payerNote, order.emailSnapshot,
-      order.limits, order.createdAt,
-    ]
-  );
+  // Pricing (affiliate discounts), the insert, the voucher hold and — when the
+  // discounts cover everything — the approval commit together.
+  db.transaction(() => {
+    // A manual order is quoted and paid in USD (payAmount = its USD price).
+    const priced = applyCheckoutDiscountsSync(db, {
+      userId,
+      unlimited: Boolean(plan.unlimitedCredit),
+      payCurrency: "USD",
+      payAmount: order.amountNanoUsd,
+      amountNanoUsd: order.amountNanoUsd,
+      voucherCode,
+    });
+    if (!priced.ok) throw new Error(priced.error);
+    order.amountNanoUsd = priced.amountNanoUsd;
+    db.run(
+      `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt, payCurrency, payAmount)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?)`,
+      [
+        order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
+        order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.payerNote, order.emailSnapshot,
+        order.limits, order.createdAt, priced.payAmount,
+      ]
+    );
+    recordCheckoutDiscountsSync(db, order.id, priced);
+    if (priced.payAmount <= 0) approveOrderSync(db, order.id, { approvedBy: "voucher", now: order.createdAt });
+  });
   return getOrderById(order.id);
 }
 

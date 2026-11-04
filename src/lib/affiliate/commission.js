@@ -202,7 +202,7 @@ function releaseRowSync(db, row, now) {
 
 /**
  * Release this affiliate's due commissions. Called inside every wallet read and
- * every withdrawal request, so no background job is needed (design D3).
+ * every spend from the wallet, so no background job is needed (design D3).
  *
  * @returns {number} rows released
  */

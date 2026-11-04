@@ -5,7 +5,8 @@
 // drive every rule without a server. Relative imports only.
 import { v4 as uuidv4 } from "uuid";
 import { generatePaymentCode, isValidPrefix } from "./codes.js";
-import { snapshotLimitsOf } from "../billing/orders.js";
+import { approveOrderSync, snapshotLimitsOf } from "../billing/orders.js";
+import { applyCheckoutDiscountsSync, recordCheckoutDiscountsSync } from "../affiliate/checkoutDiscounts.js";
 import { nano } from "../billing/ledger.js";
 import { quoteTopup } from "../billing/topup.js";
 import { findTerm, termPrice } from "../billing/terms.js";
@@ -173,6 +174,7 @@ export function createGatewayOrderSync(db, {
   nowIso = null,
   amountVnd = null,
   periods = 1,
+  voucherCode = null,
 } = {}) {
   if (!userId) return { ok: false, code: "invalid", error: "Thiếu người dùng", status: 400 };
   if (!plan) return { ok: false, code: "invalid", error: "Gói không tồn tại", status: 400 };
@@ -258,7 +260,21 @@ export function createGatewayOrderSync(db, {
 
   const payCurrency = offered.currency;
   // VietQR is paid in the typed đồng; USDT in the USD price of that amount.
-  const payAmount = quote ? (payCurrency === "VND" ? quote.amountVnd : quote.priceNanoUsd) : offered.amount;
+  const listPayAmount = quote ? (payCurrency === "VND" ? quote.amountVnd : quote.priceNanoUsd) : offered.amount;
+  const listAmountNanoUsd = quote ? quote.priceNanoUsd : price.priceNanoUsd;
+
+  // Affiliate discounts (referral discount on unlimited plans, then a voucher).
+  // Priced before anything is written: a bad voucher leaves no order behind.
+  const priced = applyCheckoutDiscountsSync(db, {
+    userId,
+    unlimited: Boolean(plan.unlimitedCredit),
+    payCurrency,
+    payAmount: listPayAmount,
+    amountNanoUsd: listAmountNanoUsd,
+    voucherCode,
+  });
+  if (!priced.ok) return priced;
+  const payAmount = priced.payAmount;
 
   const order = {
     id: uuidv4(),
@@ -267,7 +283,7 @@ export function createGatewayOrderSync(db, {
     // `amountNanoUsd` keeps its existing meaning (the USD price of this order: the
     // plan's price, or for a custom-amount top-up the quoted price of the typed
     // amount) so every finance/statistics query built on it keeps working unchanged.
-    amountNanoUsd: quote ? quote.priceNanoUsd : price.priceNanoUsd,
+    amountNanoUsd: priced.amountNanoUsd,
     creditNanoUsd: quote ? quote.creditNanoUsd : nano(plan.creditNanoUsd),
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: nano(plan.durationDays),
@@ -298,6 +314,13 @@ export function createGatewayOrderSync(db, {
       order.limits, order.createdAt,
     ]
   );
+  recordCheckoutDiscountsSync(db, order.id, priced);
+
+  // Fully covered by discounts: nothing to pay, so approve it now, in this
+  // transaction, instead of showing a QR for 0đ that no bank can send.
+  if (payAmount <= 0) {
+    approveOrderSync(db, order.id, { approvedBy: "voucher", now: at });
+  }
 
   return { ok: true, order: readGatewayOrder(db, order.id) };
 }
@@ -340,6 +363,8 @@ export function readGatewayOrder(db, orderId) {
     createdAt: row.createdAt ?? null,
     paidAt: row.paidAt ?? null,
     approvedBy: row.approvedBy ?? null,
+    voucherDiscount: row.voucherDiscount == null ? null : nano(row.voucherDiscount),
+    referralDiscountBp: row.referralDiscountBp == null ? null : Number(row.referralDiscountBp),
   };
 }
 

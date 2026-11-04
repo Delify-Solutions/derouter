@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CardSkeleton } from "@/shared/components";
-import { ActionButton, Page, Section, Stat } from "@/app/account/components/ui";
+import { ActionButton, Page, Panel, Section, Stat, fieldClass } from "@/app/account/components/ui";
 import { PlanQueue, RateNow } from "@/shared/components/billing";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import BuyPlans from "./BuyPlans";
@@ -41,6 +41,8 @@ export default function PlansPageClient() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [buyingId, setBuyingId] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
+  // Affiliate voucher entered before buying (spec affiliate-program "Voucher at checkout").
+  const [voucherCode, setVoucherCode] = useState("");
   const [savingOrder, setSavingOrder] = useState(false);
   const [queueError, setQueueError] = useState("");
   const [notice, setNotice] = useState(null);
@@ -149,10 +151,20 @@ export default function PlansPageClient() {
           method,
           ...(amountVnd ? { amountVnd } : {}),
           ...(periods > 1 ? { periods } : {}),
+          ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Không tạo được đơn hàng");
+      if (voucherCode.trim()) setVoucherCode("");
+
+      // The voucher (and any referral discount) covered the whole price: the
+      // order is already paid and the plan granted, so there is nothing to scan.
+      if (body.order?.status === "paid") {
+        setNotice({ type: "success", message: "Đã thanh toán bằng voucher. Gói đã được kích hoạt." });
+        await Promise.all([load(), loadOrders()]);
+        return;
+      }
 
       if (method === "manual") {
         setNotice({ type: "success", message: ORDER_CONFIRMED });
@@ -278,6 +290,23 @@ export default function PlansPageClient() {
           )}
         </div>
       </Section>
+
+      <Panel className="mb-6 flex flex-col gap-2 p-4 sm:flex-row sm:items-end sm:gap-4">
+        <label className="flex flex-1 flex-col gap-2">
+          <span className="meta text-text-muted">Voucher (tùy chọn)</span>
+          <input
+            className={fieldClass}
+            value={voucherCode}
+            onChange={(e) => setVoucherCode(e.target.value.toUpperCase())}
+            placeholder="Nhập mã voucher rồi chọn gói bên dưới"
+            maxLength={64}
+            autoComplete="off"
+          />
+        </label>
+        <p className="text-xs text-text-muted sm:max-w-sm">
+          Giá trị voucher được trừ vào giá gói khi tạo đơn. Mỗi voucher dùng một lần; phần dư không hoàn lại.
+        </p>
+      </Panel>
 
       <BuyPlans
         plans={data.plans}

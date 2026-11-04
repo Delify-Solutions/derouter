@@ -29,8 +29,9 @@ const ACTION_LABEL = {
   referrer_changed: "Đổi người giới thiệu",
   affiliate_updated: "Sửa CTV",
   affiliate_commission_reversed: "Thu hồi hoa hồng",
-  affiliate_withdrawal_paid: "Đã chuyển tiền rút",
-  affiliate_withdrawal_rejected: "Từ chối lệnh rút",
+  affiliate_credit_converted: "Đổi hoa hồng thành credit",
+  affiliate_voucher_created: "Tạo voucher",
+  affiliate_voucher_cancelled: "Hủy voucher",
   affiliate_wallet_adjusted: "Điều chỉnh ví hoa hồng",
 };
 

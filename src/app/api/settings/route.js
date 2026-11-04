@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById } from "@/lib/localDb";
+import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById, getPlanById } from "@/lib/localDb";
 import { validateAffiliateSettings } from "@/lib/affiliate/settings.js";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
@@ -174,6 +174,17 @@ export async function PATCH(request) {
       );
     }
     Object.assign(body, affiliatePatch.value);
+
+    // The credit template must be an existing plan (change affiliate-credit-vouchers D2).
+    if (Object.prototype.hasOwnProperty.call(body, "affiliateCreditPlanId") && body.affiliateCreditPlanId) {
+      const plan = await getPlanById(body.affiliateCreditPlanId);
+      if (!plan) {
+        return NextResponse.json(
+          { error: "Gói khuôn cho credit không tồn tại" },
+          { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
+        );
+      }
+    }
 
     // The default referral gift must be an existing new-user code (design D7).
     if (

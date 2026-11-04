@@ -18,6 +18,8 @@ const SOURCE_LABEL = {
   gift: "Tặng",
   admin: "Admin",
   refund: "Hoàn tiền",
+  affiliate: "Đổi từ hoa hồng",
+  referral_bonus: "Quà giới thiệu",
 };
 
 /**

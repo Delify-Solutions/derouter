@@ -122,7 +122,7 @@ export function hasWalletHistorySync(db, userId) {
   if (!userId) return false;
   const row = db.get(`SELECT 1 AS x FROM affiliateLedger WHERE userId = ? LIMIT 1`, [userId]);
   if (row) return true;
-  // A pending withdrawal or a held commission is history too: the page must stay
+  // A held commission is history too: the page must stay
   // reachable after the program is switched off (spec "Customer affiliate page").
   const commission = db.get(
     `SELECT 1 AS x FROM affiliateCommissions WHERE affiliateUserId = ? LIMIT 1`,

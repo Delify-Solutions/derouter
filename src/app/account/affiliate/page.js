@@ -6,7 +6,7 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-/** `/account/affiliate` — referral link, welcome gift, wallet and withdrawals. */
+/** `/account/affiliate` — referral link, welcome gift, wallet, credit conversion and vouchers. */
 export default function AffiliatePage() {
   return <AffiliatePageClient />;
 }

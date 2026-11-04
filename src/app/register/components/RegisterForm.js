@@ -24,6 +24,12 @@ function ReferralBanner({ referral }) {
         <span className="material-symbols-outlined text-[16px]" aria-hidden="true">group_add</span>
         Bạn được giới thiệu
       </p>
+      {referral.bonus?.bp > 0 ? (
+        <p className="mt-2 text-text-muted">
+          Được tặng thêm {(referral.bonus.bp / 100).toFixed(referral.bonus.bp % 100 === 0 ? 0 : 2)}% credit cho{" "}
+          {referral.bonus.maxOrders === 0 ? "mỗi đơn" : `${referral.bonus.maxOrders} đơn đầu`} (gói không giới hạn: giảm giá khi thanh toán).
+        </p>
+      ) : null}
       {referral.giftCode ? (
         <>
           <p className="mt-2 text-text-muted">

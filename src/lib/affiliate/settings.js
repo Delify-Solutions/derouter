@@ -19,10 +19,23 @@ export const AFFILIATE_SETTING_DEFAULTS = {
   affiliateDefaultMaxOrders: 1,
   affiliateHoldDays: 7,
   affiliateCookieDays: 30,
-  affiliateMinWithdrawVnd: 100_000,
-  // $5.
-  affiliateMinWithdrawUsdNano: 5 * NANO_PER_USD,
   affiliateDefaultGiftCodeId: "",
+  // Spending the wallet (change affiliate-credit-vouchers). Commission is never
+  // paid out: it becomes API credit or a voucher.
+  // đồng per $1 of credit, for VND → credit and for cross-currency vouchers.
+  affiliateVndPerUsd: 25_000,
+  // Plan whose RPM/TPM and per-window limits converted and bonus credit use.
+  // "" = converting and the buyer credit bonus are off.
+  affiliateCreditPlanId: "",
+  // Lifetime of each converted or bonus credit grant, in days.
+  affiliateCreditDays: 30,
+  // Smallest amount per conversion or voucher.
+  affiliateMinRedeemVnd: 10_000,
+  affiliateMinRedeemUsdNano: 1 * NANO_PER_USD,
+  // Referred-buyer bonus: X bp extra credit (or price off for unlimited plans)
+  // on the buyer's first N paid orders. 0 bp = off; 0 orders = every order.
+  affiliateBuyerBonusBp: 0,
+  affiliateBuyerBonusMaxOrders: 1,
 };
 
 /** `[min, max]` of every integer affiliate setting; `null` = no upper bound. */
@@ -31,8 +44,12 @@ export const AFFILIATE_SETTING_RANGES = {
   affiliateDefaultMaxOrders: [0, 1000],
   affiliateHoldDays: [0, 365],
   affiliateCookieDays: [1, 365],
-  affiliateMinWithdrawVnd: [0, null],
-  affiliateMinWithdrawUsdNano: [0, null],
+  affiliateVndPerUsd: [1, 10_000_000],
+  affiliateCreditDays: [1, 365],
+  affiliateMinRedeemVnd: [0, null],
+  affiliateMinRedeemUsdNano: [0, null],
+  affiliateBuyerBonusBp: [0, 10000],
+  affiliateBuyerBonusMaxOrders: [0, 1000],
 };
 
 /** The setting keys this capability owns. */
@@ -85,9 +102,10 @@ export function validateAffiliateSettings(patch) {
     value.affiliateEnabled = body.affiliateEnabled;
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, "affiliateDefaultGiftCodeId")) {
-    const raw = body.affiliateDefaultGiftCodeId;
-    value.affiliateDefaultGiftCodeId = typeof raw === "string" ? raw.trim() : "";
+  for (const key of ["affiliateDefaultGiftCodeId", "affiliateCreditPlanId"]) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const raw = body[key];
+    value[key] = typeof raw === "string" ? raw.trim() : "";
   }
 
   return { value };
@@ -100,14 +118,22 @@ export function validateAffiliateSettings(patch) {
  * @returns {{ value: number|null, error?: undefined } | { error: string, value?: undefined }}
  */
 export function validateOverride(key, raw) {
-  const range = key === "rateBp" ? AFFILIATE_SETTING_RANGES.affiliateDefaultRateBp
-    : key === "maxOrders" ? AFFILIATE_SETTING_RANGES.affiliateDefaultMaxOrders
-      : null;
+  const range = {
+    rateBp: AFFILIATE_SETTING_RANGES.affiliateDefaultRateBp,
+    maxOrders: AFFILIATE_SETTING_RANGES.affiliateDefaultMaxOrders,
+    buyerBonusBp: AFFILIATE_SETTING_RANGES.affiliateBuyerBonusBp,
+    buyerBonusMaxOrders: AFFILIATE_SETTING_RANGES.affiliateBuyerBonusMaxOrders,
+  }[key] || null;
   if (!range) return { error: `Không hỗ trợ trường ${key}` };
   if (isBlank(raw)) return { value: null };
   const n = toWholeNumber(raw);
   if (!Number.isSafeInteger(n) || n < range[0] || (range[1] !== null && n > range[1])) {
-    const label = key === "rateBp" ? "Tỷ lệ hoa hồng" : "Số đơn";
+    const label = {
+      rateBp: "Tỷ lệ hoa hồng",
+      maxOrders: "Số đơn",
+      buyerBonusBp: "Tỷ lệ quà người được giới thiệu",
+      buyerBonusMaxOrders: "Số đơn được quà",
+    }[key];
     return { error: `${label} phải là số nguyên trong khoảng ${range[0]}–${range[1]}` };
   }
   return { value: n };

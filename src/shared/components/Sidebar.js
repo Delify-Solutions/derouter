@@ -34,7 +34,7 @@ const navItems = [
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
   { href: "/dashboard/gift-codes", label: "Gift codes", icon: "redeem" },
-  // Affiliate program: settings, CTVs, commissions and withdrawals (spec
+  // Affiliate program: settings, CTVs, commissions and vouchers (spec
   // affiliate-program "Admin affiliate management").
   { href: "/dashboard/affiliates", label: "Affiliate", icon: "group_add" },
   // Payment accounts + received transactions. The needs-review badge is the

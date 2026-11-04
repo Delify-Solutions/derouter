@@ -339,19 +339,12 @@ export async function deleteUser(id, { actor = "system" } = {}) {
       `UPDATE requestDetails SET userId = NULL, apiKeyId = NULL, data = json_remove(data, '$.owner') WHERE userId = ?`,
       [id]
     );
-    // Affiliate program (design D10): the code, the wallet and the payout details
-    // go with the account. Withdrawals and commissions are KEPT for accounting —
-    // the withdrawal keeps the email it was requested under, so the row stays
-    // readable once the account is gone.
-    db.run(`UPDATE affiliateWithdrawals SET emailSnapshot = COALESCE(emailSnapshot, ?) WHERE userId = ?`, [email, id]);
-    // A withdrawal still pending would otherwise stay actionable: "paid" would send
-    // money to an account that no longer exists, "rejected" would write a ledger
-    // row for a wallet that is gone. Close it here, with the reason on the row.
+    // Affiliate program: the code and the wallet go with the account. Its unused
+    // vouchers are cancelled with no refund (the wallet is gone); used vouchers
+    // and commissions are kept for accounting.
     db.run(
-      `UPDATE affiliateWithdrawals
-          SET status = 'rejected', adminNote = 'Tài khoản đã bị xóa', decidedBy = ?, decidedAt = ?
-        WHERE userId = ? AND status = 'pending'`,
-      [actor, new Date().toISOString(), id]
+      `UPDATE affiliateVouchers SET status = 'cancelled', cancelledAt = ? WHERE ownerUserId = ? AND status = 'active'`,
+      [new Date().toISOString(), id]
     );
     db.run(`DELETE FROM affiliateLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM affiliates WHERE userId = ?`, [id]);

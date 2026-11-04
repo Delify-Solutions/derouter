@@ -3,7 +3,7 @@
 // Every function here resolves the adapter and opens ONE `db.transaction` around
 // the sync functions from src/lib/affiliate/* (design D2/D3/D5). Routes never call
 // the sync modules directly, so the "release due commissions, then read the
-// balance" ordering and the withdrawal checks happen in the same write.
+// balance" ordering and the spending checks happen in the same write.
 //
 // Money is integer: đồng for VND, nano-USD for USD.
 import { getAdapter } from "../driver.js";
@@ -24,12 +24,13 @@ import {
 import {
   walletSync,
   walletsSync,
-  payoutDetailsSync,
-  savePayoutSync,
-  requestWithdrawalSync,
-  decideWithdrawalSync,
   adjustWalletSync,
+  convertToCreditSync,
+  creditTemplatePlanSync,
 } from "../../affiliate/wallet.js";
+import { createVoucherSync, cancelVoucherSync } from "../../affiliate/vouchers.js";
+import { buyerBonusTermsSync } from "../../affiliate/buyerBonus.js";
+import { maskEmail } from "../../affiliate/mask.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -58,8 +59,8 @@ export async function resolveFirstReferral(candidates) {
 }
 
 /**
- * The customer affiliate page payload (design D8): terms, wallet, payout details,
- * counters. `link` is composed by the caller, which knows the public origin.
+ * The customer affiliate page payload (design D8): terms, wallet, spending
+ * settings, counters. `link` is composed by the caller, which knows the public origin.
  */
 export async function getAffiliateOverview(userId) {
   const db = await getAdapter();
@@ -91,40 +92,74 @@ export async function getAffiliateOverview(userId) {
       clicks: row?.clickCount ?? 0,
       signups,
       payingReferrals,
+      // Buyer bonus the referred customers get (effective terms of this account).
+      buyerBonusBp: row ? (row.buyerBonusBp ?? Number(settings.affiliateBuyerBonusBp ?? 0)) : null,
+      buyerBonusMaxOrders: row ? (row.buyerBonusMaxOrders ?? Number(settings.affiliateBuyerBonusMaxOrders ?? 0)) : null,
       wallet,
-      payout: payoutDetailsSync(db, userId),
-      minWithdraw: {
-        VND: Number(settings.affiliateMinWithdrawVnd ?? 0),
-        USD: Number(settings.affiliateMinWithdrawUsdNano ?? 0),
+      redeem: {
+        minVnd: Number(settings.affiliateMinRedeemVnd ?? 0),
+        minUsdNano: Number(settings.affiliateMinRedeemUsdNano ?? 0),
+        vndPerUsd: Number(settings.affiliateVndPerUsd ?? 0),
+        creditDays: Number(settings.affiliateCreditDays ?? 30),
+        templatePlanName: (() => {
+          const plan = creditTemplatePlanSync(db, settings);
+          return plan ? (plan.name || plan.code) : null;
+        })(),
       },
     };
   });
 }
 
-/** Save payout details for one currency. */
-export async function setAffiliatePayout(userId, currency, details) {
+/** Convert wallet money into API credit (one separate grant per call). */
+export async function convertToCredit(userId, { currency, amount }) {
   const db = await getAdapter();
-  return db.transaction(() => savePayoutSync(db, userId, currency, details));
+  return db.transaction(() => convertToCreditSync(db, userId, { currency, amount }));
 }
 
-export async function requestWithdrawal(userId, { currency, amount }) {
+/** Create a single-use voucher from the wallet. */
+export async function createVoucher(userId, { currency, amount }) {
   const db = await getAdapter();
-  return db.transaction(() => requestWithdrawalSync(db, userId, { currency, amount }));
+  return db.transaction(() => createVoucherSync(db, userId, { currency, amount }));
 }
 
-/** The affiliate's own withdrawals, newest first. */
-export async function listMyWithdrawals(userId, { limit = 20, offset = 0 } = {}) {
+/** Cancel one of the caller's own unused vouchers (refund to the wallet). */
+export async function cancelVoucher(userId, voucherId) {
+  const db = await getAdapter();
+  return db.transaction(() => cancelVoucherSync(db, userId, voucherId));
+}
+
+/** The affiliate's own vouchers, newest first. The user is shown masked. */
+export async function listMyVouchers(userId, { limit = 20, offset = 0 } = {}) {
   const db = await getAdapter();
   const take = Math.min(Math.max(1, Math.floor(Number(limit) || 20)), 100);
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
   const rows = db.all(
-    `SELECT * FROM affiliateWithdrawals WHERE userId = ? ORDER BY createdAt DESC, rowid DESC LIMIT ? OFFSET ?`,
+    `SELECT v.*, u.email AS usedByEmail, o.status AS holderStatus
+       FROM affiliateVouchers v
+       LEFT JOIN users u ON u.id = v.usedByUserId
+       LEFT JOIN orders o ON o.id = v.heldByOrderId
+      WHERE v.ownerUserId = ?
+      ORDER BY v.createdAt DESC, v.rowid DESC LIMIT ? OFFSET ?`,
     [userId, take, skip]
   );
   const total = Number(
-    db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals WHERE userId = ?`, [userId])?.n ?? 0
+    db.get(`SELECT COUNT(*) AS n FROM affiliateVouchers WHERE ownerUserId = ?`, [userId])?.n ?? 0
   );
-  return { rows, total };
+  return {
+    total,
+    rows: rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      currency: row.currency,
+      amount: Number(row.amount),
+      status: row.status,
+      // In use by a pending order right now (not cancellable meanwhile).
+      held: row.status === "active" && (row.holderStatus === "pending" || row.holderStatus === "expired"),
+      usedBy: row.usedByEmail ? maskEmail(row.usedByEmail) : null,
+      usedAt: row.usedAt ?? null,
+      createdAt: row.createdAt,
+    })),
+  };
 }
 
 /** The affiliate's commissions, newest first. */
@@ -283,8 +318,8 @@ export async function getAffiliateDetail(userId) {
       `SELECT * FROM affiliateCommissions WHERE affiliateUserId = ? ORDER BY createdAt DESC LIMIT 50`,
       [userId]
     );
-    const withdrawals = db.all(
-      `SELECT * FROM affiliateWithdrawals WHERE userId = ? ORDER BY createdAt DESC LIMIT 50`,
+    const vouchers = db.all(
+      `SELECT * FROM affiliateVouchers WHERE ownerUserId = ? ORDER BY createdAt DESC LIMIT 50`,
       [userId]
     );
     return {
@@ -292,10 +327,9 @@ export async function getAffiliateDetail(userId) {
       user,
       effective: effectiveTermsSync(row, settings),
       wallet,
-      payout: payoutDetailsSync(db, userId),
       referrals,
       commissions,
-      withdrawals,
+      vouchers,
     };
   });
 }
@@ -312,7 +346,7 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
 
     const sets = [];
     const values = [];
-    for (const key of ["rateBp", "maxOrders", "giftCodeId", "status", "adminNote"]) {
+    for (const key of ["rateBp", "maxOrders", "buyerBonusBp", "buyerBonusMaxOrders", "giftCodeId", "status", "adminNote"]) {
       if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
       sets.push(`${key} = ?`);
       values.push(patch[key]);
@@ -330,6 +364,7 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
       details: {
         before: {
           rateBp: before.rateBp, maxOrders: before.maxOrders,
+          buyerBonusBp: before.buyerBonusBp, buyerBonusMaxOrders: before.buyerBonusMaxOrders,
           giftCodeId: before.giftCodeId, status: before.status, adminNote: before.adminNote,
         },
         after: patch,
@@ -375,39 +410,29 @@ export async function listCommissions({ affiliateUserId = "", status = "", limit
   return { rows, total };
 }
 
-/** Every withdrawal, filterable by status (admin list). */
-export async function listWithdrawals({ status = "", limit = 50, offset = 0 } = {}) {
+/** Every voucher, filterable by status (admin list). */
+export async function listVouchers({ status = "", limit = 50, offset = 0 } = {}) {
   const db = await getAdapter();
   const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
-
   const where = [];
   const params = [];
-  if (["pending", "paid", "rejected"].includes(status)) {
-    where.push(`w.status = ?`);
+  if (["active", "used", "cancelled"].includes(status)) {
+    where.push(`v.status = ?`);
     params.push(status);
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-  const total = Number(db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals w ${whereSql}`, params)?.n ?? 0);
+  const total = Number(db.get(`SELECT COUNT(*) AS n FROM affiliateVouchers v ${whereSql}`, params)?.n ?? 0);
   const rows = db.all(
-    `SELECT w.*, COALESCE(u.email, w.emailSnapshot) AS email, u.displayName
-       FROM affiliateWithdrawals w
-       LEFT JOIN users u ON u.id = w.userId
+    `SELECT v.*, owner.email AS ownerEmail, buyer.email AS usedByEmail
+       FROM affiliateVouchers v
+       LEFT JOIN users owner ON owner.id = v.ownerUserId
+       LEFT JOIN users buyer ON buyer.id = v.usedByUserId
        ${whereSql}
-      ORDER BY w.createdAt DESC, w.rowid DESC LIMIT ? OFFSET ?`,
+      ORDER BY v.createdAt DESC, v.rowid DESC LIMIT ? OFFSET ?`,
     [...params, take, skip]
   );
-  const pendingCount = Number(
-    db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals WHERE status = 'pending'`)?.n ?? 0
-  );
-  return { rows, total, pendingCount };
-}
-
-/** Admin decision on one withdrawal (paid / rejected). Null = already decided. */
-export async function decideWithdrawal(id, decision, { actor = "admin" } = {}) {
-  const db = await getAdapter();
-  return db.transaction(() => decideWithdrawalSync(db, id, { ...decision, actor }));
+  return { rows, total };
 }
 
 /** Admin wallet adjustment with a mandatory reason. */
@@ -455,6 +480,8 @@ export async function setUserReferrer(userId, referrerUserId, { actor = "admin",
     return { referredByUserId: referrerUserId || null, referredAt: referrerUserId ? at : null };
   });
 }
+
+export { buyerBonusTermsSync };
 
 // Re-exported so a caller that already holds a transaction can use the sync core
 // without importing src/lib/affiliate/* twice.

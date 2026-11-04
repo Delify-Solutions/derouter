@@ -1,4 +1,4 @@
-// Typed money → integer, for the affiliate forms (customer withdrawal, admin
+// Typed money → integer, for the affiliate forms (customer conversion/voucher, admin
 // settings, admin wallet adjustment).
 //
 // Customers and admins type money the way they read it on screen: "100.000" for

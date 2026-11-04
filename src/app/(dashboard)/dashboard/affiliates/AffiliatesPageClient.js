@@ -12,16 +12,10 @@ const TABS = [
   { value: "settings", label: "Cài đặt" },
   { value: "affiliates", label: "CTV" },
   { value: "commissions", label: "Hoa hồng" },
-  { value: "withdrawals", label: "Rút tiền" },
+  { value: "vouchers", label: "Voucher" },
 ];
 
 const PAGE_SIZE = 25;
-
-const WITHDRAWAL_STATUS = {
-  pending: { label: "Chờ xử lý", tone: "warning" },
-  paid: { label: "Đã chuyển", tone: "success" },
-  rejected: { label: "Từ chối", tone: "danger" },
-};
 
 const COMMISSION_STATUS = {
   pending: { label: "Đang giữ", tone: "warning" },
@@ -138,7 +132,7 @@ export default function AffiliatesPageClient({ initialTab = "", initialQuery = "
       {tab === "settings" && <SettingsTab onNotice={setNotice} />}
       {tab === "affiliates" && <AffiliatesTab initialQuery={initialQuery} onNotice={setNotice} />}
       {tab === "commissions" && <CommissionsTab />}
-      {tab === "withdrawals" && <WithdrawalsTab onNotice={setNotice} />}
+      {tab === "vouchers" && <VouchersTab />}
     </div>
   );
 }
@@ -150,39 +144,53 @@ function SettingsTab({ onNotice }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [codes, setCodes] = useState([]);
+  const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
     affiliateEnabled: false,
     affiliateDefaultRatePercent: "",
     affiliateDefaultMaxOrders: "",
     affiliateHoldDays: "",
     affiliateCookieDays: "",
-    affiliateMinWithdrawVnd: "",
-    affiliateMinWithdrawUsd: "",
+    affiliateMinRedeemVnd: "",
+    affiliateMinRedeemUsd: "",
     affiliateDefaultGiftCodeId: "",
+    affiliateVndPerUsd: "",
+    affiliateCreditPlanId: "",
+    affiliateCreditDays: "",
+    affiliateBuyerBonusPercent: "",
+    affiliateBuyerBonusMaxOrders: "",
   });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [settingsRes, codesRes] = await Promise.all([
+      const [settingsRes, codesRes, plansRes] = await Promise.all([
         fetch("/api/settings", { cache: "no-store" }),
         fetch("/api/affiliates/gift-codes", { cache: "no-store" }),
+        fetch("/api/plans", { cache: "no-store" }),
       ]);
       const settings = await settingsRes.json().catch(() => ({}));
       const codeBody = await codesRes.json().catch(() => ({}));
+      const planBody = await plansRes.json().catch(() => ({}));
       if (!settingsRes.ok) throw new Error(settings.error || "Không tải được cài đặt");
       setCodes(Array.isArray(codeBody.codes) ? codeBody.codes : []);
+      setPlans(Array.isArray(planBody.plans) ? planBody.plans : []);
       setForm({
         affiliateEnabled: settings.affiliateEnabled === true,
         affiliateDefaultRatePercent: bpToPercentText(settings.affiliateDefaultRateBp),
         affiliateDefaultMaxOrders: String(settings.affiliateDefaultMaxOrders ?? ""),
         affiliateHoldDays: String(settings.affiliateHoldDays ?? ""),
         affiliateCookieDays: String(settings.affiliateCookieDays ?? ""),
-        affiliateMinWithdrawVnd: String(settings.affiliateMinWithdrawVnd ?? ""),
+        affiliateMinRedeemVnd: String(settings.affiliateMinRedeemVnd ?? ""),
         // nano-USD → USD text for the field; the save path converts back exactly.
-        affiliateMinWithdrawUsd: nanoToUsdText(settings.affiliateMinWithdrawUsdNano ?? 0),
+        affiliateMinRedeemUsd: nanoToUsdText(settings.affiliateMinRedeemUsdNano ?? 0),
         affiliateDefaultGiftCodeId: settings.affiliateDefaultGiftCodeId || "",
+        affiliateVndPerUsd: String(settings.affiliateVndPerUsd ?? ""),
+        affiliateCreditPlanId: settings.affiliateCreditPlanId || "",
+        affiliateCreditDays: String(settings.affiliateCreditDays ?? ""),
+        affiliateBuyerBonusPercent: bpToPercentText(settings.affiliateBuyerBonusBp ?? 0),
+        affiliateBuyerBonusMaxOrders: String(settings.affiliateBuyerBonusMaxOrders ?? ""),
       });
     } catch (e) {
       setError(e.message || "Không tải được cài đặt");
@@ -207,14 +215,22 @@ function SettingsTab({ onNotice }) {
       const maxOrders = parseCountInput(form.affiliateDefaultMaxOrders);
       const holdDays = parseCountInput(form.affiliateHoldDays);
       const cookieDays = parseCountInput(form.affiliateCookieDays);
-      const minVnd = parseVndInput(form.affiliateMinWithdrawVnd);
-      const usdNano = parseUsdInput(form.affiliateMinWithdrawUsd);
+      const minVnd = parseVndInput(form.affiliateMinRedeemVnd);
+      const usdNano = parseUsdInput(form.affiliateMinRedeemUsd);
+      const vndPerUsd = parseVndInput(form.affiliateVndPerUsd);
+      const creditDays = parseCountInput(form.affiliateCreditDays);
+      const buyerBonusBp = percentTextToBp(form.affiliateBuyerBonusPercent || "0");
+      const buyerMaxOrders = parseCountInput(form.affiliateBuyerBonusMaxOrders);
       const problems = [
+        [vndPerUsd === null || vndPerUsd < 1, "Tỷ giá phải là số đồng cho 1 USD, ví dụ 25000 hoặc 25.000."],
+        [creditDays === null || creditDays < 1 || creditDays > 365, "Hạn credit phải là số ngày từ 1 đến 365."],
+        [!Number.isInteger(buyerBonusBp) || buyerBonusBp < 0 || buyerBonusBp > 10000, "Quà người được giới thiệu phải từ 0 đến 100%."],
+        [buyerMaxOrders === null || buyerMaxOrders > 1000, "Số đơn được quà phải là số nguyên từ 0 đến 1000."],
         [maxOrders === null || maxOrders > 1000, "Số đơn mặc định phải là số nguyên từ 0 đến 1000."],
         [holdDays === null || holdDays > 365, "Số ngày giữ hoa hồng phải là số nguyên từ 0 đến 365."],
         [cookieDays === null || cookieDays < 1 || cookieDays > 365, "Số ngày giữ cookie phải là số nguyên từ 1 đến 365."],
-        [minVnd === null, "Rút tối thiểu (đồng) phải là số đồng, ví dụ 100000 hoặc 100.000."],
-        [usdNano === null, "Rút tối thiểu (USD) phải là số USD, ví dụ 5 hoặc 5.50."],
+        [minVnd === null, "Tối thiểu mỗi lần (đồng) phải là số đồng, ví dụ 10000 hoặc 10.000."],
+        [usdNano === null, "Tối thiểu mỗi lần (USD) phải là số USD, ví dụ 1 hoặc 1.50."],
       ];
       const problem = problems.find(([bad]) => bad);
       if (problem) {
@@ -228,9 +244,14 @@ function SettingsTab({ onNotice }) {
         affiliateDefaultMaxOrders: maxOrders,
         affiliateHoldDays: holdDays,
         affiliateCookieDays: cookieDays,
-        affiliateMinWithdrawVnd: minVnd,
-        affiliateMinWithdrawUsdNano: usdNano,
+        affiliateMinRedeemVnd: minVnd,
+        affiliateMinRedeemUsdNano: usdNano,
         affiliateDefaultGiftCodeId: form.affiliateDefaultGiftCodeId || "",
+        affiliateVndPerUsd: vndPerUsd,
+        affiliateCreditPlanId: form.affiliateCreditPlanId || "",
+        affiliateCreditDays: creditDays,
+        affiliateBuyerBonusBp: buyerBonusBp,
+        affiliateBuyerBonusMaxOrders: buyerMaxOrders,
       };
 
       const res = await fetch("/api/settings", {
@@ -301,18 +322,60 @@ function SettingsTab({ onNotice }) {
             inputMode="numeric"
           />
           <Input
-            label="Rút tối thiểu (đồng)"
-            value={form.affiliateMinWithdrawVnd}
-            onChange={(e) => setForm((f) => ({ ...f, affiliateMinWithdrawVnd: e.target.value }))}
+            label="Tối thiểu mỗi lần dùng (đồng)"
+            value={form.affiliateMinRedeemVnd}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateMinRedeemVnd: e.target.value }))}
+            hint="Mỗi lần đổi credit hoặc tạo voucher"
             inputMode="numeric"
           />
           <Input
-            label="Rút tối thiểu (USD)"
-            value={form.affiliateMinWithdrawUsd}
-            onChange={(e) => setForm((f) => ({ ...f, affiliateMinWithdrawUsd: e.target.value }))}
+            label="Tối thiểu mỗi lần dùng (USD)"
+            value={form.affiliateMinRedeemUsd}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateMinRedeemUsd: e.target.value }))}
             inputMode="decimal"
           />
+          <Input
+            label="Tỷ giá (đồng cho $1 credit)"
+            value={form.affiliateVndPerUsd}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateVndPerUsd: e.target.value }))}
+            hint="Đổi hoa hồng VND ra credit và quy đổi voucher khác đơn vị"
+            inputMode="numeric"
+          />
+          <Input
+            label="Hạn credit đổi / quà (ngày)"
+            value={form.affiliateCreditDays}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateCreditDays: e.target.value }))}
+            hint="Mỗi lần đổi là một khoản riêng với hạn riêng"
+            inputMode="numeric"
+          />
+          <Input
+            label="Quà người được giới thiệu (%)"
+            value={form.affiliateBuyerBonusPercent}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateBuyerBonusPercent: e.target.value }))}
+            hint="% credit thêm mỗi đơn; gói không giới hạn: % giảm giá. 0 = tắt"
+            inputMode="decimal"
+          />
+          <Input
+            label="Số đơn được quà (N)"
+            value={form.affiliateBuyerBonusMaxOrders}
+            onChange={(e) => setForm((f) => ({ ...f, affiliateBuyerBonusMaxOrders: e.target.value }))}
+            hint="0 = mọi đơn đã thanh toán"
+            inputMode="numeric"
+          />
         </div>
+
+        <Select
+          label="Gói khuôn cho credit (RPM, TPM, hạn mức)"
+          value={form.affiliateCreditPlanId}
+          onChange={(e) => setForm((f) => ({ ...f, affiliateCreditPlanId: e.target.value }))}
+          options={[
+            { value: "", label: "Chưa chọn — tắt đổi credit và quà credit" },
+            ...plans.map((plan) => ({
+              value: plan.id,
+              label: `${plan.name || plan.code}${plan.rpm ? ` · ${plan.rpm} RPM` : ""}${plan.tpm ? ` · ${plan.tpm} TPM` : ""}${plan.isActive ? "" : " (ẩn)"}`,
+            })),
+          ]}
+        />
 
         <Select
           label="Mã quà tặng chào mừng mặc định"
@@ -352,6 +415,10 @@ function SettingsTab({ onNotice }) {
         </p>
         <p className="text-sm leading-6 text-text-muted">
           Chỉ chọn được mã người mới (bắt buộc liên kết Telegram) làm quà giới thiệu.
+        </p>
+        <p className="text-sm leading-6 text-text-muted">
+          Hoa hồng không rút ra tiền mặt. CTV đổi thành credit (theo tỷ giá, giới hạn tốc độ của gói khuôn,
+          mỗi lần một khoản có hạn riêng) hoặc tạo voucher dùng một lần để trừ vào giá gói khi thanh toán.
         </p>
       </aside>
     </section>
@@ -509,6 +576,8 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
 function AffiliateModal({ row, onClose, onSaved, onError }) {
   const [ratePercent, setRatePercent] = useState(row.rateBp == null ? "" : bpToPercentText(row.rateBp));
   const [maxOrders, setMaxOrders] = useState(row.maxOrders == null ? "" : String(row.maxOrders));
+  const [buyerPercent, setBuyerPercent] = useState(row.buyerBonusBp == null ? "" : bpToPercentText(row.buyerBonusBp));
+  const [buyerMaxOrders, setBuyerMaxOrders] = useState(row.buyerBonusMaxOrders == null ? "" : String(row.buyerBonusMaxOrders));
   const [giftCodeId, setGiftCodeId] = useState(row.giftCodeId || "");
   const [status, setStatus] = useState(row.status || "active");
   const [adminNote, setAdminNote] = useState(row.adminNote || "");
@@ -541,11 +610,27 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
       }
     }
 
+    const buyerBp = buyerPercent.trim() === "" ? null : percentTextToBp(buyerPercent);
+    if (buyerPercent.trim() !== "" && (!Number.isInteger(buyerBp) || buyerBp < 0 || buyerBp > 10000)) {
+      setError("Quà người được giới thiệu phải từ 0 đến 100%.");
+      return;
+    }
+    let buyerMaxValue = null;
+    if (buyerMaxOrders.trim() !== "") {
+      buyerMaxValue = parseCountInput(buyerMaxOrders);
+      if (buyerMaxValue === null || buyerMaxValue > 1000) {
+        setError("Số đơn được quà phải là số nguyên từ 0 đến 1000.");
+        return;
+      }
+    }
+
     // Only what the admin changed. Re-sending an untouched gift override that has
     // since expired made the server refuse the whole save, blocking included.
     const patch = {};
     if (rateBp !== (row.rateBp ?? null)) patch.rateBp = rateBp;
     if (maxOrdersValue !== (row.maxOrders ?? null)) patch.maxOrders = maxOrdersValue;
+    if (buyerBp !== (row.buyerBonusBp ?? null)) patch.buyerBonusBp = buyerBp;
+    if (buyerMaxValue !== (row.buyerBonusMaxOrders ?? null)) patch.buyerBonusMaxOrders = buyerMaxValue;
     if ((giftCodeId || null) !== (row.giftCodeId || null)) patch.giftCodeId = giftCodeId || null;
     if (status !== (row.status || "active")) patch.status = status;
     if ((adminNote.trim() || null) !== (row.adminNote || null)) patch.adminNote = adminNote;
@@ -637,6 +722,22 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
           value={maxOrders}
           onChange={(e) => setMaxOrders(e.target.value)}
           placeholder={`mặc định ${row.effective.maxOrders}`}
+          inputMode="numeric"
+          hint="0 = mọi đơn"
+        />
+        <Input
+          label="Quà người được giới thiệu riêng (%)"
+          value={buyerPercent}
+          onChange={(e) => setBuyerPercent(e.target.value)}
+          placeholder="theo mặc định"
+          inputMode="decimal"
+          hint="% credit thêm mỗi đơn; gói không giới hạn: % giảm giá"
+        />
+        <Input
+          label="Số đơn được quà riêng"
+          value={buyerMaxOrders}
+          onChange={(e) => setBuyerMaxOrders(e.target.value)}
+          placeholder="theo mặc định"
           inputMode="numeric"
           hint="0 = mọi đơn"
         />
@@ -817,33 +918,35 @@ function CommissionsTab() {
   );
 }
 
-// ── Withdrawals ───────────────────────────────────────────────────────────
+// ── Vouchers ──────────────────────────────────────────────────────────────
 
-function WithdrawalsTab({ onNotice }) {
+const VOUCHER_STATUS = {
+  active: { label: "Chưa dùng", tone: "success" },
+  used: { label: "Đã dùng", tone: "neutral" },
+  cancelled: { label: "Đã hủy", tone: "danger" },
+};
+
+function VouchersTab() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [deciding, setDeciding] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({
-        limit: String(PAGE_SIZE),
-        offset: String((page - 1) * PAGE_SIZE),
-      });
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) });
       if (status) params.set("status", status);
-      const res = await fetch(`/api/affiliates/withdrawals?${params.toString()}`, { cache: "no-store" });
+      const res = await fetch(`/api/affiliates/vouchers?${params.toString()}`, { cache: "no-store" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Không tải được lệnh rút");
-      setRows(Array.isArray(body.withdrawals) ? body.withdrawals : []);
+      if (!res.ok) throw new Error(body.error || "Không tải được voucher");
+      setRows(Array.isArray(body.vouchers) ? body.vouchers : []);
       setTotal(Number(body.total) || 0);
     } catch (e) {
-      setError(e.message || "Không tải được lệnh rút");
+      setError(e.message || "Không tải được voucher");
       setRows([]);
     } finally {
       setLoading(false);
@@ -863,9 +966,9 @@ function WithdrawalsTab({ onNotice }) {
           onChange={(e) => { setStatus(e.target.value); setPage(1); }}
           options={[
             { value: "", label: "Tất cả" },
-            { value: "pending", label: "Chờ xử lý" },
-            { value: "paid", label: "Đã chuyển" },
-            { value: "rejected", label: "Từ chối" },
+            { value: "active", label: "Chưa dùng" },
+            { value: "used", label: "Đã dùng" },
+            { value: "cancelled", label: "Đã hủy" },
           ]}
         />
         <Button variant="secondary" onClick={load} icon="refresh">Tải lại</Button>
@@ -877,36 +980,31 @@ function WithdrawalsTab({ onNotice }) {
         <CardSkeleton />
       ) : rows.length === 0 ? (
         <p className="border border-dashed border-border px-6 py-12 text-center text-sm text-text-muted">
-          Không có lệnh rút nào ở trạng thái này.
+          Chưa có voucher nào.
         </p>
       ) : (
         <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[960px] border-collapse text-left">
+          <table className="w-full min-w-[900px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2">
-                {["Ngày", "CTV", "Số tiền", "Nhận về", "Trạng thái", "Ghi chú", ""].map((label) => (
+                {["Ngày tạo", "Mã", "CTV", "Giá trị", "Trạng thái", "Người dùng", "Đơn", "Lúc dùng"].map((label) => (
                   <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
-                const state = WITHDRAWAL_STATUS[row.status] || { label: row.status, tone: "neutral" };
+                const state = VOUCHER_STATUS[row.status] || { label: row.status, tone: "neutral" };
                 return (
                   <tr key={row.id} className="border-b border-border last:border-b-0">
                     <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.createdAt)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.email || "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.code}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.ownerEmail || row.ownerUserId}</td>
                     <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[11px] text-text-muted">
-                      <DestinationText destination={row.destination} />
-                    </td>
                     <td className="px-4 py-2.5 whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></td>
-                    <td className="px-4 py-2.5 text-xs text-text-muted">{row.adminNote || row.txRef || "—"}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {row.status === "pending" ? (
-                        <Button size="sm" variant="secondary" onClick={() => setDeciding(row)}>Xử lý</Button>
-                      ) : null}
-                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedByEmail || "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedOrderId ? row.usedOrderId.slice(0, 8) : "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.usedAt)}</td>
                   </tr>
                 );
               })}
@@ -917,136 +1015,13 @@ function WithdrawalsTab({ onNotice }) {
 
       {total > PAGE_SIZE && (
         <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} lệnh · trang {page}/{totalPages}</p>
+          <p className="font-mono text-[11px] text-text-muted">{total} dòng · trang {page}/{totalPages}</p>
           <div className="flex gap-2">
             <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
             <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
           </div>
         </div>
       )}
-
-      {deciding && (
-        <WithdrawalModal
-          row={deciding}
-          onClose={() => setDeciding(null)}
-          onDone={(text) => {
-            setDeciding(null);
-            onNotice({ tone: "ok", text });
-            load();
-          }}
-          onError={(text) => onNotice({ tone: "error", text })}
-        />
-      )}
     </section>
-  );
-}
-
-/** The destination snapshot, as the operator needs to make the transfer. */
-function DestinationText({ destination }) {
-  const parsed = useMemo(() => {
-    try {
-      return JSON.parse(destination) || {};
-    } catch {
-      return {};
-    }
-  }, [destination]);
-  if (parsed.bankName) {
-    return (
-      <span>
-        {parsed.bankName} · {parsed.accountNumber} · {parsed.accountName}
-      </span>
-    );
-  }
-  if (parsed.address) {
-    return <span>{parsed.network || "USDT"} · {parsed.address}</span>;
-  }
-  return <span>—</span>;
-}
-
-function WithdrawalModal({ row, onClose, onDone, onError }) {
-  const [txRef, setTxRef] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-
-  const decide = async (action) => {
-    setError("");
-    if (action === "paid" && !txRef.trim()) {
-      setError("Nhập mã giao dịch chuyển khoản.");
-      return;
-    }
-    if (action === "rejected" && reason.trim().length < 3) {
-      setError("Nhập lý do từ chối (ít nhất 3 ký tự).");
-      return;
-    }
-    setBusy(action);
-    try {
-      const res = await fetch(`/api/affiliates/withdrawals/${row.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, txRef: txRef.trim() || undefined, reason: reason.trim() || undefined }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        onError("Lệnh rút này đã được xử lý ở nơi khác. Số dư không thay đổi.");
-        onClose();
-        return;
-      }
-      if (!res.ok) {
-        setError(body.error || "Không xử lý được lệnh rút");
-        return;
-      }
-      onDone(action === "paid" ? "Đã đánh dấu lệnh rút là đã chuyển." : "Đã từ chối và hoàn số tiền vào ví.");
-    } catch {
-      setError("Không kết nối được máy chủ");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  return (
-    <Modal
-      isOpen
-      onClose={onClose}
-      title={`Lệnh rút ${money(row.currency, row.amount)}`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={Boolean(busy)}>Hủy</Button>
-          <Button variant="secondary" onClick={() => decide("rejected")} loading={busy === "rejected"}>Từ chối</Button>
-          <Button onClick={() => decide("paid")} loading={busy === "paid"}>Đã chuyển</Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <dl className="grid gap-2 text-sm">
-          <div className="flex justify-between gap-3">
-            <dt className="text-text-muted">CTV</dt>
-            <dd className="font-mono text-[12px] text-text-main">{row.email || row.userId}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-text-muted">Nhận về</dt>
-            <dd className="text-right font-mono text-[11px] text-text-main"><DestinationText destination={row.destination} /></dd>
-          </div>
-        </dl>
-        <Input
-          label="Mã giao dịch chuyển khoản"
-          value={txRef}
-          onChange={(e) => setTxRef(e.target.value)}
-          hint="Bắt buộc khi đánh dấu đã chuyển. Tối đa 200 ký tự."
-        />
-        <Input
-          label="Lý do từ chối"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          hint="Bắt buộc khi từ chối. Số tiền được hoàn vào ví ngay."
-        />
-        {error && (
-          <p role="alert" className="flex items-center gap-1 text-[11px] text-danger">
-            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
-            {error}
-          </p>
-        )}
-      </div>
-    </Modal>
   );
 }
