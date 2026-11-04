@@ -304,7 +304,7 @@ export default function KeysPageClient({ publicBaseUrl = "" }) {
   return (
     <Page
       title="API key"
-      description="Dùng key này để gọi model trong nhóm của bạn. Chỉ bạn xem được key, khi đã đăng nhập."
+      description="Dùng key này để gọi model trong nhóm của bạn. Key chỉ hiện khi bạn đã đăng nhập; quản trị viên có thể sao chép key để hỗ trợ và mỗi lần đều được ghi nhật ký."
       actions={createAction}
     >
       <Section title="Kết nối" description="Trỏ client OpenAI hoặc Claude tới địa chỉ này.">

@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
- * GET /api/users/[id]/keys — the customer's keys, with prefix (never the secret),
+ * GET /api/users/[id]/keys — the customer's keys, with prefix (the secret only via
+ * POST …/keys/[keyId]/secret, audited),
  * creation date, status and last use (spec admin-user-management, `API key` tab).
  *
  * "Last use" is the latest usage row attributed to the key, which is the only
