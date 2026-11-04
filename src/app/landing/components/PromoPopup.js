@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import PropTypes from "prop-types";
 import {
   giftPageHref,
@@ -115,29 +116,58 @@ PromoPopupDialog.propTypes = {
 };
 
 /**
- * Landing-page popup (spec promo-popup): opens after the configured delay unless
- * this version was dismissed recently; Esc, the close button or the backdrop
- * dismiss it. Clicking the code copies it and remembers it for the gift page.
+ * Promotional popup (spec promo-popup), mounted on the landing page, /register,
+ * /docs and the /account area of new accounts. Opens after the configured delay
+ * unless this version was closed less than `repeatMinutes` ago; Esc, the close
+ * button or the backdrop close it. Clicking the code copies it and remembers it
+ * for the gift page.
+ *
+ * `hideOn` lists path prefixes where it must not open (the gift page itself:
+ * the code is already prefilled there).
  */
-export default function PromoPopup({ copy, signedIn = false }) {
+export default function PromoPopup({ copy, signedIn = false, hideOn = [], eligibilityUrl = null }) {
   const popup = readPromoPopup(copy);
-  const live = popup.enabled && Boolean(popup.title || popup.body || popup.code);
+  const pathname = usePathname() || "";
+  const hidden = hideOn.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  const live = !hidden && popup.enabled && Boolean(popup.title || popup.body || popup.code);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const dialogRef = useRef(null);
   const lastFocus = useRef(null);
-  const { version, delaySec, repeatDays } = popup;
+  const { version, delaySec, repeatMinutes } = popup;
 
+  // Re-armed on every route change (`pathname`) while closed: in the account
+  // area the layout stays mounted while the customer moves between pages, and
+  // the popup must be able to come back once the repeat window has passed.
+  //
+  // `eligibilityUrl` (account area): the audience is re-checked with the server
+  // right before opening, because redeeming the code or buying a plan happens
+  // while this component stays mounted with the answer it was rendered with.
   useEffect(() => {
-    if (!live) return undefined;
-    if (isPopupDismissed(readPopupDismissal(), version, repeatDays)) return undefined;
-    const timer = setTimeout(() => {
+    if (!live || open) return undefined;
+    if (isPopupDismissed(readPopupDismissal(), version, repeatMinutes)) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (eligibilityUrl) {
+        try {
+          const res = await fetch(eligibilityUrl, { cache: "no-store" });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body.eligible !== true) return;
+        } catch {
+          return; // unknown = do not interrupt the customer
+        }
+      }
+      if (cancelled) return;
       lastFocus.current = document.activeElement;
       setOpen(true);
     }, delaySec * 1000);
-    return () => clearTimeout(timer);
-  }, [live, version, delaySec, repeatDays]);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [live, open, version, delaySec, repeatMinutes, pathname, eligibilityUrl]);
+
+  // Shown only while it may be: moving to a hidden path (the gift page) drops it
+  // and everything tied to it (scroll lock, key handling) without a state update.
+  const visible = live && open;
 
   const close = useCallback(() => {
     setOpen(false);
@@ -146,7 +176,7 @@ export default function PromoPopup({ copy, signedIn = false }) {
   }, [version]);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!visible) return undefined;
     const node = dialogRef.current;
     node?.querySelector("button, a")?.focus();
     const onKey = (event) => {
@@ -167,7 +197,7 @@ export default function PromoPopup({ copy, signedIn = false }) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, close]);
+  }, [visible, close]);
 
   const onCopy = async () => {
     savePendingGiftCode(popup.code);
@@ -176,8 +206,7 @@ export default function PromoPopup({ copy, signedIn = false }) {
     setCopyFailed(!ok);
   };
 
-  // Acting on the offer counts as seeing it: it should not reopen on the next
-  // visit for someone who already took it.
+  // Acting on the offer counts as closing it, for the same repeat window.
   const onFollow = () => {
     if (popup.code) savePendingGiftCode(popup.code);
     savePopupDismissal(version);
@@ -185,13 +214,13 @@ export default function PromoPopup({ copy, signedIn = false }) {
 
   // The page behind must not scroll while the dialog is open.
   useEffect(() => {
-    if (!open) return undefined;
+    if (!visible) return undefined;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previous; };
-  }, [open]);
+  }, [visible]);
 
-  if (!live || !open) return null;
+  if (!visible) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -222,4 +251,6 @@ export default function PromoPopup({ copy, signedIn = false }) {
 PromoPopup.propTypes = {
   copy: PropTypes.object.isRequired,
   signedIn: PropTypes.bool,
+  hideOn: PropTypes.arrayOf(PropTypes.string),
+  eligibilityUrl: PropTypes.string,
 };

@@ -6,9 +6,11 @@
 // the register form and the gift page import it client-side, tests under Node.
 
 export const DEFAULT_DELAY_SEC = 3;
-export const DEFAULT_REPEAT_DAYS = 3;
+// Closing the popup only hides it for a short while (owner request: it must keep
+// coming back, not vanish for days). 0 = show again on every page load.
+export const DEFAULT_REPEAT_MINUTES = 5;
 export const MAX_DELAY_SEC = 120;
-export const MAX_REPEAT_DAYS = 365;
+export const MAX_REPEAT_MINUTES = 7 * 24 * 60;
 
 /** localStorage key holding `{ code, at }` between the popup and the gift page. */
 export const PENDING_GIFT_KEY = "derouter:pendingGiftCode";
@@ -32,13 +34,13 @@ export function popupFieldError(key, value) {
   if (key === "popupCode" && text.trim() && !/^[A-Za-z0-9-]+$/.test(text.trim())) {
     return "Popup: mã chỉ gồm chữ, số và dấu gạch ngang";
   }
-  if (key === "popupDelaySec" || key === "popupRepeatDays") {
-    const max = key === "popupDelaySec" ? MAX_DELAY_SEC : MAX_REPEAT_DAYS;
+  if (key === "popupDelaySec" || key === "popupRepeatMinutes") {
+    const max = key === "popupDelaySec" ? MAX_DELAY_SEC : MAX_REPEAT_MINUTES;
     const trimmed = text.trim();
     if (trimmed && (!/^\d+$/.test(trimmed) || Number(trimmed) > max)) {
       return key === "popupDelaySec"
         ? `Popup: thời gian chờ là số giây từ 0 đến ${max}`
-        : `Popup: số ngày hiện lại là số từ 0 đến ${max}`;
+        : `Popup: số phút hiện lại là số từ 0 đến ${max}`;
     }
   }
   return null;
@@ -81,7 +83,7 @@ export function readPromoPopup(copy = {}) {
     code,
     cta: cta || (code ? "Đăng ký nhận ưu đãi" : "Đăng ký ngay"),
     delaySec: boundedInt(copy.popupDelaySec, DEFAULT_DELAY_SEC, MAX_DELAY_SEC),
-    repeatDays: boundedInt(copy.popupRepeatDays, DEFAULT_REPEAT_DAYS, MAX_REPEAT_DAYS),
+    repeatMinutes: boundedInt(copy.popupRepeatMinutes, DEFAULT_REPEAT_MINUTES, MAX_REPEAT_MINUTES),
     version: hashText(`${title}\n${body}\n${code}\n${cta}`),
   };
 }
@@ -112,13 +114,16 @@ export function promoTargetHref(code, { signedIn = false } = {}) {
   return signedIn ? gift : `/register?next=${encodeURIComponent(gift)}`;
 }
 
-/** True when a dismissal of this popup version is still in force. */
-export function isPopupDismissed(record, version, repeatDays, now = Date.now()) {
+/**
+ * True when a dismissal of this popup version is still in force: closed less
+ * than `repeatMinutes` ago. 0 = never in force (shown on every page load).
+ */
+export function isPopupDismissed(record, version, repeatMinutes, now = Date.now()) {
   if (!record || record.version !== version) return false;
   const at = Number(record.at);
   if (!Number.isFinite(at)) return false;
-  if (repeatDays <= 0) return false;
-  return now - at < repeatDays * 24 * 60 * 60 * 1000;
+  if (repeatMinutes <= 0) return false;
+  return now - at < repeatMinutes * 60 * 1000;
 }
 
 // ── Browser storage (every access guarded: private mode and blocked storage throw) ──

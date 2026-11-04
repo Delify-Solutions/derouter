@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listDocsBySection } from "@/lib/db/repos/contentRepo.js";
 import DocsNav from "./components/DocsNav";
+import PromoPopupSlot from "@/app/landing/components/PromoPopupSlot";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export default async function DocsIndexPage() {
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
       <DocsNav groups={groups} />
+      <PromoPopupSlot />
 
       <main className="shell py-12">
         <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Tài liệu</h1>

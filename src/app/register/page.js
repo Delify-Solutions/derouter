@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import RegisterForm from "./components/RegisterForm";
+import PromoPopupSlot from "@/app/landing/components/PromoPopupSlot";
 import { getAdapter } from "@/lib/db/driver.js";
 import { REF_COOKIE } from "@/lib/affiliate/constants.js";
 import { resolveFirstReferralSync } from "@/lib/affiliate/core.js";
@@ -51,6 +52,7 @@ export default async function RegisterPage({ searchParams }) {
   return (
     <Suspense fallback={<div className="h-40" />}>
       <RegisterForm referral={referral} />
+      <PromoPopupSlot />
     </Suspense>
   );
 }
