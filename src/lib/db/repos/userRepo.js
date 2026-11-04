@@ -55,6 +55,10 @@ function rowToUser(row) {
     telegramUserId: row.telegramUserId ?? null,
     telegramUsername: row.telegramUsername ?? null,
     telegramLinkedAt: row.telegramLinkedAt ?? null,
+    // Referral attribution (spec affiliate-program). Customer routes build their
+    // payload field by field, so this reaches the admin screens only.
+    referredByUserId: row.referredByUserId ?? null,
+    referredAt: row.referredAt ?? null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
     lastLoginAt: row.lastLoginAt ?? null,
@@ -142,8 +146,21 @@ export async function listUsers() {
 /**
  * Create a customer. `groupId` defaults to resolveDefaultGroupId(); `status`
  * defaults to `unverified` when email verification is switched on.
+ *
+ * `referredByUserId` is written in the same INSERT as the account (spec
+ * affiliate-program "Registration records the referrer"): a code can only ever
+ * bind an account that does not exist yet. The caller has already validated the
+ * referrer, but it is re-checked here so a user id that vanished between the two
+ * writes cannot leave a dangling reference.
  */
-export async function createUser({ email, passwordHash, displayName = null, groupId, status } = {}) {
+export async function createUser({
+  email,
+  passwordHash,
+  displayName = null,
+  groupId,
+  status,
+  referredByUserId = null,
+} = {}) {
   const value = normalizeEmail(email);
   if (!value) throw new Error("email is required");
   if (!passwordHash) throw new Error("passwordHash is required");
@@ -170,24 +187,40 @@ export async function createUser({ email, passwordHash, displayName = null, grou
   }
 
   const now = new Date().toISOString();
+  const id = uuidv4();
+
+  // Re-validate the referrer inside the same connection that writes the account:
+  // it must exist and must not be the account itself.
+  let referrerId = null;
+  if (referredByUserId && referredByUserId !== id) {
+    const referrer = db.get(`SELECT id FROM users WHERE id = ?`, [referredByUserId]);
+    if (referrer) referrerId = referrer.id;
+  }
+
   const user = {
-    id: uuidv4(),
+    id,
     email: value,
     passwordHash,
     displayName: displayName ? String(displayName).trim() || null : null,
     groupId: resolvedGroupId,
     status: resolvedStatus,
     overdraftNanoUsd: 0,
+    referredByUserId: referrerId,
+    referredAt: referrerId ? now : null,
     createdAt: now,
     updatedAt: now,
     lastLoginAt: null,
   };
 
   db.run(
-    `INSERT INTO users(id, email, passwordHash, displayName, groupId, status, overdraftNanoUsd, createdAt, updatedAt, lastLoginAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users(
+       id, email, passwordHash, displayName, groupId, status, overdraftNanoUsd,
+       referredByUserId, referredAt, createdAt, updatedAt, lastLoginAt
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user.id, user.email, user.passwordHash, user.displayName, user.groupId,
-      user.status, user.overdraftNanoUsd, user.createdAt, user.updatedAt, user.lastLoginAt,
+      user.status, user.overdraftNanoUsd, user.referredByUserId, user.referredAt,
+      user.createdAt, user.updatedAt, user.lastLoginAt,
     ]
   );
 
@@ -298,6 +331,30 @@ export async function deleteUser(id, { actor = "system" } = {}) {
     db.run(`DELETE FROM userPlans WHERE userId = ?`, [id]);
     db.run(`DELETE FROM creditLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM giftRedemptions WHERE userId = ?`, [id]);
+    // Request logs keep the owner snapshotted at request time so a deleted KEY
+    // still names its customer. A deleted ACCOUNT must not: drop the snapshot
+    // (columns and the email inside the stored record), as it was before the
+    // snapshot existed.
+    db.run(
+      `UPDATE requestDetails SET userId = NULL, apiKeyId = NULL, data = json_remove(data, '$.owner') WHERE userId = ?`,
+      [id]
+    );
+    // Affiliate program (design D10): the code, the wallet and the payout details
+    // go with the account. Withdrawals and commissions are KEPT for accounting —
+    // the withdrawal keeps the email it was requested under, so the row stays
+    // readable once the account is gone.
+    db.run(`UPDATE affiliateWithdrawals SET emailSnapshot = COALESCE(emailSnapshot, ?) WHERE userId = ?`, [email, id]);
+    // A withdrawal still pending would otherwise stay actionable: "paid" would send
+    // money to an account that no longer exists, "rejected" would write a ledger
+    // row for a wallet that is gone. Close it here, with the reason on the row.
+    db.run(
+      `UPDATE affiliateWithdrawals
+          SET status = 'rejected', adminNote = 'Tài khoản đã bị xóa', decidedBy = ?, decidedAt = ?
+        WHERE userId = ? AND status = 'pending'`,
+      [actor, new Date().toISOString(), id]
+    );
+    db.run(`DELETE FROM affiliateLedger WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM affiliates WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userAuditLog WHERE userId = ?`, [id]);
     db.run(`DELETE FROM users WHERE id = ?`, [id]);
 

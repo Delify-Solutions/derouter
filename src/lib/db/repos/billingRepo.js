@@ -43,6 +43,9 @@ import {
   orderLimits,
   rowToOrder,
 } from "../../billing/orders.js";
+// Refund reverses the commission its order earned (design D4); both run inside
+// refundOrder's transaction so money and commission cannot disagree.
+import { reverseCommissionForOrderSync } from "../../affiliate/commission.js";
 import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
 import { quoteTopup, topupBounds } from "../../billing/topup.js";
@@ -883,16 +886,35 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
   return getOrderById(order.id);
 }
 
-export async function updateOrderStatus(id, { status, approvedBy = null, adminNote = null } = {}) {
+/**
+ * Set an order's status (and optionally its approver / note).
+ *
+ * `fromStatus` makes the write conditional: it only applies while the order is
+ * still in that status. Routes read the order, await, then write; without the
+ * guard a payment approved in between (gateway poller / webhook) could be
+ * overwritten — a paid order turned `cancelled` keeps its plan and its affiliate
+ * commission but can never be refunded. `changed` reports whether it applied.
+ *
+ * @returns {Promise<object|null>} the order (with `changed`), or null when missing
+ */
+export async function updateOrderStatus(id, { status, approvedBy = null, adminNote = null, fromStatus = null } = {}) {
   if (!status) throw new Error("updateOrderStatus requires a status");
   const db = await getAdapter();
   const row = db.get(`SELECT * FROM orders WHERE id = ?`, [id]);
   if (!row) return null;
-  db.run(
-    `UPDATE orders SET status = ?, approvedBy = COALESCE(?, approvedBy), adminNote = COALESCE(?, adminNote) WHERE id = ?`,
-    [status, approvedBy, adminNote, id]
-  );
-  return getOrderById(id);
+  const result = fromStatus
+    ? db.run(
+        `UPDATE orders SET status = ?, approvedBy = COALESCE(?, approvedBy), adminNote = COALESCE(?, adminNote)
+          WHERE id = ? AND status = ?`,
+        [status, approvedBy, adminNote, id, fromStatus]
+      )
+    : db.run(
+        `UPDATE orders SET status = ?, approvedBy = COALESCE(?, approvedBy), adminNote = COALESCE(?, adminNote) WHERE id = ?`,
+        [status, approvedBy, adminNote, id]
+      );
+  const changed = !(result && typeof result.changes === "number" && result.changes === 0);
+  const order = await getOrderById(id);
+  return order ? { ...order, changed } : null;
 }
 
 /**
@@ -937,7 +959,7 @@ export async function refundOrder(id, { adminId = null, adminNote = null } = {})
     const row = db.get(`SELECT * FROM orders WHERE id = ?`, [id]);
     if (!row) return null;
     if (row.status === "refunded") {
-      return { alreadyRefunded: true, order: rowToOrder(row), userPlan: null, refundedNanoUsd: 0 };
+      return { alreadyRefunded: true, order: rowToOrder(row), userPlan: null, refundedNanoUsd: 0, commissionReversed: null };
     }
     if (row.status !== "paid") {
       throw new Error(`Cannot refund an order in status "${row.status}"`);
@@ -976,11 +998,21 @@ export async function refundOrder(id, { adminId = null, adminNote = null } = {})
       });
     }
 
+    // The commission this order earned goes away with the money (spec
+    // "Refund reverses commission"): a held one never pays, an already released
+    // one becomes a negative wallet entry. Same transaction as the refund.
+    const commission = reverseCommissionForOrderSync(db, id, {
+      now: at,
+      actor: adminId ? `admin:${adminId}` : "admin",
+      reason: adminNote ?? null,
+    });
+
     return {
       alreadyRefunded: false,
       order: rowToOrder(db.get(`${ORDER_SELECT} WHERE o.id = ?`, [id])),
       userPlan: null,
       refundedNanoUsd,
+      commissionReversed: commission.reversed ? commission.row : null,
     };
   });
 }

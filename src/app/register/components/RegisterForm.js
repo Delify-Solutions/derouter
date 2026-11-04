@@ -9,7 +9,37 @@ import { safeNext } from "@/shared/utils/safeNext";
 import AuthShell, { FormError, FormNotice } from "@/app/login/components/AuthShell";
 import { giftPageHref, readPendingGiftCode } from "@/shared/utils/promoPopup.js";
 
-export default function RegisterForm() {
+/**
+ * The referral banner (spec account-registration "Register page shows the referral
+ * welcome gift"). It names the CODE, never the affiliate: the referrer's address is
+ * not the visitor's business, and the code is what the gift page will ask for.
+ */
+function ReferralBanner({ referral }) {
+  if (!referral?.code) return null;
+  return (
+    <div
+      className="border border-brand-500/30 bg-brand-500/10 px-3 py-3 text-sm text-brand-700 dark:text-brand-400"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">group_add</span>
+        Bạn được giới thiệu
+      </p>
+      {referral.giftCode ? (
+        <>
+          <p className="mt-2 text-text-muted">
+            Mã quà tặng chào mừng:{" "}
+            <code className="font-mono font-medium text-text-main">{referral.giftCode}</code>
+          </p>
+          <p className="mt-1 text-text-muted">
+            Mã này cần liên kết Telegram. Sau khi đăng ký, nhập mã ở trang “Mã quà tặng”.
+          </p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export default function RegisterForm({ referral = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Carried through signup → verification mail → verify-email page → login, so a
@@ -46,6 +76,9 @@ export default function RegisterForm() {
           displayName: displayName.trim() || undefined,
           // The API validates it again; only the verification mail carries it.
           ...(nextTarget ? { next: nextTarget } : {}),
+          // The code the banner displayed (spec: "The register form SHALL send the
+          // code it displayed as ref"). An invalid one simply binds nobody.
+          ...(referral?.code ? { ref: referral.code } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -129,6 +162,7 @@ export default function RegisterForm() {
       }
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <ReferralBanner referral={referral} />
         <FormError message={error} />
         <Input
           label="Email"

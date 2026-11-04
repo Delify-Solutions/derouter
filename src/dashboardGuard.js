@@ -53,7 +53,9 @@ const PUBLIC_API_PATHS = [
 // /telegram/link is the Telegram Mini App page (spec telegram-link): it runs
 // inside Telegram without our cookie and authenticates through Telegram's
 // signature, checked by POST /api/public/telegram/link.
-const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email", "/docs", "/telegram/link"];
+// `/r/<CODE>` is the affiliate referral link (spec affiliate-program "Referral
+// link redirect"): a visitor clicking it has neither a session nor an account.
+const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email", "/docs", "/telegram/link", "/r"];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.

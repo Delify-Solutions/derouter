@@ -1682,7 +1682,7 @@ export async function deleteKeyUsageHistory(apiKey) {
   db.transaction(() => {
     const h = db.run(`DELETE FROM usageHistory WHERE ${keyFilter.cond}`, keyFilter.params);
     history = h.changes || 0;
-    // requestDetails has no apiKeyId column — only its raw-key rows exist.
+    // By raw key: rows written before requestDetails.apiKeyId existed have only that.
     const d = db.run(`DELETE FROM requestDetails WHERE apiKey = ?`, [apiKey]);
     details = d.changes || 0;
     // Invalidate any in-memory stats snapshot so the next read recomputes.

@@ -15,6 +15,10 @@ import { grantUserPlan } from "./grants.js";
 import { nano } from "./ledger.js";
 import { parseLimits, serializeLimits } from "./limits.js";
 import { parseJson } from "../db/helpers/jsonCol.js";
+// Commission accrual (design D2). Synchronous and driver-free, so it can run
+// inside this function's transaction: an approval and its commission commit or
+// roll back together, on every approval path alike.
+import { accrueCommissionSync } from "../affiliate/commission.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -156,6 +160,8 @@ export function approveOrderSync(db, orderId, {
       userPlan: null,
       appliedToOverdraftNanoUsd: 0,
       paidAt: row.paidAt ?? null,
+      // A repeat approval never accrues: exactly one commission per order.
+      commission: null,
     };
   }
 
@@ -183,6 +189,7 @@ export function approveOrderSync(db, orderId, {
       userPlan: null,
       appliedToOverdraftNanoUsd: 0,
       paidAt: current?.paidAt ?? null,
+      commission: null,
     };
   }
 
@@ -204,6 +211,13 @@ export function approveOrderSync(db, orderId, {
     now: paidAt,
   });
 
+  // Commission for the buyer's referrer (spec affiliate-program "Commission
+  // accrues when a referred order is paid"). Only on this path: an already
+  // approved order returned above and never reaches it, and `orderId` UNIQUE
+  // makes a lost race a no-op even if the driver ever ran these statements
+  // outside the serialized write path.
+  const commission = accrueCommissionSync(db, row, { now: paidAt });
+
   return {
     alreadyApproved: false,
     order: rowToOrder(getOrderRowSync(db, orderId)),
@@ -211,6 +225,7 @@ export function approveOrderSync(db, orderId, {
     userPlans: granted.userPlans,
     appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
     paidAt,
+    commission: commission ?? null,
   };
 }
 

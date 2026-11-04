@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { keyOwnerSnapshotSync } from "./apiKeysRepo.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -97,6 +98,13 @@ async function flushToDatabase() {
       const config = await getObservabilityConfig();
 
       db.transaction(() => {
+        // One owner lookup per distinct key per flush.
+        const owners = new Map();
+        const ownerOf = (key) => {
+          if (!key) return null;
+          if (!owners.has(key)) owners.set(key, keyOwnerSnapshotSync(db, key));
+          return owners.get(key);
+        };
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
           if (!item.timestamp) item.timestamp = new Date().toISOString();
@@ -121,11 +129,18 @@ async function flushToDatabase() {
             providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
             response: truncateField(item.response, config.maxJsonSize),
             pxpipe: item.pxpipe || undefined,
+            // Who owned the key when the request ran (see the requestDetails
+            // columns): the admin view still names the customer after the key
+            // is deleted.
+            owner: ownerOf(item.apiKey) || undefined,
           };
 
           db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, apiKey, status, data) VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, apiKey = excluded.apiKey, status = excluded.status, data = excluded.data`,
-            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.apiKey, record.status, stringifyJson(record)]
+            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, apiKey, status, data, userId, apiKeyId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, apiKey = excluded.apiKey, status = excluded.status, data = excluded.data, userId = excluded.userId, apiKeyId = excluded.apiKeyId`,
+            [
+              record.id, record.timestamp, record.provider, record.model, record.connectionId, record.apiKey,
+              record.status, stringifyJson(record), record.owner?.userId ?? null, record.owner?.apiKeyId ?? null,
+            ]
           );
         }
 
@@ -174,7 +189,13 @@ export async function getRequestDetails(filter = {}) {
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.apiKey) { conds.push("apiKey = ?"); params.push(filter.apiKey); }
   // Every key a customer owns (spec admin-user-management "Request details show the key owner").
-  if (filter.userId) { conds.push("apiKey IN (SELECT key FROM apiKeys WHERE userId = ?)"); params.push(filter.userId); }
+  // Rows carry the owner snapshotted at request time, so a deleted key's requests
+  // stay listed; rows written before the snapshot existed fall back to the live
+  // key list.
+  if (filter.userId) {
+    conds.push("(userId = ? OR (userId IS NULL AND apiKey IN (SELECT key FROM apiKeys WHERE userId = ?)))");
+    params.push(filter.userId, filter.userId);
+  }
   // Status filter: empty/full status value → exact match (e.g. "429"); a single
   // leading digit ("2","4","5") → prefix match so selecting "4xx" shows every
   // 4xx row. Non-numeric statuses ("error","ok") fall through to exact match.

@@ -111,12 +111,24 @@ test("parseDocFile accepts CRLF files and quoted values", () => {
   assert.equal(doc.body, "Nội dung.");
 });
 
+test("`published: false` seeds the page as a draft", () => {
+  db.run(`DELETE FROM docsPages`);
+  const draft = page({ slug: "draft-page" }).replace("sortOrder: 10\n", "sortOrder: 10\npublished: false\n");
+  assert.equal(parseDocFile(draft).doc.isPublished, false);
+  assert.equal(parseDocFile(page()).doc.isPublished, true, "no key = published");
+  seedDocsSync(db, { dir: fixtureDir({ "d.md": draft, "a.md": page() }) });
+  const bySlug = Object.fromEntries(rows().map((row) => [row.slug, row.isPublished]));
+  assert.deepEqual(bySlug, { "draft-page": 0, alpha: 1 });
+});
+
 // The shipped pages must all load: a malformed file would otherwise disappear
 // from production with only a warning in the boot log.
 const SHIPPED = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "content", "docs");
 const EXPECTED_SLUGS = [
   "quickstart", "claude-code", "claude-desktop", "codex", "omp", "opencode",
   "cc-switch", "sdk", "models", "plans", "troubleshooting",
+  // Affiliate program (spec affiliate-program "Customer affiliate page").
+  "gioi-thieu",
 ];
 
 test("every shipped docs page parses, has a valid slug and seeds", () => {
@@ -125,6 +137,8 @@ test("every shipped docs page parses, has a valid slug and seeds", () => {
   assert.deepEqual(result.skipped, []);
   assert.deepEqual([...result.inserted].sort(), [...EXPECTED_SLUGS].sort());
   for (const slug of result.inserted) assert.equal(validateSlug(slug), null, slug);
+  // The affiliate page ships as a draft: the program itself ships switched off.
+  assert.equal(db.get(`SELECT isPublished FROM docsPages WHERE slug = 'gioi-thieu'`).isPublished, 0);
 });
 
 test("shipped pages: unique sort orders, sections contiguous, no dead-link or raw-html hazards", () => {

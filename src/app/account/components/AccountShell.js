@@ -16,6 +16,10 @@ const NAV = [
   { href: "/account/plans", label: "Gói của tôi", icon: "workspace_premium" },
   { href: "/account/ledger", label: "Nhật ký credit", icon: "receipt_long" },
   { href: "/account/gift", label: "Mã quà tặng", icon: "redeem" },
+  // Affiliate program (spec affiliate-program "Customer affiliate page"). Shown
+  // only when the program is on or the account already has wallet history: a
+  // disabled program must not hand out a link.
+  { href: "/account/affiliate", label: "Giới thiệu", icon: "group_add", affiliateOnly: true },
   { href: "/account/keys", label: "API key", icon: "key" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
 ];
@@ -29,12 +33,13 @@ function isActive(pathname, href) {
  * and the account controls, then the page. Below `lg` the sidebar becomes a row
  * of links under the header, so every destination stays one tap away.
  */
-export default function AccountShell({ email = "", name = "", children }) {
+export default function AccountShell({ email = "", name = "", affiliateAvailable = false, children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
-  const current = NAV.find((item) => isActive(pathname, item.href)) ?? NAV[0];
+  const items = NAV.filter((item) => !item.affiliateOnly || affiliateAvailable);
+  const current = items.find((item) => isActive(pathname, item.href)) ?? items[0];
   const initial = (name || email || "?").trim().charAt(0).toUpperCase();
 
   const signOut = async () => {
@@ -61,7 +66,7 @@ export default function AccountShell({ email = "", name = "", children }) {
         </div>
 
         <nav aria-label="Tài khoản" className="flex flex-col gap-1 px-4 py-2">
-          {NAV.map((item) => {
+          {items.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
@@ -119,7 +124,7 @@ export default function AccountShell({ email = "", name = "", children }) {
         </header>
 
         <nav aria-label="Tài khoản (thu gọn)" className="flex overflow-x-auto border-b border-border lg:hidden">
-          {NAV.map((item) => {
+          {items.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
