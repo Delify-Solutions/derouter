@@ -44,6 +44,21 @@ export function platformErrorBody({ status, code, message, resetAt = null }) {
   return { error };
 }
 
+/** Header naming a router-decided denial (see platformErrorResponse). */
+export const PLATFORM_ERROR_HEADER = "X-Derouter-Error";
+
+/**
+ * The same response, marked as a router decision (see PLATFORM_ERROR_HEADER):
+ * for denials built with the engine's errorResponse, whose text and format must
+ * stay exactly as they were, but which a customer must read as written.
+ */
+export function markPlatform(response) {
+  if (!response?.headers) return response;
+  const headers = new Headers(response.headers);
+  headers.set(PLATFORM_ERROR_HEADER, "platform");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 /**
  * `Response` for a platform denial: JSON, CORS-open (LLM clients call this from
  * their own processes), and `Retry-After` in whole seconds when known.
@@ -52,6 +67,10 @@ export function platformErrorResponse({ status, code, message, resetAt = null, r
   const headers = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
+    // Marks a denial the router itself decided (spec model-privacy): its message
+    // is written for the customer and is kept, while an error that came from an
+    // upstream is reworded before a customer key sees it.
+    [PLATFORM_ERROR_HEADER]: "platform",
   };
   if (retryAfterSec != null && Number.isFinite(Number(retryAfterSec))) {
     headers["Retry-After"] = String(Math.max(1, Math.ceil(Number(retryAfterSec))));

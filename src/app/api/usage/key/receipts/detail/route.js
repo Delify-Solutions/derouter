@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { getApiKeyForAuth, getRequestDetails } from "@/lib/db/index.js";
+import { getSettings } from "@/lib/localDb";
+import { hideUpstreamModelsEnabled, maskOptionsFor } from "@/lib/models/customerModels.js";
+import { maskStoredResponse } from "@/lib/models/publicModel.js";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +74,14 @@ export async function GET(request) {
       return NextResponse.json({ error: "Not Found" }, { status: 404 });
     }
 
+    // A customer key never sees the upstream model (spec model-privacy).
+    let hide = false;
+    try {
+      hide = Boolean(auth.key.userId) && hideUpstreamModelsEnabled(await getSettings());
+    } catch {
+      hide = Boolean(auth.key.userId);
+    }
+
     const page = Number.isNaN(pageRaw) ? 1 : Math.max(1, pageRaw);
     const pageSize = Number.isNaN(pageSizeRaw) ? 50 : Math.min(100, Math.max(1, pageSizeRaw));
 
@@ -102,12 +113,12 @@ export async function GET(request) {
       if (!detail) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      return NextResponse.json({ detail: scrubDetail(detail, includeRaw) });
+      return NextResponse.json({ detail: scrubDetail(detail, includeRaw, hide) });
     }
 
     // List mode: recent details for this key, summary fields + (optionally) raw.
     const res = await getRequestDetails({ apiKey: key, page, pageSize, startDate, endDate });
-    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw));
+    const details = (res.details || []).map((d) => scrubDetailForList(d, includeRaw, hide));
     return NextResponse.json({
       details,
       pagination: res.pagination,
@@ -119,7 +130,7 @@ export async function GET(request) {
 
 // Always mask the apiKey field; strip the raw payloads unless includeRaw.
 // Provider is intentionally omitted from the output (not exposed publicly).
-function scrubDetailForList(d, includeRaw) {
+function scrubDetailForList(d, includeRaw, hide = false) {
   const req = d.request || {};
   const messages = Array.isArray(req.messages) ? req.messages : [];
   const tools = Array.isArray(req.tools) ? req.tools : null;
@@ -137,10 +148,13 @@ function scrubDetailForList(d, includeRaw) {
     connectionId: d.connectionId || d.id || null,
     timestamp: d.timestamp,
     // Show the combo the key holder called (requestedModel) when available; fall back
-    // to the resolved pool/fallback model for older records that predate the field.
-    // `resolvedModel` is kept so the UI can show "via <pool model>" if desired.
-    model: d.requestedModel || d.model,
-    resolvedModel: d.model || null,
+    // to the resolved model for older records that predate the field. The
+    // resolved (upstream) model itself is never returned to a customer key
+    // (spec model-privacy); an admin key still gets it.
+    // A customer row with no recorded combo (written before error rows kept it)
+    // shows no model rather than the upstream one.
+    model: d.requestedModel || (hide ? null : d.model),
+    ...(hide ? {} : { resolvedModel: d.model || null }),
     status: normalizeStatus(d.status),
     apiKey: maskKey(d.apiKey),
     latency: d.latency || { ttft: null, total: 0 },
@@ -157,13 +171,25 @@ function scrubDetailForList(d, includeRaw) {
   if (includeRaw) {
     out.request = d.request ?? null;
     out.response = d.response ?? null;
+    // The stored request/response are the engine's: the request already carries
+    // the upstream model it was rewritten to, the response the upstream's own
+    // fields and errors. Both are masked for a customer key.
+    if (hide) {
+      const options = maskOptionsFor({
+        publicName: d.requestedModel || "—",
+        upstream: [d.model, d.provider && d.model ? `${d.provider}/${d.model}` : null].filter(Boolean),
+        providers: [d.provider].filter(Boolean),
+      });
+      if (out.request) out.request = maskStoredResponse(out.request, options);
+      if (out.response) out.response = maskStoredResponse(out.response, options);
+    }
   }
   return out;
 }
 
 // Single-detail mode: same scrub but always carry the per-request summary.
-function scrubDetail(d, includeRaw) {
-  const base = scrubDetailForList(d, includeRaw);
+function scrubDetail(d, includeRaw, hide = false) {
+  const base = scrubDetailForList(d, includeRaw, hide);
   if (includeRaw) {
     return base; // already has payloads
   }

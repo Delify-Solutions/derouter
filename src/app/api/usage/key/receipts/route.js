@@ -12,6 +12,8 @@ import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.j
 import { applyBpToPricing } from "@/lib/billing/discounts.js";
 import { nanoToUsd } from "@/shared/utils/money";
 import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
+import { getSettings } from "@/lib/db/repos/settingsRepo.js";
+import { hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
 
 export const dynamic = "force-dynamic";
 
@@ -115,6 +117,16 @@ export async function GET(request) {
     };
     const visibleCombos = combos.filter((c) => isAllowedCombo(c.name));
 
+    // A customer key never sees an upstream model (spec model-privacy). Rows
+    // written before the combo name was recorded carry the upstream model: they
+    // read "—" in the history and are grouped as "Khác" in the summary.
+    let hide = false;
+    if (auth.key.userId) {
+      try { hide = hideUpstreamModelsEnabled(await getSettings()); } catch { hide = true; }
+    }
+    const comboNames = new Set(combos.map((c) => c.name));
+    const publicModelName = (name, fallback) => (!hide || comboNames.has(name) ? name : fallback);
+
     // Provider is intentionally not exposed on the public usage page (neither
     // resolved names nor raw UUIDs). The history rows below omit it entirely.
 
@@ -151,7 +163,7 @@ export async function GET(request) {
         const latencyMs = meta?.latencyMs ?? null;
         return {
           timestamp: r.timestamp,
-          model: r.model,
+          model: publicModelName(r.model, "—"),
           status: normalizeStatus(r.status),
           // Discounted cost, as charged. A discounted request also carries the list
           // cost and the total percent so the receipt can say "giảm X%".
@@ -244,7 +256,22 @@ export async function GET(request) {
     // table on /usage only lists combos the key can consume. `summary.items` is
     // keyed by model name (= combo name in this proxy). Recompute totals from
     // the filtered set so the totals row matches what's shown.
+    const maskedSummary = (() => {
+      if (!hide || !summary?.items) return summary;
+      const merged = new Map();
+      for (const item of summary.items) {
+        const label = publicModelName(item.model, "Khác");
+        const prev = merged.get(label);
+        if (!prev) { merged.set(label, { ...item, model: label }); continue; }
+        for (const field of ["input", "output", "cacheRead", "cacheCreation", "requests", "cost"]) {
+          prev[field] = (prev[field] || 0) + (item[field] || 0);
+        }
+      }
+      return { ...summary, items: [...merged.values()] };
+    })();
+
     const filteredSummary = (() => {
+      const summary = maskedSummary;
       if (!Array.isArray(allowedModels) || allowedModels.length === 0) return summary;
       const items = (summary?.items || []).filter((it) => isAllowedCombo(it.model));
       const totals = items.reduce(

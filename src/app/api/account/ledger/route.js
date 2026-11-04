@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { hideUpstreamModelsSync } from "@/lib/models/customerModels.js";
 import { resolveAccountUser } from "@/lib/auth/userSession";
 import { getAdapter } from "@/lib/db/driver.js";
 import {
@@ -29,6 +30,8 @@ export async function GET(request) {
       page: Number(params.get("page")) || 1,
       planId: params.get("planId") || null,
       kind: params.get("kind") || null,
+      // A customer never sees the upstream model (spec model-privacy).
+      hideUpstream: hideUpstreamModelsSync(db),
     });
 
     return NextResponse.json(

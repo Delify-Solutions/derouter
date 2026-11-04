@@ -123,6 +123,18 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (useTransport && credentials) credentials.runtimeTransport = useTransport;
   const stripList = getModelStrip(alias, model);
   const upstreamModel = getModelUpstreamId(alias, model);
+  // Ids that name this upstream model, for the customer response mask (spec
+  // model-privacy): set by the chat handler, absent for internal callers.
+  const usedIds = clientRawRequest?.upstreamModels;
+  if (usedIds && typeof usedIds.add === "function") {
+    for (const id of [upstreamModel, model, `${provider}/${model}`, `${alias}/${model}`]) {
+      if (typeof id === "string" && id) usedIds.add(id);
+    }
+  }
+  const usedProviders = clientRawRequest?.upstreamProviders;
+  if (usedProviders && typeof usedProviders.add === "function") {
+    for (const id of [provider, alias]) if (typeof id === "string" && id) usedProviders.add(id);
+  }
 
   // Inject provider-level thinking config override (only if client hasn't set)
   // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
@@ -450,7 +462,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     trackPendingRequest(model, provider, connectionId, false, true);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
-      provider, model, connectionId, apiKey,
+      // requestedModel: the combo the client called, so an error row names it
+      // like a success row does (spec model-privacy).
+      provider, model, requestedModel, connectionId, apiKey,
       latency: { ttft: null, total: Date.now() - requestStartTime },
       tokens: { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),
@@ -530,7 +544,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     const { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
-      provider, model, connectionId, apiKey,
+      provider, model, requestedModel, connectionId, apiKey,
       latency: { ttft: null, total: Date.now() - requestStartTime },
       tokens: { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),

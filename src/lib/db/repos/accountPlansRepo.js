@@ -109,7 +109,7 @@ export function getPlanHistorySync(db, userId, { limit = 50 } = {}) {
  * @param {{ page?:number, pageSize?:number, planId?:string|null, kind?:string|null }} filters
  * @returns {{ entries:Array, total:number, page:number, pageSize:number }}
  */
-export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, planId = null, kind = null } = {}) {
+export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, planId = null, kind = null, hideUpstream = false } = {}) {
   const take = Math.min(Math.max(1, Math.floor(Number(pageSize) || 25)), 100);
   const current = Math.max(1, Math.floor(Number(page) || 1));
   const skip = (current - 1) * take;
@@ -129,7 +129,7 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
 
   const rows = db.all(
     `SELECT cl.*, p.name AS planName, p.code AS planCode,
-            uh.model AS usageModel, uh.promptTokens AS usagePrompt,
+            uh.model AS usageModel, uh.meta AS usageMeta, uh.promptTokens AS usagePrompt,
             uh.completionTokens AS usageCompletion
        FROM creditLedger cl
        LEFT JOIN userPlans up ON up.id = cl.userPlanId
@@ -154,6 +154,12 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
   return {
     entries: rows.map((row) => {
       const meta = parseJson(row.meta, null);
+      // The model a charge is shown under is the combo the customer called
+      // (usageHistory.meta.requestedModel); usageHistory.model is the upstream
+      // model, which a customer never sees (spec model-privacy). A row with no
+      // recorded combo shows no model to a customer; the admin keeps both.
+      const requestedModel = parseJson(row.usageMeta, null)?.requestedModel || null;
+      const upstreamModel = row.usageModel ?? null;
       return {
         id: row.id,
         createdAt: row.createdAt,
@@ -163,7 +169,8 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
         // A back-charged row is a `charge` with meta.backfill; the page labels it
         // so support and the customer see the same word.
         backfill: meta?.backfill === true,
-        model: row.usageModel ?? null,
+        model: requestedModel || (hideUpstream ? null : upstreamModel),
+        ...(hideUpstream ? {} : { upstreamModel }),
         promptTokens: row.usagePrompt == null ? null : nano(row.usagePrompt),
         completionTokens: row.usageCompletion == null ? null : nano(row.usageCompletion),
         deltaNanoUsd: nano(row.deltaNanoUsd),
