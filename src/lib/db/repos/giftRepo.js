@@ -28,10 +28,34 @@ export function normalizeGiftCode(input) {
   return String(input ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-/** Render a normalised 16-char key as K7QM-3XTP-9WFA-2BHC. */
+/** Bounds of a code the admin types (e.g. WELCOME2026). Short codes are guessable. */
+export const CUSTOM_CODE_MIN = 4;
+export const CUSTOM_CODE_MAX = 32;
+
+/**
+ * Vietnamese error for an admin-typed code, or null when it is acceptable.
+ * Letters, digits, dashes and spaces only (separators are dropped on save), and
+ * 4–32 characters once normalised.
+ */
+export function customCodeError(input) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+  if (!/^[A-Za-z0-9 -]+$/.test(raw)) return "Mã chỉ gồm chữ không dấu, số và dấu gạch ngang";
+  const key = normalizeGiftCode(raw);
+  if (key.length < CUSTOM_CODE_MIN || key.length > CUSTOM_CODE_MAX) {
+    return `Mã phải dài từ ${CUSTOM_CODE_MIN} đến ${CUSTOM_CODE_MAX} ký tự (không tính dấu gạch)`;
+  }
+  return null;
+}
+
+/**
+ * Display form of a stored code. A generated 16-char key reads best in fours
+ * (K7QM-3XTP-9WFA-2BHC); a code the admin chose (WELCOME2026) is shown as is.
+ */
 export function formatGiftCode(input) {
   const key = normalizeGiftCode(input);
   if (!key) return "";
+  if (key.length !== CODE_GROUPS * CODE_GROUP_SIZE) return key;
   const chunks = [];
   for (let i = 0; i < key.length; i += CODE_GROUP_SIZE) {
     chunks.push(key.slice(i, i + CODE_GROUP_SIZE));
@@ -191,6 +215,8 @@ export async function createGiftCode(input) {
     throw new Error("maxRedemptions must be at least 1");
   }
 
+  const codeError = customCodeError(input?.code);
+  if (codeError) throw new Error(codeError);
   const requested = normalizeGiftCode(input?.code);
   let key = requested;
   if (!key) {
@@ -200,7 +226,7 @@ export async function createGiftCode(input) {
     }
     if (!key) throw new Error("Could not allocate a unique gift code");
   } else if (findGiftRowByCode(db, key)) {
-    throw new Error("That code already exists");
+    throw new Error("Mã này đã tồn tại");
   }
   if (grant.grantKind === "plan") {
     const plan = planRow(db, grant.planId);
@@ -304,6 +330,25 @@ export async function updateGiftCode(id, patch = {}) {
     if (next.newUserOnly === 1) next.perUserLimit = 1;
     if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
       throw new Error("maxRedemptions must be at least 1");
+    }
+    const redeemed = Number(row.redeemedCount) || 0;
+    if (next.maxRedemptions < redeemed) {
+      throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
+    }
+    // Once anyone redeemed the code, what it grants is history: changing the
+    // plan, credit, amount or duration now would hand later redeemers a
+    // different gift under the same code, with nothing recording the switch.
+    // Limits, dates, the switch and the note stay editable.
+    if (redeemed > 0) {
+      const same = (a, b) => (a ?? null) === (b ?? null) || Number(a) === Number(b);
+      const grantChanged =
+        !same(next.planId, row.planId) ||
+        !same(next.creditNanoUsd, row.creditNanoUsd) ||
+        !same(next.amountVnd, row.amountVnd) ||
+        !same(next.durationDays, row.durationDays);
+      if (grantChanged) {
+        throw new Error("Mã đã có người dùng nên không đổi được quà tặng. Hãy tạo mã mới.");
+      }
     }
     if (!Number.isInteger(next.perUserLimit) || next.perUserLimit < 1) {
       throw new Error("perUserLimit must be at least 1");

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDocBySlug, listDocsBySection } from "@/lib/db/repos/contentRepo.js";
 import { renderMarkdown } from "@/shared/utils/markdown.js";
 import DocsNav from "../components/DocsNav";
+import PromoPopupSlot from "@/app/landing/components/PromoPopupSlot";
 import DocsTabsEnhancer from "../components/DocsTabsEnhancer";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,7 @@ export default async function DocsPage({ params }) {
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
       <DocsNav groups={groups} activeSlug={doc.slug} />
+      <PromoPopupSlot />
 
       <main className="shell grid grid-cols-1 gap-10 py-10 lg:grid-cols-[220px_minmax(0,1fr)]">
         {pages.length > 0 ? (

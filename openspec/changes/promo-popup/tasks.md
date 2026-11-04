@@ -13,8 +13,15 @@
 
 - [x] 3.1 `PopupCard` in Admin → Nội dung: fields, status, unknown-code warning, preview
 
-## 4. Check
+## 4. Everywhere, minutes (follow-up)
 
-- [x] 4.1 Tests: settings parsing and bounds, admin-save validation, version, target links and `safeNext`, dismissal window, pending code storage, boolean merge
-- [x] 4.2 `npm run lint`, `npm test`, `npm run build`; Playwright run of popup → copy → register → prefilled gift page → redeem, mobile, admin card
-- [ ] 4.3 Merge deltas into `openspec/specs/` and archive
+- [x] 4.1 Repeat window in minutes (`popupRepeatMinutes`, default 5, 0 = every page load); admin field updated
+- [x] 4.2 `PromoPopupSlot` on landing, `/register`, `/docs`, docs pages, account layout (new accounts only, not on `/account/gift`); only popup keys sent to the browser
+- [x] 4.3 Re-arm on route change; re-check new-account status with `GET /api/account/promo-popup` before opening; release scroll lock on hidden paths
+- [x] 4.4 Tests: minutes window, new-account audience (purchase, redemption, dashed codes)
+
+## 5. Check
+
+- [x] 5.1 Tests: settings parsing and bounds, admin-save validation, version, target links and `safeNext`, dismissal window, pending code storage, boolean merge
+- [x] 5.2 `npm run lint`, `npm test`, `npm run build`; Playwright run of popup → copy → register → prefilled gift page → redeem, mobile, admin card
+- [ ] 5.3 Merge deltas into `openspec/specs/` and archive

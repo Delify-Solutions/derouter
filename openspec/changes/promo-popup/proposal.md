@@ -4,7 +4,8 @@ The owner wants to advertise promotions (typically a gift code) to visitors of t
 
 ## What Changes
 
-- A promotional popup on the landing page, edited in Admin → Nội dung next to the announcement banner: on/off, title, body, gift code, button text, delay before showing, and days before showing again after a visitor closes it.
+- A promotional popup, edited in Admin → Nội dung next to the announcement banner: on/off, title, body, gift code, button text, delay before showing, and minutes before showing again after a visitor closes it (default 5; 0 = every page load).
+- Shown on the landing page, `/register`, `/docs` and every `/account` page (except the gift page) of a new account: one that never bought a plan and has not redeemed the popup's code.
 - Clicking the code copies it. The button sends a visitor to `/register?next=/account/gift?code=…` (a signed-in customer straight to the gift page); a "Đăng nhập để nhập mã" link covers existing accounts.
 - The code is also remembered in the browser for 7 days, so a visitor who signs up another way still lands on the gift page with it prefilled.
 - `/account/gift` prefills `?code=` or the remembered code; a successful redemption clears both.
@@ -13,7 +14,7 @@ The owner wants to advertise promotions (typically a gift code) to visitors of t
 ## Capabilities
 
 ### New Capabilities
-- `promo-popup`: the landing-page promotional popup and the code hand-off to the gift page.
+- `promo-popup`: the promotional popup and the code hand-off to the gift page.
 
 ### Modified Capabilities
 - None.
@@ -22,4 +23,5 @@ The owner wants to advertise promotions (typically a gift code) to visitors of t
 
 - `src/shared/utils/promoPopup.js` (new), `src/app/landing/components/PromoPopup.js` (new), `src/app/(dashboard)/dashboard/content/PopupCard.js` (new).
 - `contentRepo.js` (new copy keys, boolean keys set), `/api/landing-copy` (validation), `LandingPage.js`, `ContentPageClient.js`, `RegisterForm.js`, `GiftRedeemForm.js`.
+- `PromoPopupSlot.js` (server slot used by the landing page, `/register`, `/docs`, the account layout), `src/lib/promo/newAccount.js`, `GET /api/account/promo-popup`.
 - No schema change: the settings live in the `landingCopy` settings blob.

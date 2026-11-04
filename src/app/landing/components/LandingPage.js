@@ -1,7 +1,7 @@
 import { cookies, headers } from "next/headers";
 import Navigation from "./Navigation";
 import AnnouncementBanner from "./AnnouncementBanner";
-import PromoPopup from "./PromoPopup";
+import PromoPopupSlot from "./PromoPopupSlot";
 import HeroSection from "./HeroSection";
 import PlansSection from "./PlansSection";
 import ModelsSection from "./ModelsSection";
@@ -123,7 +123,7 @@ export default async function LandingPage({ copy }) {
       </main>
 
       <Footer modelCount={MODELS.length} plans={visiblePlans} featured={featured} />
-      <PromoPopup copy={copy} signedIn={session === "customer"} />
+      <PromoPopupSlot signedIn={session === "customer"} copy={copy} />
     </div>
   );
 }
