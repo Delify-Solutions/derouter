@@ -8,9 +8,9 @@ import ReasonModal from "./ReasonModal";
 /**
  * `API key` — name, prefix, creation date, last use and status.
  *
- * Enable/disable and delete both require a reason and write an audit entry; the
- * secret itself is never returned by any admin endpoint (only the 8-character
- * prefix the row already carries).
+ * Enable/disable and delete both require a reason and write an audit entry.
+ * "Sao chép" fetches the full key on that press only (so the admin can test with
+ * it) and writes a `key_revealed` audit entry; the list itself carries the prefix.
  */
 export default function KeysTab({ userId }) {
   const [keys, setKeys] = useState([]);
@@ -18,6 +18,7 @@ export default function KeysTab({ userId }) {
   const [error, setError] = useState("");
   const [action, setAction] = useState(null); // { type: "toggle" | "delete", key }
   const [notice, setNotice] = useState("");
+  const [copyState, setCopyState] = useState({}); // keyId -> "loading" | "copied"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +56,37 @@ export default function KeysTab({ userId }) {
     await load();
     setNotice(type === "delete" ? "Đã xóa key" : key.isActive ? "Đã tắt key" : "Đã bật key");
     return { ok: true };
+  };
+
+  const copyKey = async (key) => {
+    setError("");
+    setNotice("");
+    setCopyState((prev) => ({ ...prev, [key.id]: "loading" }));
+    const clear = () => setCopyState((prev) => {
+      const next = { ...prev };
+      delete next[key.id];
+      return next;
+    });
+    let secret;
+    try {
+      const res = await fetch(`/api/users/${userId}/keys/${key.id}/secret`, { method: "POST", cache: "no-store" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.secret) throw new Error(body.error || "Không lấy được key");
+      secret = body.secret;
+    } catch (e) {
+      clear();
+      setError(e.message || "Không lấy được key");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(secret);
+    } catch {
+      clear();
+      setError("Trình duyệt chặn sao chép vào clipboard");
+      return;
+    }
+    setCopyState((prev) => ({ ...prev, [key.id]: "copied" }));
+    setTimeout(clear, 2000);
   };
 
   if (loading) return <div className="h-40 border border-border bg-surface" aria-hidden="true" />;
@@ -102,6 +134,17 @@ export default function KeysTab({ userId }) {
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => copyKey(key)}
+                        disabled={copyState[key.id] === "loading"}
+                        aria-busy={copyState[key.id] === "loading"}
+                      >
+                        {copyState[key.id] === "copied" ? "Đã sao chép" : copyState[key.id] === "loading" ? "Đang lấy…" : "Sao chép"}
+                        <span className="sr-only"> key {key.name || key.keyPrefix || ""}</span>
+                        <span className="sr-only" role="status">{copyState[key.id] === "copied" ? "Đã sao chép key" : ""}</span>
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => setAction({ type: "toggle", key })}>
                         {key.isActive ? "Tắt" : "Bật"}
                       </Button>

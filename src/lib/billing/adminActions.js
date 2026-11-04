@@ -640,3 +640,25 @@ export function changeProfileSync(db, userId, { email, displayName, reason, acto
 }
 
 export { CREDIT_MAX_NANO, CREDIT_MIN_NANO, DAYS_MAX, NOTE_MAX };
+
+/**
+ * Hand the admin one of a customer's keys so they can test with it, and record
+ * that they did. No reason asked: a copy changes nothing. The secret goes to the
+ * caller only; the audit entry names the key, never its value.
+ *
+ * @returns {string|null} the raw key, or null when `keyId` is not a key of
+ *   `userId` (another customer's key, an admin key and an unknown id alike)
+ */
+export function revealKeySecretSync(db, userId, keyId, { actor = "admin", now = null } = {}) {
+  if (!userId || !keyId) return null;
+  const key = db.get(`SELECT id, name, key FROM apiKeys WHERE id = ? AND userId = ?`, [keyId, userId]);
+  if (!key || typeof key.key !== "string" || !key.key) return null;
+  insertAuditSync(db, {
+    userId,
+    actor,
+    action: "key_revealed",
+    details: { keyId, keyName: key.name ?? null },
+    now: now || nowIso(),
+  });
+  return key.key;
+}

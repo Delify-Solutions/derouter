@@ -16,6 +16,7 @@ const ACTION_LABEL = {
   key_disabled: "Tắt API key",
   key_enabled: "Bật API key",
   key_deleted: "Xóa API key",
+  key_revealed: "Sao chép API key",
   plan_granted: "Cấp gói",
   credit_granted: "Cấp credit",
   plan_extended: "Gia hạn gói",

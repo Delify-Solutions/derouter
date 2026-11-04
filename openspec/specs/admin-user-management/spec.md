@@ -17,7 +17,7 @@ Gives the operator a complete view of every customer — plans, money, usage, ke
 - `Đơn hàng`: the user's orders with the existing approve/cancel/refund actions.
 - `Sổ cái`: the user's ledger, paginated and filterable by plan and kind.
 - `Usage`: for 7 or 30 days, cost per day as a chart and a per-model table of requests, input tokens, output tokens and cost across all of the user's keys.
-- `API key`: name, prefix, creation date, last use, status.
+- `API key`: name, prefix, creation date, last use, status, and a copy button that fetches the full key on that press only (`POST /api/users/[id]/keys/[keyId]/secret`, never by GET or in the list) so the admin can test with it; each copy writes a `key_revealed` audit entry without asking for a reason.
 - `Phiên đăng nhập`: creation, expiry, IP, user agent of each open session.
 - `Mã quà tặng`: the user's redemptions.
 - `Nhật ký`: audit entries newest first with time, actor, action, reason and before/after details.
@@ -39,6 +39,7 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 | Revoke | — | purchase `active` or `exhausted` | status `revoked`, remaining credit set to 0 | `revoke` (negative remaining) |
 | Reorder queue | full ordered id list (reason not required) | as in `plan-queue-billing` | priorities 1..n | — |
 | Disable / enable / delete key | key id; delete needs confirmation | key belongs to the user | effective on the next request | — |
+| Copy key (reason not required) | key id | key belongs to the user (otherwise HTTP 404); at most 30 per minute per admin identity (then HTTP 429) | the full key is returned to the admin; the audit entry `key_revealed` names the key, never its value | — |
 | Revoke one / all sessions | session id or all | session belongs to the user | session(s) can no longer authenticate | — |
 | Change group | active group id | always | effective on the next request | — |
 | Change status | `active`, `suspended`, `unverified` | always | `suspended`/`unverified` also revokes all sessions and blocks the API | — |
@@ -52,6 +53,10 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 #### Scenario: Revoke records money and audit
 - **WHEN** the admin revokes a purchase with $120 remaining and reason "Hoàn tiền ngoài hệ thống"
 - **THEN** the purchase is `revoked` with $0 remaining, one `revoke` ledger row of -$120 exists, and the audit log shows the action, the admin and the reason
+
+#### Scenario: Copy key is audited without the secret
+- **WHEN** the admin presses "Sao chép" on a key of the user
+- **THEN** the full key is copied to the clipboard and the audit log shows `key_revealed` with the admin, the key id and name, and no key value
 
 #### Scenario: Missing reason
 - **WHEN** the admin submits "Grant credit" with an empty reason

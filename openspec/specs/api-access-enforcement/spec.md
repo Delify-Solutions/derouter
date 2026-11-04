@@ -82,7 +82,7 @@ For a customer key, `/v1/models` (and the kind-specific listings) SHALL list exa
 - **THEN** `/v1/models` with that customer key lists `combo-a` and `model-b` and nothing else
 
 ### Requirement: Admin key surface excludes customer keys
-`GET /api/keys` SHALL return only admin keys. `GET`, `PUT` and `DELETE /api/keys/[id]` SHALL respond 404 for a customer key. The admin Endpoint & Key page SHALL show only admin keys plus a line stating how many customer keys exist and that they are managed on the user's page. No admin key API SHALL return a customer key's secret.
+`GET /api/keys` SHALL return only admin keys. `GET`, `PUT` and `DELETE /api/keys/[id]` SHALL respond 404 for a customer key. The admin Endpoint & Key page SHALL show only admin keys plus a line stating how many customer keys exist and that they are managed on the user's page. No `/api/keys` route SHALL return a customer key's secret; the only admin path to a customer secret is the audited `POST /api/users/[id]/keys/[keyId]/secret` (see `admin-user-management`).
 
 #### Scenario: Customer secret never listed
 - **WHEN** an admin calls `GET /api/keys` while customers own 3 keys
