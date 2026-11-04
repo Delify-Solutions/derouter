@@ -6,9 +6,9 @@ import { Card, Input, Toggle } from "@/shared/components";
 import { PromoPopupDialog } from "@/app/landing/components/PromoPopup";
 import {
   DEFAULT_DELAY_SEC,
-  DEFAULT_REPEAT_DAYS,
+  DEFAULT_REPEAT_MINUTES,
   MAX_DELAY_SEC,
-  MAX_REPEAT_DAYS,
+  MAX_REPEAT_MINUTES,
   normalizePromoCode,
   promoPopupState,
   readPromoPopup,
@@ -20,7 +20,7 @@ const STATUS = {
   empty: { icon: "visibility_off", text: "Đang ẩn: chưa có nội dung", className: "border-amber-500/50 text-amber-800 dark:text-amber-300" },
 };
 
-const KEYS = ["popupEnabled", "popupTitle", "popupBody", "popupCode", "popupCta", "popupDelaySec", "popupRepeatDays"];
+const KEYS = ["popupEnabled", "popupTitle", "popupBody", "popupCode", "popupCta", "popupDelaySec", "popupRepeatMinutes"];
 
 function Warning({ children }) {
   return (
@@ -172,14 +172,14 @@ export default function PopupCard({ copy, saved, onChange }) {
               hint={`Để trống = ${DEFAULT_DELAY_SEC} giây.`}
             />
             <Input
-              label="Hiện lại sau (ngày)"
+              label="Hiện lại sau (phút)"
               type="number"
               min="0"
-              max={MAX_REPEAT_DAYS}
-              value={copy.popupRepeatDays ?? ""}
-              onChange={(e) => onChange("popupRepeatDays", e.target.value)}
-              placeholder={String(DEFAULT_REPEAT_DAYS)}
-              hint={`Sau khi khách đóng hoặc bấm nút. 0 = mỗi lần vào trang, để trống = ${DEFAULT_REPEAT_DAYS}. Sửa nội dung thì hiện lại ngay.`}
+              max={MAX_REPEAT_MINUTES}
+              value={copy.popupRepeatMinutes ?? ""}
+              onChange={(e) => onChange("popupRepeatMinutes", e.target.value)}
+              placeholder={String(DEFAULT_REPEAT_MINUTES)}
+              hint={`Sau khi khách đóng. 0 = mỗi lần mở trang, để trống = ${DEFAULT_REPEAT_MINUTES} phút. Sửa nội dung thì hiện lại ngay.`}
             />
           </div>
           {copy.popupEnabled && !draft.title && !draft.body && !draft.code && (

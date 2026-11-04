@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getAccountSession } from "@/lib/auth/userSession";
 import { getAffiliateSettings, hasAffiliateHistory } from "@/lib/db/repos/affiliateRepo.js";
 import AccountShell from "./components/AccountShell";
+import PromoPopupSlot from "@/app/landing/components/PromoPopupSlot";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,9 @@ export default async function AccountLayout({ children }) {
   return (
     <AccountShell email={user.email} name={user.displayName || ""} affiliateAvailable={affiliateAvailable}>
       {children}
+      {/* New accounts only (no purchase, popup code not redeemed); never on the
+          gift page, where the code is already prefilled. */}
+      <PromoPopupSlot accountUserId={user.id} hideOn={["/account/gift"]} />
     </AccountShell>
   );
 }
