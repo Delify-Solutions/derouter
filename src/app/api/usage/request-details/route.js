@@ -2,6 +2,20 @@ import { NextResponse } from "next/server";
 import { getRequestDetails, clearAllRequestDetails } from "@/lib/usageDb";
 import { describeKeysByRaw } from "@/lib/db/repos/apiKeysRepo.js";
 
+/** keyInfo from the owner snapshot stored on a request-details row (key deleted since). */
+function snapshotKeyInfo(owner) {
+  if (!owner || typeof owner !== "object" || (!owner.userId && !owner.apiKeyId)) return null;
+  return {
+    keyId: owner.apiKeyId ?? null,
+    name: owner.keyName ?? null,
+    kind: owner.userId ? "user" : "admin",
+    userId: owner.userId ?? null,
+    email: owner.email ?? null,
+    displayName: owner.displayName ?? null,
+    deleted: true,
+  };
+}
+
 /**
  * GET /api/usage/request-details
  * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate
@@ -77,9 +91,11 @@ export async function GET(request) {
     // Name the key and its owner on every row, so the admin sees WHO made the
     // request, not just a masked key.
     const owners = await describeKeysByRaw(redactedDetails.map((d) => d.apiKey));
+    // A key deleted since the request no longer resolves live; the owner
+    // snapshotted on the row at request time still names the customer.
     const details = redactedDetails.map((d) => ({
       ...d,
-      keyInfo: d.apiKey ? owners[d.apiKey] ?? { kind: "unknown" } : null,
+      keyInfo: d.apiKey ? owners[d.apiKey] ?? snapshotKeyInfo(d.owner) ?? { kind: "unknown" } : null,
     }));
 
     return NextResponse.json({ ...result, details });

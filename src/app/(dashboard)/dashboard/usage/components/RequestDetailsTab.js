@@ -34,7 +34,12 @@ function KeyOwner({ apiKey, info, onPickUser = null, compact = true }) {
       ) : (
         <span className={`min-w-0 truncate text-sm ${info?.kind === "user" ? "text-text-main" : "text-text-muted"}`} title={owner}>{owner}</span>
       )}
-      <span className="min-w-0 truncate font-mono text-xs text-text-muted" title={`${info?.name ? `${info.name} — ` : ""}${masked}`}>
+      {/* First on its own line: appended to the name it was cut off by the truncation. */}
+      {info?.deleted ? <span className="font-mono text-xs text-text-subtle">key đã xóa</span> : null}
+      <span
+        className="min-w-0 truncate font-mono text-xs text-text-muted"
+        title={`${info?.deleted ? "Key đã xóa — " : ""}${info?.name ? `${info.name} — ` : ""}${masked}`}
+      >
         {info?.name ? `${info.name} · ` : ""}{masked}
       </span>
     </span>

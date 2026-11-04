@@ -211,9 +211,18 @@ export const TABLES = {
       apiKey: "TEXT",
       status: "TEXT",
       data: "TEXT NOT NULL",
+      // Owner of the key AT REQUEST TIME (spec admin-user-management "Request
+      // details show the key owner"). Snapshotted because the key row can be
+      // deleted later: a live lookup by raw key then finds nothing, and the
+      // per-customer filter would silently drop that customer's requests.
+      // NULL for rows written before this column existed (read falls back to a
+      // live lookup) and for requests without a known key.
+      userId: "TEXT",
+      apiKeyId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_rd_ts ON requestDetails(timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_rd_user_ts ON requestDetails(userId, timestamp DESC) WHERE userId IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS idx_rd_provider ON requestDetails(provider)",
       "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",

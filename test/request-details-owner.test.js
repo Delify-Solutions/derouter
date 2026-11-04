@@ -69,3 +69,49 @@ test("filtering by user returns every key of that customer and nothing else", as
   const none = await getRequestDetails({ userId: "nobody", page: 1, pageSize: 20 });
   assert.equal(none.details.length, 0);
 });
+
+test("a request keeps its owner after the key is deleted (snapshot at request time)", async () => {
+  const { updateSettings } = await import("../src/lib/db/repos/settingsRepo.js");
+  const { saveRequestDetail } = await import("../src/lib/db/repos/requestDetailsRepo.js");
+  const { deleteApiKey } = await import("../src/lib/db/repos/apiKeysRepo.js");
+  // Flush on every save so the test does not wait for the timer. The env switch
+  // overrides the settings, so a shell with ENABLE_REQUEST_LOGS=false must not
+  // turn logging off here.
+  delete process.env.ENABLE_REQUEST_LOGS;
+  await updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
+
+  const doomed = await createApiKey("A old laptop", "m", { userId: "u-a" });
+  await saveRequestDetail({
+    id: "d-snap", provider: "p", model: "m", apiKey: doomed.key, status: "200",
+    timestamp: "2026-11-02T05:00:00.000Z",
+  });
+  for (let i = 0; i < 100 && !db.get(`SELECT 1 AS x FROM requestDetails WHERE id = 'd-snap'`); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const row = db.get(`SELECT userId, apiKeyId FROM requestDetails WHERE id = 'd-snap'`);
+  assert.deepEqual({ ...row }, { userId: "u-a", apiKeyId: doomed.id });
+
+  await deleteApiKey(doomed.id);
+  // The live lookup no longer knows the key...
+  assert.equal((await describeKeysByRaw([doomed.key]))[doomed.key], undefined);
+  // ...but the row still belongs to u-a for the per-customer filter,
+  const { details } = await getRequestDetails({ userId: "u-a", page: 1, pageSize: 20 });
+  assert.ok(details.some((d) => d.id === "d-snap"), "deleted key's request still listed for its owner");
+  // and the stored record names the owner for the admin view.
+  const snap = details.find((d) => d.id === "d-snap").owner;
+  assert.equal(snap.email, "a@x.vn");
+  assert.equal(snap.keyName, "A old laptop");
+  const other = await getRequestDetails({ userId: "u-b", page: 1, pageSize: 20 });
+  assert.ok(!other.details.some((d) => d.id === "d-snap"));
+});
+
+test("deleting the account drops the owner snapshot from its request logs", async () => {
+  const { deleteUser } = await import("../src/lib/db/repos/userRepo.js");
+  assert.equal(db.get(`SELECT userId FROM requestDetails WHERE id = 'd-snap'`).userId, "u-a");
+  await deleteUser("u-a", { actor: "admin:test" });
+  const row = db.get(`SELECT userId, apiKeyId, data FROM requestDetails WHERE id = 'd-snap'`);
+  assert.equal(row.userId, null);
+  assert.equal(row.apiKeyId, null);
+  assert.equal(JSON.parse(row.data).owner, undefined);
+  assert.doesNotMatch(row.data, /a@x\.vn/);
+});

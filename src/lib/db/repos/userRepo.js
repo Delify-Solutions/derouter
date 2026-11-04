@@ -331,6 +331,14 @@ export async function deleteUser(id, { actor = "system" } = {}) {
     db.run(`DELETE FROM userPlans WHERE userId = ?`, [id]);
     db.run(`DELETE FROM creditLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM giftRedemptions WHERE userId = ?`, [id]);
+    // Request logs keep the owner snapshotted at request time so a deleted KEY
+    // still names its customer. A deleted ACCOUNT must not: drop the snapshot
+    // (columns and the email inside the stored record), as it was before the
+    // snapshot existed.
+    db.run(
+      `UPDATE requestDetails SET userId = NULL, apiKeyId = NULL, data = json_remove(data, '$.owner') WHERE userId = ?`,
+      [id]
+    );
     // Affiliate program (design D10): the code, the wallet and the payout details
     // go with the account. Withdrawals and commissions are KEPT for accounting —
     // the withdrawal keeps the email it was requested under, so the row stays

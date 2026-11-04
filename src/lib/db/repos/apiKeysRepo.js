@@ -317,6 +317,56 @@ export async function ensureDefaultAdminKey(machineId) {
 }
 
 /**
+ * Snapshot of who owns a raw key, for rows that outlive the key (request
+ * details). SYNCHRONOUS: runs inside the request-details flush transaction.
+ * Falls back to the deleted-key tombstone, so a key deleted while its request
+ * was still in flight is still attributed.
+ *
+ * @returns {{ apiKeyId: string|null, userId: string|null, kind: "user"|"admin",
+ *             keyName: string|null, email: string|null, displayName: string|null } | null}
+ */
+export function keyOwnerSnapshotSync(db, rawKey) {
+  if (typeof rawKey !== "string" || !rawKey) return null;
+  const hash = hashApiKey(rawKey);
+  const row = db.get(
+    `SELECT k.id, k.name, k.userId, u.email, u.displayName
+       FROM apiKeys k LEFT JOIN users u ON u.id = k.userId
+      WHERE k.key = ? OR k.keyHash = ? LIMIT 1`,
+    [rawKey, hash]
+  );
+  if (row) {
+    return {
+      apiKeyId: row.id,
+      userId: row.userId ?? null,
+      kind: row.userId ? "user" : "admin",
+      keyName: row.name ?? null,
+      email: row.email ?? null,
+      displayName: row.displayName ?? null,
+    };
+  }
+  let tomb = null;
+  try {
+    tomb = db.get(
+      `SELECT d.apiKeyId, d.userId, u.email, u.displayName
+         FROM deletedApiKeys d LEFT JOIN users u ON u.id = d.userId
+        WHERE d.keyHash = ? LIMIT 1`,
+      [hash]
+    );
+  } catch {
+    tomb = null; // older schema without the tombstone table
+  }
+  if (!tomb) return null;
+  return {
+    apiKeyId: tomb.apiKeyId ?? null,
+    userId: tomb.userId ?? null,
+    kind: "user",
+    keyName: null,
+    email: tomb.email ?? null,
+    displayName: tomb.displayName ?? null,
+  };
+}
+
+/**
  * Who a set of raw keys belongs to, for admin screens that store the raw key on a
  * row (request details): `{ [rawKey]: { keyId, name, kind, userId, email, displayName } }`.
  * `kind` is "user" for a customer key, "admin" for a key with no owner. A key that

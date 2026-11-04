@@ -82,8 +82,12 @@ The admin usage page SHALL have a "Users" tab (`/dashboard/usage?tab=users`; the
 - **THEN** they are listed with 0 requests and "—" as last request, and disappear when "With requests" is selected
 
 ### Requirement: Request details show the key owner
-Every row of the admin request details (`/dashboard/usage?tab=details`) and its detail panel SHALL show who made the request: the owner's e-mail for a customer key, "Key admin" for a key with no owner, or "Key đã xóa / không rõ" for a key that no longer exists, then the key's name and its masked value. `GET /api/usage/request-details` SHALL return this as `keyInfo` per row and SHALL accept `userId` to list the requests of every key that customer owns. The page SHALL offer a "Người dùng" filter searching customers by e-mail, and clicking an owner's e-mail in the table SHALL apply that filter. The raw key SHALL NOT be shown.
+Every row of the admin request details (`/dashboard/usage?tab=details`) and its detail panel SHALL show who made the request: the owner's e-mail for a customer key, "Key admin" for a key with no owner, or "Key đã xóa / không rõ" for a key whose owner is not known, then the key's name and its masked value. The owner SHALL be recorded on the row when the request is logged, so a request made with a key that was deleted afterwards still shows that owner (marked "key đã xóa") and still appears under that customer's `userId` filter. Deleting the account SHALL drop that recorded owner from its request rows. `GET /api/usage/request-details` SHALL return this as `keyInfo` per row and SHALL accept `userId` to list the requests of every key that customer owns. The page SHALL offer a "Người dùng" filter searching customers by e-mail, and clicking an owner's e-mail in the table SHALL apply that filter. The raw key SHALL NOT be shown.
 
 #### Scenario: Whose request is this
 - **WHEN** an admin opens request details and a row came from the key "A laptop" of a@x.vn
 - **THEN** the row shows "a@x.vn" over "A laptop · sk-…****…", and clicking "a@x.vn" lists only requests from a@x.vn's keys
+
+#### Scenario: Key deleted after the request
+- **WHEN** a@x.vn makes a request with key "A old laptop" and then deletes that key
+- **THEN** the row still shows "a@x.vn" with "key đã xóa", and filtering by a@x.vn still lists it
