@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 28;
+export const SCHEMA_VERSION = 29;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -513,6 +513,13 @@ export const TABLES = {
       approvedBy: "TEXT",
       createdAt: "TEXT",
       paidAt: "TEXT",
+      // Affiliate discounts (spec affiliate-program "Voucher at checkout",
+      // "Referred-buyer bonus"). voucherDiscount is in the order's pay currency
+      // (đồng or nano-USD) and has already been taken off payAmount;
+      // referralDiscountBp is the unlimited-plan buyer discount, also applied.
+      voucherId: "TEXT",
+      voucherDiscount: "INTEGER",
+      referralDiscountBp: "INTEGER",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders(userId, status)",
@@ -833,10 +840,14 @@ export const TABLES = {
       maxOrders: "INTEGER",
       // Referral welcome gift override. NULL = affiliateDefaultGiftCodeId.
       giftCodeId: "TEXT",
+      // Referred-buyer bonus overrides (basis points / first N paid orders).
+      // NULL = affiliateBuyerBonusBp / affiliateBuyerBonusMaxOrders.
+      buyerBonusBp: "INTEGER",
+      buyerBonusMaxOrders: "INTEGER",
       status: "TEXT NOT NULL DEFAULT 'active'", // 'active' | 'blocked'
       clickCount: "INTEGER DEFAULT 0",
-      // JSON snapshots of the payout destination: VND {bankName, accountNumber,
-      // accountName}, USD {network, address}. Never sent to a third party whole.
+      // Unused since withdrawals were removed (change affiliate-credit-vouchers);
+      // kept declared so existing databases and the sync agree.
       payoutVnd: "TEXT",
       payoutUsd: "TEXT",
       adminNote: "TEXT",
@@ -895,28 +906,30 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_afl_user_ts ON affiliateLedger(userId, createdAt DESC)",
     ],
   },
-  // Withdrawal requests (design D5). `destination` is a snapshot of the payout
-  // details at request time, so a later edit cannot redirect money already
-  // requested.
-  affiliateWithdrawals: {
+  // Single-use vouchers an affiliate makes from its wallet (spec
+  // affiliate-program "Vouchers", "Voucher at checkout"). `amount` is in
+  // `currency` (đồng or nano-USD). `heldByOrderId` is the order currently using
+  // it; the hold lapses by itself once that order is no longer pending.
+  // (affiliateWithdrawals was removed from TABLES: existing databases keep the
+  // empty table, sync never drops it.)
+  affiliateVouchers: {
     columns: {
       id: "TEXT PRIMARY KEY",
-      userId: "TEXT NOT NULL",
-      // Kept for accounting after the account is deleted (design D10).
-      emailSnapshot: "TEXT",
+      code: "TEXT NOT NULL UNIQUE",
+      ownerUserId: "TEXT NOT NULL",
       currency: "TEXT NOT NULL", // 'VND' | 'USD'
-      amount: "INTEGER NOT NULL", // đồng or nano-USD
-      destination: "TEXT NOT NULL", // JSON snapshot
-      status: "TEXT NOT NULL", // 'pending' | 'paid' | 'rejected'
-      txRef: "TEXT",
-      adminNote: "TEXT",
-      decidedBy: "TEXT",
-      decidedAt: "TEXT",
+      amount: "INTEGER NOT NULL",
+      status: "TEXT NOT NULL", // 'active' | 'used' | 'cancelled'
+      heldByOrderId: "TEXT",
+      usedOrderId: "TEXT",
+      usedByUserId: "TEXT",
+      usedAt: "TEXT",
+      cancelledAt: "TEXT",
       createdAt: "TEXT NOT NULL",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_aw_status ON affiliateWithdrawals(status, createdAt)",
-      "CREATE INDEX IF NOT EXISTS idx_aw_user_ts ON affiliateWithdrawals(userId, createdAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_av_owner_ts ON affiliateVouchers(ownerUserId, createdAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_av_status_ts ON affiliateVouchers(status, createdAt DESC)",
     ],
   },
 };

@@ -54,7 +54,7 @@ export async function PATCH(request, { params }) {
   const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
   const patch = {};
 
-  for (const key of ["rateBp", "maxOrders"]) {
+  for (const key of ["rateBp", "maxOrders", "buyerBonusBp", "buyerBonusMaxOrders"]) {
     if (!has(key)) continue;
     const checked = validateOverride(key, body[key]);
     if (checked.error) return NextResponse.json({ error: checked.error }, { status: 400, headers: NO_STORE });

@@ -14,7 +14,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
  *
  * Opening this page is what creates the account's code, and only while the
  * program is enabled. With the program off, an account that already has wallet
- * history still sees its wallet and withdrawals but gets no link (spec "Program
+ * history still sees its wallet and vouchers but gets no link (spec "Program
  * settings").
  */
 export async function GET(request) {
@@ -66,9 +66,10 @@ export async function GET(request) {
           signups: overview.signups,
           payingReferrals: overview.payingReferrals,
         },
+        buyerBonusBp: overview.enabled ? overview.buyerBonusBp : null,
+        buyerBonusMaxOrders: overview.enabled ? overview.buyerBonusMaxOrders : null,
         wallet: overview.wallet,
-        payout: overview.payout,
-        minWithdraw: overview.minWithdraw,
+        redeem: overview.redeem,
       },
       { headers: NO_STORE }
     );

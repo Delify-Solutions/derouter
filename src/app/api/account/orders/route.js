@@ -97,6 +97,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "Kỳ hạn không hợp lệ" }, { status: 400, headers: NO_STORE });
   }
 
+  // Affiliate voucher (spec affiliate-program "Voucher at checkout"). Optional.
+  const voucherCode = typeof body?.voucherCode === "string" && body.voucherCode.trim()
+    ? body.voucherCode.trim().slice(0, 64)
+    : null;
+
   const payerNote = typeof body?.payerNote === "string" && body.payerNote.trim()
     ? body.payerNote.trim().slice(0, 500)
     : null;
@@ -129,13 +134,10 @@ export async function POST(request) {
     }
 
     if (method === "manual") {
-      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual", amountVnd, periods });
-      // The manual path records what the customer was quoted, in the same columns a
+      // createOrder records what the customer was quoted (payCurrency USD,
+      // payAmount after any voucher / referral discount) in the same columns a
       // gateway order uses, so a single order list can show both.
-      db.run(
-        `UPDATE orders SET payCurrency = 'USD', payAmount = amountNanoUsd WHERE id = ?`,
-        [order.id]
-      );
+      const order = await createOrder({ userId: session.userId, planId, payerNote, method: "manual", amountVnd, periods, voucherCode });
       const updated = await getOrderById(order.id);
       await recordActivity(request, {
         userId: session.userId,
@@ -163,6 +165,7 @@ export async function POST(request) {
       settings,
       amountVnd,
       periods,
+      voucherCode,
     }));
 
     if (!created.ok) {

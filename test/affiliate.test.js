@@ -7,8 +7,8 @@
 //   * the currency and base amount follow the currency the customer paid in, and
 //     the amount is floor(base × bp / 10000) in integer maths only;
 //   * a refund reverses the commission, and a released one leaves a negative
-//     balance that blocks withdrawals;
-//   * withdrawals reserve in the same transaction, so two full-balance requests
+//     balance that blocks spending;
+//   * spending (credit, vouchers) debits in the same transaction, so two full-balance requests
 //     cannot both succeed;
 //   * a blocked, deleted or disabled referrer earns nothing.
 //
@@ -28,6 +28,7 @@ const orders = await import("../src/lib/billing/orders.js");
 const affiliate = await import("../src/lib/affiliate/core.js");
 const commission = await import("../src/lib/affiliate/commission.js");
 const wallet = await import("../src/lib/affiliate/wallet.js");
+const vouchers = await import("../src/lib/affiliate/vouchers.js");
 const gift = await import("../src/lib/affiliate/gift.js");
 const codes = await import("../src/lib/affiliate/codes.js");
 const mask = await import("../src/lib/affiliate/mask.js");
@@ -55,7 +56,7 @@ after(() => {
 });
 
 const CLEAN_TABLES = [
-  "affiliateWithdrawals",
+  "affiliateVouchers",
   "affiliateLedger",
   "affiliateCommissions",
   "affiliates",
@@ -616,7 +617,7 @@ test("the rate multiplication uses BigInt above 2^53", () => {
 
 // ── Hold, release and reversal ──────────────────────────────────────────────
 
-test("a held commission is pending and not withdrawable, then releases when due", () => {
+test("a held commission is pending and not spendable, then releases when due", () => {
   enableProgram({ affiliateDefaultHoldDays: undefined, affiliateDefaultMaxOrders: 5, affiliateHoldDays: 7 });
   makeAffiliate("aff", { maxOrders: 5 });
   plan();
@@ -677,35 +678,26 @@ test("refund during hold reverses without touching the balance", async () => {
   assert.ok(audit, "reversal is audited on the affiliate's account");
 });
 
-test("refund after release leaves a negative balance that blocks withdrawal", async () => {
-  enableProgram({ affiliateHoldDays: 0, affiliateMinWithdrawVnd: 0, affiliateMinWithdrawUsdNano: 0 });
+test("refund after release leaves a negative balance that blocks spending", async () => {
+  enableProgram({ affiliateHoldDays: 0, affiliateMinRedeemVnd: 0, affiliateMinRedeemUsdNano: 0 });
   makeAffiliate("aff");
   plan();
   user("buyer", { referredByUserId: "aff" });
   orderRow({ id: "o1", userId: "buyer" });
   approve("o1", T0);
 
-  // Released at accrual (holdDays 0), then withdrawn and paid out.
-  db.transaction(() => wallet.savePayoutSync(db, "aff", "VND", {
-    bankName: "VCB", accountNumber: "0123456789", accountName: "AFF",
-  }));
-  const request = db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 25000 }, { now: at(T0 + MIN) })
-  );
-  db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "paid", txRef: "FT123", actor: "admin:test" }, { now: at(T0 + 2 * MIN) })
-  );
+  // Released at accrual (holdDays 0), then spent on a voucher.
+  db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 25000 }, { now: at(T0 + MIN) }));
 
-  await billingRepo.refundOrder("o1", { adminId: "admin", adminNote: "post-payout refund" });
+  await billingRepo.refundOrder("o1", { adminId: "admin", adminNote: "post-spend refund" });
 
   const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + 3 * MIN)));
   assert.equal(after.VND.available, -25000);
+  assert.equal(db.get(`SELECT status FROM affiliateVouchers`).status, "active", "a created voucher is not taken back");
 
   assert.throws(
-    () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + 4 * MIN) })
-    ),
-    (error) => error.reason === "insufficient"
+    () => db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 1000 }, { now: at(T0 + 4 * MIN) })),
+    (error) => error.reason === "negative_balance"
   );
 });
 
@@ -801,38 +793,25 @@ test("a deleted referrer earns nothing and the referral keeps referredByUserId",
   assert.equal(commissions().length, 0);
 });
 
-test("deleting an account keeps withdrawal rows with an email snapshot and drops the code", async () => {
-  enableProgram({ affiliateHoldDays: 0, affiliateMinWithdrawVnd: 0 });
+test("deleting an account cancels its unused vouchers, keeps used ones and drops the code", async () => {
+  enableProgram({ affiliateHoldDays: 0, affiliateMinRedeemVnd: 0 });
   makeAffiliate("aff");
   plan();
   user("buyer", { referredByUserId: "aff" });
   orderRow({ id: "o1", userId: "buyer" });
   approve("o1", T0);
 
-  db.transaction(() => wallet.savePayoutSync(db, "aff", "VND", {
-    bankName: "VCB", accountNumber: "1", accountName: "A",
-  }));
-  db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 25000 }, { now: at(T0 + MIN) })
-  );
-
-  // A row created before this change may carry no email yet (the column was added
-  // later); deletion backfills it so the accounting row stays readable.
-  db.run(`UPDATE affiliateWithdrawals SET emailSnapshot = NULL WHERE userId = 'aff'`);
+  const unused = db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 10000 }, { now: at(T0 + MIN) }));
+  const spent = db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 5000 }, { now: at(T0 + MIN) }));
+  db.run(`UPDATE affiliateVouchers SET status = 'used', usedByUserId = 'buyer' WHERE id = ?`, [spent.id]);
 
   await userRepo.deleteUser("aff", { actor: "admin:test" });
 
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliates WHERE userId = 'aff'`)?.n, 0);
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateLedger WHERE userId = 'aff'`)?.n, 0);
-  const withdrawal = db.get(`SELECT * FROM affiliateWithdrawals WHERE userId = 'aff'`);
-  assert.ok(withdrawal, "withdrawals are kept for accounting");
-  assert.equal(withdrawal.emailSnapshot, "aff@test.local");
-  // A pending request cannot stay actionable for a wallet that no longer exists.
-  assert.equal(withdrawal.status, "rejected");
-  assert.equal(withdrawal.adminNote, "Tài khoản đã bị xóa");
-  assert.equal(withdrawal.decidedBy, "admin:test");
-  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateCommissions WHERE affiliateUserId = 'aff'`)?.n, 1,
-    "commissions are kept");
+  assert.equal(db.get(`SELECT status FROM affiliateVouchers WHERE id = ?`, [unused.id]).status, "cancelled");
+  assert.equal(db.get(`SELECT status FROM affiliateVouchers WHERE id = ?`, [spent.id]).status, "used", "kept for accounting");
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateCommissions WHERE affiliateUserId = 'aff'`)?.n, 1, "commissions are kept");
 });
 
 test("a deleted affiliate's held commission is never released into a wallet", async () => {
@@ -852,7 +831,7 @@ test("a deleted affiliate's held commission is never released into a wallet", as
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateLedger WHERE userId = 'aff'`)?.n, 0);
 });
 
-// ── Withdrawals ─────────────────────────────────────────────────────────────
+// ── Spending: credit conversion and vouchers ─────────────────────────────────
 
 function fundedAffiliate({ balance = 300000 } = {}) {
   enableProgram({ affiliateDefaultRateBp: 1000, affiliateDefaultMaxOrders: 5, affiliateHoldDays: 0 });
@@ -868,153 +847,107 @@ function fundedAffiliate({ balance = 300000 } = {}) {
     paid += 100000;
     i += 1;
   }
-  db.transaction(() => wallet.savePayoutSync(db, "aff", "VND", {
-    bankName: "VCB", accountNumber: "0123456789", accountName: "AFFILIATE",
-  }));
 }
 
-test("a valid request reserves the amount immediately", () => {
-  fundedAffiliate();
-  const request = db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
+function templatePlan(id = "tpl") {
+  db.run(
+    `INSERT INTO plans(id, code, name, priceNanoUsd, creditNanoUsd, durationDays, isActive, rpm, tpm, limits, createdAt, updatedAt)
+     VALUES(?, ?, 'Affiliate credit', 0, 0, 30, 0, 20, 100000, ?, ?, ?)`,
+    [id, id, JSON.stringify([{ hours: 5, maxNanoUsd: USD(3) }]), at(T0), at(T0)]
   );
-  assert.equal(request.status, "pending");
-  assert.equal(Number(request.amount), 200000);
+  saveSettings({ affiliateCreditPlanId: id, affiliateVndPerUsd: 25000, affiliateCreditDays: 30 });
+  return id;
+}
 
-  const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + MIN)));
-  assert.equal(after.VND.available, 100000);
-  assert.equal(after.VND.withdrawn, 200000);
-  assert.equal(ledger("aff").filter((row) => row.kind === "withdrawal").length, 1);
+test("VND converts at the admin rate into a separate grant with the template's limits", () => {
+  fundedAffiliate();
+  templatePlan();
+  const first = db.transaction(() => wallet.convertToCreditSync(db, "aff", { currency: "VND", amount: 250000 }, { now: at(T0 + DAY) }));
+  assert.equal(first.creditNanoUsd, 10 * NANO, "250,000đ at 25,000đ/$ = $10");
+  const up = db.get(`SELECT * FROM userPlans WHERE id = ?`, [first.userPlan.id]);
+  assert.equal(up.planId, "tpl");
+  assert.equal(up.source, "affiliate");
+  assert.equal(Number(up.creditRemainingNanoUsd), 10 * NANO);
+  assert.equal(Number(up.unlimitedCredit), 0);
+  assert.deepEqual(JSON.parse(up.limits), [{ hours: 5, maxNanoUsd: USD(3) }]);
+  assert.equal(up.expiresAt, at(T0 + DAY + 30 * DAY));
+
+  // A second conversion is its own purchase with its own expiry: never merged.
+  const second = db.transaction(() => wallet.convertToCreditSync(db, "aff", { currency: "VND", amount: 25000 }, { now: at(T0 + 10 * DAY) }));
+  assert.notEqual(second.userPlan.id, first.userPlan.id);
+  assert.equal(second.userPlan.expiresAt, at(T0 + 40 * DAY));
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM userPlans WHERE userId = 'aff' AND source = 'affiliate'`).n, 2);
+
+  const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + 10 * DAY)));
+  assert.equal(after.VND.available, 300000 - 275000);
+  assert.equal(after.VND.spent, 275000);
 });
 
-test("below-minimum and over-balance requests are refused with nothing reserved", () => {
+test("conversion is refused without a template plan, below the minimum or above the balance", () => {
   fundedAffiliate();
   assert.throws(
-    () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 50000 }, { now: at(T0 + DAY) })
-    ),
-    (error) => error.reason === "below_minimum" && error.status === 400
+    () => db.transaction(() => wallet.convertToCreditSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) })),
+    (error) => error.reason === "no_template"
+  );
+  templatePlan();
+  saveSettings({ affiliateMinRedeemVnd: 50000 });
+  assert.throws(
+    () => db.transaction(() => wallet.convertToCreditSync(db, "aff", { currency: "VND", amount: 40000 }, { now: at(T0 + DAY) })),
+    (error) => error.reason === "below_minimum"
   );
   assert.throws(
-    () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 999999 }, { now: at(T0 + DAY) })
-    ),
+    () => db.transaction(() => wallet.convertToCreditSync(db, "aff", { currency: "VND", amount: 999999 }, { now: at(T0 + DAY) })),
     (error) => error.reason === "insufficient"
   );
-  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals`)?.n, 0);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM userPlans WHERE userId = 'aff'`).n, 0, "nothing granted");
+  assert.equal(db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY))).VND.available, 300000, "nothing deducted");
 });
 
-test("payout details are required before a withdrawal", () => {
-  enableProgram({ affiliateHoldDays: 0 });
-  makeAffiliate("aff");
-  assert.throws(
-    () => db.transaction(() => wallet.savePayoutSync(db, "aff", "VND", {
-      bankName: "VCB", accountNumber: "  ", accountName: "A",
-    })),
-    (error) => error.reason === "missing_field"
-  );
-});
-
-test("two concurrent full-balance requests: exactly one succeeds", async () => {
+test("two concurrent full-balance spends: exactly one succeeds", async () => {
   fundedAffiliate({ balance: 300000 });
-
-  // The reserve and the balance check share one transaction, so the second
-  // request sees what the first one left. Both are queued before either runs, which
-  // is the closest a synchronous adapter gets to a race.
-  const attempt = () => Promise.resolve().then(() => db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 300000 }, { now: at(T0 + DAY) })
-  ));
-  const attempts = await Promise.allSettled([attempt(), attempt()]);
-
-  const ok = attempts.filter((entry) => entry.status === "fulfilled");
-  const failed = attempts.filter((entry) => entry.status === "rejected");
-  assert.equal(ok.length, 1, "one request wins");
-  assert.equal(failed.length, 1);
-  assert.equal(failed[0].reason.reason, "insufficient");
-  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals`)?.n, 1);
-  const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + MIN)));
-  assert.equal(after.VND.available, 0, "the whole balance was reserved once, not twice");
+  const attempt = () => new Promise((resolve) => {
+    setImmediate(() => {
+      try {
+        resolve(db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 300000 }, { now: at(T0 + DAY) })));
+      } catch (error) {
+        resolve(error);
+      }
+    });
+  });
+  const results = await Promise.all([attempt(), attempt()]);
+  assert.equal(results.filter((r) => r?.status === "active").length, 1);
+  assert.equal(results.filter((r) => r instanceof wallet.WalletError && r.reason === "insufficient").length, 1);
 });
 
-test("a pending request in the same currency blocks a second one", () => {
-  fundedAffiliate();
-  db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) })
-  );
-  assert.throws(
-    () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY + MIN) })
-    ),
-    (error) => error.reason === "pending_exists"
-  );
-});
-
-test("a blocked affiliate cannot request a withdrawal", () => {
+test("a blocked affiliate cannot spend", () => {
   fundedAffiliate();
   db.run(`UPDATE affiliates SET status = 'blocked' WHERE userId = 'aff'`);
   assert.throws(
-    () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) })
-    ),
+    () => db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) })),
     (error) => error.reason === "blocked" && error.status === 403
   );
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateVouchers`).n, 0);
 });
 
-test("rejecting returns the reserved amount; a decided request cannot be decided twice", () => {
+test("a voucher is created from the wallet and cancelling it refunds", () => {
   fundedAffiliate();
-  const request = db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
-  );
-  const before = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY))) ;
-  assert.equal(before.VND.available, 100000);
+  const voucher = db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) }));
+  assert.match(voucher.code, /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
+  assert.equal(db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY))).VND.available, 200000);
 
-  db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "rejected", reason: "Sai số tài khoản", actor: "admin:test" }, { now: at(T0 + DAY + MIN) })
+  db.transaction(() => vouchers.cancelVoucherSync(db, "aff", voucher.id, { now: at(T0 + DAY + MIN) }));
+  const w = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + MIN)));
+  assert.equal(w.VND.available, 300000);
+  assert.equal(w.VND.spent, 0, "a cancelled voucher is not spent");
+  assert.throws(
+    () => db.transaction(() => vouchers.cancelVoucherSync(db, "aff", voucher.id)),
+    (error) => error.status === 409
   );
-  const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + MIN)));
-  assert.equal(after.VND.available, 300000, "the reserve came back");
-
-  const second = db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "rejected", reason: "again", actor: "admin:two" }, { now: at(T0 + DAY + 2 * MIN) })
+  assert.throws(
+    () => db.transaction(() => vouchers.cancelVoucherSync(db, "someone-else", voucher.id)),
+    (error) => error.status === 404,
+    "only the owner can cancel"
   );
-  assert.equal(second, null, "already decided");
-  const final = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + 3 * MIN)));
-  assert.equal(final.VND.available, 300000, "the balance is unchanged by the refused decision");
-});
-
-test("marking an already-paid withdrawal as rejected is refused and changes nothing", () => {
-  fundedAffiliate();
-  const request = db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
-  );
-  db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "paid", txRef: "FT-777", actor: "admin:one" }, { now: at(T0 + DAY + MIN) })
-  );
-  const balanceAfterPay = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + MIN))).VND.available;
-
-  const second = db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "rejected", reason: "đổi ý", actor: "admin:two" }, { now: at(T0 + DAY + 2 * MIN) })
-  );
-  assert.equal(second, null, "the route turns this into 409");
-  const row = db.get(`SELECT * FROM affiliateWithdrawals WHERE id = ?`, [request.id]);
-  assert.equal(row.status, "paid", "the decision is unchanged");
-  assert.equal(row.txRef, "FT-777");
-  assert.equal(db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + 3 * MIN))).VND.available, balanceAfterPay);
-  assert.equal(ledger("aff").filter((entry) => entry.kind === "withdrawal_rejected").length, 0);
-});
-
-test("a paid withdrawal keeps its txRef and reserves once", () => {
-  fundedAffiliate();
-  const request = db.transaction(() =>
-    wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
-  );
-  const paid = db.transaction(() =>
-    wallet.decideWithdrawalSync(db, request.id, { action: "paid", txRef: "FT-999", actor: "admin:test" }, { now: at(T0 + DAY + MIN) })
-  );
-  assert.equal(paid.status, "paid");
-  assert.equal(paid.txRef, "FT-999");
-  const after = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY + 2 * MIN)));
-  assert.equal(after.VND.available, 100000, "no refund for a paid request");
 });
 
 // ── Wallet ──────────────────────────────────────────────────────────────────
@@ -1048,7 +981,7 @@ test("an admin adjustment requires a reason and a non-zero integer delta", () =>
     (error) => error.reason === "bad_delta"
   );
   const after = db.transaction(() =>
-    wallet.adjustWalletSync(db, "aff", { currency: "VND", delta: -1000, reason: "Trừ tiền chuyển thừa" }, { actor: "admin:test" })
+    wallet.adjustWalletSync(db, "aff", { currency: "VND", delta: -1000, reason: "Trừ hoa hồng cộng thừa" }, { actor: "admin:test" })
   );
   assert.equal(after.VND.available, 299000);
 });
@@ -1140,8 +1073,9 @@ test("the sync reader returns exactly what updateSettings stored", async () => {
     affiliateDefaultMaxOrders: 0,
     affiliateHoldDays: 3,
     affiliateCookieDays: 14,
-    affiliateMinWithdrawVnd: 250000,
-    affiliateMinWithdrawUsdNano: 2 * NANO,
+    affiliateMinRedeemVnd: 250000,
+    affiliateMinRedeemUsdNano: 2 * NANO,
+    affiliateVndPerUsd: 26000,
     affiliateDefaultGiftCodeId: "g1",
   });
 
@@ -1153,8 +1087,9 @@ test("the sync reader returns exactly what updateSettings stored", async () => {
   assert.equal(sync.affiliateDefaultMaxOrders, 0);
   assert.equal(sync.affiliateHoldDays, 3);
   assert.equal(sync.affiliateCookieDays, 14);
-  assert.equal(sync.affiliateMinWithdrawVnd, 250000);
-  assert.equal(sync.affiliateMinWithdrawUsdNano, 2 * NANO);
+  assert.equal(sync.affiliateMinRedeemVnd, 250000);
+  assert.equal(sync.affiliateMinRedeemUsdNano, 2 * NANO);
+  assert.equal(sync.affiliateVndPerUsd, 26000);
   assert.equal(sync.affiliateDefaultGiftCodeId, "g1");
 
   for (const key of settingsLib.AFFILIATE_SETTING_KEYS) {
@@ -1169,8 +1104,13 @@ test("the sync reader merges the defaults when nothing is stored", () => {
   assert.equal(sync.affiliateDefaultMaxOrders, 1);
   assert.equal(sync.affiliateHoldDays, 7);
   assert.equal(sync.affiliateCookieDays, 30);
-  assert.equal(sync.affiliateMinWithdrawVnd, 100000);
-  assert.equal(sync.affiliateMinWithdrawUsdNano, 5 * NANO);
+  assert.equal(sync.affiliateMinRedeemVnd, 10000);
+  assert.equal(sync.affiliateMinRedeemUsdNano, 1 * NANO);
+  assert.equal(sync.affiliateVndPerUsd, 25000);
+  assert.equal(sync.affiliateCreditPlanId, "");
+  assert.equal(sync.affiliateCreditDays, 30);
+  assert.equal(sync.affiliateBuyerBonusBp, 0);
+  assert.equal(sync.affiliateBuyerBonusMaxOrders, 1);
   assert.equal(sync.affiliateDefaultGiftCodeId, "");
 });
 
@@ -1187,7 +1127,10 @@ test("an out-of-range rate is rejected and the stored value is unchanged", async
   assert.ok(settingsLib.validateAffiliateSettings({ affiliateCookieDays: 0 }).error);
   assert.ok(settingsLib.validateAffiliateSettings({ affiliateDefaultMaxOrders: 1001 }).error);
   assert.ok(settingsLib.validateAffiliateSettings({ affiliateEnabled: "yes" }).error);
-  assert.ok(settingsLib.validateAffiliateSettings({ affiliateMinWithdrawVnd: -1 }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateMinRedeemVnd: -1 }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateVndPerUsd: 0 }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateCreditDays: 0 }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateBuyerBonusBp: 10001 }).error);
   assert.equal(settingsLib.validateAffiliateSettings({ affiliateDefaultRateBp: "1200" }).value.affiliateDefaultRateBp, 1200);
 });
 
@@ -1214,25 +1157,25 @@ test("maskEmail keeps two characters of the local part", () => {
 
 // ── Review fixes ────────────────────────────────────────────────────────────
 
-test("a withdrawal is refused while the program is off, and nothing is reserved", () => {
+test("spending is refused while the program is off, and nothing is deducted", () => {
   fundedAffiliate();
   saveSettings({ affiliateEnabled: false });
   assert.throws(
     () => db.transaction(() =>
-      wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
+      vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 200000 }, { now: at(T0 + DAY) })
     ),
     (error) => error.reason === "program_disabled" && error.status === 403
   );
-  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateWithdrawals`)?.n, 0);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliateVouchers`)?.n, 0);
 });
 
 test("settings validation refuses dotted thousands, blanks and booleans", () => {
   const v = settingsLib.validateAffiliateSettings;
-  assert.ok(v({ affiliateMinWithdrawVnd: "100.000" }).error, "100.000 must not become 100");
+  assert.ok(v({ affiliateMinRedeemVnd: "100.000" }).error, "100.000 must not become 100");
   assert.ok(v({ affiliateDefaultMaxOrders: "" }).error, "blank must not become 0");
   assert.ok(v({ affiliateHoldDays: "   " }).error);
   assert.ok(v({ affiliateHoldDays: true }).error, "Number(true) is 1");
-  assert.equal(v({ affiliateMinWithdrawVnd: "100000" }).value.affiliateMinWithdrawVnd, 100000);
+  assert.equal(v({ affiliateMinRedeemVnd: "100000" }).value.affiliateMinRedeemVnd, 100000);
   assert.equal(v({ affiliateHoldDays: 7 }).value.affiliateHoldDays, 7);
   assert.ok(settingsLib.validateOverride("maxOrders", "5.0").error);
   assert.equal(settingsLib.validateOverride("maxOrders", "5").value, 5);
@@ -1295,11 +1238,11 @@ test("the welcome gift is not advertised while the program is off or the referre
   assert.equal(read(), null, "program off");
 });
 
-test("withdrawal amounts and admin deltas accept whole numbers only, from any caller", () => {
+test("spend amounts and admin deltas accept whole numbers only, from any caller", () => {
   fundedAffiliate();
   for (const amount of ["100.000", "1e5", "0x10", true]) {
     assert.throws(
-      () => db.transaction(() => wallet.requestWithdrawalSync(db, "aff", { currency: "VND", amount }, { now: at(T0 + DAY) })),
+      () => db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount }, { now: at(T0 + DAY) })),
       (error) => error.reason === "bad_amount",
       String(amount)
     );

@@ -2,8 +2,8 @@
 slug: gioi-thieu
 title: Giới thiệu bạn bè
 section: Tham khảo
-excerpt: Đường dẫn giới thiệu, hoa hồng trên đơn đã thanh toán, thời gian giữ tiền, rút tiền và mã quà tặng cho người mới.
-summary: Cách nhận hoa hồng khi giới thiệu người mua mới, ví hoa hồng hai đơn vị tiền và quy trình rút tiền.
+excerpt: Đường dẫn giới thiệu, hoa hồng trên đơn đã thanh toán, đổi hoa hồng thành credit hoặc voucher, quà cho người được giới thiệu.
+summary: Cách nhận hoa hồng khi giới thiệu người mua mới, ví hoa hồng hai đơn vị tiền và cách dùng hoa hồng.
 sortOrder: 240
 # Draft until the affiliate program is switched on: publish it from the admin docs page.
 published: false
@@ -30,22 +30,22 @@ Ví dụ: tỷ lệ 10% và khách trả 250.000đ thì hoa hồng là 25.000đ.
 
 ## Thời gian giữ tiền
 
-Hoa hồng mới ở trạng thái Đang giữ và chưa rút được. Sau số ngày giữ (mặc định 7 ngày) tính từ lúc ghi nhận, khoản đó chuyển sang Khả dụng và cộng vào số dư. Thời gian giữ của mỗi khoản được chốt lúc ghi nhận, nên đổi cấu hình sau đó không làm thay đổi khoản đã có.
+Hoa hồng mới ở trạng thái Đang giữ và chưa dùng được. Sau số ngày giữ (mặc định 7 ngày) tính từ lúc ghi nhận, khoản đó chuyển sang Khả dụng và cộng vào số dư. Thời gian giữ của mỗi khoản được chốt lúc ghi nhận, nên đổi cấu hình sau đó không làm thay đổi khoản đã có.
 
-Nếu đơn bị hoàn tiền, khoản hoa hồng của đơn đó bị thu hồi. Khoản còn đang giữ thì biến mất; khoản đã cộng vào số dư thì bị trừ lại, và số dư có thể âm. Số dư âm chặn rút tiền cho tới khi hoa hồng mới bù lại.
+Nếu đơn bị hoàn tiền, khoản hoa hồng của đơn đó bị thu hồi. Khoản còn đang giữ thì biến mất; khoản đã cộng vào số dư thì bị trừ lại, và số dư có thể âm. Số dư âm chặn việc đổi credit và tạo voucher cho tới khi hoa hồng mới bù lại. Credit đã đổi và voucher đã tạo không bị thu hồi.
 
-## Rút tiền
+## Dùng hoa hồng
 
-Trước lần rút đầu, lưu thông tin nhận tiền: với VND là tên ngân hàng, số tài khoản và chủ tài khoản; với USD là mạng (TRC20, BEP20 hoặc Binance Pay) và địa chỉ ví hoặc Binance ID.
+Hoa hồng không rút ra tiền mặt. Có hai cách dùng, ở mục "Dùng hoa hồng" trong trang Giới thiệu:
 
-Mỗi lần rút cần:
+- **Đổi thành credit.** Số tiền chọn được đổi thành credit dùng API: ví USD đổi 1:1, ví VND đổi theo tỷ giá quản trị viên đặt (hiện trên trang). Mỗi lần đổi là một khoản credit riêng, có hạn riêng (mặc định 30 ngày kể từ lúc đổi) và giới hạn tốc độ (RPM, TPM) theo gói quản trị viên chọn. Các lần đổi không gộp hạn với nhau.
+- **Tạo voucher.** Số tiền chọn thành một mã voucher dùng một lần. Bạn gửi mã cho bất kỳ ai; người đó nhập mã ở ô "Voucher" trên trang mua gói và giá trị voucher được trừ vào giá đơn (khác đơn vị tiền thì quy đổi theo tỷ giá). Phần dư không hoàn lại. Voucher chưa dùng có thể hủy để lấy lại tiền vào ví.
 
-- chương trình đang bật;
-- số tiền không nhỏ hơn mức tối thiểu của đơn vị đó (nhập VND theo đồng, ví dụ 200.000; nhập USD theo đô, ví dụ 12.50);
-- không vượt quá số dư khả dụng;
-- không có lệnh rút nào khác đang chờ xử lý cùng đơn vị tiền.
+Mỗi lần dùng phải từ mức tối thiểu trở lên và không vượt số dư khả dụng.
 
-Số tiền được giữ ngay khi gửi lệnh. Quản trị viên chuyển khoản rồi đánh dấu Đã chuyển kèm mã giao dịch, hoặc Từ chối kèm lý do; bị từ chối thì số tiền trở lại ví.
+## Quà cho người được giới thiệu
+
+Nếu quản trị viên bật, người đăng ký qua đường dẫn của bạn được tặng thêm một phần trăm credit cho một số đơn đầu đã thanh toán: phần thêm là một khoản credit riêng, hạn như credit đổi từ hoa hồng. Với gói không giới hạn credit, quà là giảm giá ngay khi tạo đơn. Mức quà hiện trên trang Giới thiệu và trên trang đăng ký.
 
 ## Mã quà tặng cho người mới
 
@@ -53,4 +53,4 @@ Nếu chương trình có mã quà tặng chào mừng, đường dẫn giới t
 
 ## Bị khóa
 
-Quản trị viên có thể khóa một tài khoản giới thiệu. Khi bị khóa, đường dẫn không ghi nhận người mới, không phát sinh hoa hồng mới và không gửi được lệnh rút. Số dư và lịch sử vẫn được giữ.
+Quản trị viên có thể khóa một tài khoản giới thiệu. Khi bị khóa, đường dẫn không ghi nhận người mới, không phát sinh hoa hồng mới, người được giới thiệu không nhận quà và bạn không đổi credit hay tạo voucher được. Số dư và lịch sử vẫn được giữ.

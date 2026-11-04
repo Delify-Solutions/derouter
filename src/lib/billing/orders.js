@@ -19,6 +19,10 @@ import { parseJson } from "../db/helpers/jsonCol.js";
 // inside this function's transaction: an approval and its commission commit or
 // roll back together, on every approval path alike.
 import { accrueCommissionSync } from "../affiliate/commission.js";
+// The order's voucher is spent and the referred buyer's bonus credit granted in
+// the same transaction as the approval (change affiliate-credit-vouchers).
+import { markVoucherUsedSync } from "../affiliate/vouchers.js";
+import { grantBuyerBonusSync } from "../affiliate/buyerBonus.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -85,6 +89,8 @@ export function rowToOrder(row) {
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
     limits: parseLimits(row.limits),
+    voucherDiscount: row.voucherDiscount == null ? null : nano(row.voucherDiscount),
+    referralDiscountBp: row.referralDiscountBp == null ? null : Number(row.referralDiscountBp),
   };
 }
 
@@ -118,6 +124,9 @@ export function toCustomerOrder(order) {
     payerNote: order.payerNote ?? null,
     createdAt: order.createdAt ?? null,
     paidAt: order.paidAt ?? null,
+    // What the customer's own discounts took off (affiliate voucher / referral).
+    voucherDiscount: order.voucherDiscount ?? null,
+    referralDiscountBp: order.referralDiscountBp ?? null,
   };
 }
 
@@ -217,6 +226,8 @@ export function approveOrderSync(db, orderId, {
   // makes a lost race a no-op even if the driver ever ran these statements
   // outside the serialized write path.
   const commission = accrueCommissionSync(db, row, { now: paidAt });
+  markVoucherUsedSync(db, row, { now: paidAt });
+  const buyerBonus = grantBuyerBonusSync(db, row, { now: paidAt });
 
   return {
     alreadyApproved: false,
@@ -226,6 +237,7 @@ export function approveOrderSync(db, orderId, {
     appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
     paidAt,
     commission: commission ?? null,
+    buyerBonus: buyerBonus?.userPlan ?? null,
   };
 }
 

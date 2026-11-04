@@ -1,19 +1,29 @@
-// Commission wallet: balances, withdrawals and admin adjustments (design D5).
+// Commission wallet: balances, spending and admin adjustments
+// (spec affiliate-program "Commission wallet", change affiliate-credit-vouchers).
 //
-// SYNCHRONOUS + DRIVER-FREE. Every function takes the adapter first and is meant
-// to run inside the caller's `db.transaction`, which is what makes "two requests
-// for the same full balance" safe: the checks and the reservation are one write.
+// Commission is never paid out. The balance can only be spent inside the service:
+// converted into API credit (convertToCreditSync) or turned into a single-use
+// voucher (vouchers.js). Both spend through spendSync, which checks and debits in
+// the caller's transaction, so two spends of the same full balance cannot both
+// succeed.
+//
+// SYNCHRONOUS + DRIVER-FREE: every function takes the adapter first and runs
+// inside the caller's `db.transaction`. Relative imports only.
 //
 // Balance = SUM(affiliateLedger.delta) per (userId, currency). Only released
 // commission reaches the ledger; held money stays in affiliateCommissions.
-import { v4 as uuidv4 } from "uuid";
 import { insertAuditSync } from "../billing/audit.js";
-import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
+import { grantUserPlan } from "../billing/grants.js";
+import { parseLimits } from "../billing/limits.js";
+import { stringifyJson } from "../db/helpers/jsonCol.js";
 import { readAffiliateSettingsSync, toWholeNumber } from "./settings.js";
 import { getAffiliateSync } from "./core.js";
 import { releaseAllDueSync, releaseDueSync } from "./commission.js";
 
-export const WITHDRAW_CURRENCIES = ["VND", "USD"];
+export const WALLET_CURRENCIES = ["VND", "USD"];
+
+/** Ledger kinds that spend the wallet; their negated sum is the "spent" figure. */
+const SPEND_KINDS = ["convert_credit", "voucher", "voucher_cancelled"];
 
 function nowIso() {
   return new Date().toISOString();
@@ -29,252 +39,150 @@ export class WalletError extends Error {
 }
 
 function emptyCurrency() {
-  return { available: 0, pending: 0, earned: 0, withdrawn: 0 };
+  return { available: 0, pending: 0, earned: 0, spent: 0 };
 }
 
-function insertLedgerSync(db, { userId, currency, delta, kind, withdrawalId = null, commissionId = null, meta = null, now }) {
+export function insertLedgerSync(db, { userId, currency, delta, kind, commissionId = null, meta = null, now }) {
   db.run(
     `INSERT INTO affiliateLedger(userId, currency, delta, kind, commissionId, withdrawalId, meta, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, currency, delta, kind, commissionId, withdrawalId, meta == null ? null : stringifyJson(meta), now]
+     VALUES(?, ?, ?, ?, ?, NULL, ?, ?)`,
+    [userId, currency, delta, kind, commissionId, meta == null ? null : stringifyJson(meta), now]
   );
+}
+
+/**
+ * `vnd` đồng → nano-USD of credit at `vndPerUsd` đồng per $1, floored, in BigInt
+ * (đồng × 1e9 overflows 2^53 from about 9 million đồng).
+ */
+export function vndToNanoUsd(vnd, vndPerUsd) {
+  const rate = BigInt(Math.trunc(Number(vndPerUsd) || 0));
+  const amount = BigInt(Math.trunc(Number(vnd) || 0));
+  if (rate <= 0n || amount <= 0n) return 0;
+  const out = (amount * 1_000_000_000n) / rate;
+  return Number(out > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : out);
+}
+
+/** nano-USD → đồng at `vndPerUsd`, floored, in BigInt. */
+export function nanoUsdToVnd(nanoUsd, vndPerUsd) {
+  const rate = BigInt(Math.trunc(Number(vndPerUsd) || 0));
+  const amount = BigInt(Math.trunc(Number(nanoUsd) || 0));
+  if (rate <= 0n || amount <= 0n) return 0;
+  return Number((amount * rate) / 1_000_000_000n);
+}
+
+function sumsInto(target, rows, field) {
+  for (const row of rows) {
+    const entry = target(row);
+    if (entry?.[row.currency]) entry[row.currency][field] = Number(row.total) || 0;
+  }
 }
 
 /**
  * One affiliate's wallet, per currency (spec "Commission wallet").
  *
  * Releases due commissions first, so the number returned is always correct at the
- * moment it is read (design D3). Must therefore run in a WRITE transaction.
+ * moment it is read (design D3 of affiliate-referrals). Must therefore run in a
+ * WRITE transaction.
  *
- *   available  ledger sum — what can be withdrawn (may be negative after a
- *              refund that landed post-payout)
+ *   available  ledger sum — what can be spent (negative after a refund that
+ *              landed after the commission was spent)
  *   pending    held commission not yet released
- *   earned     lifetime commission still standing (pending + available). A
- *              reversed commission was never really earned, so it is excluded;
- *              a negative balance after a post-payout refund shows in `available`
- *              instead.
- *   withdrawn  lifetime amount reserved by withdrawals (paid or still pending)
- *
- * @returns {{ VND: object, USD: object }}
+ *   earned     lifetime commission still standing (pending + available)
+ *   spent      lifetime converted to credit or put into vouchers, net of
+ *              cancelled vouchers
  */
 export function walletSync(db, userId, now = null) {
   if (!db) throw new Error("walletSync requires the db adapter");
   const at = now || nowIso();
-  const wallet = { VND: emptyCurrency(), USD: emptyCurrency() };
-  if (!userId) return wallet;
-
+  if (!userId) return { VND: emptyCurrency(), USD: emptyCurrency() };
   releaseDueSync(db, userId, at);
-
-  const ledgerRows = db.all(
-    `SELECT currency, COALESCE(SUM(delta), 0) AS total
-       FROM affiliateLedger WHERE userId = ? GROUP BY currency`,
-    [userId]
-  );
-  for (const row of ledgerRows) {
-    if (!wallet[row.currency]) continue;
-    wallet[row.currency].available = Number(row.total) || 0;
-  }
-
-  const pendingRows = db.all(
-    `SELECT currency, COALESCE(SUM(amount), 0) AS total
-       FROM affiliateCommissions
-      WHERE affiliateUserId = ? AND status = 'pending' GROUP BY currency`,
-    [userId]
-  );
-  for (const row of pendingRows) {
-    if (!wallet[row.currency]) continue;
-    wallet[row.currency].pending = Number(row.total) || 0;
-  }
-
-  const earnedRows = db.all(
-    `SELECT currency, COALESCE(SUM(amount), 0) AS total
-       FROM affiliateCommissions
-      WHERE affiliateUserId = ? AND status IN ('pending', 'available') GROUP BY currency`,
-    [userId]
-  );
-  for (const row of earnedRows) {
-    if (!wallet[row.currency]) continue;
-    wallet[row.currency].earned = Number(row.total) || 0;
-  }
-
-  const withdrawnRows = db.all(
-    `SELECT currency, COALESCE(SUM(amount), 0) AS total
-       FROM affiliateWithdrawals
-      WHERE userId = ? AND status IN ('pending', 'paid') GROUP BY currency`,
-    [userId]
-  );
-  for (const row of withdrawnRows) {
-    if (!wallet[row.currency]) continue;
-    wallet[row.currency].withdrawn = Number(row.total) || 0;
-  }
-
-  return wallet;
+  return readWalletsSync(db, [userId]).get(userId);
 }
 
 /**
- * Wallets for a page of affiliates in a fixed number of queries (design D3: the
- * admin list runs `releaseAllDueSync` first, never one release per row).
- *
- * @param {object} db adapter (inside a write transaction, for the release)
- * @param {string[]} userIds
- * @param {string=} now
- * @returns {Map<string, {VND: object, USD: object}>}
+ * Wallets for a page of affiliates in a fixed number of queries (the admin list
+ * runs `releaseAllDueSync` first, never one release per row).
  */
 export function walletsSync(db, userIds, now = null) {
   if (!db) throw new Error("walletsSync requires the db adapter");
-  const at = now || nowIso();
-  const out = new Map();
   const ids = Array.isArray(userIds) ? userIds.filter(Boolean) : [];
-  if (ids.length === 0) return out;
+  if (ids.length === 0) return new Map();
+  releaseAllDueSync(db, now || nowIso());
+  return readWalletsSync(db, ids);
+}
 
-  releaseAllDueSync(db, at);
-
-  const placeholders = ids.map(() => "?").join(", ");
+function readWalletsSync(db, ids) {
+  const out = new Map();
   for (const id of ids) out.set(id, { VND: emptyCurrency(), USD: emptyCurrency() });
+  const marks = ids.map(() => "?").join(", ");
+  const byUser = (row) => out.get(row.userId);
 
-  const ledgerRows = db.all(
+  sumsInto(byUser, db.all(
     `SELECT userId, currency, COALESCE(SUM(delta), 0) AS total
-       FROM affiliateLedger WHERE userId IN (${placeholders}) GROUP BY userId, currency`,
+       FROM affiliateLedger WHERE userId IN (${marks}) GROUP BY userId, currency`,
     ids
-  );
-  for (const row of ledgerRows) {
-    const entry = out.get(row.userId);
-    if (entry?.[row.currency]) entry[row.currency].available = Number(row.total) || 0;
-  }
-
-  const pendingRows = db.all(
+  ), "available");
+  sumsInto(byUser, db.all(
     `SELECT affiliateUserId AS userId, currency, COALESCE(SUM(amount), 0) AS total
        FROM affiliateCommissions
-      WHERE affiliateUserId IN (${placeholders}) AND status = 'pending'
+      WHERE affiliateUserId IN (${marks}) AND status = 'pending'
       GROUP BY affiliateUserId, currency`,
     ids
-  );
-  for (const row of pendingRows) {
-    const entry = out.get(row.userId);
-    if (entry?.[row.currency]) entry[row.currency].pending = Number(row.total) || 0;
-  }
-
-  const earnedRows = db.all(
+  ), "pending");
+  sumsInto(byUser, db.all(
     `SELECT affiliateUserId AS userId, currency, COALESCE(SUM(amount), 0) AS total
        FROM affiliateCommissions
-      WHERE affiliateUserId IN (${placeholders}) AND status IN ('pending', 'available')
+      WHERE affiliateUserId IN (${marks}) AND status IN ('pending', 'available')
       GROUP BY affiliateUserId, currency`,
     ids
-  );
-  for (const row of earnedRows) {
-    const entry = out.get(row.userId);
-    if (entry?.[row.currency]) entry[row.currency].earned = Number(row.total) || 0;
-  }
-
-  const withdrawnRows = db.all(
-    `SELECT userId, currency, COALESCE(SUM(amount), 0) AS total
-       FROM affiliateWithdrawals
-      WHERE userId IN (${placeholders}) AND status IN ('pending', 'paid')
+  ), "earned");
+  sumsInto(byUser, db.all(
+    `SELECT userId, currency, COALESCE(-SUM(delta), 0) AS total
+       FROM affiliateLedger
+      WHERE userId IN (${marks}) AND kind IN (${SPEND_KINDS.map(() => "?").join(", ")})
       GROUP BY userId, currency`,
-    ids
-  );
-  for (const row of withdrawnRows) {
-    const entry = out.get(row.userId);
-    if (entry?.[row.currency]) entry[row.currency].withdrawn = Number(row.total) || 0;
-  }
-
+    [...ids, ...SPEND_KINDS]
+  ), "spent");
   return out;
-}
-
-/** Payout details of an affiliate, parsed. `{ vnd, usd }`, either may be null. */
-export function payoutDetailsSync(db, userId) {
-  const row = getAffiliateSync(db, userId);
-  return {
-    vnd: parseJson(row?.payoutVnd, null) || null,
-    usd: parseJson(row?.payoutUsd, null) || null,
-  };
-}
-
-const PAYOUT_FIELDS_VND = ["bankName", "accountNumber", "accountName"];
-const PAYOUT_FIELDS_USD = ["network", "address"];
-
-/**
- * Save the payout destination for one currency (spec "Payout details").
- * Every VND field is required; USD needs an address and a network.
- */
-export function savePayoutSync(db, userId, currency, details) {
-  const affiliate = getAffiliateSync(db, userId);
-  if (!affiliate) throw new WalletError("no_affiliate", "Bạn chưa có mã giới thiệu", 404);
-
-  const clean = {};
-  if (currency === "VND") {
-    for (const field of PAYOUT_FIELDS_VND) {
-      const value = typeof details?.[field] === "string" ? details[field].trim() : "";
-      if (!value) throw new WalletError("missing_field", "Nhập đủ tên ngân hàng, số tài khoản và chủ tài khoản");
-      if (value.length > 100) throw new WalletError("too_long", "Mỗi trường tối đa 100 ký tự");
-      clean[field] = value;
-    }
-    db.run(`UPDATE affiliates SET payoutVnd = ?, updatedAt = ? WHERE userId = ?`, [
-      stringifyJson(clean),
-      nowIso(),
-      userId,
-    ]);
-  } else if (currency === "USD") {
-    const network = typeof details?.network === "string" ? details.network.trim().toUpperCase() : "";
-    const address = typeof details?.address === "string" ? details.address.trim() : "";
-    if (!address) throw new WalletError("missing_field", "Nhập địa chỉ USDT hoặc Binance ID");
-    if (!network) throw new WalletError("missing_field", "Chọn mạng (TRC20 hoặc BEP20)");
-    if (address.length > 100) throw new WalletError("too_long", "Địa chỉ tối đa 100 ký tự");
-    clean.network = network;
-    clean.address = address;
-    db.run(`UPDATE affiliates SET payoutUsd = ?, updatedAt = ? WHERE userId = ?`, [
-      stringifyJson(clean),
-      nowIso(),
-      userId,
-    ]);
-  } else {
-    throw new WalletError("bad_currency", "Đơn vị tiền không hợp lệ");
-  }
-
-  return clean;
 }
 
 function minimumFor(settings, currency) {
   return currency === "VND"
-    ? Number(settings.affiliateMinWithdrawVnd ?? 0)
-    : Number(settings.affiliateMinWithdrawUsdNano ?? 0);
+    ? Number(settings.affiliateMinRedeemVnd ?? 0)
+    : Number(settings.affiliateMinRedeemUsdNano ?? 0);
+}
+
+function minimumLabel(currency, minimum) {
+  return currency === "VND"
+    ? `${minimum.toLocaleString("vi-VN")}đ`
+    : `${(minimum / 1_000_000_000).toFixed(2)} USD`;
 }
 
 /**
- * Request a withdrawal (design D5 / spec "Withdrawal request").
+ * Debit the wallet for a spend (conversion or voucher). Every rule is checked
+ * here, in the caller's transaction, then one negative ledger row is written.
  *
- * Every rule is checked here, in the caller's transaction, then the amount is
- * RESERVED with a negative ledger row. Two requests for the full balance
- * therefore serialise: the second sees the balance the first left.
- *
- * @returns {object} the inserted withdrawal row
+ * @returns {{ currency: "VND"|"USD", amount: number, settings: object, affiliate: object }}
  * @throws {WalletError} 400/403 with the Vietnamese reason
  */
-export function requestWithdrawalSync(db, userId, { currency, amount }, { now = null } = {}) {
-  if (!db) throw new Error("requestWithdrawalSync requires the db adapter");
+export function spendSync(db, userId, { currency, amount }, { kind, meta = null, now = null } = {}) {
+  if (!db) throw new Error("spendSync requires the db adapter");
+  if (!SPEND_KINDS.includes(kind) || kind === "voucher_cancelled") throw new Error(`spendSync: bad kind ${kind}`);
   const at = now || nowIso();
 
   const cur = String(currency || "").toUpperCase();
-  if (!WITHDRAW_CURRENCIES.includes(cur)) {
+  if (!WALLET_CURRENCIES.includes(cur)) {
     throw new WalletError("bad_currency", "Đơn vị tiền không hợp lệ");
   }
 
   const settings = readAffiliateSettingsSync(db);
-  // With the program off the customer page shows the wallet and history only
-  // (spec "Program settings"); the API must agree with the page.
   if (settings.affiliateEnabled !== true) {
-    throw new WalletError("program_disabled", "Chương trình giới thiệu đang tạm dừng nên chưa rút được", 403);
+    throw new WalletError("program_disabled", "Chương trình giới thiệu đang tạm dừng", 403);
   }
   const affiliate = getAffiliateSync(db, userId);
-  if (!affiliate) throw new WalletError("no_affiliate", "Bạn chưa có mã giới thiệu", 404);
+  if (!affiliate) throw new WalletError("no_affiliate", "Bạn chưa có mã giới thiệu", 403);
   if (affiliate.status !== "active") {
     throw new WalletError("blocked", "Tài khoản của bạn đang bị khóa giới thiệu", 403);
-  }
-
-  const payout = payoutDetailsSync(db, userId);
-  const destination = cur === "VND" ? payout.vnd : payout.usd;
-  if (!destination) {
-    throw new WalletError("no_payout", "Lưu thông tin nhận tiền trước khi rút");
   }
 
   // Plain digits or an integer only: Number("100.000") is 100, Number("1e5") is
@@ -285,112 +193,109 @@ export function requestWithdrawalSync(db, userId, { currency, amount }, { now = 
   }
   const minimum = minimumFor(settings, cur);
   if (value < minimum) {
-    const label = cur === "VND"
-      ? `${minimum.toLocaleString("vi-VN")}đ`
-      : `${(minimum / 1_000_000_000).toFixed(2)} USD`;
-    throw new WalletError("below_minimum", `Số tiền rút tối thiểu là ${label}`);
+    throw new WalletError("below_minimum", `Số tiền tối thiểu mỗi lần là ${minimumLabel(cur, minimum)}`);
   }
 
-  // Release due commissions first: money that became available while the page was
-  // open must be withdrawable, and the balance below must be the current one.
   const wallet = walletSync(db, userId, at);
   const available = wallet[cur].available;
-  if (available <= 0) {
-    throw new WalletError("insufficient", "Số dư khả dụng không đủ để rút");
+  if (available < 0) {
+    throw new WalletError("negative_balance", "Số dư đang âm do đơn hoàn tiền, chưa dùng được");
   }
   if (value > available) {
-    throw new WalletError("insufficient", "Số dư khả dụng không đủ để rút");
+    throw new WalletError("insufficient", "Số dư khả dụng không đủ");
   }
 
-  const open = db.get(
-    `SELECT 1 AS x FROM affiliateWithdrawals WHERE userId = ? AND currency = ? AND status = 'pending'`,
-    [userId, cur]
-  );
-  if (open) {
-    throw new WalletError("pending_exists", "Bạn đang có một lệnh rút chờ xử lý cho đơn vị này");
-  }
+  insertLedgerSync(db, { userId, currency: cur, delta: -value, kind, meta, now: at });
+  return { currency: cur, amount: value, settings, affiliate };
+}
 
-  const user = db.get(`SELECT email FROM users WHERE id = ?`, [userId]);
-  const id = uuidv4();
-  db.run(
-    `INSERT INTO affiliateWithdrawals(
-       id, userId, emailSnapshot, currency, amount, destination, status, createdAt
-     ) VALUES(?, ?, ?, ?, ?, ?, 'pending', ?)`,
-    [id, userId, user?.email ?? null, cur, value, stringifyJson(destination), at]
-  );
-
-  insertLedgerSync(db, {
-    userId,
-    currency: cur,
-    delta: -value,
-    kind: "withdrawal",
-    withdrawalId: id,
-    now: at,
-  });
-
-  return db.get(`SELECT * FROM affiliateWithdrawals WHERE id = ?`, [id]);
+/** The template plan converted and bonus credit is granted against, or null. */
+export function creditTemplatePlanSync(db, settings) {
+  const id = settings?.affiliateCreditPlanId;
+  if (!id) return null;
+  return db.get(`SELECT * FROM plans WHERE id = ?`, [id]) ?? null;
 }
 
 /**
- * Admin decision on a pending withdrawal (design D5 / spec "Admin decides
- * withdrawals"). The `status = 'pending'` guard is what makes a double decision
- * impossible: the loser changes 0 rows and gets `null`, which the route maps to 409.
- *
- * @returns {object|null} the updated row, or null when it was already decided
+ * Grant `creditNanoUsd` as its own purchase against the template plan: the
+ * plan's RPM/TPM (read live from the plan) and per-window limits (snapshotted),
+ * never unlimited, expiring `affiliateCreditDays` after `now`. Shared by
+ * conversions and the referred-buyer bonus.
  */
-export function decideWithdrawalSync(db, id, { action, txRef = null, reason = null, actor = "admin" }, { now = null } = {}) {
-  if (!db) throw new Error("decideWithdrawalSync requires the db adapter");
-  const at = now || nowIso();
-  const row = db.get(`SELECT * FROM affiliateWithdrawals WHERE id = ?`, [id]);
-  if (!row) throw new WalletError("not_found", "Không tìm thấy lệnh rút", 404);
-  if (row.status !== "pending") return null;
+export function grantTemplateCreditSync(db, { userId, creditNanoUsd, source, settings, meta, now, orderId = null }) {
+  const plan = creditTemplatePlanSync(db, settings);
+  if (!plan) return null;
+  const days = Math.max(1, Math.floor(Number(settings.affiliateCreditDays) || 30));
+  const granted = grantUserPlan(db, {
+    userId,
+    planId: plan.id,
+    // The buyer bonus carries its order, so refundOrder (which closes every
+    // purchase with that orderId) takes the bonus back with the order.
+    orderId,
+    source,
+    creditNanoUsd,
+    unlimitedCredit: false,
+    durationDays: days,
+    limits: parseLimits(plan.limits),
+    meta,
+    now,
+  });
+  return { userPlan: granted.userPlan, plan, days };
+}
 
-  if (action === "paid") {
-    const ref = typeof txRef === "string" ? txRef.trim() : "";
-    if (!ref) throw new WalletError("missing_txref", "Nhập mã giao dịch chuyển khoản");
-    if (ref.length > 200) throw new WalletError("too_long", "Mã giao dịch tối đa 200 ký tự");
-    const result = db.run(
-      `UPDATE affiliateWithdrawals
-          SET status = 'paid', txRef = ?, adminNote = ?, decidedBy = ?, decidedAt = ?
-        WHERE id = ? AND status = 'pending'`,
-      [ref, reason, actor, at, id]
-    );
-    if (result && typeof result.changes === "number" && result.changes === 0) return null;
-  } else if (action === "rejected") {
-    const note = typeof reason === "string" ? reason.trim() : "";
-    if (!note) throw new WalletError("missing_reason", "Nhập lý do từ chối");
-    if (note.length > 500) throw new WalletError("too_long", "Lý do tối đa 500 ký tự");
-    const result = db.run(
-      `UPDATE affiliateWithdrawals
-          SET status = 'rejected', adminNote = ?, decidedBy = ?, decidedAt = ?
-        WHERE id = ? AND status = 'pending'`,
-      [note, actor, at, id]
-    );
-    if (result && typeof result.changes === "number" && result.changes === 0) return null;
-    // The reserve comes back in the same transaction.
-    insertLedgerSync(db, {
-      userId: row.userId,
-      currency: row.currency,
-      delta: Number(row.amount),
-      kind: "withdrawal_rejected",
-      withdrawalId: id,
-      meta: { reason: note },
-      now: at,
-    });
-  } else {
-    throw new WalletError("bad_action", "Hành động không hợp lệ");
+/**
+ * Convert wallet money into API credit (spec "Convert commission to credit").
+ * VND converts at `affiliateVndPerUsd`, USD 1:1. Each call is a separate grant
+ * with its own expiry; nothing is merged.
+ *
+ * @returns {{ userPlan: object, creditNanoUsd: number, currency: string, amount: number }}
+ */
+export function convertToCreditSync(db, userId, { currency, amount }, { now = null } = {}) {
+  const at = now || nowIso();
+  const settings = readAffiliateSettingsSync(db);
+  if (settings.affiliateEnabled !== true) {
+    throw new WalletError("program_disabled", "Chương trình giới thiệu đang tạm dừng", 403);
+  }
+  // Checked before spending so a refusal leaves the wallet untouched.
+  if (!creditTemplatePlanSync(db, settings)) {
+    throw new WalletError("no_template", "Quản trị viên chưa cấu hình gói cho credit giới thiệu", 400);
+  }
+  const cur = String(currency || "").toUpperCase();
+  const parsed = toWholeNumber(amount);
+  const credit = cur === "VND" ? vndToNanoUsd(parsed, settings.affiliateVndPerUsd) : parsed;
+  if (Number.isSafeInteger(parsed) && parsed > 0 && !(credit > 0)) {
+    throw new WalletError("too_small", "Số tiền quá nhỏ để đổi ra credit");
   }
 
-  insertAuditSync(db, {
-    userId: row.userId,
-    actor,
-    action: action === "paid" ? "affiliate_withdrawal_paid" : "affiliate_withdrawal_rejected",
-    reason: reason ?? null,
-    details: { withdrawalId: id, currency: row.currency, amount: Number(row.amount), txRef: txRef ?? null },
+  const spent = spendSync(db, userId, { currency, amount }, {
+    kind: "convert_credit",
+    meta: { creditNanoUsd: credit, vndPerUsd: cur === "VND" ? Number(settings.affiliateVndPerUsd) : null },
+    now: at,
+  });
+  const granted = grantTemplateCreditSync(db, {
+    userId,
+    creditNanoUsd: credit,
+    source: "affiliate",
+    settings: spent.settings,
+    meta: { affiliateConversion: true, currency: spent.currency, amount: spent.amount },
     now: at,
   });
 
-  return db.get(`SELECT * FROM affiliateWithdrawals WHERE id = ?`, [id]);
+  insertAuditSync(db, {
+    userId,
+    actor: "customer",
+    action: "affiliate_credit_converted",
+    details: {
+      currency: spent.currency,
+      amount: spent.amount,
+      creditNanoUsd: credit,
+      userPlanId: granted.userPlan.id,
+      expiresAt: granted.userPlan.expiresAt,
+    },
+    now: at,
+  });
+
+  return { userPlan: granted.userPlan, creditNanoUsd: credit, currency: spent.currency, amount: spent.amount };
 }
 
 /**
@@ -402,10 +307,10 @@ export function adjustWalletSync(db, userId, { currency, delta, reason }, { acto
   if (!db) throw new Error("adjustWalletSync requires the db adapter");
   const at = now || nowIso();
   const cur = String(currency || "").toUpperCase();
-  if (!WITHDRAW_CURRENCIES.includes(cur)) {
+  if (!WALLET_CURRENCIES.includes(cur)) {
     throw new WalletError("bad_currency", "Đơn vị tiền không hợp lệ");
   }
-  // Signed whole number only (same reason as the withdrawal amount above).
+  // Signed whole number only (same parsing as spendSync).
   const raw = typeof delta === "string" ? delta.trim() : delta;
   const negative = typeof raw === "string" && raw.startsWith("-");
   const magnitude = toWholeNumber(typeof raw === "string" ? raw.replace(/^[+-]/, "") : raw);

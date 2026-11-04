@@ -5,6 +5,22 @@ import { ActionButton, ButtonLink, Empty, Eyebrow, Heading, Panel, Tag } from "@
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { fitFigureStyle } from "@/shared/utils/fitFigure";
 import { termLabel } from "@/lib/billing/terms.js";
+import { formatVnd } from "@/lib/payments/amounts.js";
+import { fmtUsdNano } from "@/shared/utils/money";
+
+/** Affiliate discounts already taken off the amount to pay, as one short line. */
+function discountLine(order) {
+  if (!order) return "";
+  const parts = [];
+  if (Number(order.referralDiscountBp) > 0) {
+    parts.push(`giảm ${(Number(order.referralDiscountBp) / 100).toFixed(Number(order.referralDiscountBp) % 100 === 0 ? 0 : 2)}% nhờ được giới thiệu`);
+  }
+  if (Number(order.voucherDiscount) > 0) {
+    const value = order.payCurrency === "VND" ? formatVnd(order.voucherDiscount) : fmtUsdNano(order.voucherDiscount);
+    parts.push(`voucher −${value}`);
+  }
+  return parts.join(" · ");
+}
 
 /**
  * The payment page for one gateway order (spec payment-checkout "Order page").
@@ -188,6 +204,7 @@ export default function OrderPaymentClient({ orderId }) {
             Tạo lúc {fmtDate(order?.createdAt)}
             {order?.paidAt ? ` · thanh toán lúc ${fmtDate(order.paidAt)}` : ""}
           </p>
+          {discountLine(order) ? <p className="text-sm text-text-muted">Đã áp dụng: {discountLine(order)}</p> : null}
         </div>
         <Tag tone={tag.tone} icon={tag.icon}>{tag.label}</Tag>
       </header>
