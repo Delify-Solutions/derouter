@@ -20,3 +20,25 @@ The admin SHALL be able to give a gift code straight to accounts, without the cu
 #### Scenario: Not enough redemptions
 - **WHEN** an admin assigns a code with 1 redemption left to two accounts
 - **THEN** the first account receives it and the second is listed as "Mã đã hết lượt dùng"
+
+### Requirement: Admin-chosen codes
+The admin SHALL be able to type the code when creating it (e.g. `WELCOME2026`). A typed code SHALL contain only unaccented letters, digits, dashes and spaces, SHALL be 4–32 characters once separators are removed, and SHALL be stored upper case without separators. A code that already exists SHALL be refused. An empty field SHALL generate a random 16-character code as before. A code of exactly 16 characters (the generated length) SHALL be displayed in groups of four; a code of any other length SHALL be displayed as stored.
+
+#### Scenario: Welcome code
+- **WHEN** an admin creates a code with `welcome-2026`
+- **THEN** the code is stored as `WELCOME2026`, listed as `WELCOME2026`, and a customer redeems it by typing `Welcome2026`
+
+#### Scenario: Too short
+- **WHEN** an admin types `ABC`
+- **THEN** creation is refused with "Mã phải dài từ 4 đến 32 ký tự"
+
+### Requirement: Editing a code
+The admin gift code page SHALL offer "Sửa" on every code, editing the total redemptions, the per-user limit, the start and expiry dates, the new-user flag and the note. The total SHALL NOT be set below the number of redemptions already made. Once a code has been redeemed, what it grants (plan, credit, amount, duration) SHALL NOT change; the code string itself is never editable.
+
+#### Scenario: More uses for an exhausted code
+- **WHEN** a code with 2 of 2 uses taken is edited to 5 uses
+- **THEN** three more accounts can redeem it
+
+#### Scenario: Gift locked after redemption
+- **WHEN** an admin tries to change the credit of a code that was already redeemed
+- **THEN** the save is refused with "Mã đã có người dùng nên không đổi được quà tặng"
