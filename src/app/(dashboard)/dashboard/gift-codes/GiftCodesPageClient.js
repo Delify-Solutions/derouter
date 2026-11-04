@@ -19,6 +19,7 @@ import { formatVnd } from "@/lib/payments/amounts.js";
 import { topupCreditForAmount } from "@/lib/billing/topup.js";
 import UserPicker from "./components/UserPicker";
 import AssignResults from "./components/AssignResults";
+import EditGiftCodeModal from "./components/EditGiftCodeModal";
 
 const FILTERS = [
   { value: "all", label: "All" },
@@ -124,6 +125,7 @@ export default function GiftCodesPageClient() {
   const [redemptionsError, setRedemptionsError] = useState("");
   const [rowBusyId, setRowBusyId] = useState(null);
   const [assignFor, setAssignFor] = useState(null);
+  const [editFor, setEditFor] = useState(null);
 
   const { copied, copy } = useCopyToClipboard(2000);
 
@@ -365,6 +367,15 @@ export default function GiftCodesPageClient() {
                         <Button
                           size="sm"
                           variant="ghost"
+                          icon="edit"
+                          disabled={busy}
+                          onClick={() => setEditFor(gift)}
+                        >
+                          Sửa
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           icon="person_add"
                           disabled={!gift.isActive || status === "exhausted" || status === "expired"}
                           onClick={() => setAssignFor(gift)}
@@ -396,6 +407,17 @@ export default function GiftCodesPageClient() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {editFor && (
+        <EditGiftCodeModal
+          gift={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={(code) => {
+            setEditFor(null);
+            if (code) setCodes((prev) => prev.map((g) => (g.id === code.id ? code : g)));
+          }}
+        />
       )}
 
       {assignFor && (
@@ -569,6 +591,7 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
   const [newUserOnly, setNewUserOnly] = useState(false);
   const [expiresOn, setExpiresOn] = useState("");
   const [note, setNote] = useState("");
+  const [customCode, setCustomCode] = useState("");
   const [amountVnd, setAmountVnd] = useState("");
   const [assignees, setAssignees] = useState([]);
   const [error, setError] = useState("");
@@ -603,7 +626,23 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
       return;
     }
 
+    // Optional code the admin chooses (WELCOME2026); empty = a random one. The
+    // server applies the same rule and also refuses a code that already exists.
+    const typedCode = customCode.trim();
+    if (typedCode) {
+      const key = typedCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!/^[A-Za-z0-9 -]+$/.test(typedCode)) {
+        setError("Mã chỉ gồm chữ không dấu, số và dấu gạch ngang.");
+        return;
+      }
+      if (key.length < 4 || key.length > 32) {
+        setError("Mã phải dài từ 4 đến 32 ký tự (không tính dấu gạch).");
+        return;
+      }
+    }
+
     const body = {
+      code: typedCode || undefined,
       maxRedemptions: max,
       perUserLimit: perUser,
       newUserOnly,
@@ -684,6 +723,15 @@ function NewGiftCodeModal({ plans, onClose, onCreated }) {
       }
     >
       <div className="flex flex-col gap-4">
+        <Input
+          label="Mã tự đặt (tùy chọn)"
+          value={customCode}
+          onChange={(e) => setCustomCode(e.target.value.toUpperCase())}
+          placeholder="WELCOME2026"
+          maxLength={40}
+          hint="4–32 chữ hoặc số. Để trống để tạo mã ngẫu nhiên 16 ký tự."
+        />
+
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Grant</span>
           <div className="inline-flex w-full border border-border">

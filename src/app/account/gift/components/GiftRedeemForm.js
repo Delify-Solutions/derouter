@@ -4,12 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionButton, Eyebrow, Stat } from "@/app/account/components/ui";
 import { TelegramLinkPrompt } from "@/app/account/components/TelegramLink";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
-import { formatGiftCode, normalizeGiftCode } from "./formatCode";
+import { formatGiftCode, formatTypedGiftCode, normalizeGiftCode } from "./formatCode";
 import { clearPendingGiftCode, readPendingGiftCode } from "@/shared/utils/promoPopup.js";
 
-// Group in fours as the user types, matching the shape admin codes are minted in.
+// Generated codes are grouped in fours once complete; admin-chosen codes stay as typed.
 function formatAsTyped(raw) {
-  return formatGiftCode(raw);
+  return formatTypedGiftCode(raw);
 }
 
 function fmtWhen(value) {
@@ -49,7 +49,7 @@ export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
     // Minted codes (16 characters) read best in fours; a hand-picked code such as
     // WELCOME2026 is shown as the popup showed it. Redemption ignores dashes.
     const key = normalizeGiftCode(prefill);
-    if (key) setCode(key.length === 16 ? formatAsTyped(key) : key);
+    if (key) setCode(formatGiftCode(key));
     inputRef.current?.focus();
   }, []);
 
@@ -59,7 +59,7 @@ export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
   useEffect(() => {
     const key = normalizeGiftCode(initialCode || "");
     if (!key) return;
-    setCode((current) => current || (key.length === 16 ? formatAsTyped(key) : key));
+    setCode((current) => current || formatGiftCode(key));
   }, [initialCode]);
 
   const onChange = (event) => {
