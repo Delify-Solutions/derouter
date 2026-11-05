@@ -58,7 +58,8 @@ export default async function RegisterPage({ searchParams }) {
   return (
     <Suspense fallback={<div className="h-40" />}>
       <RegisterForm referral={referral} />
-      <PromoPopupSlot />
+      {/* The register banner already lists the referral benefits. */}
+      <PromoPopupSlot withReferral={false} />
     </Suspense>
   );
 }

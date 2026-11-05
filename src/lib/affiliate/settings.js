@@ -11,8 +11,13 @@ import { parseJson } from "../db/helpers/jsonCol.js";
 /** 1 USD = 1e9 nano-USD. Repeated here to keep this module free of UI imports. */
 export const NANO_PER_USD = 1_000_000_000;
 
+/** Who may refer new users: every customer, or only affiliates an admin invited. */
+export const AFFILIATE_ACCESS_MODES = ["open", "invite"];
+
 export const AFFILIATE_SETTING_DEFAULTS = {
   affiliateEnabled: false,
+  // "open" = every customer gets a link; "invite" = only invited affiliates.
+  affiliateAccess: "open",
   // 1000 bp = 10%.
   affiliateDefaultRateBp: 1000,
   // 0 = every order earns commission.
@@ -100,6 +105,13 @@ export function validateAffiliateSettings(patch) {
       return { error: "affiliateEnabled phải là true hoặc false" };
     }
     value.affiliateEnabled = body.affiliateEnabled;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "affiliateAccess")) {
+    if (!AFFILIATE_ACCESS_MODES.includes(body.affiliateAccess)) {
+      return { error: "affiliateAccess phải là open hoặc invite" };
+    }
+    value.affiliateAccess = body.affiliateAccess;
   }
 
   for (const key of ["affiliateDefaultGiftCodeId", "affiliateCreditPlanId"]) {
