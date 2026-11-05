@@ -6,7 +6,8 @@ On the admin side, `/dashboard/affiliates` lists CTVs and commissions but cannot
 - see who each CTV referred;
 - cancel a commission (fraud, a self-referral, an order that should not count);
 - release a held commission early ("duyệt trước");
-- remove a referrer from an account.
+- remove a referrer from an account;
+- choose who may be a CTV: every customer, or only accounts the admin invited.
 
 ## What Changes
 
@@ -27,6 +28,10 @@ On the admin side, `/dashboard/affiliates` lists CTVs and commissions but cannot
   - search by either email or the CTV code, and a filter by CTV, reached from a CTV row.
 
   Each row can **Gỡ giới thiệu** (with a reason), using the existing referrer API.
+- **Affiliate access mode.** A new setting `affiliateAccess`: `open` (default, today's behaviour: every customer gets a link) or `invite` (only invited affiliates). The admin adds an invited CTV by email or user id from the "CTV" tab ("Thêm CTV"), and can withdraw or restore an invitation per CTV. In invite mode:
+  - an uninvited account's link stops recording new users (and its banner, popup and gift are no longer shown to visitors);
+  - what it already has is kept: its wallet stays spendable, and the users it referred earlier keep earning commission and their buyer bonus;
+  - the "Giới thiệu" item is hidden from an uninvited account that has nothing to keep, and opening the page creates no code for it.
 
 ## Capabilities
 
@@ -34,7 +39,7 @@ On the admin side, `/dashboard/affiliates` lists CTVs and commissions but cannot
 - (none)
 
 ### Modified Capabilities
-- `affiliate-program`: the referral link redirect target changes. Adds the referral benefits popup, the admin commission actions and the admin referral list.
+- `affiliate-program`: the referral link redirect target changes. Adds the referral benefits popup, the admin commission actions, the admin referral list and the affiliate access mode.
 
 ## Impact
 
@@ -46,8 +51,9 @@ On the admin side, `/dashboard/affiliates` lists CTVs and commissions but cannot
   - `src/lib/affiliate/commission.js` (`releaseCommissionNowSync`, `reverseCommissionByIdSync`);
   - `src/lib/db/repos/affiliateRepo.js` (`actOnCommission`, `listReferrals`);
   - new routes `PATCH /api/affiliates/commissions/[id]` and `GET /api/affiliates/referrals`;
+  - access mode: `src/lib/affiliate/settings.js` (`affiliateAccess`), `src/lib/affiliate/core.js` (`mayRefer`, `linkActive`, `affiliateAreaAvailableSync`), `affiliateRepo` (`inviteAffiliate`, `invited` patch and list filter), `POST /api/affiliates`, `PATCH /api/affiliates/[userId]`, `src/app/account/layout.js`, `GET /api/account/affiliate` and the customer page;
   - `AffiliatesPageClient.js`;
   - the audit labels.
-- No schema change.
+- Schema: `affiliates.invitedAt` (TEXT, nullable), `SCHEMA_VERSION` 31. Additive only. Version 30 is taken by the parallel change `admin-limits-gifts-users`.
 - Tests: `test/promo-popup.test.js` and `test/affiliate.test.js`.
 - This change builds on the still-active `affiliate-credit-vouchers` change (buyer bonus) and `promo-popup` change (the popup itself). It only adds requirements, plus a modification of "Referral link redirect", which neither of those changes touches.

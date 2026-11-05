@@ -17,7 +17,15 @@
 - [x] 3.1 `affiliateRepo.listReferrals` and `GET /api/affiliates/referrals`
 - [x] 3.2 "Người được giới thiệu" tab: search, CTV filter from the CTV row, link to the user, "Gỡ giới thiệu" via the referrer API ← (verify: only accounts with a referrer; held/available sums per currency; filter and search by CTV code)
 
-## 4. Checks
+## 4. Affiliate access mode
 
-- [x] 4.1 Tests in `test/promo-popup.test.js` and `test/affiliate.test.js`
-- [x] 4.2 `npm test`, `npm run lint`, `npm run build`, live check of `/r/<CODE>` and the admin actions
+- [x] 4.1 Schema `affiliates.invitedAt`, `SCHEMA_VERSION` 31; setting `affiliateAccess` with validation
+- [x] 4.2 `core.js`: `mayRefer`, `linkActive`, `affiliateAreaAvailableSync`; `resolveReferrerSync` uses `linkActive`
+- [x] 4.3 `affiliateRepo`: overview creates a code only when `mayRefer`; `inviteAffiliate`; `invited` patch; `invited` list filter
+- [x] 4.4 `POST /api/affiliates`, `invited` in `PATCH /api/affiliates/[userId]`, account layout and `GET /api/account/affiliate`
+- [x] 4.5 Admin UI: access select in settings, "Thêm CTV" dialog, "Được mời" badge and filter, invitation select in the CTV dialog; customer page states; audit label ← (verify: invite mode refuses an uninvited code everywhere a code is resolved; existing referrals still accrue; an uninvited account gets no code by opening the page but can spend its wallet)
+
+## 5. Checks
+
+- [x] 5.1 Tests in `test/promo-popup.test.js` and `test/affiliate.test.js`
+- [x] 5.2 `npm test`, `npm run lint`, `npm run build`, live check of `/r/<CODE>` and the admin actions

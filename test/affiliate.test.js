@@ -1417,3 +1417,139 @@ test("referral list counts only the current referrer's commission and escapes LI
   const hit = await affiliateRepo.listReferrals({ q: "buyer_1" });
   assert.deepEqual(hit.rows.map((r) => r.userId), ["buyer"], "_ is a literal character, not a wildcard");
 });
+
+// ── Invite-only access (change affiliate-landing-admin) ──────────────────────
+
+test("access mode is validated and defaults to open", () => {
+  assert.equal(settingsLib.AFFILIATE_SETTING_DEFAULTS.affiliateAccess, "open");
+  assert.deepEqual(settingsLib.validateAffiliateSettings({ affiliateAccess: "invite" }).value, { affiliateAccess: "invite" });
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateAccess: "everyone" }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateAccess: true }).error);
+});
+
+test("invite-only: an uninvited link stops recording new users, an invited one keeps working", () => {
+  enableProgram();
+  makeAffiliate("plain", { code: "PLAIN1" });
+  makeAffiliate("vip", { code: "VIPVIP" });
+  db.run(`UPDATE affiliates SET invitedAt = ? WHERE userId = 'vip'`, [at(T0)]);
+
+  assert.equal(affiliate.resolveReferrerSync(db, "PLAIN1"), "plain", "open mode: every link works");
+  saveSettings({ affiliateAccess: "invite" });
+  assert.equal(affiliate.resolveReferrerSync(db, "PLAIN1"), null, "uninvited link refused");
+  assert.equal(affiliate.resolveReferrerSync(db, "VIPVIP"), "vip", "invited link works");
+  assert.deepEqual(
+    affiliate.resolveFirstReferralSync(db, ["PLAIN1", "VIPVIP"]),
+    { code: "VIPVIP", referrerId: "vip" },
+    "the register page falls through to the next valid code"
+  );
+
+  db.run(`UPDATE affiliates SET status = 'blocked' WHERE userId = 'vip'`);
+  assert.equal(affiliate.resolveReferrerSync(db, "VIPVIP"), null, "blocking still wins");
+});
+
+test("invite-only: an uninvited affiliate keeps earning from users it already referred", () => {
+  enableProgram({ affiliateDefaultMaxOrders: 0 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  saveSettings({ affiliateAccess: "invite" });
+
+  orderRow({ id: "o1" });
+  approve("o1");
+  const rows = commissions("o1");
+  assert.equal(rows.length, 1, "existing referral still accrues");
+  assert.equal(rows[0].affiliateUserId, "aff");
+});
+
+test("invite-only: the customer area hides the page unless invited or something to keep", () => {
+  enableProgram();
+  user("newbie");
+  makeAffiliate("referrer");
+  user("child", { referredByUserId: "referrer" });
+  makeAffiliate("vip");
+  db.run(`UPDATE affiliates SET invitedAt = ? WHERE userId = 'vip'`, [at(T0)]);
+
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "newbie"), true, "open mode: everyone");
+  saveSettings({ affiliateAccess: "invite" });
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "newbie"), false, "uninvited, nothing to keep");
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "referrer"), true, "has referred users");
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "vip"), true, "invited");
+  saveSettings({ affiliateEnabled: false });
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "vip"), false, "program off, no history");
+});
+
+test("invite-only: opening the page creates no code for an uninvited account", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  user("newbie");
+  const overview = await affiliateRepo.getAffiliateOverview("newbie");
+  assert.equal(overview.canRefer, false);
+  assert.equal(overview.code, null);
+  assert.equal(overview.available, false);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliates WHERE userId = 'newbie'`).n, 0, "no row created");
+
+  saveSettings({ affiliateAccess: "open" });
+  const open = await affiliateRepo.getAffiliateOverview("newbie");
+  assert.equal(open.canRefer, true);
+  assert.ok(open.code, "open mode creates the code on first visit");
+});
+
+test("invite-only: an uninvited affiliate can still spend its wallet", () => {
+  fundedAffiliate();
+  saveSettings({ affiliateAccess: "invite" });
+  const voucher = db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) }));
+  assert.equal(voucher.status, "active");
+});
+
+test("admin invite by email or id creates the code once and is audited", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  user("cand", { email: "Cand@Test.Local" });
+
+  assert.deepEqual(await affiliateRepo.inviteAffiliate("nobody@test.local"), { error: "user_not_found" });
+
+  const first = await affiliateRepo.inviteAffiliate("cand@test.local", { actor: "admin:t", reason: "VIP" });
+  assert.equal(first.alreadyInvited, false);
+  assert.equal(first.user.id, "cand");
+  assert.ok(first.affiliate.code);
+  assert.ok(first.affiliate.invitedAt);
+  assert.equal(affiliate.resolveReferrerSync(db, first.affiliate.code), "cand");
+
+  const again = await affiliateRepo.inviteAffiliate("cand");
+  assert.equal(again.alreadyInvited, true);
+  assert.equal(again.affiliate.code, first.affiliate.code, "same code");
+  const audits = db.all(`SELECT action, actor FROM userAuditLog WHERE userId = 'cand' AND action = 'affiliate_invited'`);
+  assert.deepEqual(audits, [{ action: "affiliate_invited", actor: "admin:t" }], "audited once");
+});
+
+test("admin can withdraw and restore an invitation; the list filters by it", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  makeAffiliate("a1", { code: "AAAAA1" });
+  makeAffiliate("a2", { code: "AAAAA2" });
+  await affiliateRepo.inviteAffiliate("a1");
+  const invitedAt = db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt;
+
+  const invitedOnly = await affiliateRepo.listAffiliates({ invited: "yes" });
+  assert.deepEqual(invitedOnly.rows.map((r) => r.userId), ["a1"]);
+  const notInvited = await affiliateRepo.listAffiliates({ invited: "no" });
+  assert.deepEqual(notInvited.rows.map((r) => r.userId), ["a2"]);
+
+  await affiliateRepo.updateAffiliate("a1", { invited: true });
+  assert.equal(db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt, invitedAt, "re-inviting keeps the date");
+
+  await affiliateRepo.updateAffiliate("a1", { invited: false });
+  assert.equal(db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt, null);
+  assert.equal(affiliate.resolveReferrerSync(db, "AAAAA1"), null, "withdrawn invitation stops the link");
+
+  await affiliateRepo.updateAffiliate("a2", { invited: true });
+  assert.equal(affiliate.resolveReferrerSync(db, "AAAAA2"), "a2");
+});
+
+test("invite-only: a buyer referred earlier keeps the buyer bonus", async () => {
+  enableProgram({ affiliateBuyerBonusBp: 1000, affiliateBuyerBonusMaxOrders: 2 });
+  makeAffiliate("aff");
+  user("buyer", { referredByUserId: "aff" });
+  saveSettings({ affiliateAccess: "invite" });
+  const { buyerBonusTermsSync } = await import("../src/lib/affiliate/buyerBonus.js");
+  const terms = buyerBonusTermsSync(db, "buyer");
+  assert.equal(terms?.bp, 1000, "the earlier referral still gets its bonus");
+  assert.equal(affiliate.resolveReferrerSync(db, db.get(`SELECT code FROM affiliates WHERE userId = 'aff'`).code), null, "but the link records nobody new");
+});

@@ -3,7 +3,7 @@
 ### Requirement: Referral link redirect
 `GET /r/<CODE>` SHALL be public. Its behaviour depends on the code:
 
-- **Valid code**: the program is enabled and the code belongs to a non-blocked affiliate.
+- **Valid code**: the program is enabled and the code belongs to a non-blocked affiliate that the access mode admits (any affiliate in `open` mode, only an invited one in `invite` mode; see "Affiliate access mode").
   - It SHALL set the cookie `dr_ref=<CODE>` (`HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS, Max-Age = `affiliateCookieDays`).
   - It SHALL redirect (302) to the landing page `/`, where the referral benefits popup is shown. The `Location` SHALL be relative, so it does not depend on the server's listen address.
   - It SHALL increment the affiliate's click counter, at most once per browser: no increment when the request already carries `dr_ref` with the same code.
@@ -21,6 +21,29 @@
 #### Scenario: Blocked affiliate
 - **WHEN** the affiliate is blocked
 - **THEN** the response redirects to `/register` and sets no cookie
+
+#### Scenario: Uninvited affiliate in invite mode
+- **WHEN** `affiliateAccess` is `invite` and the affiliate has no invitation
+- **THEN** the response redirects to `/register` and sets no cookie
+
+### Requirement: One referral code per account
+A customer SHALL get a referral code the first time the customer opens the affiliate page while the program is enabled and the access mode admits the account (always in `open` mode; in `invite` mode only an invited account, whose code is created when the admin invites it). An account the access mode does not admit SHALL NOT get a code by opening the page.
+
+The code SHALL be:
+- 6–10 characters from an unambiguous uppercase alphabet (no `0`, `O`, `1`, `I`, `L`);
+- generated with a cryptographic RNG;
+- unique across accounts;
+- unchanged for the life of the account.
+
+The referral link SHALL be `<public base URL>/r/<CODE>`. Codes SHALL be matched case-insensitively.
+
+#### Scenario: Code is stable
+- **WHEN** a customer opens `/account/affiliate` twice
+- **THEN** both visits show the same code and link
+
+#### Scenario: No code for an uninvited account
+- **WHEN** `affiliateAccess` is `invite` and a customer without an invitation opens `/account/affiliate`
+- **THEN** no code is created and no link is shown
 
 ## ADDED Requirements
 
@@ -119,3 +142,29 @@ Removing a referrer SHALL stop later orders from earning commission or buyer bon
 #### Scenario: Remove a referrer
 - **WHEN** an admin removes the referrer of account B with a reason
 - **THEN** B disappears from the list, the change is audited as `referrer_changed`, and B's existing commissions stay as they were
+
+### Requirement: Affiliate access mode
+The admin SHALL choose who may refer new users with the setting `affiliateAccess`: `open` (default; every customer gets a referral link when opening "Giới thiệu") or `invite` (only affiliates the admin invited). The admin SHALL add an invited affiliate by email or user id, which creates its code when missing, and SHALL be able to withdraw or restore an invitation per affiliate. Each invitation change SHALL be audited on the affiliate's account.
+
+In `invite` mode, a referral code of an affiliate without an invitation SHALL be treated as invalid for new users: the redirect, the register banner, registration and the visitor popup SHALL ignore it. What the affiliate already has SHALL be kept: its wallet remains spendable, and accounts it referred before keep earning it commission and keep their buyer bonus. Opening "Giới thiệu" SHALL NOT create a code for an uninvited account, and the item SHALL be hidden unless the account has wallet history or referred users.
+
+#### Scenario: Uninvited link in invite mode
+- **WHEN** the mode is `invite` and a visitor opens `/r/<CODE>` of an affiliate without an invitation
+- **THEN** no referral cookie is set and the account the visitor creates has no referrer
+
+#### Scenario: Invited affiliate
+- **WHEN** the admin adds `ctv@example.com` from "Thêm CTV" while the mode is `invite`
+- **THEN** that account gets a code, its link records new users, and the audit shows "Mời làm CTV"
+
+#### Scenario: Existing referral keeps earning
+- **WHEN** the mode changes to `invite` and a user referred earlier by an uninvited affiliate pays an order
+- **THEN** the commission accrues to that affiliate as before
+
+#### Scenario: Uninvited customer opens the account area
+- **WHEN** the mode is `invite` and a customer with no invitation, no wallet history and no referred users signs in
+- **THEN** "Giới thiệu" is not in the menu and no affiliate row is created for the account
+
+#### Scenario: Withdrawn invitation
+- **WHEN** the admin sets an invited affiliate to "Chưa mời" in invite mode
+- **THEN** its link stops recording new users and its wallet stays spendable
+

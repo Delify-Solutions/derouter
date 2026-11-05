@@ -166,6 +166,7 @@ function SettingsTab({ onNotice }) {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
     affiliateEnabled: false,
+    affiliateAccess: "open",
     affiliateDefaultRatePercent: "",
     affiliateDefaultMaxOrders: "",
     affiliateHoldDays: "",
@@ -197,6 +198,7 @@ function SettingsTab({ onNotice }) {
       setPlans(Array.isArray(planBody.plans) ? planBody.plans : []);
       setForm({
         affiliateEnabled: settings.affiliateEnabled === true,
+        affiliateAccess: settings.affiliateAccess === "invite" ? "invite" : "open",
         affiliateDefaultRatePercent: bpToPercentText(settings.affiliateDefaultRateBp),
         affiliateDefaultMaxOrders: String(settings.affiliateDefaultMaxOrders ?? ""),
         affiliateHoldDays: String(settings.affiliateHoldDays ?? ""),
@@ -259,6 +261,7 @@ function SettingsTab({ onNotice }) {
 
       const payload = {
         affiliateEnabled: form.affiliateEnabled,
+        affiliateAccess: form.affiliateAccess,
         affiliateDefaultRateBp: rateBp,
         affiliateDefaultMaxOrders: maxOrders,
         affiliateHoldDays: holdDays,
@@ -310,6 +313,19 @@ function SettingsTab({ onNotice }) {
             onChange={(value) => setForm((f) => ({ ...f, affiliateEnabled: value }))}
           />
         </div>
+
+        <Select
+          label="Ai được làm CTV"
+          value={form.affiliateAccess}
+          onChange={(e) => setForm((f) => ({ ...f, affiliateAccess: e.target.value }))}
+          options={[
+            { value: "open", label: "Mở cho tất cả khách hàng" },
+            { value: "invite", label: "Chỉ CTV được mời" },
+          ]}
+          hint={form.affiliateAccess === "invite"
+            ? "Chỉ tài khoản admin thêm ở tab CTV mới có đường dẫn. Người khác: đường dẫn ngừng ghi nhận người mới, số dư và người đã giới thiệu vẫn giữ."
+            : "Mọi khách hàng mở mục Giới thiệu đều nhận được đường dẫn riêng."}
+        />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
@@ -452,9 +468,11 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState(initialQuery);
   const [status, setStatus] = useState("");
+  const [invited, setInvited] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
+  const [inviting, setInviting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -466,6 +484,7 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
       });
       if (q.trim()) params.set("q", q.trim());
       if (status) params.set("status", status);
+      if (invited) params.set("invited", invited);
       const res = await fetch(`/api/affiliates?${params.toString()}`, { cache: "no-store" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Không tải được danh sách CTV");
@@ -477,7 +496,7 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
     } finally {
       setLoading(false);
     }
-  }, [page, q, status]);
+  }, [page, q, status, invited]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -497,7 +516,18 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
             { value: "blocked", label: "Đã khóa" },
           ]}
         />
+        <Select
+          label="Lời mời"
+          value={invited}
+          onChange={(e) => { setInvited(e.target.value); setPage(1); }}
+          options={[
+            { value: "", label: "Tất cả" },
+            { value: "yes", label: "Được mời" },
+            { value: "no", label: "Chưa mời" },
+          ]}
+        />
         <Button variant="secondary" onClick={load} icon="refresh">Tải lại</Button>
+        <Button onClick={() => setInviting(true)} icon="person_add">Thêm CTV</Button>
       </div>
 
       {error ? (
@@ -532,9 +562,12 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.code}</td>
                   <td className="px-4 py-2.5">
-                    <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
-                      {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
+                        {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
+                      </Badge>
+                      {row.invitedAt ? <Badge variant="info">Được mời</Badge> : null}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.clickCount}</td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.signups}</td>
@@ -579,6 +612,17 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
         </div>
       )}
 
+      {inviting && (
+        <InviteAffiliateModal
+          onClose={() => setInviting(false)}
+          onDone={(text) => {
+            setInviting(false);
+            onNotice({ tone: "ok", text });
+            load();
+          }}
+        />
+      )}
+
       {editing && (
         <AffiliateModal
           row={editing}
@@ -595,6 +639,71 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
   );
 }
 
+function InviteAffiliateModal({ onClose, onDone }) {
+  const [who, setWho] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (!who.trim()) {
+      setError("Nhập email hoặc ID tài khoản.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: who.trim(), reason: "Thêm CTV được mời từ trang Affiliate" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Không thêm được CTV");
+        return;
+      }
+      const label = body.affiliate?.email || who.trim();
+      onDone(body.alreadyInvited
+        ? `${label} đã là CTV được mời (mã ${body.affiliate?.code}).`
+        : `Đã thêm ${label} làm CTV được mời (mã ${body.affiliate?.code}).`);
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Thêm CTV được mời"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Hủy</Button>
+          <Button onClick={submit} loading={busy}>Thêm CTV</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-text-muted">
+          Tài khoản được thêm sẽ có mã giới thiệu ngay và được đánh dấu là CTV được mời. Khi chương trình
+          chỉ mở cho CTV được mời, chỉ những tài khoản này mới ghi nhận người đăng ký mới.
+        </p>
+        <Input
+          label="Email hoặc ID tài khoản"
+          value={who}
+          maxLength={320}
+          onChange={(e) => setWho(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          autoFocus
+        />
+        {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
 function AffiliateModal({ row, onClose, onSaved, onError }) {
   const [ratePercent, setRatePercent] = useState(row.rateBp == null ? "" : bpToPercentText(row.rateBp));
   const [maxOrders, setMaxOrders] = useState(row.maxOrders == null ? "" : String(row.maxOrders));
@@ -602,6 +711,7 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
   const [buyerMaxOrders, setBuyerMaxOrders] = useState(row.buyerBonusMaxOrders == null ? "" : String(row.buyerBonusMaxOrders));
   const [giftCodeId, setGiftCodeId] = useState(row.giftCodeId || "");
   const [status, setStatus] = useState(row.status || "active");
+  const [invitedChoice, setInvitedChoice] = useState(row.invitedAt ? "yes" : "no");
   const [adminNote, setAdminNote] = useState(row.adminNote || "");
   const [codes, setCodes] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -655,6 +765,7 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
     if (buyerMaxValue !== (row.buyerBonusMaxOrders ?? null)) patch.buyerBonusMaxOrders = buyerMaxValue;
     if ((giftCodeId || null) !== (row.giftCodeId || null)) patch.giftCodeId = giftCodeId || null;
     if (status !== (row.status || "active")) patch.status = status;
+    if ((invitedChoice === "yes") !== Boolean(row.invitedAt)) patch.invited = invitedChoice === "yes";
     if ((adminNote.trim() || null) !== (row.adminNote || null)) patch.adminNote = adminNote;
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -783,6 +894,16 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
             { value: "active", label: "Hoạt động" },
             { value: "blocked", label: "Khóa" },
           ]}
+        />
+        <Select
+          label="CTV được mời"
+          value={invitedChoice}
+          onChange={(e) => setInvitedChoice(e.target.value)}
+          options={[
+            { value: "yes", label: "Được mời" },
+            { value: "no", label: "Chưa mời" },
+          ]}
+          hint="Khi chương trình chỉ mở cho CTV được mời, chỉ CTV được mời mới ghi nhận người đăng ký mới."
         />
         <Input label="Ghi chú nội bộ" value={adminNote} onChange={(e) => setAdminNote(e.target.value)} />
 

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 31;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -845,6 +845,9 @@ export const TABLES = {
       buyerBonusBp: "INTEGER",
       buyerBonusMaxOrders: "INTEGER",
       status: "TEXT NOT NULL DEFAULT 'active'", // 'active' | 'blocked'
+      // Set when an admin adds this account as an invited affiliate. With
+      // affiliateAccess = 'invite', only rows with invitedAt may refer new users.
+      invitedAt: "TEXT",
       clickCount: "INTEGER DEFAULT 0",
       // Unused since withdrawals were removed (change affiliate-credit-vouchers);
       // kept declared so existing databases and the sync agree.

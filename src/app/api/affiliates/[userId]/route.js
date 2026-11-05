@@ -25,7 +25,8 @@ export async function GET(request, { params }) {
 const STATUSES = new Set(["active", "blocked"]);
 
 /**
- * PATCH /api/affiliates/[userId] — per-affiliate overrides, block switch, note.
+ * PATCH /api/affiliates/[userId] — per-affiliate overrides, block switch, note,
+ * and `invited` (boolean) for invite-only mode.
  *
  * `rateBp` / `maxOrders` / `giftCodeId` accept `null` (or "") to CLEAR the
  * override and fall back to the program default (spec "Effective terms per
@@ -98,6 +99,13 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: "Trạng thái không hợp lệ" }, { status: 400, headers: NO_STORE });
     }
     patch.status = status;
+  }
+
+  if (has("invited")) {
+    if (typeof body.invited !== "boolean") {
+      return NextResponse.json({ error: "invited phải là true hoặc false" }, { status: 400, headers: NO_STORE });
+    }
+    patch.invited = body.invited;
   }
 
   if (has("adminNote")) {

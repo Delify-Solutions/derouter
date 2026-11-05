@@ -70,7 +70,16 @@ Reasons follow `validateReason` (3–500 characters) like every other audited ad
 
 "Gỡ giới thiệu" reuses `PATCH /api/users/[id]/referrer` with `referrerUserId: null` and a reason. That route already audits as `referrer_changed`.
 
+### D5. Access mode is a setting plus an invitation date
+- `affiliateAccess` (`open` | `invite`, default `open`) lives in the settings blob next to `affiliateEnabled`, validated by `validateAffiliateSettings`.
+- The invitation is `affiliates.invitedAt`, not a new status: `status` stays the block switch, and an invitation survives a block. Re-inviting keeps the original date; withdrawing sets it to NULL. Both go through `updateAffiliate` (audited `affiliate_updated`); `inviteAffiliate(who)` creates the row and code when missing and audits `affiliate_invited`.
+- One predicate decides whether a link records new users: `linkActive(row, settings)` = program on, not blocked, and (`open` or `invitedAt` set). `resolveReferrerSync` uses it, so `/r/<CODE>`, the register page, registration and the visitor popup all follow it with no other change.
+- Earning from existing referrals is deliberately not gated by the mode (owner decision): commission accrual, the buyer bonus and the referred buyer's gift prefill check only the program switch and the block, as before. Wallet spending is not gated either.
+- The "Program settings" table is not modified here: the still-active `affiliate-credit-vouchers` change also rewrites it, and two MODIFIED copies would conflict on archive. "Affiliate access mode" names the setting, its values and default; whichever change archives second adds the `affiliateAccess` row to the table.
+- The customer area uses `affiliateAreaAvailableSync`: program on and allowed to refer, or something to keep (wallet history, or at least one referred user, because those still earn). `getAffiliateOverview` calls `ensureAffiliateSync` only when `mayRefer`, so an uninvited account never gets a code by opening the page. The API returns `canRefer`; the link, code, terms and gift are sent only when it is true.
+
 ## Risks / Trade-offs
 
 - **Landing instead of register may lower immediate signups.** Mitigation: the popup opens after at most 1 s and its button goes straight to `/register?ref=`.
+- **Switching to invite mode silently stops existing links.** The setting's hint says so; uninvited CTVs see "Đường dẫn tạm ngừng" on their page. The admin can invite them back from the CTV list (filter "Chưa mời").
 - **Cancelling an available commission can make the wallet negative** if the CTV already spent it. This is the existing refund behaviour; a negative balance blocks spending. The dialog says so.
