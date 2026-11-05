@@ -146,10 +146,110 @@ test("another customer's order cannot be checked or paid; a manual order waits f
   assert.match((await run(press(`up:${order.id}`))).calls.at(-1).text, /Không tìm thấy đơn/);
 });
 
-test("a custom-amount plan points to the web", async () => {
-  db.run(`UPDATE plans SET allowCustomAmount = 1 WHERE id = ?`, [planId]);
-  const reply = (await run(press(`bp:${planId}`))).calls.at(-1);
-  assert.match(reply.text, /số tiền tùy ý/);
-  assert.match((await run(press(`bm:${planId}:v`))).calls.at(-1).text, /số tiền tùy ý/);
+test("a custom-amount plan: quick 1× / 2× amounts, a typed amount, and the order carries it", async () => {
+  db.run(`UPDATE plans SET allowCustomAmount = 1, customMinVnd = 50000, customMaxVnd = 10000000 WHERE id = ?`, [planId]);
+  const choice = (await run(press(`bp:${planId}`))).calls.at(-1);
+  const data = buttons(choice).map((b) => b.callback_data);
+  assert.ok(data.includes(`ba:${planId}:250000`), "1 gói = the plan's price");
+  assert.ok(data.includes(`ba:${planId}:500000`), "2 gói = twice the price");
+  assert.ok(data.includes(`bn:${planId}`));
+
+  const methods = (await run(press(`ba:${planId}:500000`))).calls.at(-1);
+  assert.match(methods.text, /500\.000đ/);
+  assert.match(methods.text, /\$500\.00/, "credit at the plan's rate: 250.000đ buys $250");
+  assert.ok(buttons(methods).some((b) => b.callback_data === `bm:${planId}:v:500000`));
+  assert.ok(buttons(methods).every((b) => !b.callback_data || Buffer.byteLength(b.callback_data) <= 64));
+
+  const { calls } = await run(press(`bm:${planId}:v:500000`));
+  const order = db.get(`SELECT * FROM orders WHERE userId = 'cust'`);
+  assert.equal(order.payAmount, 500000);
+  assert.equal(order.creditNanoUsd, USD(500));
+  assert.ok(calls.some((c) => c.type === "photo" && /amount=500000/.test(c.url)), "the QR carries the amount");
+
+  // Same amount again: the unpaid order is reused; another amount is a new order.
+  await run(press(`bm:${planId}:v:500000`));
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM orders`).n, 1);
+  await run(press(`bm:${planId}:v:250000`));
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM orders`).n, 2);
+});
+
+test("typing an amount answers the bot's prompt; bad amounts are explained", async () => {
+  db.run(`UPDATE plans SET allowCustomAmount = 1, customMinVnd = 50000, customMaxVnd = 10000000 WHERE id = ?`, [planId]);
+  const ask = (await run(press(`bn:${planId}`))).calls.at(-1);
+  assert.equal(ask.markup.force_reply, true);
+  const reply = (text) => ({
+    update_id: uid++,
+    message: {
+      message_id: 2, text, chat: { id: 501, type: "private" }, from: { id: 501, is_bot: false },
+      reply_to_message: { message_id: 1, text: ask.text.replace(/<[^>]+>/g, ""), from: { id: 1, is_bot: true } },
+    },
+  });
+  const ok = (await run(reply("700k"))).calls.at(-1);
+  assert.match(ok.text, /700\.000đ/);
+  assert.ok(buttons(ok).some((b) => b.callback_data === `bm:${planId}:v:700000`));
+  assert.match((await run(reply("10k"))).calls.at(-1).text, /tối thiểu/);
+  assert.match((await run(reply("abc"))).calls.at(-1).text, /Không đọc được số tiền/);
+  // A fixed amount sent without going through a choice is refused back to the choice.
+  assert.match((await run(press(`bm:${planId}:v`))).calls.at(-1).text, /nạp số tiền tùy ý/);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM orders`).n, 0);
+});
+
+test("the web cancel never turns a paid order into a cancelled one", async () => {
+  await run(press(`bm:${planId}:v`));
+  const order = db.get(`SELECT * FROM orders WHERE userId = 'cust'`);
+  await billing.approveOrder(order.id, "admin");
+  assert.deepEqual(await billing.cancelOrder(order.id, "cust"), { ok: false, reason: "not_pending" });
+
+  // Paid by another process between the read and the write: the read still says
+  // pending, the guarded write must change nothing.
+  const realGet = db.get.bind(db);
+  db.get = (sql, params) => {
+    const row = realGet(sql, params);
+    return /FROM orders WHERE id = \?/.test(sql) && row ? { ...row, status: "pending" } : row;
+  };
+  try {
+    assert.deepEqual(await billing.cancelOrder(order.id, "cust"), { ok: false, reason: "not_pending" });
+  } finally {
+    db.get = realGet;
+  }
+  assert.equal(db.get(`SELECT status FROM orders WHERE id = ?`, [order.id]).status, "paid");
+
+  db.run(`UPDATE orders SET status = 'pending' WHERE id = ?`, [order.id]);
+  assert.equal((await billing.cancelOrder(order.id, "cust")).ok, true);
+});
+
+test("custom amounts: blocked plans, replies to other messages, suspended accounts, odd amounts", async () => {
+  const { parseVndAmount } = await import("../src/lib/telegram/bot/orders.js");
+  assert.equal(parseVndAmount("1.2345k"), null, "no fractional đồng");
+  assert.equal(parseVndAmount("1.5tr"), 1500000);
+  assert.equal(parseVndAmount("-500k"), null);
+
+  db.run(`UPDATE plans SET allowCustomAmount = 1, customMinVnd = 50000, customMaxVnd = 10000000 WHERE id = ?`, [planId]);
+  // A reply to a message that is not the bot's prompt is not an amount.
+  const notPrompt = {
+    update_id: uid++,
+    message: {
+      message_id: 3, text: "500k", chat: { id: 501, type: "private" }, from: { id: 501, is_bot: false },
+      reply_to_message: { message_id: 1, text: `Mã gói: ${planId}`, from: { id: 501, is_bot: false } },
+    },
+  };
+  assert.match((await run(notPrompt)).calls.at(-1).text, /Gõ \/help/);
+
+  db.run(`UPDATE plans SET isActive = 0 WHERE id = ?`, [planId]);
+  assert.match((await run(press(`ba:${planId}:500000`))).calls.at(-1).text, /Chưa mua được/);
+  assert.match((await run(press(`bn:${planId}`))).calls.at(-1).text, /Chưa mua được/);
+  assert.match((await run(press(`bm:${planId}:v`))).calls.at(-1).text, /Chưa mua được/);
+  db.run(`UPDATE plans SET isActive = 1 WHERE id = ?`, [planId]);
+
+  db.run(`UPDATE users SET status = 'suspended' WHERE id = 'cust'`);
+  const prompt = {
+    update_id: uid++,
+    message: {
+      message_id: 4, text: "500k", chat: { id: 501, type: "private" }, from: { id: 501, is_bot: false },
+      reply_to_message: { message_id: 1, text: `Nhập số tiền cho gói Go\nMã gói: ${planId}`, from: { id: 1, is_bot: true } },
+    },
+  };
+  assert.match((await run(prompt)).calls.at(-1).text, /bị khoá/);
+  db.run(`UPDATE users SET status = 'active' WHERE id = 'cust'`);
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM orders`).n, 0);
 });

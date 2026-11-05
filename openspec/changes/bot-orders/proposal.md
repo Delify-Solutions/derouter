@@ -12,7 +12,13 @@ The owner wants customers to buy plans directly in the Telegram bot.
   buttons to check payment, cancel, or open the order on the web. The admin is
   told about the new order as for web orders.
 - `/myorders` lists recent orders; pending ones can be paid again or cancelled.
-- Custom-amount plans, multi-period terms and vouchers stay on the web.
+- Custom-amount plans: quick 1× / 2× the plan's price, or a typed amount (a
+  forced reply to the bot's prompt), quoted before choosing a method.
+- Multi-period terms and vouchers stay on the web.
+- The web's own cancel is guarded on `pending` too.
+- A linked customer writing to the bot resumes notifications paused after
+  Telegram refused a message.
+- Customer docs page "Bot Telegram".
 
 ## Capabilities
 
@@ -22,5 +28,7 @@ The owner wants customers to buy plans directly in the Telegram bot.
 ## Impact
 
 - `src/lib/telegram/bot/orders.js` (new), `handler.js`, `customer.js`,
-  `src/lib/telegram/botApi.js` (sendPhoto), webhook route (admin notifier);
-  `test/bot-orders.test.js`.
+  `src/lib/telegram/botApi.js` (sendPhoto), webhook route (admin notifier),
+  `src/lib/db/repos/billingRepo.js` (`cancelOrder` guard),
+  `content/docs/telegram-bot.md`; tests `test/bot-orders.test.js`,
+  `test/telegram-bot.test.js`, `test/docs-seed.test.js`.

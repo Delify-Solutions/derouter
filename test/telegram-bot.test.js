@@ -227,3 +227,9 @@ test("a suspended account gets no data", async () => {
   db.run(`UPDATE users SET status = 'suspended' WHERE id = 'cust'`);
   assert.match(lastText(await run(msg(501, "/me"))), /bị khoá/);
 });
+
+test("writing to the bot resumes notifications paused by a blocked chat", async () => {
+  db.run(`UPDATE users SET telegramDmBlockedAt = ? WHERE id = 'cust'`, [new Date().toISOString()]);
+  await run(msg(501, "/start"));
+  assert.equal(db.get(`SELECT telegramDmBlockedAt AS b FROM users WHERE id = 'cust'`).b, null);
+});

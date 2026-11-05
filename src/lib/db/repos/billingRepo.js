@@ -957,7 +957,10 @@ export async function cancelOrder(id, userId) {
   if (!row) return { ok: false, reason: "not_found" };
   if (row.userId !== userId) return { ok: false, reason: "forbidden" };
   if (row.status !== "pending") return { ok: false, reason: "not_pending" };
-  db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [id]);
+  // Guarded on the status: a payment the gateway matched between the read above
+  // and this write must win, never be turned into a cancelled order.
+  const res = db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'`, [id]);
+  if (Number(res?.changes ?? 0) === 0) return { ok: false, reason: "not_pending" };
   return { ok: true, order: await getOrderById(id) };
 }
 
