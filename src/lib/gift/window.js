@@ -21,6 +21,12 @@ export function inWindow(row, nowMs) {
   return true;
 }
 
+/** Has the code used up its total? Never for an unlimited code (change gift-unlimited). */
+export function giftExhausted(row) {
+  if (Number(row?.unlimitedRedemptions) === 1) return false;
+  return Number(row?.redeemedCount ?? 0) >= Number(row?.maxRedemptions ?? 1);
+}
+
 /**
  * Everything that makes a code drivable: active, in window, not exhausted.
  * `notStarted` and `expired` are kept apart for the admin screens.
@@ -32,6 +38,6 @@ export function giftStatusOf(row, nowMs = Date.now()) {
   const expiresAt = toMillis(row.expiresAt);
   if (startsAt !== null && nowMs < startsAt) return "scheduled";
   if (expiresAt !== null && nowMs > expiresAt) return "expired";
-  if (Number(row.redeemedCount ?? 0) >= Number(row.maxRedemptions ?? 1)) return "exhausted";
+  if (giftExhausted(row)) return "exhausted";
   return "active";
 }

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -688,6 +688,9 @@ export const TABLES = {
       amountVnd: "INTEGER",
       durationDays: "INTEGER",
       maxRedemptions: "INTEGER DEFAULT 1",
+      // 1 = no total cap (change gift-unlimited): maxRedemptions is ignored. An
+      // explicit flag, not a NULL max, so no older row changes meaning.
+      unlimitedRedemptions: "INTEGER DEFAULT 0",
       redeemedCount: "INTEGER DEFAULT 0",
       perUserLimit: "INTEGER DEFAULT 1",
       startsAt: "TEXT",

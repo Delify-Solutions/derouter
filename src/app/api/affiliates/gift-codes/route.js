@@ -16,7 +16,7 @@ export async function GET() {
   try {
     const db = await getAdapter();
     const rows = db.all(
-      `SELECT id, code, isActive, startsAt, expiresAt, redeemedCount, maxRedemptions, newUserOnly
+      `SELECT id, code, isActive, startsAt, expiresAt, redeemedCount, maxRedemptions, unlimitedRedemptions, newUserOnly
          FROM giftCodes
         WHERE newUserOnly = 1 AND deletedAt IS NULL
         ORDER BY createdAt DESC, rowid DESC`
@@ -31,6 +31,7 @@ export async function GET() {
           expiresAt: row.expiresAt ?? null,
           redeemedCount: Number(row.redeemedCount ?? 0),
           maxRedemptions: Number(row.maxRedemptions ?? 1),
+          unlimitedRedemptions: Number(row.unlimitedRedemptions) === 1,
         })),
       },
       { headers: NO_STORE }

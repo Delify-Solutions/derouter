@@ -41,8 +41,8 @@ function isActive(pathname, href) {
 
 /**
  * Customer area frame: a 256px sidebar, a 64px header carrying the current page
- * and the account controls, then the page. Below `lg` the sidebar becomes a hamburger in the header
- * that opens the glass menu panel (MobileMenu), so every destination stays one tap away.
+ * and the account controls, then the page. Below `lg` the sidebar becomes an app-style
+ * liquid-glass tab bar at the bottom (MobileMenu): four main pages and "Thêm" for the rest.
  */
 export default function AccountShell({ email = "", name = "", affiliateAvailable = false, unreadCount = 0, channelUrl = "", children }) {
   const pathname = usePathname();
@@ -123,7 +123,6 @@ export default function AccountShell({ email = "", name = "", affiliateAvailable
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-bg px-6 lg:px-10">
           <div className="flex items-center gap-3">
-            <MobileMenu items={items.map((item) => ({ ...item, active: isActive(pathname, item.href) }))} extraItem={channelItem} pathname={pathname} email={email} onSignOut={signOut} signingOut={pending} />
             <Link href="/account" className="font-mono text-base font-semibold text-text-main lg:hidden">
               <span className="text-text-subtle" aria-hidden="true">{"//"}</span>
               <span className="sr-only">derouter</span>
@@ -161,10 +160,20 @@ export default function AccountShell({ email = "", name = "", affiliateAvailable
         </header>
 
 
-        <main className="flex-1 px-6 py-10 lg:px-10">
+        {/* Below lg the bottom padding keeps the last content clear of the tab bar. */}
+        <main className="flex-1 px-6 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-10 lg:px-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1100px]">{children}</div>
         </main>
       </div>
+
+      <MobileMenu
+        items={items.map((item) => ({ ...item, active: isActive(pathname, item.href) }))}
+        extraItem={channelItem}
+        pathname={pathname}
+        email={email}
+        onSignOut={signOut}
+        signingOut={pending}
+      />
     </div>
   );
 }

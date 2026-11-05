@@ -53,6 +53,8 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
   const [durationDays, setDurationDays] = useState(String(gift?.grantKind === "credit" ? gift.durationDays ?? 30 : 30));
   const [amountVnd, setAmountVnd] = useState(gift?.amountVnd != null ? String(gift.amountVnd) : "");
   const [maxRedemptions, setMaxRedemptions] = useState(String(gift?.maxRedemptions ?? 1));
+  // No total cap (change gift-unlimited).
+  const [unlimited, setUnlimited] = useState(Boolean(gift?.unlimitedRedemptions));
   const [perUserLimit, setPerUserLimit] = useState(String(gift?.perUserLimit ?? 1));
   const [newUserOnly, setNewUserOnlyState] = useState(Boolean(gift?.newUserOnly));
   // Channel-join code and "listed on the customer gift page" (change channel-gift).
@@ -83,14 +85,15 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
   // Picking accounts raises the total so every one of them can receive the code.
   const pickAssignees = (next) => {
     setAssignees(next);
-    if (next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
+    if (!unlimited && next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
   };
 
   const submit = async () => {
     setError("");
 
-    const max = Number(maxRedemptions);
-    if (!/^\d+$/.test(maxRedemptions.trim()) || !Number.isInteger(max) || max < 1) {
+    // Unlimited: the typed total is not checked (nor sent).
+    const max = unlimited ? Infinity : Number(maxRedemptions);
+    if (!unlimited && (!/^\d+$/.test(maxRedemptions.trim()) || !Number.isInteger(max) || max < 1)) {
       setError("Tổng lượt dùng phải là số nguyên từ 1 trở lên.");
       return;
     }
@@ -146,7 +149,8 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
     }
 
     const body = {
-      maxRedemptions: max,
+      unlimitedRedemptions: unlimited,
+      ...(unlimited ? {} : { maxRedemptions: max }),
       perUserLimit: perUser,
       newUserOnly,
       channelJoinOnly,
@@ -372,13 +376,28 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Tổng lượt dùng"
-            inputMode="numeric"
-            value={maxRedemptions}
-            onChange={(e) => setMaxRedemptions(e.target.value)}
-            hint={editing ? `Tối thiểu ${Math.max(1, redeemed)}.` : "Tổng số lần mã được dùng."}
-          />
+          <div className="flex flex-col gap-2">
+            <Input
+              label="Tổng lượt dùng"
+              inputMode="numeric"
+              value={unlimited ? "" : maxRedemptions}
+              placeholder={unlimited ? "Không giới hạn" : undefined}
+              onChange={(e) => setMaxRedemptions(e.target.value)}
+              disabled={unlimited}
+              hint={unlimited
+                ? "Mã không bao giờ hết lượt; vẫn giới hạn theo lượt mỗi người."
+                : editing ? `Tối thiểu ${Math.max(1, redeemed)}.` : "Tổng số lần mã được dùng."}
+            />
+            <Toggle
+              checked={unlimited}
+              onChange={(on) => {
+                setUnlimited(on);
+                // Back to a cap: start from a total the server accepts.
+                if (!on && (Number(maxRedemptions) || 0) < redeemed) setMaxRedemptions(String(Math.max(1, redeemed)));
+              }}
+              label="Không giới hạn tổng lượt"
+            />
+          </div>
           <Input
             label="Lượt mỗi người"
             inputMode="numeric"
