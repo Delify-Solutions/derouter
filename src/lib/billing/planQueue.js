@@ -59,6 +59,33 @@ export function hasStarted(entry, nowMs) {
   return !Number.isFinite(startsMs) || startsMs <= nowMs;
 }
 
+/**
+ * The RPM or TPM a purchase is held to (spec plan-templates "Per-purchase rate
+ * override"): its own override when set (0 = no limit), else the plan's live value.
+ * null = no limit.
+ */
+export function effectiveRate(override, planValue) {
+  if (override !== null && override !== undefined && override !== "") {
+    const own = Number(override);
+    return Number.isFinite(own) && own > 0 ? own : null;
+  }
+  const plan = Number(planValue);
+  return Number.isFinite(plan) && plan > 0 ? plan : null;
+}
+
+/**
+ * Which RPM/TPM allowance a purchase counts against. Allowances are per (user,
+ * plan): every purchase of one plan shares its plan id. A purchase without a plan
+ * (a credit gift, an admin credit grant) has its own allowance, keyed by the
+ * purchase, only when it carries a rate override; otherwise no rate applies.
+ */
+export function rateKeyOf(row) {
+  if (!row) return null;
+  if (row.planId) return row.planId;
+  const hasOverride = (row.rpm !== null && row.rpm !== undefined) || (row.tpm !== null && row.tpm !== undefined);
+  return hasOverride && row.id ? `purchase:${row.id}` : null;
+}
+
 function rowToEntry(row, windowsByPlan) {
   const limits = parseLimits(row.limits);
   const stored = windowsByPlan.get(row.id) ?? new Map();
@@ -73,10 +100,13 @@ function rowToEntry(row, windowsByPlan) {
     planId: row.planId ?? null,
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
-    // The plan's request/token rate, read live (never snapshotted): it applies
-    // while this purchase is the one paying. null = no limit.
-    rpm: Number(row.planRpm) > 0 ? Number(row.planRpm) : null,
-    tpm: Number(row.planTpm) > 0 ? Number(row.planTpm) : null,
+    // The request/token rate that applies while this purchase is the one paying:
+    // the purchase's own override, else the plan's, read live. null = no limit.
+    rpm: effectiveRate(row.rpm, row.planRpm),
+    tpm: effectiveRate(row.tpm, row.planTpm),
+    // The raw override (null = follows the plan), for the admin editor.
+    rpmOverride: row.rpm == null ? null : Number(row.rpm),
+    tpmOverride: row.tpm == null ? null : Number(row.tpm),
     source: row.source ?? null,
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
@@ -208,9 +238,9 @@ export function scopeQueue(queue, planId) {
 }
 
 /**
- * Which plan's RPM/TPM allowance a request counts against: the key's pinned plan,
- * else the plan of the purchase that pays right now. Null when no plan is involved
- * (credit without a plan, nothing able to pay), which means no rate limit applies.
+ * Which RPM/TPM allowance a request counts against: the key's pinned plan, else
+ * the allowance of the purchase that pays right now (`rateKeyOf`). Null when none
+ * applies (credit without a plan or override, nothing able to pay).
  * Allowances are per (user, plan) and shared by every key, so minting more keys
  * never opens a second allowance.
  */
@@ -218,8 +248,8 @@ export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
   if (keyPlanId) return keyPlanId;
   const paying = admitSync(db, userId, nowIsoArg);
   if (!paying.ok) return null;
-  const row = db.get(`SELECT planId FROM userPlans WHERE id = ?`, [paying.planId]);
-  return row?.planId ?? null;
+  const row = db.get(`SELECT id, planId, rpm, tpm FROM userPlans WHERE id = ?`, [paying.planId]);
+  return rateKeyOf(row);
 }
 
 /**

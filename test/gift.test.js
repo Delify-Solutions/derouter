@@ -334,7 +334,7 @@ test("an admin may choose the code; it is stored normalised and shown as typed",
   }
 });
 
-test("a redeemed code can get more uses, but never fewer than used and never a different gift", async () => {
+test("a redeemed code can get more uses and a different gift for later redeemers, never fewer uses than used", async () => {
   reset();
   const gift = await gifts.createGiftCode({
     code: "SUPPORT1", grantKind: "credit", creditNanoUsd: USD(5), durationDays: 7, maxRedemptions: 2,
@@ -352,12 +352,24 @@ test("a redeemed code can get more uses, but never fewer than used and never a d
   assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: "eu3", code: "SUPPORT1" })).ok, true);
 
   await assert.rejects(gifts.updateGiftCode(gift.id, { maxRedemptions: 2 }), /không được nhỏ hơn số lượt đã dùng \(3\)/);
-  await assert.rejects(gifts.updateGiftCode(gift.id, { creditNanoUsd: USD(50) }), /không đổi được quà tặng/);
-  await assert.rejects(gifts.updateGiftCode(gift.id, { durationDays: 30 }), /không đổi được quà tặng/);
-  assert.equal(Number(db.get(`SELECT creditNanoUsd FROM giftCodes WHERE id = ?`, [gift.id]).creditNanoUsd), USD(5));
 
-  // Before anyone redeems it, the gift itself is still editable.
-  const fresh = await gifts.createGiftCode({ grantKind: "credit", creditNanoUsd: USD(5), durationDays: 7 });
-  const changed = await gifts.updateGiftCode(fresh.id, { creditNanoUsd: USD(8) });
-  assert.equal(changed.creditNanoUsd, USD(8));
+  // The gift itself may change after redemptions: later redeemers get the new
+  // gift, earlier purchases keep what they received.
+  const changed = await gifts.updateGiftCode(gift.id, { creditNanoUsd: USD(50), durationDays: 30 });
+  assert.equal(changed.creditNanoUsd, USD(50));
+  insertUser("eu4", "eu4@test.local");
+  assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: "eu4", code: "SUPPORT1" })).ok, true);
+  const credits = (userId) => db.all(`SELECT creditTotalNanoUsd AS c FROM userPlans WHERE userId = ?`, [userId]).map((r) => Number(r.c));
+  assert.deepEqual(credits("eu1"), [USD(5)], "an earlier redemption is untouched");
+  assert.deepEqual(credits("eu4"), [USD(50)]);
+
+  // Credit → plan is a valid edit too; the code then grants the plan.
+  db.run(
+    `INSERT INTO plans(id, code, name, priceNanoUsd, creditNanoUsd, durationDays, isActive, createdAt, updatedAt)
+     VALUES('pl-edit', 'pl-edit', 'Edit', ?, ?, 30, 1, ?, ?)`,
+    [USD(1), USD(10), new Date().toISOString(), new Date().toISOString()]
+  );
+  const toPlan = await gifts.updateGiftCode(gift.id, { planId: "pl-edit", creditNanoUsd: null, durationDays: null });
+  assert.equal(toPlan.grantKind, "plan");
+  assert.equal(toPlan.creditNanoUsd, null);
 });

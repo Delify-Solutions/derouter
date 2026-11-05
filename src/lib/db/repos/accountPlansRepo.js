@@ -41,6 +41,9 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     planName: entry.planName,
     rpm: entry.rpm ?? null,
     tpm: entry.tpm ?? null,
+    // The purchase's own override (null = follows the plan); the admin editor reads it.
+    rpmOverride: entry.rpmOverride ?? null,
+    tpmOverride: entry.tpmOverride ?? null,
     source: entry.source,
     creditTotalNanoUsd: entry.creditTotalNanoUsd,
     creditRemainingNanoUsd: entry.creditRemainingNanoUsd,
@@ -249,14 +252,27 @@ function formatVnd(value) {
  */
 export function listBindablePlansSync(db, userId, nowIsoArg = null) {
   if (!userId) return [];
-  return db.all(
-    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name, p.rpm AS rpm, p.tpm AS tpm
+  const rows = db.all(
+    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name
        FROM userPlans up
        JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
       ORDER BY p.name ASC, p.id ASC`,
     [userId, nowIsoArg || nowIso()]
   );
+  if (rows.length === 0) return rows;
+  // The rate a key pinned to the plan gets is that of the plan's first purchase in
+  // queue order, with its own override applied (spec plan-templates "Per-purchase
+  // rate override"), the same purchase admission picks first.
+  const firstByPlan = new Map();
+  for (const entry of queueViewSync(db, userId, nowIsoArg || nowIso())) {
+    if (entry.planId && !firstByPlan.has(entry.planId)) firstByPlan.set(entry.planId, entry);
+  }
+  return rows.map((row) => ({
+    ...row,
+    rpm: firstByPlan.get(row.id)?.rpm ?? null,
+    tpm: firstByPlan.get(row.id)?.tpm ?? null,
+  }));
 }
 
 /**
