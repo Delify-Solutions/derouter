@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
+import {
+  redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT, giftRequirementSync, listAvailableGiftsSync,
+} from "@/lib/db/repos/giftRepo.js";
+import { getSettings } from "@/lib/localDb";
+import { channelUrlOf } from "@/lib/telegram/channel.js";
+import {
+  botTokenOf, channelChatIdOf, channelCheckConfigured, checkChannelMember, reserveMembershipCheck,
+} from "@/lib/telegram/channelMember.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
@@ -20,7 +27,34 @@ const FAILURE = {
   not_new_user: { status: 409, error: GIFT_REASON_TEXT.not_new_user },
   telegram_required: { status: 403, error: GIFT_REASON_TEXT.telegram_required, code: "telegram_required" },
   telegram_used: { status: 409, error: GIFT_REASON_TEXT.telegram_used },
+  // Channel-join codes (change channel-gift).
+  channel_required: { status: 403, error: GIFT_REASON_TEXT.channel_required, code: "channel_required" },
+  telegram_channel_used: { status: 409, error: GIFT_REASON_TEXT.telegram_channel_used },
 };
+
+const CHANNEL_TELEGRAM_REQUIRED = "Cần liên kết Telegram rồi tham gia kênh để nhận mã này.";
+const CHANNEL_UNAVAILABLE = "Chưa kiểm tra được kênh Telegram lúc này. Vui lòng thử lại sau ít phút.";
+const CHANNEL_TOO_SOON = "Vui lòng đợi vài giây rồi thử lại.";
+
+/**
+ * Channel-join code: ask Telegram whether the account's Telegram user is in the
+ * channel. Runs before the transaction (it is async); the transaction re-checks
+ * that the link did not change meanwhile.
+ * @returns {Promise<{ verified: string|null } | { response: NextResponse }>}
+ */
+async function verifyChannelMembership(userId, requirement, settings) {
+  // Dead code, no link, already taken: the transaction refuses with the right reason.
+  if (!requirement.checkChannel) return { verified: null };
+  if (!reserveMembershipCheck(userId)) {
+    return { response: NextResponse.json({ error: CHANNEL_TOO_SOON, code: "too_soon" }, { status: 429 }) };
+  }
+  const telegramUserId = requirement.telegramUserId;
+  const checked = await checkChannelMember(botTokenOf(settings), channelChatIdOf(settings), telegramUserId);
+  if (!checked.ok) {
+    return { response: NextResponse.json({ error: CHANNEL_UNAVAILABLE, code: "channel_unavailable" }, { status: 503 }) };
+  }
+  return { verified: checked.member ? telegramUserId : null };
+}
 
 async function requireSession(request) {
   // resolveAccountUser checks the session row too, so a revoked token cannot redeem.
@@ -60,9 +94,22 @@ export async function POST(request) {
     }
 
     const db = await getAdapter();
+    const requirement = giftRequirementSync(db, { userId: session.userId, code: body.code });
+    let settings = null;
+    const loadSettings = async () => {
+      if (!settings) settings = (await getSettings().catch(() => null)) || {};
+      return settings;
+    };
+    let channelMemberTelegramUserId = null;
+    if (requirement?.channelJoinOnly) {
+      const checked = await verifyChannelMembership(session.userId, requirement, await loadSettings());
+      if (checked.response) return checked.response;
+      channelMemberTelegramUserId = checked.verified;
+    }
+
     // One transaction: the redemption row, the counter bump and the grant commit together.
     const result = db.transaction(() =>
-      redeemGiftCode(db, { userId: session.userId, code: body.code })
+      redeemGiftCode(db, { userId: session.userId, code: body.code, channelMemberTelegramUserId })
     );
 
     const giftCode = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
@@ -74,8 +121,11 @@ export async function POST(request) {
         details: { code: giftCode, reason: result?.reason || "not_found" },
       });
       const mapped = FAILURE[result?.reason] || FAILURE.not_found;
+      const channelCode = requirement?.channelJoinOnly === true;
+      const error = channelCode && result?.reason === "telegram_required" ? CHANNEL_TELEGRAM_REQUIRED : mapped.error;
+      const channelUrl = result?.reason === "channel_required" ? channelUrlOf(await loadSettings()) : "";
       return NextResponse.json(
-        { error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) },
+        { error, ...(mapped.code ? { code: mapped.code } : {}), ...(channelUrl ? { channelUrl } : {}) },
         { status: mapped.status }
       );
     }
@@ -86,7 +136,28 @@ export async function POST(request) {
       details: { code: giftCode, userPlanId: result.userPlan?.id ?? null },
     });
     if (result.userPlan?.id) fireAndForget(notifyPlanReceived(result.userPlan.id, "gift"));
+
+    // A welcome code just taken: point the new customer at the channel-join
+    // voucher they can still take (change channel-gift).
+    let channelOffer = null;
+    if (requirement?.newUserOnly) {
+      const channelUrl = channelUrlOf(await loadSettings());
+      const offer = channelUrl && channelCheckConfigured(settings)
+        ? listAvailableGiftsSync(db, session.userId, { listedOnly: false, channelOnly: true })[0]
+        : null;
+      if (offer) {
+        channelOffer = {
+          code: offer.code,
+          creditNanoUsd: offer.grant.creditNanoUsd,
+          unlimitedCredit: offer.grant.unlimitedCredit,
+          planName: offer.grant.planName,
+          channelUrl,
+        };
+      }
+    }
+
     return NextResponse.json({
+      channelOffer,
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,
       unlimitedCredit: result.userPlan?.unlimitedCredit === 1,

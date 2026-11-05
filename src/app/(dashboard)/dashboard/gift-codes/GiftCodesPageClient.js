@@ -351,6 +351,18 @@ export default function GiftCodesPageClient() {
                           Người mới
                         </span>
                       )}
+                      {gift.channelJoinOnly && (
+                        <span className="mt-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
+                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">campaign</span>
+                          Tham gia kênh
+                        </span>
+                      )}
+                      {gift.listed && (
+                        <span className="mt-1 ml-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
+                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">visibility</span>
+                          Hiện cho khách
+                        </span>
+                      )}
                       {gift.note && <p className="mt-1 text-xs text-text-subtle">{gift.note}</p>}
                     </td>
                     <td className="px-4 py-3">
