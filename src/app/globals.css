@@ -896,3 +896,14 @@ button:disabled,
   .liquid-glass::before { display: none; }
   .liquid-glass-dim { background: rgb(0 0 0 / 0.4); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+
+/* Token statistics chart (change usage-analytics): categorical series, the
+   reference dataviz order, stepped per theme and validated against each surface. */
+:root {
+  --viz-1: #2a78d6; --viz-2: #eb6834; --viz-3: #1baf7a;
+  --viz-4: #eda100; --viz-5: #e87ba4; --viz-6: #008300; --viz-other: #a1a1aa;
+}
+.dark {
+  --viz-1: #3987e5; --viz-2: #d95926; --viz-3: #199e70;
+  --viz-4: #c98500; --viz-5: #d55181; --viz-6: #008300; --viz-other: #71717a;
+}

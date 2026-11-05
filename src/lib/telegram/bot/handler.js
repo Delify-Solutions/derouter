@@ -11,6 +11,9 @@ import {
   mainMenu, helpText, notLinkedReply, meReply, usageReply, plansReply, keysReply, settingsReply, togglePref,
   unlinkAsk, unlinkDo, giftsReply, redeemReply,
 } from "./customer.js";
+import {
+  planBuyReply, createOrderReply, orderStatusReply, cancelOwnOrderReply, myOrdersReply, payAgainReply,
+} from "./orders.js";
 import { isAdmin, statsReply, ordersReply, orderConfirmReply, approveDo, cancelDo, userReply } from "./admin.js";
 import { escapeHtml } from "./format.js";
 
@@ -21,7 +24,7 @@ export function parseCommand(text) {
   return { command: m[1].toLowerCase(), arg: (m[2] || "").trim() };
 }
 
-const CUSTOMER = new Set(["me", "balance", "usage", "gifts", "gift", "plans", "keys", "settings", "unlink"]);
+const CUSTOMER = new Set(["me", "balance", "usage", "gifts", "gift", "plans", "buy", "myorders", "keys", "settings", "unlink"]);
 const ADMIN = new Set(["stats", "orders", "user"]);
 
 function findCustomerSync(db, telegramUserId) {
@@ -57,7 +60,9 @@ async function commandReply(command, arg, ctx) {
       case "usage": return usageReply(ctx);
       case "gifts": return giftsReply(ctx);
       case "gift": return arg ? redeemReply(ctx, arg) : giftsReply(ctx);
-      case "plans": return plansReply(ctx);
+      case "plans":
+      case "buy": return plansReply(ctx);
+      case "myorders": return myOrdersReply(ctx);
       case "keys": return keysReply(ctx);
       case "settings": return settingsReply(ctx);
       case "unlink": return unlinkAsk();
@@ -83,6 +88,15 @@ async function callbackReply(data, ctx) {
   if (!user) return { mode: "edit", ...notLinkedReply(ctx.baseUrl) };
   if (user.status === "suspended") return { mode: "edit", text: "Tài khoản đang bị khoá. Vui lòng liên hệ hỗ trợ.", markup: null };
   if (kind === "g") return { mode: "send", ...(await redeemReply(ctx, value)) };
+  // Buying (change bot-orders): plan → method → order with payment details.
+  if (kind === "bp") return { mode: "edit", ...(await planBuyReply(ctx, value)) };
+  if (kind === "bm") {
+    const [planId, method] = value.split(":");
+    return { mode: "send", ...(await createOrderReply(ctx, planId, method)) };
+  }
+  if (kind === "up") return { mode: "send", ...(await payAgainReply(ctx, value)) };
+  if (kind === "us") return { mode: "send", ...(await orderStatusReply(ctx, value)) };
+  if (kind === "uc") return { mode: "edit", ...(await cancelOwnOrderReply(ctx, value)) };
   if (kind === "n") return { mode: "edit", ...togglePref(ctx, value) };
   if (kind === "u" && value === "ask") return { mode: "edit", ...unlinkAsk() };
   if (kind === "u" && value === "yes") return { mode: "edit", ...unlinkDo(ctx) };
@@ -90,16 +104,36 @@ async function callbackReply(data, ctx) {
 }
 
 /**
+ * A reply with a picture (the payment QR): the image with the details as its
+ * caption; when Telegram cannot fetch the image or the caption is too long, the
+ * details go as text so the customer always gets them.
+ */
+async function sendWithPhoto(api, chatId, reply) {
+  if (reply.text.length <= 1024 && api.photo) {
+    const sent = await api.photo(chatId, reply.photo, reply.text, reply.markup);
+    if (sent?.ok) return;
+  } else if (api.photo) {
+    const sent = await api.photo(chatId, reply.photo);
+    if (sent?.ok) {
+      await api.send(chatId, reply.text, reply.markup);
+      return;
+    }
+  }
+  await api.send(chatId, reply.text, reply.markup);
+}
+
+/**
  * Handle one Telegram update. Never throws: a failure answers with a short
  * apology so the customer is not left waiting.
  *
  * @param {object} update  Telegram Update
- * @param {{ db, settings, api, siteName?, baseUrl?, checkMember?, reserve? }} deps
+ * @param {{ db, settings, api, siteName?, baseUrl?, checkMember?, reserve?, onOrderCreated? }} deps
+ *   onOrderCreated: tells the admin about a new order (the route passes the notifier).
  *   checkMember / reserve: the channel membership check and its spacing (tests).
  * @returns {Promise<{ handled: boolean }>}
  */
 export async function handleUpdate(update, deps) {
-  const { db, settings = {}, api, siteName = "derouter", baseUrl = "", checkMember, reserve } = deps;
+  const { db, settings = {}, api, siteName = "derouter", baseUrl = "", checkMember, reserve, onOrderCreated } = deps;
   const message = update?.message;
   const callback = update?.callback_query;
   const chat = message?.chat ?? callback?.message?.chat;
@@ -110,7 +144,7 @@ export async function handleUpdate(update, deps) {
   }
 
   const ctx = {
-    db, settings, baseUrl, siteName, from, checkMember, reserve,
+    db, settings, baseUrl, siteName, from, checkMember, reserve, onOrderCreated,
     admin: isAdmin(settings, from.id),
     user: null,
   };
@@ -118,9 +152,12 @@ export async function handleUpdate(update, deps) {
   try {
     ctx.user = findCustomerSync(db, from.id);
     if (callback) {
-      const reply = await callbackReply(callback.data, ctx);
+      // Answer first: the tap's spinner stops while the reply is worked out.
       await api.answer(callback.id);
-      if (reply.mode === "send" || !callback.message?.message_id) {
+      const reply = await callbackReply(callback.data, ctx);
+      if (reply.photo) {
+        await sendWithPhoto(api, chat.id, reply);
+      } else if (reply.mode === "send" || !callback.message?.message_id) {
         await api.send(chat.id, reply.text, reply.markup);
       } else {
         await api.edit(chat.id, callback.message.message_id, reply.text, reply.markup);
@@ -135,7 +172,8 @@ export async function handleUpdate(update, deps) {
       return { handled: true };
     }
     const reply = await commandReply(parsed.command, parsed.arg, ctx);
-    await api.send(chat.id, reply.text, reply.markup);
+    if (reply.photo) await sendWithPhoto(api, chat.id, reply);
+    else await api.send(chat.id, reply.text, reply.markup);
     return { handled: true };
   } catch (error) {
     // The message only: no update content (it can hold what the customer typed).
