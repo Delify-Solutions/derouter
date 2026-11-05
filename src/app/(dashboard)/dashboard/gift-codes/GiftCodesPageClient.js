@@ -56,11 +56,17 @@ function fmtDateTime(value) {
   });
 }
 
+/** "12 / 100", or "12 / ∞" for a code with no total cap (change gift-unlimited). */
+function usesLabel(gift) {
+  const used = gift.redeemedCount ?? 0;
+  return gift.unlimitedRedemptions ? `${used} / ∞` : `${used} / ${gift.maxRedemptions ?? 1}`;
+}
+
 function giftStatus(gift) {
   if (!gift.isActive) return "disabled";
   const expires = ts(gift.expiresAt);
   if (expires !== null && expires < nowMs()) return "expired";
-  if ((gift.redeemedCount ?? 0) >= (gift.maxRedemptions ?? 1)) return "exhausted";
+  if (!gift.unlimitedRedemptions && (gift.redeemedCount ?? 0) >= (gift.maxRedemptions ?? 1)) return "exhausted";
   const starts = ts(gift.startsAt);
   if (starts !== null && starts > nowMs()) return "scheduled";
   return "active";
@@ -358,7 +364,7 @@ export default function GiftCodesPageClient() {
                         </span>
                       )}
                       {gift.listed && (
-                        <span className="mt-1 ml-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
+                        <span className="mt-1 ml-1 inline-flex items-center gap-1 whitespace-nowrap border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
                           <span className="material-symbols-outlined text-[13px]" aria-hidden="true">visibility</span>
                           Hiện cho khách
                         </span>
@@ -377,8 +383,8 @@ export default function GiftCodesPageClient() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-mono text-sm text-text-main">
-                        {gift.redeemedCount ?? 0} / {gift.maxRedemptions ?? 1}
+                      <span className="whitespace-nowrap font-mono text-sm text-text-main">
+                        {usesLabel(gift)}
                       </span>
                       <p className="text-xs text-text-subtle">per user {gift.perUserLimit ?? 1}</p>
                     </td>
@@ -533,7 +539,7 @@ export default function GiftCodesPageClient() {
               <div>
                 <dt className="meta text-text-muted">Redemptions</dt>
                 <dd className="mt-1 font-mono text-text-main">
-                  {createdCode.redeemedCount ?? 0} / {createdCode.maxRedemptions ?? 1}
+                  {usesLabel(createdCode)}
                 </dd>
               </div>
               <div>
@@ -562,8 +568,7 @@ export default function GiftCodesPageClient() {
                 {redemptionsFor.displayCode || redemptionsFor.code}
               </span>
               <span className="text-xs text-text-muted">
-                {grantLabel(redemptionsFor)} · {redemptionsFor.redeemedCount ?? 0} of{" "}
-                {redemptionsFor.maxRedemptions ?? 1} used
+                {grantLabel(redemptionsFor)} · {usesLabel(redemptionsFor)} used
               </span>
             </div>
           )}
@@ -643,7 +648,8 @@ function AssignGiftModal({ gift, onClose, onAssigned }) {
   const [results, setResults] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const left = Math.max(0, (gift.maxRedemptions ?? 1) - (gift.redeemedCount ?? 0));
+  // Infinity for a code with no total cap: every picked account fits.
+  const left = gift.unlimitedRedemptions ? Infinity : Math.max(0, (gift.maxRedemptions ?? 1) - (gift.redeemedCount ?? 0));
 
   const submit = async () => {
     setError("");
@@ -690,7 +696,7 @@ function AssignGiftModal({ gift, onClose, onAssigned }) {
         <div className="flex flex-col gap-1">
           <span className="font-mono text-sm tracking-wider text-text-main">{gift.displayCode || gift.code}</span>
           <span className="text-xs text-text-muted">
-            {grantLabel(gift)} · còn {left} lượt · mỗi tài khoản tối đa {gift.perUserLimit ?? 1} lần
+            {grantLabel(gift)} · {Number.isFinite(left) ? `còn ${left} lượt` : "không giới hạn lượt"} · mỗi tài khoản tối đa {gift.perUserLimit ?? 1} lần
           </span>
         </div>
         <UserPicker

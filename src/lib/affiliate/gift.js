@@ -6,7 +6,7 @@
 // enforces, read through the shared window helper so the two can never disagree.
 //
 // SYNCHRONOUS + DRIVER-FREE: takes the adapter first.
-import { inWindow } from "../gift/window.js";
+import { inWindow, giftExhausted } from "../gift/window.js";
 import { effectiveTermsSync } from "./core.js";
 
 /**
@@ -28,7 +28,7 @@ export function eligibleReferralGiftSync(db, giftCodeId, { now = Date.now() } = 
   if (Number(row.newUserOnly) !== 1) return null;
   if (Number(row.isActive) !== 1) return null;
   if (!inWindow(row, now)) return null;
-  if (Number(row.redeemedCount ?? 0) >= Number(row.maxRedemptions ?? 1)) return null;
+  if (giftExhausted(row)) return null;
   return row;
 }
 

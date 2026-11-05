@@ -52,7 +52,7 @@ function useActiveGiftCodes() {
             if (!c.isActive) return false;
             if (c.startsAt && Date.parse(c.startsAt) > now) return false;
             if (c.expiresAt && Date.parse(c.expiresAt) < now) return false;
-            if (c.maxRedemptions && (c.redeemedCount ?? 0) >= c.maxRedemptions) return false;
+            if (!c.unlimitedRedemptions && c.maxRedemptions && (c.redeemedCount ?? 0) >= c.maxRedemptions) return false;
             return true;
           })
         );

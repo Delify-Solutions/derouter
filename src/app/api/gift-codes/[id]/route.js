@@ -24,7 +24,7 @@ export async function PATCH(request, { params }) {
     const { id } = await params;
     const body = await request.json();
 
-    if (body.maxRedemptions !== undefined) {
+    if (body.maxRedemptions !== undefined && body.unlimitedRedemptions !== true) {
       const n = Number(body.maxRedemptions);
       if (!Number.isInteger(n) || n < 1) {
         return NextResponse.json({ error: "maxRedemptions must be at least 1" }, { status: 400 });
@@ -52,6 +52,7 @@ export async function PATCH(request, { params }) {
       rpm: body.rpm,
       tpm: body.tpm,
       maxRedemptions: body.maxRedemptions,
+      unlimitedRedemptions: body.unlimitedRedemptions === undefined ? undefined : body.unlimitedRedemptions === true,
       perUserLimit: body.perUserLimit,
       startsAt: body.startsAt,
       expiresAt: body.expiresAt,

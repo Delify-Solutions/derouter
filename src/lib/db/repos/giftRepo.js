@@ -13,7 +13,7 @@ import { effectiveRate } from "../../billing/planQueue.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 // The redeemability window, shared with the affiliate welcome-gift check so an
 // advertised code is always one redeemGiftCode would accept (design D7).
-import { inWindow } from "../../gift/window.js";
+import { inWindow, giftExhausted } from "../../gift/window.js";
 import { topupCreditForAmount } from "../../billing/topup.js";
 import { insertAuditSync } from "../../billing/audit.js";
 
@@ -112,6 +112,8 @@ function rowToGiftCode(row) {
     }, row.amountVnd),
     durationDays: row.durationDays ?? null,
     maxRedemptions: row.maxRedemptions ?? 1,
+    // No total cap (change gift-unlimited); maxRedemptions is then ignored.
+    unlimitedRedemptions: Number(row.unlimitedRedemptions) === 1,
     redeemedCount: row.redeemedCount ?? 0,
     perUserLimit: row.perUserLimit ?? 1,
     startsAt: row.startsAt ?? null,
@@ -316,7 +318,9 @@ function unboundedGiftError(plan, { rpm, tpm }) {
 export async function createGiftCode(input) {
   const db = await getAdapter();
   const grant = validateGrantInput(input || {});
-  const maxRedemptions = Number(input?.maxRedemptions ?? 1);
+  const unlimitedRedemptions = input?.unlimitedRedemptions === true;
+  // An unlimited code keeps a stored max of 1: it is never read while the flag is on.
+  const maxRedemptions = unlimitedRedemptions ? 1 : Number(input?.maxRedemptions ?? 1);
   const newUserOnly = input?.newUserOnly === true;
   const channelJoinOnly = input?.channelJoinOnly === true;
   if (newUserOnly && channelJoinOnly) throw new Error(KIND_CLASH_TEXT);
@@ -362,6 +366,7 @@ export async function createGiftCode(input) {
     amountVnd: grant.amountVnd,
     durationDays: grant.durationDays,
     maxRedemptions,
+    unlimitedRedemptions: unlimitedRedemptions ? 1 : 0,
     redeemedCount: 0,
     perUserLimit,
     startsAt: input?.startsAt || null,
@@ -379,11 +384,11 @@ export async function createGiftCode(input) {
   };
 
   db.run(
-    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, channelJoinOnly, listed, rpm, tpm, note, createdBy, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, unlimitedRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, channelJoinOnly, listed, rpm, tpm, note, createdBy, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.amountVnd, gift.durationDays,
-      gift.maxRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
+      gift.maxRedemptions, gift.unlimitedRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
       gift.isActive, gift.newUserOnly, gift.channelJoinOnly, gift.listed, gift.rpm, gift.tpm, gift.note,
       gift.createdBy, gift.createdAt, gift.updatedAt,
     ]
@@ -459,6 +464,9 @@ export async function updateGiftCode(id, patch = {}) {
         ? (patch.durationDays === null || patch.durationDays === "" ? null : Number(patch.durationDays))
         : row.durationDays,
       maxRedemptions: patch.maxRedemptions !== undefined ? Number(patch.maxRedemptions) : row.maxRedemptions,
+      unlimitedRedemptions: patch.unlimitedRedemptions !== undefined
+        ? (patch.unlimitedRedemptions === true ? 1 : 0)
+        : (Number(row.unlimitedRedemptions) === 1 ? 1 : 0),
       perUserLimit: patch.perUserLimit !== undefined ? Number(patch.perUserLimit) : row.perUserLimit,
       startsAt: patch.startsAt !== undefined ? (patch.startsAt || null) : row.startsAt,
       expiresAt: patch.expiresAt !== undefined ? (patch.expiresAt || null) : row.expiresAt,
@@ -489,12 +497,18 @@ export async function updateGiftCode(id, patch = {}) {
     if (next.newUserOnly === 1 && next.channelJoinOnly === 1) throw new Error(KIND_CLASH_TEXT);
     // A new-user or channel-join code is one per account by definition (design D5).
     if (next.newUserOnly === 1 || next.channelJoinOnly === 1) next.perUserLimit = 1;
-    if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
-      throw new Error("maxRedemptions must be at least 1");
-    }
-    const redeemed = Number(row.redeemedCount) || 0;
-    if (next.maxRedemptions < redeemed) {
-      throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
+    // An unlimited code ignores its max; a capped one may not drop below the
+    // redemptions made (also when it goes back from unlimited to capped).
+    if (next.unlimitedRedemptions === 1) {
+      if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) next.maxRedemptions = 1;
+    } else {
+      if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
+        throw new Error("maxRedemptions must be at least 1");
+      }
+      const redeemed = Number(row.redeemedCount) || 0;
+      if (next.maxRedemptions < redeemed) {
+        throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
+      }
     }
     if (!Number.isInteger(next.perUserLimit) || next.perUserLimit < 1) {
       throw new Error("perUserLimit must be at least 1");
@@ -537,12 +551,12 @@ export async function updateGiftCode(id, patch = {}) {
     db.run(
       `UPDATE giftCodes
           SET code = ?, grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
-              maxRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
+              maxRedemptions = ?, unlimitedRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
               newUserOnly = ?, channelJoinOnly = ?, listed = ?, rpm = ?, tpm = ?, note = ?, updatedAt = ?
         WHERE id = ?`,
       [
         next.code, grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
-        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.channelJoinOnly,
+        next.unlimitedRedemptions, next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.channelJoinOnly,
         next.listed, next.rpm, next.tpm, next.note, nowIso(), id,
       ]
     );
@@ -753,7 +767,7 @@ export function giftRequirementSync(db, { userId, code, now = Date.now() }) {
   if (channelJoinOnly && telegramUserId) {
     const live = (row.isActive === 1 || row.isActive === true)
       && inWindow(row, now)
-      && Number(row.redeemedCount ?? 0) < Number(row.maxRedemptions ?? 1);
+      && !giftExhausted(row);
     const mine = Number(db.get(
       `SELECT COUNT(*) AS c FROM giftRedemptions WHERE giftId = ? AND userId = ?`,
       [row.id, userId]
@@ -790,7 +804,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null, channelMem
   if (!row) return { ok: false, reason: "not_found" };
   if (row.deletedAt || (row.isActive !== 1 && row.isActive !== true)) return { ok: false, reason: "not_found" };
   if (!inWindow(row, Date.now())) return { ok: false, reason: "not_active" };
-  if ((row.redeemedCount ?? 0) >= (row.maxRedemptions ?? 1)) return { ok: false, reason: "exhausted" };
+  if (giftExhausted(row)) return { ok: false, reason: "exhausted" };
 
   let grant;
   if (row.grantKind === "plan") {
@@ -872,7 +886,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null, channelMem
       // counter read above was stale.
       const res = db.run(
         `UPDATE giftCodes SET redeemedCount = redeemedCount + 1, updatedAt = ?
-          WHERE id = ? AND (maxRedemptions IS NULL OR redeemedCount < maxRedemptions)`,
+          WHERE id = ? AND (unlimitedRedemptions = 1 OR maxRedemptions IS NULL OR redeemedCount < maxRedemptions)`,
         [now, row.id]
       );
       if ((res?.changes ?? 0) === 0) throw new GiftError("exhausted");
@@ -960,7 +974,10 @@ export function listAvailableGiftsSync(db, userId, {
   now = Date.now(), listedOnly = true, channelOnly = false, includeChannel = true,
 } = {}) {
   if (!userId) return [];
-  const where = ["g.deletedAt IS NULL", "g.isActive = 1", "g.redeemedCount < g.maxRedemptions"];
+  const where = [
+    "g.deletedAt IS NULL", "g.isActive = 1",
+    "(g.unlimitedRedemptions = 1 OR g.redeemedCount < g.maxRedemptions)",
+  ];
   if (listedOnly) where.push("g.listed = 1");
   if (channelOnly) where.push("g.channelJoinOnly = 1");
   // Channel-join codes are left out when the channel check is not set up: they
@@ -1001,7 +1018,10 @@ export function listAvailableGiftsSync(db, userId, {
       kind: channelJoinOnly ? "channel" : newUserOnly ? "new_user" : "normal",
       grant,
       expiresAt: row.expiresAt ?? null,
-      remaining: Math.max(0, Number(row.maxRedemptions) - Number(row.redeemedCount || 0)),
+      // null = no total cap.
+      remaining: Number(row.unlimitedRedemptions) === 1
+        ? null
+        : Math.max(0, Number(row.maxRedemptions) - Number(row.redeemedCount || 0)),
       needsTelegram,
     });
     if (out.length >= AVAILABLE_MAX) break;
