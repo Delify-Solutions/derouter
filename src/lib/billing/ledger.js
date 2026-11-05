@@ -52,6 +52,28 @@ export function setDebtNanoSync(db, userId, value) {
 }
 
 /**
+ * Write the account's whole debt off (change debt-clear): the debt goes to 0 and
+ * one `adjust` row of +debt records it, with `meta.reason` saying why
+ * ("overdraft_absorbed" by an unlimited plan, "debt_cleared" by an admin).
+ * Synchronous; run inside the caller's transaction.
+ * @returns {number} the amount written off (0 when there was no debt)
+ */
+export function writeOffDebtSync(db, userId, { userPlanId = null, meta = {}, createdAt = null } = {}) {
+  const debt = getDebtNanoSync(db, userId);
+  if (debt <= 0) return 0;
+  setDebtNanoSync(db, userId, 0);
+  insertLedgerSync(db, {
+    userId,
+    userPlanId,
+    deltaNanoUsd: debt,
+    kind: "adjust",
+    meta: { ...meta, writtenOffNanoUsd: debt },
+    createdAt,
+  });
+  return debt;
+}
+
+/**
  * Insert one ledger row. `requestKey` stays NULL unless the caller passes one;
  * SQLite allows many NULLs under a UNIQUE index, which is what non-idempotent
  * grant/adjust/expire rows want.

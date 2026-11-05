@@ -32,6 +32,21 @@ function usd(nanoUsd) {
  * into the API shape of design D18: each entry carries `statusLabel`, `reopenAt` and
  * one ready-to-render row per limit.
  */
+
+// Labels for the debt rows of the ledger (change debt-clear).
+const DEBT_NOTES = new Map([
+  ["overdraft_paydown", "trả nợ"],
+  ["overdraft_absorbed", "gói không giới hạn trả nợ"],
+  ["debt_cleared", "admin xóa nợ"],
+]);
+
+/** The label of a debt row, or null. An admin credit adjust stores free text in meta.reason, so only system rows count. */
+function debtNoteOf(kind, meta) {
+  if (kind !== "adjust" || !meta || typeof meta.reason !== "string") return null;
+  if (meta.adminActor && meta.reason !== "debt_cleared") return null;
+  return DEBT_NOTES.get(meta.reason) ?? null;
+}
+
 export function getQueueSync(db, userId, nowIsoArg = null) {
   const at = nowIsoArg || nowIso();
   return queueViewSync(db, userId, at).map((entry) => ({
@@ -172,6 +187,8 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
         // A back-charged row is a `charge` with meta.backfill; the page labels it
         // so support and the customer see the same word.
         backfill: meta?.backfill === true,
+        // Debt rows (change debt-clear): why an adjust row moved the debt.
+        debtNote: debtNoteOf(row.kind, meta),
         model: requestedModel || (hideUpstream ? null : upstreamModel),
         ...(hideUpstream ? {} : { upstreamModel }),
         promptTokens: row.usagePrompt == null ? null : nano(row.usagePrompt),

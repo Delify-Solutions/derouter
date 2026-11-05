@@ -161,6 +161,11 @@ export default function LedgerTable() {
                         truy trừ
                       </span>
                     )}
+                    {entry.debtNote && (
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-text-subtle">
+                        {entry.debtNote}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-sm text-text-main whitespace-nowrap">
                     {entry.planName || entry.planCode || "—"}

@@ -14,7 +14,7 @@
 // $200 back" is the question the log has to answer.
 import { insertAuditSync } from "./audit.js";
 import { grantUserPlan, isoPlusDays } from "./grants.js";
-import { insertLedgerSync, nano } from "./ledger.js";
+import { insertLedgerSync, getDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { effectiveRate } from "./planQueue.js";
 import {
   validateLimits,
@@ -164,6 +164,41 @@ export function grantCreditSync(db, userId, { amountNanoUsd, durationDays, reaso
   });
 
   return { ok: true, userPlan: granted.userPlan, appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd };
+}
+
+// ── Clear debt ─────────────────────────────────────────────────────────────
+
+/**
+ * Write the account's whole debt off (change debt-clear): the debt becomes 0, one
+ * `adjust` ledger row of +debt and one `debt_cleared` audit entry record it.
+ * `expectNanoUsd` is the debt the admin saw (required): a debt that changed since
+ * is refused, so a click never clears more than what was on screen.
+ */
+export function clearDebtSync(db, userId, { reason, expectNanoUsd = null, actor = "admin", now = null } = {}) {
+  const cleanReason = validateReason(reason);
+  if (!cleanReason) return fail(400, "Lý do phải có từ 3 đến 500 ký tự");
+  if (expectNanoUsd == null || !Number.isSafeInteger(Number(expectNanoUsd))) {
+    return fail(400, "Thiếu số nợ đang hiển thị");
+  }
+  const debt = getDebtNanoSync(db, userId);
+  if (debt <= 0) return fail(409, "Tài khoản không còn nợ");
+  if (nano(expectNanoUsd) !== debt) {
+    return fail(409, "Khoản nợ vừa thay đổi. Tải lại trang rồi thử lại.");
+  }
+  const at = now || nowIso();
+  const cleared = writeOffDebtSync(db, userId, {
+    meta: { reason: "debt_cleared", adminActor: actor, note: cleanReason },
+    createdAt: at,
+  });
+  insertAuditSync(db, {
+    userId,
+    actor,
+    action: "debt_cleared",
+    reason: cleanReason,
+    details: { before: { debtNanoUsd: debt }, after: { debtNanoUsd: 0 }, clearedNanoUsd: cleared },
+    now: at,
+  });
+  return { ok: true, clearedNanoUsd: cleared };
 }
 
 // ── Extend ─────────────────────────────────────────────────────────────────

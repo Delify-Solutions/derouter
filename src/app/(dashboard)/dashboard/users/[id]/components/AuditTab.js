@@ -21,6 +21,7 @@ const ACTION_LABEL = {
   credit_granted: "Cấp credit",
   plan_extended: "Gia hạn gói",
   credit_adjusted: "Điều chỉnh credit",
+  debt_cleared: "Xóa nợ",
   plan_limits_changed: "Sửa hạn mức gói",
   plan_rates_changed: "Sửa RPM/TPM gói",
   plan_revoked: "Thu hồi gói",
