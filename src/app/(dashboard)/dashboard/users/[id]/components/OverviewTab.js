@@ -5,6 +5,7 @@ import { Button, Input, Select } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import ReasonModal from "./ReasonModal";
 import ReferrerPanel from "./ReferrerPanel";
+import TelegramPanel from "./TelegramPanel";
 
 const STATUS_OPTIONS = [
   { value: "active", label: "Hoạt động" },
@@ -173,6 +174,8 @@ export default function OverviewTab({ user, summary, onChanged }) {
       </section>
 
       <ReferrerPanel user={user} onChanged={onChanged} />
+
+      <TelegramPanel user={user} onChanged={onChanged} />
 
       <section className="flex flex-col gap-3 border border-border bg-surface p-5">
         <h2 className="meta text-text-muted">Ghi chú nội bộ</h2>

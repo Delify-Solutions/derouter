@@ -65,6 +65,7 @@ function describe(entry) {
     if (entry.type === "email_change_requested" && entry.details?.newEmail) parts.push(`sang ${entry.details.newEmail}`);
     if (entry.type === "email_changed" && entry.details?.to) parts.push(`${entry.details.from || "?"} → ${entry.details.to}`);
     if (entry.type.startsWith("key_") && entry.details?.name) parts.push(`“${entry.details.name}”`);
+    if (entry.type === "telegram_unlink" && entry.details?.by === "admin") parts.push("do quản trị viên gỡ");
     if (entry.device) parts.push(entry.device);
     if (entry.ip) parts.push(`IP ${entry.ip}`);
     return { icon: spec.icon, title: spec.label, detail: parts.join(" · "), tag: spec.tone ? { tone: spec.tone, text: spec.tone === "danger" ? "Bị chặn" : "Cảnh báo" } : null };
