@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -163,6 +163,9 @@ export const TABLES = {
       // Owning apiKeys.id for rows written from this release on. Nullable: legacy
       // rows have none until migration 005 backfills what it can.
       apiKeyId: "TEXT",
+      // Owning account at request time (change usage-analytics): durable, unlike
+      // the 24 h deleted-key tombstone. NULL for admin keys and older rows.
+      userId: "TEXT",
       endpoint: "TEXT",
       promptTokens: "INTEGER DEFAULT 0",
       completionTokens: "INTEGER DEFAULT 0",
@@ -193,6 +196,7 @@ export const TABLES = {
       // dual-path reads until the next release can drop `apiKey`.
       "CREATE INDEX IF NOT EXISTS idx_uh_apikeyid_ts ON usageHistory(apiKeyId, timestamp DESC)",
       "CREATE INDEX IF NOT EXISTS idx_uh_ts_nano ON usageHistory(timestamp DESC, costNanoUsd)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_user_ts ON usageHistory(userId, timestamp DESC)",
     ],
   },
   usageDaily: {
@@ -672,6 +676,10 @@ export const TABLES = {
       // rebuildWindowsSync and the per-plan ledger filter both walk one plan's
       // rows in time order.
       "CREATE INDEX IF NOT EXISTS idx_cl_userplan_ts ON creditLedger(userPlanId, createdAt)",
+      // Admin statistics (change usage-analytics): charges over a time range.
+      "CREATE INDEX IF NOT EXISTS idx_cl_kind_ts ON creditLedger(kind, createdAt)",
+      // The request a charge paid for: owner of older usage rows (usage-analytics).
+      "CREATE INDEX IF NOT EXISTS idx_cl_usage ON creditLedger(usageId)",
     ],
   },
   giftCodes: {

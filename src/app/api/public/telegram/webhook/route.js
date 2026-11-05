@@ -8,6 +8,16 @@ import { handleUpdate } from "@/lib/telegram/bot/handler.js";
 import { botBaseUrlOf, webhookSecretMatches } from "@/lib/telegram/bot/config.js";
 import { loadSiteName } from "@/lib/notify/customerTelegram.js";
 
+/** The admin "new order" message, as the web checkout sends it; never fails the update. */
+async function notifyNewOrder(payload) {
+  try {
+    const mod = await import("@/lib/notify/telegram");
+    if (typeof mod?.notifyAdminNewOrder === "function") await mod.notifyAdminNewOrder(payload);
+  } catch (error) {
+    console.warn("[telegram-bot] admin notification skipped:", error?.message || error);
+  }
+}
+
 export const dynamic = "force-dynamic";
 
 // Telegram may deliver an update twice (a retry after a slow answer): the ids
@@ -57,6 +67,7 @@ export async function POST(request) {
     api: botClient(token),
     siteName: await loadSiteName().catch(() => "derouter"),
     baseUrl: botBaseUrlOf(settings),
+    onOrderCreated: notifyNewOrder,
   });
   return OK();
 }

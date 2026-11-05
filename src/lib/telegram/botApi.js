@@ -69,6 +69,13 @@ export function botClient(token, { fetchImpl = fetch } = {}) {
       disable_web_page_preview: true,
       ...(markup ? { reply_markup: markup } : {}),
     }),
+    // A photo by URL (Telegram fetches it) with a caption of at most 1024 characters.
+    photo: (chatId, url, caption = "", markup = null) => call("sendPhoto", {
+      chat_id: String(chatId),
+      photo: String(url),
+      ...(caption ? { caption: fitText(caption).slice(0, 1024), parse_mode: "HTML" } : {}),
+      ...(markup ? { reply_markup: markup } : {}),
+    }),
     answer: (callbackQueryId, text = "") => call("answerCallbackQuery", {
       callback_query_id: callbackQueryId,
       ...(text ? { text: String(text).slice(0, 200) } : {}),

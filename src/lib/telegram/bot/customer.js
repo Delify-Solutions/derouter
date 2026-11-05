@@ -24,7 +24,8 @@ export const CUSTOMER_COMMANDS = [
   { command: "usage", description: "Thống kê sử dụng hôm nay và 7 ngày" },
   { command: "gifts", description: "Mã quà có thể nhận" },
   { command: "gift", description: "Nhập mã quà: /gift MÃ" },
-  { command: "plans", description: "Bảng giá các gói" },
+  { command: "plans", description: "Bảng giá và mua gói" },
+  { command: "myorders", description: "Đơn hàng của bạn" },
   { command: "keys", description: "API key của bạn" },
   { command: "settings", description: "Bật/tắt thông báo, gỡ liên kết" },
   { command: "help", description: "Danh sách lệnh" },
@@ -33,7 +34,8 @@ export const CUSTOMER_COMMANDS = [
 export function mainMenu() {
   return keyboard([
     [{ text: "Số dư", callback_data: "m:me" }, { text: "Sử dụng", callback_data: "m:usage" }],
-    [{ text: "Mã quà", callback_data: "m:gifts" }, { text: "Bảng giá", callback_data: "m:plans" }],
+    [{ text: "Mã quà", callback_data: "m:gifts" }, { text: "Mua gói", callback_data: "m:plans" }],
+    [{ text: "Đơn hàng", callback_data: "m:myorders" }],
     [{ text: "API key", callback_data: "m:keys" }, { text: "Cài đặt", callback_data: "m:settings" }],
   ]);
 }
@@ -46,7 +48,8 @@ export function helpText(siteName, { admin = false } = {}) {
     "/usage — thống kê sử dụng",
     "/gifts — mã quà có thể nhận",
     "/gift MÃ — nhập mã quà",
-    "/plans — bảng giá các gói",
+    "/plans — bảng giá và mua gói",
+    "/myorders — đơn hàng, thanh toán, hủy đơn",
     "/keys — API key của bạn",
     "/settings — bật/tắt thông báo, gỡ liên kết",
     "/id — Telegram ID của bạn",
@@ -181,8 +184,14 @@ export async function plansReply(ctx) {
     const credit = plan.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : plan.allowCustomAmount ? "theo số tiền" : fmtUsdNano(plan.creditNanoUsd);
     lines.push(`• <b>${escapeHtml(plan.name || plan.code)}</b> — ${price} · credit ${credit} · ${plan.durationDays} ngày`);
   }
-  lines.push("", "Thanh toán trên web (chuyển khoản / USDT), gói được cộng tự động.");
-  return { text: lines.join("\n"), markup: keyboard([[urlButton("Mua gói trên web", baseUrl, "/account/plans")]]) };
+  lines.push("", "Bấm Mua để thanh toán ngay trong bot; gói được cộng tự động khi nhận tiền.");
+  return {
+    text: lines.join("\n"),
+    markup: keyboard([
+      ...plans.map((plan) => [{ text: `Mua ${plan.name || plan.code}`.slice(0, 60), callback_data: `bp:${plan.id}` }]),
+      [urlButton("Mua trên web", baseUrl, "/account/plans")],
+    ]),
+  };
 }
 
 // ── /keys ───────────────────────────────────────────────────────────────────
