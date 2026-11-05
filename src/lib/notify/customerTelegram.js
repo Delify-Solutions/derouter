@@ -213,6 +213,20 @@ export const messages = {
       `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
       "Các phiên đăng nhập khác đã bị đăng xuất. Không phải bạn? Liên hệ hỗ trợ ngay.",
     ].join("\n"),
+  emailChangeRequested: ({ newEmail }) => (site) =>
+    [
+      header(site, "Yêu cầu đổi email đăng nhập"),
+      `Email mới: <code>${escapeHtml(newEmail)}</code>`,
+      `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
+      "Email chỉ đổi khi liên kết gửi tới địa chỉ mới được mở. Không phải bạn? Đổi mật khẩu ngay.",
+    ].join("\n"),
+  emailChanged: ({ newEmail }) => (site) =>
+    [
+      header(site, "Email đăng nhập đã thay đổi"),
+      `Email mới: <code>${escapeHtml(newEmail)}</code>`,
+      `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
+      "Không phải bạn? Liên hệ hỗ trợ ngay.",
+    ].join("\n"),
   apiKeyCreated: ({ name }) => (site) =>
     [
       header(site, "API key mới được tạo"),
