@@ -13,8 +13,9 @@
 - [x] 2.2 `createGiftCode` / `updateGiftCode` accept RPM/TPM; `updateGiftCode` edits every field including the code string; the grant lock is removed
 - [x] 2.3 `redeemGiftCode` writes the code's RPM/TPM onto the purchase; a deleted code is `not_found`
 - [x] 2.4 `deleteGiftCode`: hard when unused, soft when used; lists and picker exclude deleted codes
-- [x] 2.6 An unlimited-plan code cannot remove every bound (save and redeem); a reused deleted string names the clash; an edit of other fields keeps a stranded top-up amount
-- [x] 2.5 `GiftCodeFormModal` for create and edit; "Xóa" with a confirmation that names the outcome; RPM/TPM shown in the list ← (verify: editing a redeemed code changes only later redemptions; a soft-deleted code cannot be redeemed, edited or reused)
+- [x] 2.6 An unlimited-plan code cannot remove every bound (save and redeem); an edit of other fields keeps a stranded top-up amount
+- [x] 2.7 Delete frees the code string (`~deleted~` suffix, `liveGiftCode` for history) and unlinks the code from the referral default, CTV overrides (audited) and the popup in the same transaction; `listGiftCodes` returns `usage`; a rename carries the popup code along ← (verify: a deleted string can be created again and redeems the new code; the old history still shows the old string; nothing still points at a deleted code)
+- [x] 2.5 `GiftCodeFormModal` for create and edit; "Xóa" with a confirmation that names the outcome; RPM/TPM shown in the list ← (verify: editing a redeemed code changes only later redemptions; a soft-deleted code cannot be redeemed or edited; the delete dialog lists where the code is used)
 
 ## 3. Users
 

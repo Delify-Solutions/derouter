@@ -76,9 +76,18 @@ Like limits, it is allowed for `active` or `exhausted` purchases. It refuses to 
 A soft-deleted code:
 - is excluded from `listGiftCodes`, `getGiftCodeById`, `updateGiftCode` and the affiliate gift picker;
 - is refused by `redeemGiftCode` (`not_found`);
-- keeps its string reserved, because the `UNIQUE` code column and the redemption history refer to it. Reusing that string is refused with a clear message.
+- gives its string back (owner decision): the stored code becomes `<CODE>~deleted~<id>`. `UNIQUE` still holds, the redemption rows keep pointing at the same row id, and a customer can never type the value because input is normalised to A-Z0-9. `findGiftRowByCode` skips deleted rows, so creating or renaming onto the old string is allowed.
 
-`listRedemptions` still works for it.
+`listRedemptions` still works for it and shows the code through `liveGiftCode` (the part before `~deleted~`).
+
+Unlinking (owner decision "warn, then unlink") happens in the same transaction, before the hard or soft delete:
+- `settings.affiliateDefaultGiftCodeId` is cleared when it is this id;
+- `settings.landingCopy.popupCode` is cleared when it names this code (compared normalised); the rest of the popup copy is left alone;
+- every `affiliates.giftCodeId` equal to this id is set to NULL, with an `affiliate_updated` audit row on that CTV naming the deleted code.
+
+Every admin-facing gift row (`listGiftCodes`, `getGiftCodeById`, `createGiftCode`, `updateGiftCode`) carries `usage: { referralDefault, affiliateCount, popup }` from one helper, so a row the page replaced after a toggle, edit or assign still feeds the dialog; the list computes it with one settings read and one grouped query so the confirmation can list those places; `DELETE` returns `unlinked` with the counts actually cleared.
+
+Renaming is the other way a string reference can break. CTV and default references use the id and survive a rename; the popup uses the string, so `updateGiftCode` rewrites `landingCopy.popupCode` to the new string when it named the old one.
 
 ### D6. User page actions reuse existing APIs
 `AccountActions` sits in the user detail header:

@@ -26,7 +26,7 @@ after(() => {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 beforeEach(() => {
-  for (const table of ["giftRedemptions", "giftCodes", "userPlanWindows", "creditLedger", "userPlans", "plans", "users", "userAuditLog"]) {
+  for (const table of ["affiliates", "settings", "giftRedemptions", "giftCodes", "userPlanWindows", "creditLedger", "userPlans", "plans", "users", "userAuditLog"]) {
     try { db.run(`DELETE FROM ${table}`); } catch { /* table may not exist */ }
   }
   const now = new Date().toISOString();
@@ -116,12 +116,13 @@ test("every field of a gift code is editable, the code string included", async (
 
 test("deleting a gift code: unused is removed, used is hidden but keeps its history", async () => {
   const unused = await gifts.createGiftCode({ code: "UNUSED1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
-  assert.deepEqual(await gifts.deleteGiftCode(unused.id), { deleted: "hard" });
+  const none = { referralDefault: false, affiliates: 0, popup: false };
+  assert.deepEqual(await gifts.deleteGiftCode(unused.id), { deleted: "hard", unlinked: none });
   assert.equal(db.get(`SELECT id FROM giftCodes WHERE id = ?`, [unused.id]), undefined);
 
   const used = await gifts.createGiftCode({ code: "USED1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1, maxRedemptions: 5 });
   const res = db.transaction(() => gifts.redeemGiftCode(db, { userId: "u1", code: "USED1" }));
-  assert.deepEqual(await gifts.deleteGiftCode(used.id), { deleted: "soft" });
+  assert.deepEqual(await gifts.deleteGiftCode(used.id), { deleted: "soft", unlinked: none });
   assert.equal(await gifts.getGiftCodeById(used.id), null);
   assert.ok(!(await gifts.listGiftCodes()).some((c) => c.id === used.id), "hidden from the list");
   assert.equal((await gifts.listRedemptions(used.id)).length, 1, "history kept");
@@ -129,10 +130,14 @@ test("deleting a gift code: unused is removed, used is hidden but keeps its hist
   assert.equal(await gifts.updateGiftCode(used.id, { isActive: true }), null, "a deleted code cannot be revived");
   assert.equal(await gifts.deleteGiftCode(used.id), null);
 
-  await assert.rejects(
-    gifts.createGiftCode({ code: "USED1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 }),
-    /mã đã xóa/
-  );
+  // The deleted code gave its string back: history still shows the old code.
+  const again = await gifts.createGiftCode({ code: "USED1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
+  assert.notEqual(again.id, used.id);
+  assert.equal((await gifts.listRedemptions(used.id))[0].giftCode, "USED1", "history shows the code as typed");
+  assert.equal((await gifts.listRedemptions(again.id)).length, 0, "the new code has its own history");
+  const redeemed = db.transaction(() => gifts.redeemGiftCode(db, { userId: "u1", code: "USED1" }));
+  assert.equal(redeemed.ok, true, "the new code is redeemable, not the deleted one");
+  assert.equal(db.get(`SELECT giftId FROM giftRedemptions WHERE userPlanId = ?`, [redeemed.userPlan.id]).giftId, again.id);
 });
 
 test("a deleted code cannot be assigned", async () => {
@@ -154,13 +159,12 @@ test("an unlimited-plan gift cannot remove every bound", async () => {
   assert.ok(loose);
 });
 
-test("renaming or creating onto a deleted code's string names the clash", async () => {
+test("a live code can be renamed onto a deleted code's string", async () => {
   const used = await gifts.createGiftCode({ code: "GONECODE", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1, maxRedemptions: 2 });
   db.transaction(() => gifts.redeemGiftCode(db, { userId: "u1", code: "GONECODE" }));
   await gifts.deleteGiftCode(used.id);
   const other = await gifts.createGiftCode({ code: "LIVECODE", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
-  await assert.rejects(gifts.updateGiftCode(other.id, { code: "GONECODE" }), /mã đã xóa/);
-  await assert.rejects(gifts.createGiftCode({ code: "GONECODE", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 }), /mã đã xóa/);
+  assert.equal((await gifts.updateGiftCode(other.id, { code: "GONECODE" })).code, "GONECODE");
   await assert.rejects(gifts.createGiftCode({ grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1, rpm: "0x10" }), /RPM/);
   assert.equal(setPurchaseRatesSync(db, "u1", "x", { rpm: true, reason: "bad input" }).status, 404, "unknown purchase checked first");
 });
@@ -180,4 +184,102 @@ test("the pin picker shows each plan's effective rate", async () => {
   const up = grantPlanSync(db, "u1", { planId: p.id, reason: "test" }).userPlan;
   setPurchaseRatesSync(db, "u1", up.id, { rpm: 600, reason: "vip" });
   assert.deepEqual(listBindablePlansSync(db, "u1").map((r) => [r.id, r.rpm]), [[p.id, 600]]);
+});
+
+function settingsData() {
+  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  return row ? JSON.parse(row.data) : {};
+}
+
+function saveSettingsData(data) {
+  db.run(
+    `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    [JSON.stringify(data)]
+  );
+}
+
+function affiliateRow(userId, giftCodeId) {
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO users(id, email, passwordHash, status, overdraftNanoUsd, createdAt, updatedAt)
+     VALUES(?, ?, 'x', 'active', 0, ?, ?)`,
+    [userId, `${userId}@test.local`, now, now]
+  );
+  db.run(
+    `INSERT INTO affiliates(userId, code, giftCodeId, status, clickCount, createdAt, updatedAt)
+     VALUES(?, ?, ?, 'active', 0, ?, ?)`,
+    [userId, userId.toUpperCase(), giftCodeId, now, now]
+  );
+}
+
+test("deleting a code unlinks it from the referral default, CTV overrides and the popup", async () => {
+  const g = await gifts.createGiftCode({ code: "WELCOME1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1, newUserOnly: true });
+  const keep = await gifts.createGiftCode({ code: "KEEPME1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
+  saveSettingsData({
+    affiliateDefaultGiftCodeId: g.id,
+    landingCopy: { popupEnabled: true, popupTitle: "Hi", popupCode: "welcome-1" },
+  });
+  affiliateRow("ctv1", g.id);
+  affiliateRow("ctv2", g.id);
+  affiliateRow("ctv3", keep.id);
+
+  const listed = (await gifts.listGiftCodes()).find((c) => c.id === g.id);
+  assert.deepEqual(listed.usage, { referralDefault: true, affiliateCount: 2, popup: true }, "the list says where it is used");
+  assert.deepEqual((await gifts.listGiftCodes()).find((c) => c.id === keep.id).usage, { referralDefault: false, affiliateCount: 1, popup: false });
+
+  const result = await gifts.deleteGiftCode(g.id, { actor: "admin:t" });
+  assert.deepEqual(result, { deleted: "hard", unlinked: { referralDefault: true, affiliates: 2, popup: true } });
+
+  const data = settingsData();
+  assert.equal(data.affiliateDefaultGiftCodeId, "");
+  assert.equal(data.landingCopy.popupCode, "");
+  assert.equal(data.landingCopy.popupTitle, "Hi", "the rest of the popup is untouched");
+  assert.deepEqual(
+    db.all(`SELECT userId, giftCodeId FROM affiliates ORDER BY userId`),
+    [{ userId: "ctv1", giftCodeId: null }, { userId: "ctv2", giftCodeId: null }, { userId: "ctv3", giftCodeId: keep.id }]
+  );
+  const audits = db.all(`SELECT userId, actor, reason FROM userAuditLog WHERE action = 'affiliate_updated' ORDER BY userId`);
+  assert.deepEqual(audits.map((a) => [a.userId, a.actor]), [["ctv1", "admin:t"], ["ctv2", "admin:t"]]);
+  assert.match(audits[0].reason, /WELCOME1/);
+});
+
+test("renaming a code carries the promo popup along", async () => {
+  const g = await gifts.createGiftCode({ code: "POPME1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
+  saveSettingsData({ landingCopy: { popupEnabled: true, popupCode: "POPME1" }, other: 1 });
+  await gifts.updateGiftCode(g.id, { code: "POPME2" });
+  assert.equal(settingsData().landingCopy.popupCode, "POPME2");
+  assert.equal(settingsData().other, 1, "other settings kept");
+
+  saveSettingsData({ landingCopy: { popupEnabled: true, popupCode: "SOMEOTHER" } });
+  await gifts.updateGiftCode(g.id, { code: "POPME3" });
+  assert.equal(settingsData().landingCopy.popupCode, "SOMEOTHER", "a popup naming another code is left alone");
+});
+
+test("every admin gift row carries its usage, also after an edit", async () => {
+  const g = await gifts.createGiftCode({ code: "USAGE1", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1 });
+  assert.deepEqual(g.usage, { referralDefault: false, affiliateCount: 0, popup: false });
+  saveSettingsData({ affiliateDefaultGiftCodeId: g.id, landingCopy: { popupCode: "USAGE1" } });
+  affiliateRow("ctvu", g.id);
+  const expected = { referralDefault: true, affiliateCount: 1, popup: true };
+  assert.deepEqual((await gifts.getGiftCodeById(g.id)).usage, expected);
+  assert.deepEqual((await gifts.updateGiftCode(g.id, { isActive: false })).usage, expected, "after a toggle");
+  assert.deepEqual((await gifts.updateGiftCode(g.id, { code: "USAGE2" })).usage, expected, "a rename keeps the popup link");
+});
+
+test("soft-deleting a redeemed code also unlinks it and frees the string", async () => {
+  const g = await gifts.createGiftCode({ code: "SOFTGONE", grantKind: "credit", creditNanoUsd: USD(1), durationDays: 1, maxRedemptions: 5 });
+  db.transaction(() => gifts.redeemGiftCode(db, { userId: "u1", code: "SOFTGONE" }));
+  saveSettingsData({ affiliateDefaultGiftCodeId: g.id, landingCopy: { popupCode: "SOFTGONE" } });
+  affiliateRow("ctvs", g.id);
+
+  const result = await gifts.deleteGiftCode(g.id, { actor: "admin:t" });
+  assert.deepEqual(result, { deleted: "soft", unlinked: { referralDefault: true, affiliates: 1, popup: true } });
+  assert.equal(settingsData().affiliateDefaultGiftCodeId, "");
+  assert.equal(settingsData().landingCopy.popupCode, "");
+  assert.equal(db.get(`SELECT giftCodeId FROM affiliates WHERE userId = 'ctvs'`).giftCodeId, null);
+  const stored = db.get(`SELECT code, deletedAt FROM giftCodes WHERE id = ?`, [g.id]);
+  assert.ok(stored.deletedAt);
+  assert.equal(gifts.liveGiftCode(stored.code), "SOFTGONE");
+  assert.notEqual(stored.code, "SOFTGONE", "the string is free");
+  assert.equal(db.transaction(() => gifts.redeemGiftCode(db, { userId: "u1", code: "SOFTGONE" })).reason, "not_found");
 });

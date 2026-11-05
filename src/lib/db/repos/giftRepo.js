@@ -10,6 +10,7 @@ import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
 import { parseLimits } from "../../billing/limits.js";
 import { effectiveRate } from "../../billing/planQueue.js";
+import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 // The redeemability window, shared with the affiliate welcome-gift check so an
 // advertised code is always one redeemGiftCode would accept (design D7).
 import { inWindow } from "../../gift/window.js";
@@ -129,13 +130,81 @@ function rowToGiftCode(row) {
 // Codes are stored as typed (uppercased, separators kept for readability), so a
 // lookup tries the exact key first and then compares normalised forms. The
 // table is small and admin-managed; a scan is cheap and separator-agnostic.
+// Deleted codes are skipped: their string was freed on delete (see deleteGiftCode).
 function findGiftRowByCode(db, code) {
   const key = normalizeGiftCode(code);
   if (!key) return null;
-  const exact = db.get(`SELECT * FROM giftCodes WHERE code = ?`, [key]);
+  const exact = db.get(`SELECT * FROM giftCodes WHERE code = ? AND deletedAt IS NULL`, [key]);
   if (exact) return exact;
-  const rows = db.all(`SELECT * FROM giftCodes`);
+  const rows = db.all(`SELECT * FROM giftCodes WHERE deletedAt IS NULL`);
   return rows.find((r) => normalizeGiftCode(r.code) === key) || null;
+}
+
+// A soft-deleted code keeps its row (redemption history points at it) but gives
+// its string back, so the admin can create a new code with the same string. The
+// stored value becomes `<CODE>~deleted~<id>`: UNIQUE still holds, and a customer
+// can never type it (input is normalised to A-Z0-9).
+const DELETED_MARK = "~deleted~";
+
+/** The code as the customer knew it, also for a deleted code. */
+export function liveGiftCode(stored) {
+  const text = String(stored ?? "");
+  const at = text.indexOf(DELETED_MARK);
+  return at === -1 ? text : text.slice(0, at);
+}
+
+function readSettingsDataSync(db) {
+  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  return row ? parseJson(row.data, {}) || {} : {};
+}
+
+function writeSettingsDataSync(db, data) {
+  db.run(
+    `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    [stringifyJson(data)]
+  );
+}
+
+/**
+ * Where a code is used outside its own row (spec gift-codes "Delete a gift
+ * code"): the referral program's default welcome gift, CTV welcome-gift
+ * overrides (both by id), and the promo popup (by code string).
+ */
+/**
+ * The `usage` summary every admin-facing gift row carries (list, single read,
+ * create, update), so the delete dialog can always name what it will unlink.
+ * `counts` = affiliates per gift id, precomputed by the list for the whole page.
+ */
+function usageSummarySync(db, giftRow, settings, counts = null) {
+  const popupKey = normalizeGiftCode(settings.landingCopy?.popupCode);
+  const affiliateCount = counts
+    ? counts.get(giftRow.id) ?? 0
+    : Number(db.get(`SELECT COUNT(*) AS n FROM affiliates WHERE giftCodeId = ?`, [giftRow.id])?.n ?? 0);
+  return {
+    referralDefault: settings.affiliateDefaultGiftCodeId === giftRow.id,
+    affiliateCount,
+    popup: Boolean(popupKey) && popupKey === normalizeGiftCode(giftRow.code),
+  };
+}
+
+/** One admin gift row with its usage, or null. */
+function giftWithUsageSync(db, row) {
+  if (!row) return null;
+  return { ...rowToGiftCode(row), usage: usageSummarySync(db, row, readSettingsDataSync(db)) };
+}
+
+export function giftCodeUsageSync(db, giftRow, data = null) {
+  const settings = data || readSettingsDataSync(db);
+  const popupKey = normalizeGiftCode(settings.landingCopy?.popupCode);
+  return {
+    referralDefault: Boolean(giftRow?.id) && settings.affiliateDefaultGiftCodeId === giftRow.id,
+    affiliates: db.all(
+      `SELECT a.userId, a.code, u.email FROM affiliates a LEFT JOIN users u ON u.id = a.userId
+        WHERE a.giftCodeId = ? ORDER BY a.createdAt, a.rowid`,
+      [giftRow.id]
+    ),
+    popup: Boolean(popupKey) && popupKey === normalizeGiftCode(giftRow.code),
+  };
 }
 
 function planRow(db, planId) {
@@ -264,7 +333,7 @@ export async function createGiftCode(input) {
     if (!key) throw new Error("Could not allocate a unique gift code");
   } else {
     const clash = findGiftRowByCode(db, key);
-    if (clash) throw new Error(clash.deletedAt ? "Mã này trùng một mã đã xóa trước đây" : "Mã này đã tồn tại");
+    if (clash) throw new Error("Mã này đã tồn tại");
   }
   if (grant.grantKind === "plan") {
     const plan = planRow(db, grant.planId);
@@ -310,14 +379,24 @@ export async function createGiftCode(input) {
     ]
   );
 
-  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [gift.id]));
+  return giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ?`, [gift.id]));
 }
 
 /** All gift codes, newest first, with the plan name resolved. */
 export async function listGiftCodes() {
   const db = await getAdapter();
   const rows = db.all(`${GIFT_SELECT} WHERE g.deletedAt IS NULL ORDER BY g.createdAt DESC`);
-  return rows.map(rowToGiftCode);
+  // Where each code is referenced, so the delete dialog can say what it unlinks.
+  // One settings read and one grouped query for the whole list.
+  const settings = readSettingsDataSync(db);
+  const affiliateCounts = new Map(
+    db.all(`SELECT giftCodeId, COUNT(*) AS n FROM affiliates WHERE giftCodeId IS NOT NULL GROUP BY giftCodeId`)
+      .map((row) => [row.giftCodeId, Number(row.n)])
+  );
+  return rows.map((row) => ({
+    ...rowToGiftCode(row),
+    usage: usageSummarySync(db, row, settings, affiliateCounts),
+  }));
 }
 
 /**
@@ -343,7 +422,7 @@ export async function listGiftPlans() {
 
 export async function getGiftCodeById(id) {
   const db = await getAdapter();
-  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ? AND g.deletedAt IS NULL`, [id]));
+  return giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ? AND g.deletedAt IS NULL`, [id]));
 }
 
 /**
@@ -381,17 +460,15 @@ export async function updateGiftCode(id, patch = {}) {
       code: row.code,
     };
 
-    // The code string itself: same rule as a new code, and unique among every
-    // code ever created (a deleted code keeps its string for its history).
+    // The code string itself: same rule as a new code, and unique among the
+    // codes that are not deleted (a deleted code gave its string back).
     if (patch.code !== undefined && normalizeGiftCode(patch.code) !== normalizeGiftCode(row.code)) {
       const codeError = customCodeError(patch.code);
       if (codeError) throw new Error(codeError);
       const key = normalizeGiftCode(patch.code);
       if (!key) throw new Error("Mã không được để trống");
       const clash = findGiftRowByCode(db, key);
-      if (clash && clash.id !== id) {
-        throw new Error(clash.deletedAt ? "Mã này trùng một mã đã xóa trước đây" : "Mã này đã tồn tại");
-      }
+      if (clash && clash.id !== id) throw new Error("Mã này đã tồn tại");
       next.code = key;
     }
 
@@ -454,7 +531,16 @@ export async function updateGiftCode(id, patch = {}) {
         next.note, nowIso(), id,
       ]
     );
-    updated = rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
+    // The promo popup names its code by string: a rename carries it along so
+    // the popup keeps pointing at this code.
+    if (next.code !== row.code) {
+      const data = readSettingsDataSync(db);
+      const popupKey = normalizeGiftCode(data.landingCopy?.popupCode);
+      if (popupKey && popupKey === normalizeGiftCode(row.code)) {
+        writeSettingsDataSync(db, { ...data, landingCopy: { ...data.landingCopy, popupCode: next.code } });
+      }
+    }
+    updated = giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
   });
   return updated;
 }
@@ -463,23 +549,58 @@ export async function updateGiftCode(id, patch = {}) {
  * Delete a gift code (spec gift-codes "Delete a gift code"). A code nobody
  * redeemed is removed outright. A redeemed one is soft-deleted: hidden from the
  * admin list and never redeemable again, while its redemption history and the
- * purchases it granted stay intact.
+ * purchases it granted stay intact; its string is freed for a new code.
  *
- * @returns {Promise<{ deleted: "hard"|"soft" } | null>} null = no such code
+ * In the same transaction the code is unlinked from every place that uses it:
+ * the referral default gift and the promo popup code are cleared, and each CTV
+ * override is cleared (audited on that CTV as `affiliate_updated`).
+ *
+ * @returns {Promise<{ deleted: "hard"|"soft", unlinked: { referralDefault: boolean, affiliates: number, popup: boolean } } | null>}
+ *   null = no such code
  */
-export async function deleteGiftCode(id) {
+export async function deleteGiftCode(id, { actor = "admin" } = {}) {
   const db = await getAdapter();
   return db.transaction(() => {
-    const row = db.get(`SELECT id FROM giftCodes WHERE id = ? AND deletedAt IS NULL`, [id]);
+    const row = db.get(`SELECT id, code FROM giftCodes WHERE id = ? AND deletedAt IS NULL`, [id]);
     if (!row) return null;
+    const at = nowIso();
+
+    const data = readSettingsDataSync(db);
+    const usage = giftCodeUsageSync(db, row, data);
+    if (usage.referralDefault || usage.popup) {
+      const next = { ...data };
+      if (usage.referralDefault) next.affiliateDefaultGiftCodeId = "";
+      if (usage.popup) next.landingCopy = { ...data.landingCopy, popupCode: "" };
+      writeSettingsDataSync(db, next);
+    }
+    const label = formatGiftCode(row.code);
+    for (const affiliate of usage.affiliates) {
+      db.run(`UPDATE affiliates SET giftCodeId = NULL, updatedAt = ? WHERE userId = ?`, [at, affiliate.userId]);
+      insertAuditSync(db, {
+        userId: affiliate.userId,
+        actor,
+        action: "affiliate_updated",
+        reason: `Mã quà ${label} đã bị xóa`,
+        details: { before: { giftCodeId: id }, after: { giftCodeId: null } },
+        now: at,
+      });
+    }
+    const unlinked = {
+      referralDefault: usage.referralDefault,
+      affiliates: usage.affiliates.length,
+      popup: usage.popup,
+    };
+
     const used = db.get(`SELECT COUNT(*) AS n FROM giftRedemptions WHERE giftId = ?`, [id]);
     if (Number(used?.n ?? 0) === 0) {
       db.run(`DELETE FROM giftCodes WHERE id = ?`, [id]);
-      return { deleted: "hard" };
+      return { deleted: "hard", unlinked };
     }
-    const at = nowIso();
-    db.run(`UPDATE giftCodes SET isActive = 0, deletedAt = ?, updatedAt = ? WHERE id = ?`, [at, at, id]);
-    return { deleted: "soft" };
+    db.run(
+      `UPDATE giftCodes SET code = ?, isActive = 0, deletedAt = ?, updatedAt = ? WHERE id = ?`,
+      [`${row.code}${DELETED_MARK}${id}`, at, at, id]
+    );
+    return { deleted: "soft", unlinked };
   });
 }
 
@@ -498,7 +619,7 @@ export async function listRedemptions(giftId) {
   return rows.map((row) => ({
     id: row.id,
     giftId: row.giftId,
-    giftCode: row.giftCode ? formatGiftCode(row.giftCode) : null,
+    giftCode: row.giftCode ? formatGiftCode(liveGiftCode(row.giftCode)) : null,
     userId: row.userId,
     userEmail: row.userEmail ?? null,
     userPlanId: row.userPlanId ?? null,
@@ -536,7 +657,7 @@ export async function listUserRedemptions(userId) {
   return rows.map((row) => ({
     id: row.id,
     giftId: row.giftId,
-    giftCode: row.giftCode ? formatGiftCode(row.giftCode) : null,
+    giftCode: row.giftCode ? formatGiftCode(liveGiftCode(row.giftCode)) : null,
     userPlanId: row.userPlanId ?? null,
     redeemedAt: row.redeemedAt ?? null,
     grantKind: row.grantKind,

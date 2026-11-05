@@ -13,7 +13,8 @@ The admin gift code page SHALL offer "Sửa" on every code. It SHALL open the sa
 The following rules SHALL apply:
 - The total SHALL NOT be set below the number of redemptions already made.
 - The start SHALL NOT be later than the expiry.
-- A new code string SHALL follow the rules for admin-chosen codes, and SHALL NOT match any other code, including a deleted one.
+- A new code string SHALL follow the rules for admin-chosen codes, and SHALL NOT match any other code that is not deleted.
+- When the promo popup names the code being renamed, the popup SHALL be updated to the new string in the same write.
 
 A change SHALL apply to redemptions made after it. Purchases already granted by the code SHALL keep what they received. The dialog SHALL say so when the code has been redeemed.
 
@@ -28,6 +29,10 @@ A change SHALL apply to redemptions made after it. Purchases already granted by 
 #### Scenario: Rename a code
 - **WHEN** an admin renames code OLDNAME to NEWNAME
 - **THEN** NEWNAME can be redeemed and OLDNAME is reported as not existing
+
+#### Scenario: Rename the popup's code
+- **WHEN** the promo popup shows code OLDNAME and an admin renames it to NEWNAME
+- **THEN** the popup shows NEWNAME
 
 ## ADDED Requirements
 
@@ -45,7 +50,10 @@ The admin gift code page SHALL offer "Xóa" on every code, with a confirmation t
 - **A redeemed code** SHALL be soft-deleted, with these effects:
   - it disappears from the admin list and from the affiliate gift picker;
   - it can no longer be redeemed, assigned or edited;
-  - its redemption history and the purchases it granted SHALL stay unchanged.
+  - its redemption history and the purchases it granted SHALL stay unchanged, and the history SHALL still show the code as customers typed it;
+  - its string SHALL become free, so a new code may use it.
+
+In both cases the code SHALL be unlinked, in the same transaction, from every place that uses it: the referral program's default welcome gift and the promo popup code SHALL be cleared, and each CTV's welcome-gift override SHALL be cleared and audited on that CTV. The confirmation SHALL name those places before the admin confirms, and the result SHALL say what was unlinked.
 
 The on/off switch SHALL remain for pausing a code without deleting it.
 
@@ -56,3 +64,11 @@ The on/off switch SHALL remain for pausing a code without deleting it.
 #### Scenario: Used code hidden
 - **WHEN** an admin deletes a code redeemed 3 times
 - **THEN** it is gone from the list, entering it reports that the code does not exist, and the 3 redeemers keep their purchases
+
+#### Scenario: Recreate a deleted string
+- **WHEN** an admin deletes the redeemed code WELCOME and then creates a new code WELCOME
+- **THEN** the new code is created, redeeming WELCOME uses the new code, and the old redemptions still show WELCOME
+
+#### Scenario: Code in use is unlinked
+- **WHEN** an admin deletes a code that is the referral default gift, the welcome gift of 2 CTVs and the popup code
+- **THEN** the dialog lists those places, and after deleting the default gift and the popup code are empty and neither CTV has its own gift any more

@@ -103,6 +103,34 @@ function matchesFilter(gift, filter) {
 }
 
 
+/** The places a code is used, in words ("" when unused). */
+function usagePlaces(usage) {
+  if (!usage) return [];
+  const places = [];
+  if (usage.referralDefault) places.push("quà chào mừng mặc định của chương trình giới thiệu");
+  if (Number(usage.affiliateCount) > 0) places.push(`quà riêng của ${usage.affiliateCount} CTV`);
+  if (usage.popup) places.push("mã của popup khuyến mãi");
+  return places;
+}
+
+/** Delete dialog warning: what deleting the code unlinks. */
+function usageWarning(usage) {
+  const places = usagePlaces(usage);
+  if (places.length === 0) return "";
+  const popupNote = usage.popup ? " Chữ trong popup giữ nguyên, hãy sửa lại nếu có nhắc tới mã." : "";
+  return `Mã đang được dùng làm ${places.join(", ")}: xóa sẽ tự gỡ mã khỏi các chỗ này.${popupNote}`;
+}
+
+/** After a delete: what was unlinked, from the server's count. */
+function unlinkedText(unlinked) {
+  if (!unlinked) return "";
+  return usagePlaces({
+    referralDefault: unlinked.referralDefault,
+    affiliateCount: unlinked.affiliates,
+    popup: unlinked.popup,
+  }).join(", ");
+}
+
 export default function GiftCodesPageClient() {
   const [codes, setCodes] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -113,6 +141,7 @@ export default function GiftCodesPageClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createdCode, setCreatedCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+  const [notice, setNotice] = useState("");
   const [redemptionsFor, setRedemptionsFor] = useState(null);
   const [redemptions, setRedemptions] = useState([]);
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
@@ -187,6 +216,8 @@ export default function GiftCodesPageClient() {
       // redemption history for the accounts that used it.
       setCodes((prev) => prev.filter((g) => g.id !== gift.id));
       setConfirmState(null);
+      const removed = unlinkedText(data.unlinked);
+      setNotice(`Đã xóa mã ${gift.displayCode || gift.code}.${removed ? ` Đã gỡ khỏi ${removed}.` : ""}`);
     } catch {
       setLoadError("Could not reach the server.");
     } finally {
@@ -248,6 +279,13 @@ export default function GiftCodesPageClient() {
           </button>
         ))}
       </div>
+
+      {notice && (
+        <p role="status" className="flex items-start gap-2 border border-brand-500/40 bg-brand-500/5 px-4 py-2 text-sm text-brand-700 dark:text-brand-400">
+          <span className="flex-1">{notice}</span>
+          <button type="button" className="text-xs underline" onClick={() => setNotice("")}>Đóng</button>
+        </p>
+      )}
 
       {loadError && (
         <div className="flex items-start gap-2 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
@@ -574,9 +612,12 @@ export default function GiftCodesPageClient() {
         onClose={() => setConfirmState(null)}
         onConfirm={deleteCode}
         title={`Xóa mã ${confirmState?.gift?.displayCode || confirmState?.gift?.code || ""}`}
-        message={Number(confirmState?.gift?.redeemedCount) > 0
-          ? `Mã đã được dùng ${confirmState.gift.redeemedCount} lượt: mã sẽ biến mất khỏi danh sách và không nhập được nữa. Gói/credit đã cấp và lịch sử các lượt dùng giữ nguyên.`
-          : "Mã chưa ai dùng sẽ bị xóa hẳn. Không thể hoàn tác."}
+        message={[
+          Number(confirmState?.gift?.redeemedCount) > 0
+            ? `Mã đã được dùng ${confirmState.gift.redeemedCount} lượt: mã sẽ biến mất khỏi danh sách và không nhập được nữa. Gói/credit đã cấp và lịch sử các lượt dùng giữ nguyên. Có thể tạo mã mới trùng chuỗi này.`
+            : "Mã chưa ai dùng sẽ bị xóa hẳn. Không thể hoàn tác.",
+          usageWarning(confirmState?.gift?.usage),
+        ].filter(Boolean).join(" ")}
         confirmText="Xóa"
         loading={Boolean(confirmState?.gift && rowBusyId === confirmState.gift.id)}
       />

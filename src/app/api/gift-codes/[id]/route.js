@@ -1,3 +1,4 @@
+import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { NextResponse } from "next/server";
 import { getGiftCodeById, updateGiftCode, deleteGiftCode } from "@/lib/db/repos/giftRepo.js";
 
@@ -67,12 +68,15 @@ export async function PATCH(request, { params }) {
 
 // DELETE /api/gift-codes/:id — a never-redeemed code is removed; a redeemed one is
 // hidden and stops working, keeping its redemption history (spec gift-codes).
+// Either way the code is unlinked from the referral default gift, CTV overrides
+// and the promo popup in the same transaction.
 export async function DELETE(request, { params }) {
   try {
     const { id } = await params;
-    const result = await deleteGiftCode(id);
+    const actor = await getAdminActor(request);
+    const result = await deleteGiftCode(id, { actor });
     if (!result) return NextResponse.json({ error: "Không tìm thấy mã" }, { status: 404 });
-    return NextResponse.json({ success: true, deleted: result.deleted });
+    return NextResponse.json({ success: true, deleted: result.deleted, unlinked: result.unlinked });
   } catch {
     return NextResponse.json({ error: "Không xóa được mã" }, { status: 500 });
   }

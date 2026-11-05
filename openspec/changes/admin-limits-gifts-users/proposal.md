@@ -17,10 +17,12 @@ The owner wants four admin tools that do not exist yet:
 - **Edit every field of a gift code.**
   - The edit dialog becomes the same form as creation: code string, plan/credit/amount/duration, RPM/TPM, limits, dates, new-user flag and note.
   - **BREAKING (rule change):** what a redeemed code grants may now be changed. The change applies to later redemptions only; purchases already granted keep what they received. The total still cannot drop below the redemptions made.
-  - The code string may be changed (same rules as a new code, unique among all codes ever created).
+  - The code string may be changed (same rules as a new code, unique among the codes that are not deleted).
 - **Delete a gift code.** "Xóa" replaces "Disable" (the on/off switch stays).
   - A code nobody redeemed is removed.
-  - A redeemed code is soft-deleted (`deletedAt`): hidden from the list and the affiliate gift picker, never redeemable, not editable. Its redemptions and granted purchases stay.
+  - A redeemed code is soft-deleted (`deletedAt`): hidden from the list and the affiliate gift picker, never redeemable, not editable. Its redemptions and granted purchases stay, and its string is freed so a new code can reuse it.
+  - The confirmation names where the code is used (referral default gift, CTV welcome gifts, promo popup); deleting unlinks it from all of them.
+  - Renaming a code that the promo popup shows updates the popup to the new string.
 - **Lock / delete a user from the user page.** The user detail header gains:
   - "Khóa tài khoản" / "Mở khóa" (status `suspended` / `active`, with a reason);
   - "Xóa tài khoản" (type the email to confirm).
