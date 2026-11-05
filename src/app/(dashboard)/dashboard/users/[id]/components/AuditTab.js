@@ -29,6 +29,7 @@ const ACTION_LABEL = {
   // Affiliate program (spec affiliate-program).
   referrer_changed: "Đổi người giới thiệu",
   affiliate_updated: "Sửa CTV",
+  telegram_unlinked: "Gỡ liên kết Telegram",
   affiliate_invited: "Mời làm CTV",
   affiliate_commission_reversed: "Hủy hoa hồng",
   affiliate_commission_released: "Duyệt sớm hoa hồng",

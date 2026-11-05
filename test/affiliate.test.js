@@ -1355,7 +1355,9 @@ test("admin referral list shows each referred account with its referrer and comm
   user("lurker", { referredByUserId: "aff2", email: "lurker@x.com" });
   user("organic", { email: "organic@x.com" });
   orderRow({ id: "o1", userId: "buyer" });
-  approve("o1", T0);
+  // listReferrals releases due commissions against the real clock, so the
+  // order is approved now: its 7-day hold is still running.
+  approve("o1", Date.now());
 
   const all = await affiliateRepo.listReferrals({});
   assert.equal(all.total, 2, "only accounts with a referrer are listed");

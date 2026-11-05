@@ -89,7 +89,7 @@ export default function TelegramBroadcastClient() {
     <div className="flex min-w-0 flex-col gap-8 px-1 sm:px-0">
       <div className="flex flex-col gap-1.5">
         <span className="meta text-text-muted">Khách hàng</span>
-        <h1 className="text-2xl font-semibold tracking-tight text-text-main">Thông báo Telegram</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-text-main">Telegram</h1>
         <p className="max-w-2xl text-sm text-text-muted">
           Gửi tin tới mọi khách đã liên kết Telegram và đang bật &quot;Thông báo từ admin&quot;. Tin thanh toán, gói và
           bảo mật được gửi tự động, không cần soạn ở đây.

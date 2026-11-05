@@ -254,6 +254,12 @@ export const messages = {
       `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
       "Không phải bạn? Xoá key và đổi mật khẩu ngay.",
     ].filter(Boolean).join("\n"),
+  telegramUnlinkedByAdmin: () => (site) =>
+    [
+      header(site, "Đã gỡ liên kết Telegram"),
+      "Quản trị viên đã gỡ liên kết giữa tài khoản Telegram này và tài khoản của bạn. Bạn sẽ không nhận thông báo ở đây nữa.",
+      "Có thể liên kết lại trong trang Tài khoản. Cần hỗ trợ? Liên hệ quản trị viên.",
+    ].join("\n"),
   accountSuspended: () => (site) =>
     [header(site, "Tài khoản bị tạm khoá"), "Liên hệ hỗ trợ nếu bạn cần biết thêm."].join("\n"),
   accountReactivated: () => (site) =>

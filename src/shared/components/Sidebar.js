@@ -42,7 +42,7 @@ const navItems = [
   { href: "/dashboard/payments", label: "Thanh toán", icon: "account_balance", badge: "needsReview" },
   { href: "/dashboard/content", label: "Nội dung", icon: "article" },
   { href: "/dashboard/announcements", label: "Thông báo", icon: "notifications" },
-  { href: "/dashboard/telegram", label: "Thông báo Telegram", icon: "campaign" },
+  { href: "/dashboard/telegram", label: "Telegram", icon: "campaign" },
 ];
 
 const debugItems = [
