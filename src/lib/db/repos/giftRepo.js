@@ -9,6 +9,8 @@ import { randomInt } from "crypto";
 import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
 import { parseLimits } from "../../billing/limits.js";
+import { effectiveRate } from "../../billing/planQueue.js";
+import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 // The redeemability window, shared with the affiliate welcome-gift check so an
 // advertised code is always one redeemGiftCode would accept (design D7).
 import { inWindow } from "../../gift/window.js";
@@ -114,6 +116,10 @@ function rowToGiftCode(row) {
     expiresAt: row.expiresAt ?? null,
     isActive: row.isActive === 1 || row.isActive === true,
     newUserOnly: Number(row.newUserOnly) === 1,
+    // RPM/TPM written onto each purchase this code grants. null = the plan's own
+    // (none for a credit gift); 0 = no limit.
+    rpm: row.rpm == null ? null : Number(row.rpm),
+    tpm: row.tpm == null ? null : Number(row.tpm),
     note: row.note ?? null,
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt ?? null,
@@ -124,13 +130,81 @@ function rowToGiftCode(row) {
 // Codes are stored as typed (uppercased, separators kept for readability), so a
 // lookup tries the exact key first and then compares normalised forms. The
 // table is small and admin-managed; a scan is cheap and separator-agnostic.
+// Deleted codes are skipped: their string was freed on delete (see deleteGiftCode).
 function findGiftRowByCode(db, code) {
   const key = normalizeGiftCode(code);
   if (!key) return null;
-  const exact = db.get(`SELECT * FROM giftCodes WHERE code = ?`, [key]);
+  const exact = db.get(`SELECT * FROM giftCodes WHERE code = ? AND deletedAt IS NULL`, [key]);
   if (exact) return exact;
-  const rows = db.all(`SELECT * FROM giftCodes`);
+  const rows = db.all(`SELECT * FROM giftCodes WHERE deletedAt IS NULL`);
   return rows.find((r) => normalizeGiftCode(r.code) === key) || null;
+}
+
+// A soft-deleted code keeps its row (redemption history points at it) but gives
+// its string back, so the admin can create a new code with the same string. The
+// stored value becomes `<CODE>~deleted~<id>`: UNIQUE still holds, and a customer
+// can never type it (input is normalised to A-Z0-9).
+const DELETED_MARK = "~deleted~";
+
+/** The code as the customer knew it, also for a deleted code. */
+export function liveGiftCode(stored) {
+  const text = String(stored ?? "");
+  const at = text.indexOf(DELETED_MARK);
+  return at === -1 ? text : text.slice(0, at);
+}
+
+function readSettingsDataSync(db) {
+  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  return row ? parseJson(row.data, {}) || {} : {};
+}
+
+function writeSettingsDataSync(db, data) {
+  db.run(
+    `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    [stringifyJson(data)]
+  );
+}
+
+/**
+ * Where a code is used outside its own row (spec gift-codes "Delete a gift
+ * code"): the referral program's default welcome gift, CTV welcome-gift
+ * overrides (both by id), and the promo popup (by code string).
+ */
+/**
+ * The `usage` summary every admin-facing gift row carries (list, single read,
+ * create, update), so the delete dialog can always name what it will unlink.
+ * `counts` = affiliates per gift id, precomputed by the list for the whole page.
+ */
+function usageSummarySync(db, giftRow, settings, counts = null) {
+  const popupKey = normalizeGiftCode(settings.landingCopy?.popupCode);
+  const affiliateCount = counts
+    ? counts.get(giftRow.id) ?? 0
+    : Number(db.get(`SELECT COUNT(*) AS n FROM affiliates WHERE giftCodeId = ?`, [giftRow.id])?.n ?? 0);
+  return {
+    referralDefault: settings.affiliateDefaultGiftCodeId === giftRow.id,
+    affiliateCount,
+    popup: Boolean(popupKey) && popupKey === normalizeGiftCode(giftRow.code),
+  };
+}
+
+/** One admin gift row with its usage, or null. */
+function giftWithUsageSync(db, row) {
+  if (!row) return null;
+  return { ...rowToGiftCode(row), usage: usageSummarySync(db, row, readSettingsDataSync(db)) };
+}
+
+export function giftCodeUsageSync(db, giftRow, data = null) {
+  const settings = data || readSettingsDataSync(db);
+  const popupKey = normalizeGiftCode(settings.landingCopy?.popupCode);
+  return {
+    referralDefault: Boolean(giftRow?.id) && settings.affiliateDefaultGiftCodeId === giftRow.id,
+    affiliates: db.all(
+      `SELECT a.userId, a.code, u.email FROM affiliates a LEFT JOIN users u ON u.id = a.userId
+        WHERE a.giftCodeId = ? ORDER BY a.createdAt, a.rowid`,
+      [giftRow.id]
+    ),
+    popup: Boolean(popupKey) && popupKey === normalizeGiftCode(giftRow.code),
+  };
 }
 
 function planRow(db, planId) {
@@ -203,6 +277,36 @@ function validatePerUserLimit(value) {
   return n;
 }
 
+const GIFT_RATE_MAX = 1_000_000_000;
+
+/**
+ * An RPM/TPM field of a gift code: undefined = not given, null/"" = the plan's own
+ * (no limit for a credit gift), else an integer 0 (no limit) … GIFT_RATE_MAX.
+ */
+function parseGiftRate(value, label) {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === "string" && value.trim() === "")) return null;
+  const digits = typeof value === "number" ? Number.isInteger(value) : typeof value === "string" && /^\d{1,10}$/.test(value.trim());
+  const n = digits ? Number(value) : NaN;
+  if (!Number.isInteger(n) || n < 0 || n > GIFT_RATE_MAX) {
+    throw new Error(`${label} phải là số nguyên từ 0 đến ${GIFT_RATE_MAX.toLocaleString("vi-VN")} (để trống = theo gói)`);
+  }
+  return n;
+}
+
+/**
+ * An unlimited-credit plan is bounded only by its window limits and its RPM/TPM
+ * (spec plan-queue-billing "Unlimited-credit plans"). A gift of such a plan must
+ * not hand out a purchase with neither: its own RPM/TPM override counts, else
+ * the plan's. Returns a Vietnamese message, or null when the gift keeps a bound.
+ */
+function unboundedGiftError(plan, { rpm, tpm }) {
+  if (!plan || Number(plan.unlimitedCredit) !== 1) return null;
+  if (parseLimits(plan.limits).length > 0) return null;
+  if (effectiveRate(rpm, plan.rpm) != null || effectiveRate(tpm, plan.tpm) != null) return null;
+  return "Gói không giới hạn credit cần ít nhất một hạn mức: mã này không được bỏ cả RPM và TPM khi gói không có hạn mức theo khung giờ";
+}
+
 /** Create a gift code. Omit `code` to generate a readable one. */
 export async function createGiftCode(input) {
   const db = await getAdapter();
@@ -214,6 +318,8 @@ export async function createGiftCode(input) {
   if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {
     throw new Error("maxRedemptions must be at least 1");
   }
+  const rpm = parseGiftRate(input?.rpm, "RPM") ?? null;
+  const tpm = parseGiftRate(input?.tpm, "TPM") ?? null;
 
   const codeError = customCodeError(input?.code);
   if (codeError) throw new Error(codeError);
@@ -225,13 +331,16 @@ export async function createGiftCode(input) {
       if (!findGiftRowByCode(db, candidate)) { key = candidate; break; }
     }
     if (!key) throw new Error("Could not allocate a unique gift code");
-  } else if (findGiftRowByCode(db, key)) {
-    throw new Error("Mã này đã tồn tại");
+  } else {
+    const clash = findGiftRowByCode(db, key);
+    if (clash) throw new Error("Mã này đã tồn tại");
   }
   if (grant.grantKind === "plan") {
     const plan = planRow(db, grant.planId);
     if (!plan) throw new Error("Plan not found");
     assertAmountPlan(plan, grant.amountVnd);
+    const unbounded = unboundedGiftError(plan, { rpm, tpm });
+    if (unbounded) throw new Error(unbounded);
   }
 
   const now = nowIso();
@@ -252,6 +361,8 @@ export async function createGiftCode(input) {
     expiresAt: input?.expiresAt || null,
     isActive: input?.isActive === false ? 0 : 1,
     newUserOnly: newUserOnly ? 1 : 0,
+    rpm,
+    tpm,
     note: input?.note || null,
     createdBy: input?.createdBy || null,
     createdAt: now,
@@ -259,23 +370,33 @@ export async function createGiftCode(input) {
   };
 
   db.run(
-    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, note, createdBy, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, rpm, tpm, note, createdBy, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.amountVnd, gift.durationDays,
       gift.maxRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
-      gift.isActive, gift.newUserOnly, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
+      gift.isActive, gift.newUserOnly, gift.rpm, gift.tpm, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
     ]
   );
 
-  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [gift.id]));
+  return giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ?`, [gift.id]));
 }
 
 /** All gift codes, newest first, with the plan name resolved. */
 export async function listGiftCodes() {
   const db = await getAdapter();
-  const rows = db.all(`${GIFT_SELECT} ORDER BY g.createdAt DESC`);
-  return rows.map(rowToGiftCode);
+  const rows = db.all(`${GIFT_SELECT} WHERE g.deletedAt IS NULL ORDER BY g.createdAt DESC`);
+  // Where each code is referenced, so the delete dialog can say what it unlinks.
+  // One settings read and one grouped query for the whole list.
+  const settings = readSettingsDataSync(db);
+  const affiliateCounts = new Map(
+    db.all(`SELECT giftCodeId, COUNT(*) AS n FROM affiliates WHERE giftCodeId IS NOT NULL GROUP BY giftCodeId`)
+      .map((row) => [row.giftCodeId, Number(row.n)])
+  );
+  return rows.map((row) => ({
+    ...rowToGiftCode(row),
+    usage: usageSummarySync(db, row, settings, affiliateCounts),
+  }));
 }
 
 /**
@@ -301,31 +422,56 @@ export async function listGiftPlans() {
 
 export async function getGiftCodeById(id) {
   const db = await getAdapter();
-  return rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
+  return giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ? AND g.deletedAt IS NULL`, [id]));
 }
 
-/** Patch an existing gift code. Only the fields below are writable. */
+/**
+ * Patch an existing gift code (spec gift-codes "Edit a gift code"): every field,
+ * the code string and what it grants included. A change applies to LATER
+ * redemptions only: what earlier redeemers received is a purchase of its own
+ * and stays as granted. The total may not drop below the redemptions made.
+ */
 export async function updateGiftCode(id, patch = {}) {
   const db = await getAdapter();
   let updated = null;
   db.transaction(() => {
-    const row = db.get(`SELECT * FROM giftCodes WHERE id = ?`, [id]);
+    const row = db.get(`SELECT * FROM giftCodes WHERE id = ? AND deletedAt IS NULL`, [id]);
     if (!row) return;
     const next = {
-      planId: patch.planId !== undefined ? patch.planId : row.planId,
-      creditNanoUsd: patch.creditNanoUsd !== undefined ? patch.creditNanoUsd : row.creditNanoUsd,
+      planId: patch.planId !== undefined ? (patch.planId || null) : row.planId,
+      creditNanoUsd: patch.creditNanoUsd !== undefined
+        ? (patch.creditNanoUsd === null || patch.creditNanoUsd === "" ? null : Number(patch.creditNanoUsd))
+        : row.creditNanoUsd,
       amountVnd: patch.amountVnd !== undefined
         ? (patch.amountVnd === null || patch.amountVnd === "" ? null : Number(patch.amountVnd))
         : row.amountVnd,
-      durationDays: patch.durationDays !== undefined ? patch.durationDays : row.durationDays,
+      durationDays: patch.durationDays !== undefined
+        ? (patch.durationDays === null || patch.durationDays === "" ? null : Number(patch.durationDays))
+        : row.durationDays,
       maxRedemptions: patch.maxRedemptions !== undefined ? Number(patch.maxRedemptions) : row.maxRedemptions,
       perUserLimit: patch.perUserLimit !== undefined ? Number(patch.perUserLimit) : row.perUserLimit,
       startsAt: patch.startsAt !== undefined ? (patch.startsAt || null) : row.startsAt,
       expiresAt: patch.expiresAt !== undefined ? (patch.expiresAt || null) : row.expiresAt,
       isActive: patch.isActive !== undefined ? (patch.isActive ? 1 : 0) : row.isActive,
       newUserOnly: patch.newUserOnly !== undefined ? (patch.newUserOnly === true ? 1 : 0) : (Number(row.newUserOnly) === 1 ? 1 : 0),
+      rpm: patch.rpm !== undefined ? parseGiftRate(patch.rpm, "RPM") : (row.rpm ?? null),
+      tpm: patch.tpm !== undefined ? parseGiftRate(patch.tpm, "TPM") : (row.tpm ?? null),
       note: patch.note !== undefined ? (patch.note || null) : row.note,
+      code: row.code,
     };
+
+    // The code string itself: same rule as a new code, and unique among the
+    // codes that are not deleted (a deleted code gave its string back).
+    if (patch.code !== undefined && normalizeGiftCode(patch.code) !== normalizeGiftCode(row.code)) {
+      const codeError = customCodeError(patch.code);
+      if (codeError) throw new Error(codeError);
+      const key = normalizeGiftCode(patch.code);
+      if (!key) throw new Error("Mã không được để trống");
+      const clash = findGiftRowByCode(db, key);
+      if (clash && clash.id !== id) throw new Error("Mã này đã tồn tại");
+      next.code = key;
+    }
+
     // A new-user code is one per account by definition (design D5).
     if (next.newUserOnly === 1) next.perUserLimit = 1;
     if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
@@ -335,23 +481,11 @@ export async function updateGiftCode(id, patch = {}) {
     if (next.maxRedemptions < redeemed) {
       throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
     }
-    // Once anyone redeemed the code, what it grants is history: changing the
-    // plan, credit, amount or duration now would hand later redeemers a
-    // different gift under the same code, with nothing recording the switch.
-    // Limits, dates, the switch and the note stay editable.
-    if (redeemed > 0) {
-      const same = (a, b) => (a ?? null) === (b ?? null) || Number(a) === Number(b);
-      const grantChanged =
-        !same(next.planId, row.planId) ||
-        !same(next.creditNanoUsd, row.creditNanoUsd) ||
-        !same(next.amountVnd, row.amountVnd) ||
-        !same(next.durationDays, row.durationDays);
-      if (grantChanged) {
-        throw new Error("Mã đã có người dùng nên không đổi được quà tặng. Hãy tạo mã mới.");
-      }
-    }
     if (!Number.isInteger(next.perUserLimit) || next.perUserLimit < 1) {
       throw new Error("perUserLimit must be at least 1");
+    }
+    if (next.startsAt && next.expiresAt && next.startsAt > next.expiresAt) {
+      throw new Error("Ngày bắt đầu phải trước ngày hết hạn");
     }
     // A code grants exactly one thing. Re-derive grantKind from the effective
     // values so a patch can move a code from plan to credit (or back) without
@@ -361,36 +495,113 @@ export async function updateGiftCode(id, patch = {}) {
     if (hasPlan === hasCredit) {
       throw new Error("Provide exactly one of planId or creditNanoUsd");
     }
-    if (hasCredit && (!Number.isInteger(next.durationDays) || next.durationDays < 1)) {
-      throw new Error("durationDays must be at least 1 for credit grants");
+    if (hasCredit) {
+      if (!Number.isSafeInteger(next.creditNanoUsd)) throw new Error("creditNanoUsd must be a positive integer");
+      if (!Number.isInteger(next.durationDays) || next.durationDays < 1) {
+        throw new Error("durationDays must be at least 1 for credit grants");
+      }
     }
     const grantKind = hasPlan ? "plan" : "credit";
     if (!hasPlan) next.amountVnd = null;
+    if (hasPlan) next.creditNanoUsd = null;
     if (next.amountVnd != null && (!Number.isSafeInteger(next.amountVnd) || next.amountVnd <= 0)) {
       throw new Error("Số tiền phải là số đồng nguyên dương");
     }
-    if (hasPlan) assertAmountPlan(planRow(db, next.planId), next.amountVnd);
+    if (hasPlan) {
+      const plan = planRow(db, next.planId);
+      if (!plan) throw new Error("Plan not found");
+      // The amount rule is checked when the grant is set or changed. An edit of
+      // other fields (a note, more uses) must not be blocked because the plan
+      // has since stopped selling custom amounts; redemption still refuses an
+      // amount the plan can no longer convert.
+      const grantChanged = next.planId !== row.planId || (next.amountVnd ?? null) !== (row.amountVnd == null ? null : Number(row.amountVnd));
+      if (grantChanged) assertAmountPlan(plan, next.amountVnd);
+      const unbounded = unboundedGiftError(plan, next);
+      if (unbounded) throw new Error(unbounded);
+    }
     db.run(
       `UPDATE giftCodes
-          SET grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
+          SET code = ?, grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
               maxRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
-              newUserOnly = ?, note = ?, updatedAt = ?
+              newUserOnly = ?, rpm = ?, tpm = ?, note = ?, updatedAt = ?
         WHERE id = ?`,
       [
-        grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
-        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.note, nowIso(), id,
+        next.code, grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
+        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.rpm, next.tpm,
+        next.note, nowIso(), id,
       ]
     );
-    updated = rowToGiftCode(db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
+    // The promo popup names its code by string: a rename carries it along so
+    // the popup keeps pointing at this code.
+    if (next.code !== row.code) {
+      const data = readSettingsDataSync(db);
+      const popupKey = normalizeGiftCode(data.landingCopy?.popupCode);
+      if (popupKey && popupKey === normalizeGiftCode(row.code)) {
+        writeSettingsDataSync(db, { ...data, landingCopy: { ...data.landingCopy, popupCode: next.code } });
+      }
+    }
+    updated = giftWithUsageSync(db, db.get(`${GIFT_SELECT} WHERE g.id = ?`, [id]));
   });
   return updated;
 }
 
-/** Soft delete: a redeemed code must keep its history, so deactivate instead. */
-export async function deleteGiftCode(id) {
+/**
+ * Delete a gift code (spec gift-codes "Delete a gift code"). A code nobody
+ * redeemed is removed outright. A redeemed one is soft-deleted: hidden from the
+ * admin list and never redeemable again, while its redemption history and the
+ * purchases it granted stay intact; its string is freed for a new code.
+ *
+ * In the same transaction the code is unlinked from every place that uses it:
+ * the referral default gift and the promo popup code are cleared, and each CTV
+ * override is cleared (audited on that CTV as `affiliate_updated`).
+ *
+ * @returns {Promise<{ deleted: "hard"|"soft", unlinked: { referralDefault: boolean, affiliates: number, popup: boolean } } | null>}
+ *   null = no such code
+ */
+export async function deleteGiftCode(id, { actor = "admin" } = {}) {
   const db = await getAdapter();
-  const res = db.run(`UPDATE giftCodes SET isActive = 0, updatedAt = ? WHERE id = ?`, [nowIso(), id]);
-  return (res?.changes ?? 0) > 0;
+  return db.transaction(() => {
+    const row = db.get(`SELECT id, code FROM giftCodes WHERE id = ? AND deletedAt IS NULL`, [id]);
+    if (!row) return null;
+    const at = nowIso();
+
+    const data = readSettingsDataSync(db);
+    const usage = giftCodeUsageSync(db, row, data);
+    if (usage.referralDefault || usage.popup) {
+      const next = { ...data };
+      if (usage.referralDefault) next.affiliateDefaultGiftCodeId = "";
+      if (usage.popup) next.landingCopy = { ...data.landingCopy, popupCode: "" };
+      writeSettingsDataSync(db, next);
+    }
+    const label = formatGiftCode(row.code);
+    for (const affiliate of usage.affiliates) {
+      db.run(`UPDATE affiliates SET giftCodeId = NULL, updatedAt = ? WHERE userId = ?`, [at, affiliate.userId]);
+      insertAuditSync(db, {
+        userId: affiliate.userId,
+        actor,
+        action: "affiliate_updated",
+        reason: `Mã quà ${label} đã bị xóa`,
+        details: { before: { giftCodeId: id }, after: { giftCodeId: null } },
+        now: at,
+      });
+    }
+    const unlinked = {
+      referralDefault: usage.referralDefault,
+      affiliates: usage.affiliates.length,
+      popup: usage.popup,
+    };
+
+    const used = db.get(`SELECT COUNT(*) AS n FROM giftRedemptions WHERE giftId = ?`, [id]);
+    if (Number(used?.n ?? 0) === 0) {
+      db.run(`DELETE FROM giftCodes WHERE id = ?`, [id]);
+      return { deleted: "hard", unlinked };
+    }
+    db.run(
+      `UPDATE giftCodes SET code = ?, isActive = 0, deletedAt = ?, updatedAt = ? WHERE id = ?`,
+      [`${row.code}${DELETED_MARK}${id}`, at, at, id]
+    );
+    return { deleted: "soft", unlinked };
+  });
 }
 
 /** Redemption log. Pass a giftId to scope it to one code. */
@@ -408,7 +619,7 @@ export async function listRedemptions(giftId) {
   return rows.map((row) => ({
     id: row.id,
     giftId: row.giftId,
-    giftCode: row.giftCode ? formatGiftCode(row.giftCode) : null,
+    giftCode: row.giftCode ? formatGiftCode(liveGiftCode(row.giftCode)) : null,
     userId: row.userId,
     userEmail: row.userEmail ?? null,
     userPlanId: row.userPlanId ?? null,
@@ -446,7 +657,7 @@ export async function listUserRedemptions(userId) {
   return rows.map((row) => ({
     id: row.id,
     giftId: row.giftId,
-    giftCode: row.giftCode ? formatGiftCode(row.giftCode) : null,
+    giftCode: row.giftCode ? formatGiftCode(liveGiftCode(row.giftCode)) : null,
     userPlanId: row.userPlanId ?? null,
     redeemedAt: row.redeemedAt ?? null,
     grantKind: row.grantKind,
@@ -500,7 +711,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
 
   const row = findGiftRowByCode(db, code);
   if (!row) return { ok: false, reason: "not_found" };
-  if (row.isActive !== 1 && row.isActive !== true) return { ok: false, reason: "not_found" };
+  if (row.deletedAt || (row.isActive !== 1 && row.isActive !== true)) return { ok: false, reason: "not_found" };
   if (!inWindow(row, Date.now())) return { ok: false, reason: "not_active" };
   if ((row.redeemedCount ?? 0) >= (row.maxRedemptions ?? 1)) return { ok: false, reason: "exhausted" };
 
@@ -508,6 +719,11 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
   if (row.grantKind === "plan") {
     const plan = planRow(db, row.planId);
     if (!plan || (plan.isActive !== 1 && plan.isActive !== true)) {
+      return { ok: false, reason: "invalid_plan" };
+    }
+    // Never grant an unlimited purchase with no bound, even if the plan changed
+    // after the code was saved.
+    if (unboundedGiftError(plan, { rpm: row.rpm ?? null, tpm: row.tpm ?? null })) {
       return { ok: false, reason: "invalid_plan" };
     }
     // A top-up plan gifted as an amount: credit at the plan's own rate.
@@ -587,6 +803,9 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
         unlimitedCredit: grant.unlimitedCredit === true,
         durationDays: grant.durationDays,
         limits: grant.limits ?? [],
+        // The code's own RPM/TPM, if set, rides on the purchase it grants.
+        rpm: row.rpm ?? null,
+        tpm: row.tpm ?? null,
         meta: {
           giftId: row.id,
           giftRedemptionId: redemptionId,
@@ -668,7 +887,7 @@ function resolveUsersSync(db, { userIds = [], emails = [] } = {}) {
  *          | { ok: false, reason: "not_found"|"no_users" }}
  */
 export function assignGiftCodeSync(db, giftId, { userIds = [], emails = [], actor = "admin" } = {}) {
-  const row = db.get(`SELECT * FROM giftCodes WHERE id = ?`, [giftId]);
+  const row = db.get(`SELECT * FROM giftCodes WHERE id = ? AND deletedAt IS NULL`, [giftId]);
   if (!row) return { ok: false, reason: "not_found" };
   const targets = resolveUsersSync(db, { userIds, emails });
   if (targets.length === 0) return { ok: false, reason: "no_users" };

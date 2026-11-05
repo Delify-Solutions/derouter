@@ -104,6 +104,9 @@ const DEFAULT_SETTINGS = {
   paymentOrderTtlMinutes: 30,
   // Manual (admin-approved) orders are the fallback when no provider is set up.
   allowManualOrders: true,
+  // Customers see and call combos only; responses to customer keys name the
+  // combo, never the upstream model (spec model-privacy). Admin keys unaffected.
+  hideUpstreamModels: true,
 
   // ── Affiliate program (spec affiliate-program "Program settings") ─────────
   // Off by default: deploying this changes nothing until an admin turns it on,

@@ -134,8 +134,8 @@ export async function GET(request) {
     if (k.userId) {
       const accountDb = await getAdapter();
       const rates = payingRatesSync(accountDb, k.userId, null, { planId: k.planId ?? null });
-      const used = rates.planId
-        ? await getUserRateUsage(k.userId, 60_000, rates.planId)
+      const used = rates.rateKey
+        ? await getUserRateUsage(k.userId, 60_000, rates.rateKey)
         : { requests: 0, tokens: 0 };
       account = customerAccountSync(accountDb, k.userId, rates, used);
     }

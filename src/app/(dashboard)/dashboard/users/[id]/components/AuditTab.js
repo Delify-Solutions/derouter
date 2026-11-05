@@ -22,6 +22,7 @@ const ACTION_LABEL = {
   plan_extended: "Gia hạn gói",
   credit_adjusted: "Điều chỉnh credit",
   plan_limits_changed: "Sửa hạn mức gói",
+  plan_rates_changed: "Sửa RPM/TPM gói",
   plan_revoked: "Thu hồi gói",
   queue_reordered: "Đổi thứ tự gói",
   user_deleted: "Xóa tài khoản",

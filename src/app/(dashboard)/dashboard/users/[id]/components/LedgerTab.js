@@ -106,8 +106,11 @@ export default function LedgerTab({ userId }) {
                     {entry.backfill && <span className="ml-1 text-[10px] text-text-subtle">truy trừ</span>}
                   </td>
                   <td className="px-4 py-2 text-sm text-text-main">{entry.planName || "—"}</td>
-                  <td className="max-w-[200px] truncate px-4 py-2 font-mono text-[12px] text-text-muted" title={entry.model || ""}>
-                    {entry.model || "—"}
+                  <td className="max-w-[200px] truncate px-4 py-2 font-mono text-[12px] text-text-muted" title={[entry.model, entry.upstreamModel].filter(Boolean).join(" → ")}>
+                    {entry.model || entry.upstreamModel || "—"}
+                    {entry.upstreamModel && entry.upstreamModel !== entry.model ? (
+                      <span className="block truncate text-[11px] text-text-subtle">{entry.upstreamModel}</span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">
                     {entry.promptTokens == null ? "—" : `${entry.promptTokens} / ${entry.completionTokens ?? 0}`}

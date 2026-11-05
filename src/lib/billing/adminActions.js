@@ -15,6 +15,7 @@
 import { insertAuditSync } from "./audit.js";
 import { grantUserPlan, isoPlusDays } from "./grants.js";
 import { insertLedgerSync, nano } from "./ledger.js";
+import { effectiveRate } from "./planQueue.js";
 import {
   validateLimits,
   parseLimits,
@@ -53,7 +54,7 @@ function fail(status, error) {
 function loadPurchase(db, userId, userPlanId) {
   if (!userPlanId) return null;
   return db.get(
-    `SELECT up.*, p.code AS planCode, p.name AS planName
+    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm
        FROM userPlans up
        LEFT JOIN plans p ON p.id = up.planId
       WHERE up.id = ? AND up.userId = ?`,
@@ -309,15 +310,10 @@ export function setPurchaseLimitsSync(db, userId, userPlanId, { limits, reason, 
     return fail(400, error.message);
   }
 
-  // An unlimited purchase is bounded only by its limits and its plan's RPM/TPM,
-  // so it may not be left with neither.
-  if (Number(purchase.unlimitedCredit) === 1 && normalized.length === 0) {
-    const rates = purchase.planId
-      ? db.get(`SELECT rpm, tpm FROM plans WHERE id = ?`, [purchase.planId])
-      : null;
-    if (!(nano(rates?.rpm) > 0 || nano(rates?.tpm) > 0)) {
-      return fail(400, "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM");
-    }
+  // An unlimited purchase is bounded only by its limits and its RPM/TPM (its own
+  // override, else its plan's), so it may not be left with neither.
+  if (Number(purchase.unlimitedCredit) === 1 && normalized.length === 0 && !purchaseHasRate(purchase)) {
+    return fail(400, "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM");
   }
 
   const remainingDays = Math.max(
@@ -351,6 +347,81 @@ export function setPurchaseLimitsSync(db, userId, userPlanId, { limits, reason, 
   });
 
   return { ok: true, limits: normalized };
+}
+
+/** Does this purchase row (with planRpm/planTpm joined) have any RPM/TPM bound? */
+function purchaseHasRate(row, { rpm = row.rpm, tpm = row.tpm } = {}) {
+  return effectiveRate(rpm, row.planRpm) != null || effectiveRate(tpm, row.planTpm) != null;
+}
+
+const RATE_MAX = 1_000_000_000;
+
+/**
+ * One RPM/TPM override field as the admin typed it: "" or null = follow the plan,
+ * otherwise an integer 0 (no limit) … RATE_MAX.
+ * @returns {{ value: number|null } | { error: string }}
+ */
+export function parseRateOverride(raw, label) {
+  if (raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "")) return { value: null };
+  // Digits or an integer only: Number() alone would take true, [] or "0x10".
+  const wellFormed = typeof raw === "number" ? Number.isInteger(raw) : typeof raw === "string" && /^\d{1,10}$/.test(raw.trim());
+  const n = wellFormed ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 0 || n > RATE_MAX) {
+    return { error: `${label} phải là số nguyên từ 0 đến ${RATE_MAX.toLocaleString("vi-VN")} (để trống = theo gói)` };
+  }
+  return { value: n };
+}
+
+// ── Rates ──────────────────────────────────────────────────────────────────
+
+/**
+ * Set or clear one purchase's RPM/TPM override (spec plan-templates "Per-purchase
+ * rate override"). `rpm`/`tpm`: null = follow the plan, 0 = no limit, > 0 = rate.
+ * Takes effect on the next request; the allowance keeps counting what was used.
+ */
+export function setPurchaseRatesSync(db, userId, userPlanId, { rpm, tpm, reason, actor = "admin", now = null } = {}) {
+  const cleanReason = validateReason(reason);
+  if (!cleanReason) return fail(400, "Lý do phải có từ 3 đến 500 ký tự");
+
+  const purchase = loadPurchase(db, userId, userPlanId);
+  if (!purchase) return fail(404, "Không tìm thấy gói của người dùng này");
+  if (!isEditable(purchase)) return fail(409, "Chỉ sửa RPM/TPM của gói đang chạy hoặc đã hết credit");
+
+  const parsedRpm = parseRateOverride(rpm, "RPM");
+  if (parsedRpm.error) return fail(400, parsedRpm.error);
+  const parsedTpm = parseRateOverride(tpm, "TPM");
+  if (parsedTpm.error) return fail(400, parsedTpm.error);
+  const next = { rpm: parsedRpm.value, tpm: parsedTpm.value };
+
+  if (
+    Number(purchase.unlimitedCredit) === 1 &&
+    parseLimits(purchase.limits).length === 0 &&
+    !purchaseHasRate(purchase, next)
+  ) {
+    return fail(400, "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM");
+  }
+
+  const before = { rpm: purchase.rpm ?? null, tpm: purchase.tpm ?? null };
+  if (before.rpm === next.rpm && before.tpm === next.tpm) return { ok: true, rpm: next.rpm, tpm: next.tpm, unchanged: true };
+
+  const at = now || nowIso();
+  db.run(`UPDATE userPlans SET rpm = ?, tpm = ? WHERE id = ?`, [next.rpm, next.tpm, userPlanId]);
+  insertAuditSync(db, {
+    userId,
+    actor,
+    action: "plan_rates_changed",
+    reason: cleanReason,
+    details: {
+      userPlanId,
+      planCode: purchase.planCode ?? null,
+      before,
+      after: next,
+      planRpm: purchase.planRpm ?? null,
+      planTpm: purchase.planTpm ?? null,
+    },
+    now: at,
+  });
+  return { ok: true, rpm: next.rpm, tpm: next.tpm };
 }
 
 // ── Revoke ─────────────────────────────────────────────────────────────────
@@ -435,11 +506,15 @@ export function applyLimitsToActiveSync(db, planId, limits, { actor, planCode = 
   // An unlimited purchase must keep some bound. When the new limits are empty and
   // the plan has no RPM/TPM to stand in for them, those purchases keep what they
   // had instead of being left unbounded.
-  const planHasRate = nano(plan?.rpm) > 0 || nano(plan?.tpm) > 0;
+  // The rate that stands in is per purchase: its own override, else the plan's.
   const rows = db.all(
-    `SELECT id, userId, limits, unlimitedCredit FROM userPlans WHERE planId = ? AND status = 'active'`,
+    `SELECT id, userId, limits, unlimitedCredit, rpm, tpm FROM userPlans WHERE planId = ? AND status = 'active'`,
     [planId]
-  ).filter((row) => !(Number(row.unlimitedCredit) === 1 && normalized.length === 0 && !planHasRate));
+  ).filter((row) => !(
+    Number(row.unlimitedCredit) === 1 &&
+    normalized.length === 0 &&
+    !purchaseHasRate({ ...row, planRpm: plan?.rpm, planTpm: plan?.tpm })
+  ));
   if (rows.length === 0) return { ok: true, affectedCount: 0 };
 
   const serialized = serializeLimits(normalized);

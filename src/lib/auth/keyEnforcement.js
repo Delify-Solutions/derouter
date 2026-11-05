@@ -211,15 +211,16 @@ export async function enforceKeyLimits(apiKey, model) {
 
     // 4-5. RPM then TPM, per (user, plan), at the rates of the plan paying right
     //    now. A key pinned to a plan is paid by that plan alone; an unpinned key by
-    //    the head of the queue. With no plan able to pay (or a purchase with no plan
-    //    behind it) there is no rate to apply; the admission step below then
+    //    the head of the queue. A purchase's own RPM/TPM override wins over its
+    //    plan's. With nothing able to pay (or a planless purchase without an
+    //    override) there is no rate to apply; the admission step below then
     //    explains why with 402/429.
     //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
     const pinnedPlanId = key.planId ?? null;
     const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
-    const rate = rates.planId
-      ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.planId }, rates)
+    const rate = rates.rateKey
+      ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.rateKey }, rates)
       : { ok: true };
     if (!rate.ok) return rate;
 
@@ -264,7 +265,7 @@ export async function enforceKeyLimits(apiKey, model) {
     //    TPM wait, and the cap must be the plan that will actually pay.
     const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
     const capFromRpm = Number(payer.rpm) > 0;
-    const slot = acquireSlot(slotKey(key.userId, payer.planId), { max: concurrencyCapFor(payer.rpm) });
+    const slot = acquireSlot(slotKey(key.userId, payer.rateKey), { max: concurrencyCapFor(payer.rpm) });
     if (!slot.ok) {
       return deny(429, "concurrency_limit", concurrencyLimitMessage(slot.max, { fromRpm: capFromRpm }), { retryAfterSec: 5 });
     }
