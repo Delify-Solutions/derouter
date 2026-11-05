@@ -37,6 +37,7 @@ const settingsRepo = await import("../src/lib/db/repos/settingsRepo.js");
 const userRepo = await import("../src/lib/db/repos/userRepo.js");
 const billingRepo = await import("../src/lib/db/repos/billingRepo.js");
 const giftRepo = await import("../src/lib/db/repos/giftRepo.js");
+const affiliateRepo = await import("../src/lib/db/repos/affiliateRepo.js");
 const reconcile = await import("../src/lib/payments/reconcile.js");
 const { NANO } = await import("../src/shared/utils/money.js");
 
@@ -1256,4 +1257,163 @@ test("spend amounts and admin deltas accept whole numbers only, from any caller"
   }
   const after = db.transaction(() => wallet.adjustWalletSync(db, "aff", { currency: "VND", delta: "-5000", reason: "test adj" }));
   assert.equal(after.VND.available, 300000 - 5000);
+});
+
+// ── Admin commission actions (spec "Admin commission actions") ───────────────
+
+test("admin early release makes a held commission available now, exactly once", () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  const row = commissions("o1")[0];
+  assert.equal(row.status, "pending");
+
+  const first = db.transaction(() =>
+    commission.releaseCommissionNowSync(db, row.id, { actor: "admin:a", now: at(T0 + DAY) })
+  );
+  assert.equal(first.released, true);
+  assert.equal(first.row.status, "available");
+  assert.equal(first.row.releasedAt, at(T0 + DAY));
+  assert.equal(ledger("aff").length, 1);
+  const w = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY)));
+  assert.equal(w.VND.available, 25000, "available before the hold would have ended");
+
+  // A second release, and the later automatic release, change nothing.
+  const again = db.transaction(() => commission.releaseCommissionNowSync(db, row.id, { now: at(T0 + 2 * DAY) }));
+  assert.equal(again.released, false);
+  db.transaction(() => commission.releaseDueSync(db, "aff", at(T0 + 8 * DAY)));
+  assert.equal(ledger("aff").length, 1);
+
+  const audit = db.get(`SELECT * FROM userAuditLog WHERE userId = 'aff' AND action = 'affiliate_commission_released'`);
+  assert.ok(audit, "early release is audited on the affiliate");
+  assert.equal(audit.actor, "admin:a");
+});
+
+test("admin cancel needs a reason and claws back an available commission", () => {
+  enableProgram({ affiliateHoldDays: 0 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  db.transaction(() => wallet.walletSync(db, "aff", at(T0 + MIN)));
+  const row = commissions("o1")[0];
+  assert.equal(row.status, "available");
+
+  assert.throws(
+    () => db.transaction(() => commission.reverseCommissionByIdSync(db, row.id, { reason: "  " })),
+    /reason/i
+  );
+  assert.equal(commissions("o1")[0].status, "available", "a refused cancel changes nothing");
+
+  const res = db.transaction(() =>
+    commission.reverseCommissionByIdSync(db, row.id, { actor: "admin:a", reason: "fraud", now: at(T0 + DAY) })
+  );
+  assert.equal(res.reversed, true);
+  assert.equal(commissions("o1")[0].status, "reversed");
+  const w = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY)));
+  assert.equal(w.VND.available, 0, "the reversal row cancels the commission row");
+  assert.equal(ledger("aff").filter((l) => l.kind === "reversal").length, 1);
+  const audit = db.get(`SELECT * FROM userAuditLog WHERE userId = 'aff' AND action = 'affiliate_commission_reversed'`);
+  assert.equal(audit.reason, "fraud");
+
+  // Cancelled cannot be released or cancelled again.
+  assert.equal(db.transaction(() => commission.releaseCommissionNowSync(db, row.id)).released, false);
+  assert.equal(
+    db.transaction(() => commission.reverseCommissionByIdSync(db, row.id, { reason: "again" })).reversed,
+    false
+  );
+  assert.equal(ledger("aff").filter((l) => l.kind === "reversal").length, 1);
+});
+
+test("admin actions through the repo report the status they cannot apply to", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  const id = commissions("o1")[0].id;
+
+  assert.deepEqual(await affiliateRepo.actOnCommission("nope", "release"), { error: "not_found" });
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "frobnicate"), { error: "bad_action" });
+  const cancelled = await affiliateRepo.actOnCommission(id, "reverse", { reason: "test" });
+  assert.equal(cancelled.commission.status, "reversed");
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "release"), { error: "not_pending" });
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "reverse", { reason: "x" }), { error: "already_reversed" });
+});
+
+test("admin referral list shows each referred account with its referrer and commission", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff", { code: "AFFONE" });
+  makeAffiliate("aff2", { code: "AFFTWO" });
+  plan();
+  user("buyer", { referredByUserId: "aff", email: "buyer@x.com" });
+  user("lurker", { referredByUserId: "aff2", email: "lurker@x.com" });
+  user("organic", { email: "organic@x.com" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+
+  const all = await affiliateRepo.listReferrals({});
+  assert.equal(all.total, 2, "only accounts with a referrer are listed");
+  const buyer = all.rows.find((r) => r.userId === "buyer");
+  assert.equal(buyer.affiliateUserId, "aff");
+  assert.equal(buyer.affiliateCode, "AFFONE");
+  assert.equal(buyer.paidOrders, 1);
+  assert.deepEqual(
+    buyer.commissions.map((c) => [c.currency, c.status, c.amount]),
+    [["VND", "pending", 25000]]
+  );
+  assert.deepEqual(all.rows.find((r) => r.userId === "lurker").commissions, []);
+
+  const filtered = await affiliateRepo.listReferrals({ affiliateUserId: "aff2" });
+  assert.deepEqual(filtered.rows.map((r) => r.userId), ["lurker"]);
+  const searched = await affiliateRepo.listReferrals({ q: "afftwo" });
+  assert.deepEqual(searched.rows.map((r) => r.userId), ["lurker"], "search matches the referrer's code");
+});
+
+test("early release refuses a deleted affiliate and moves availableAt to now", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  makeAffiliate("gone");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  user("buyer2", { referredByUserId: "gone" });
+  orderRow({ id: "o1", userId: "buyer" });
+  orderRow({ id: "o2", userId: "buyer2" });
+  approve("o1", T0);
+  approve("o2", T0);
+
+  const kept = commissions("o1")[0];
+  db.transaction(() => commission.releaseCommissionNowSync(db, kept.id, { now: at(T0 + DAY) }));
+  assert.equal(commissions("o1")[0].availableAt, at(T0 + DAY), "available from the release, not the old hold end");
+
+  db.run(`DELETE FROM users WHERE id = 'gone'`);
+  const orphan = commissions("o2")[0];
+  assert.deepEqual(await affiliateRepo.actOnCommission(orphan.id, "release"), { error: "affiliate_deleted" });
+  assert.equal(db.transaction(() => commission.releaseCommissionNowSync(db, orphan.id)).released, false);
+  assert.equal(commissions("o2")[0].status, "pending");
+  assert.equal(ledger("gone").length, 0, "no wallet entry for a deleted account");
+});
+
+test("referral list counts only the current referrer's commission and escapes LIKE", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff", { code: "AFFONE" });
+  makeAffiliate("aff2", { code: "AFFTWO" });
+  plan();
+  user("buyer", { referredByUserId: "aff", email: "buyer_1@x.com" });
+  user("other", { referredByUserId: "aff", email: "buyerx1@x.com" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  await affiliateRepo.setUserReferrer("buyer", "aff2", { actor: "admin", reason: "moved" });
+
+  const row = (await affiliateRepo.listReferrals({ affiliateUserId: "aff2" })).rows[0];
+  assert.equal(row.userId, "buyer");
+  assert.deepEqual(row.commissions, [], "aff's commission is not shown under aff2");
+
+  const hit = await affiliateRepo.listReferrals({ q: "buyer_1" });
+  assert.deepEqual(hit.rows.map((r) => r.userId), ["buyer"], "_ is a literal character, not a wildcard");
 });

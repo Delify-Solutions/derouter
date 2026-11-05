@@ -254,9 +254,57 @@ export function releaseAllDueSync(db, now = null) {
 export function reverseCommissionForOrderSync(db, orderId, { now = null, actor = "system", reason = null } = {}) {
   if (!db) throw new Error("reverseCommissionForOrderSync requires the db adapter");
   if (!orderId) return { reversed: false, row: null, amount: 0 };
-
   const row = db.get(`SELECT * FROM affiliateCommissions WHERE orderId = ?`, [orderId]);
+  return reverseCommissionRowSync(db, row, { now, actor, reason });
+}
+
+/**
+ * Admin cancel of one commission (spec affiliate-program "Admin commission
+ * actions"), e.g. a fraudulent referral: same effect as a refund's reversal.
+ * The reason is mandatory.
+ */
+export function reverseCommissionByIdSync(db, commissionId, { now = null, actor = "admin", reason } = {}) {
+  if (!db) throw new Error("reverseCommissionByIdSync requires the db adapter");
+  const note = typeof reason === "string" ? reason.trim() : "";
+  if (!note) throw new Error("A reason is required to cancel a commission");
+  const row = db.get(`SELECT * FROM affiliateCommissions WHERE id = ?`, [commissionId]);
+  return reverseCommissionRowSync(db, row, { now, actor, reason: note });
+}
+
+/**
+ * Admin early release of one held commission (spec affiliate-program "Admin
+ * commission actions"): pending → available now, with its wallet entry, as if
+ * the hold had ended. Same guards as the automatic release: only a pending
+ * commission of an affiliate that still exists (design D10: a deleted
+ * affiliate's wallet is gone). A repeat does nothing.
+ */
+export function releaseCommissionNowSync(db, commissionId, { now = null, actor = "admin", reason = null } = {}) {
+  if (!db) throw new Error("releaseCommissionNowSync requires the db adapter");
+  const row = db.get(
+    `SELECT c.* FROM affiliateCommissions c
+      WHERE c.id = ? AND EXISTS (SELECT 1 FROM users u WHERE u.id = c.affiliateUserId)`,
+    [commissionId]
+  );
+  if (!row || row.status !== "pending") return { released: false, row: row ?? null };
+  const at = now || nowIso();
+  if (!releaseRowSync(db, row, at)) return { released: false, row };
+  // The hold ended now: "available from" must not keep showing next week's date.
+  db.run(`UPDATE affiliateCommissions SET availableAt = ? WHERE id = ? AND availableAt > ?`, [at, row.id, at]);
+  insertAuditSync(db, {
+    userId: row.affiliateUserId,
+    actor,
+    action: "affiliate_commission_released",
+    reason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+    details: { commissionId: row.id, orderId: row.orderId, currency: row.currency, amount: Number(row.amount), availableAt: row.availableAt },
+    now: at,
+  });
+  return { released: true, row: db.get(`SELECT * FROM affiliateCommissions WHERE id = ?`, [row.id]) ?? null };
+}
+
+/** Shared by the refund path and the admin cancel. */
+function reverseCommissionRowSync(db, row, { now = null, actor = "system", reason = null } = {}) {
   if (!row || row.status === "reversed") return { reversed: false, row: row ?? null, amount: 0 };
+  const orderId = row.orderId;
 
   const at = now || nowIso();
   const result = db.run(

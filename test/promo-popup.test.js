@@ -112,3 +112,47 @@ test("stored copy keeps both booleans and drops wrong types", () => {
   assert.equal(merged.popupTitle, "");
   assert.equal(merged.popupCode, "ABC");
 });
+
+test("a referral is merged into the promo popup, or shown alone", () => {
+  const promoCopy = { popupEnabled: true, popupTitle: "Tặng $5", popupCode: "WELCOME", popupDelaySec: "3", popupRepeatMinutes: "5" };
+  const referral = { code: "K7Q2MZ", bonus: { bp: 1000, maxOrders: 1 }, giftCode: "TELE-GIFT" };
+
+  const merged = popup.combinePopup(promoCopy, referral);
+  assert.equal(merged.title, "Tặng $5");
+  assert.equal(merged.code, "WELCOME");
+  assert.equal(merged.referral.code, "K7Q2MZ");
+  assert.deepEqual(merged.referral.benefits, [
+    "Tặng thêm 10% credit cho 1 đơn đầu đã thanh toán.",
+    "Gói không giới hạn credit: giảm 10% ngay khi thanh toán.",
+    "Mã quà chào mừng TELE-GIFT: liên kết Telegram rồi nhập ở trang Mã quà tặng.",
+  ]);
+  assert.notEqual(merged.version, popup.readPromoPopup(promoCopy).version, "closing the plain promo does not hide the referral one");
+
+  const alone = popup.combinePopup({ popupEnabled: false }, referral);
+  assert.equal(alone.title, "Bạn được mời dùng thử");
+  assert.equal(alone.code, "");
+  assert.equal(popup.combinePopup({ popupEnabled: false }, null), null);
+  assert.equal(popup.combinePopup(promoCopy, null).title, "Tặng $5");
+
+  assert.equal(popup.promoTargetHref("WELCOME", { refCode: "K7Q2MZ" }), "/register?ref=K7Q2MZ&next=%2Faccount%2Fgift%3Fcode%3DWELCOME");
+  assert.equal(popup.promoTargetHref("", { refCode: "K7Q2MZ" }), "/register?ref=K7Q2MZ");
+});
+
+test("a referral that gives nothing is not announced", () => {
+  const promoCopy = { popupEnabled: true, popupTitle: "Tặng $5", popupCode: "WELCOME" };
+  const empty = { code: "K7Q2MZ", bonus: { bp: 0, maxOrders: 1 }, giftCode: null };
+  assert.equal(popup.combinePopup({ popupEnabled: false }, empty), null, "no empty invitation dialog");
+  const promo = popup.combinePopup(promoCopy, empty);
+  assert.equal(promo.referral, undefined);
+  assert.equal(promo.version, popup.readPromoPopup(promoCopy).version, "a closed promo is not re-shown");
+});
+
+test("benefit lines: every order, and fractional percents", () => {
+  assert.deepEqual(popup.referralBenefits({ code: "X", bonus: { bp: 1250, maxOrders: 0 } }), [
+    "Tặng thêm 12,5% credit cho mọi đơn đã thanh toán.",
+    "Gói không giới hạn credit: giảm 12,5% ngay khi thanh toán.",
+  ]);
+  assert.deepEqual(popup.referralBenefits({ code: "X", giftCode: "HELLO" }), [
+    "Mã quà chào mừng HELLO: liên kết Telegram rồi nhập ở trang Mã quà tặng.",
+  ]);
+});

@@ -20,6 +20,8 @@ import {
   accrueCommissionSync,
   releaseAllDueSync,
   releaseDueSync,
+  releaseCommissionNowSync,
+  reverseCommissionByIdSync,
 } from "../../affiliate/commission.js";
 import {
   walletSync,
@@ -408,6 +410,110 @@ export async function listCommissions({ affiliateUserId = "", status = "", limit
     [...params, take, skip]
   );
   return { rows, total };
+}
+
+/**
+ * Admin action on one commission (spec "Admin commission actions"):
+ * `release` makes a held commission available now, `reverse` cancels it with a
+ * mandatory reason. Returns `{ error }` for a missing row or a status the action
+ * does not apply to.
+ */
+export async function actOnCommission(commissionId, action, { actor = "admin", reason = null } = {}) {
+  const db = await getAdapter();
+  return db.transaction(() => {
+    const row = db.get(
+      `SELECT c.id, c.status, EXISTS (SELECT 1 FROM users u WHERE u.id = c.affiliateUserId) AS affiliateExists
+         FROM affiliateCommissions c WHERE c.id = ?`,
+      [commissionId]
+    );
+    if (!row) return { error: "not_found" };
+    if (action === "release") {
+      if (row.status !== "pending") return { error: "not_pending" };
+      // A deleted affiliate has no wallet to credit (design D10).
+      if (!Number(row.affiliateExists)) return { error: "affiliate_deleted" };
+      const result = releaseCommissionNowSync(db, commissionId, { actor, reason });
+      return result.released ? { commission: result.row } : { error: "not_pending" };
+    }
+    if (action === "reverse") {
+      if (row.status === "reversed") return { error: "already_reversed" };
+      const result = reverseCommissionByIdSync(db, commissionId, { actor, reason });
+      return result.reversed ? { commission: result.row } : { error: "already_reversed" };
+    }
+    return { error: "bad_action" };
+  });
+}
+
+/**
+ * Admin list of referred accounts (spec "Admin referral list"): every user with a
+ * referrer, the referrer, signup date, paid orders and commission per status.
+ * Filterable by referrer and by an email/code search over either side.
+ */
+export async function listReferrals({ q = "", affiliateUserId = "", limit = 50, offset = 0 } = {}) {
+  const db = await getAdapter();
+  const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  db.transaction(() => releaseAllDueSync(db));
+
+  const where = [`u.referredByUserId IS NOT NULL`];
+  const params = [];
+  if (affiliateUserId) {
+    where.push(`u.referredByUserId = ?`);
+    params.push(affiliateUserId);
+  }
+  const term = typeof q === "string" ? q.trim().toLowerCase() : "";
+  if (term) {
+    // `%` and `_` typed in the search are literal characters, not wildcards.
+    const like = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    where.push(
+      `(LOWER(u.email) LIKE ? ESCAPE '\\' OR LOWER(ref.email) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(af.code, '')) LIKE ? ESCAPE '\\')`
+    );
+    params.push(like, like, like);
+  }
+  const whereSql = `WHERE ${where.join(" AND ")}`;
+  const from = `FROM users u
+       LEFT JOIN users ref ON ref.id = u.referredByUserId
+       LEFT JOIN affiliates af ON af.userId = u.referredByUserId`;
+
+  const total = Number(db.get(`SELECT COUNT(*) AS n ${from} ${whereSql}`, params)?.n ?? 0);
+  const rows = db.all(
+    `SELECT u.id AS userId, u.email, u.status AS userStatus, u.createdAt AS signedUpAt, u.referredAt,
+            u.referredByUserId AS affiliateUserId, ref.email AS affiliateEmail, af.code AS affiliateCode,
+            (SELECT COUNT(*) FROM orders o WHERE o.userId = u.id AND o.status = 'paid') AS paidOrders
+       ${from} ${whereSql}
+      ORDER BY COALESCE(u.referredAt, u.createdAt) DESC, u.rowid DESC LIMIT ? OFFSET ?`,
+    [...params, take, skip]
+  );
+
+  // Commission per referred account, one grouped query for the page. Only what
+  // the CURRENT referrer earned from the account is reported: after a referrer
+  // change, the earlier referrer's amounts are not this CTV's.
+  const sums = new Map();
+  if (rows.length) {
+    const placeholders = rows.map(() => "?").join(", ");
+    const referrerOf = new Map(rows.map((row) => [row.userId, row.affiliateUserId]));
+    for (const s of db.all(
+      `SELECT referredUserId, affiliateUserId, currency, status, COUNT(*) AS n, COALESCE(SUM(amount), 0) AS amount
+         FROM affiliateCommissions
+        WHERE referredUserId IN (${placeholders})
+        GROUP BY referredUserId, affiliateUserId, currency, status`,
+      rows.map((row) => row.userId)
+    )) {
+      if (s.affiliateUserId !== referrerOf.get(s.referredUserId)) continue;
+      const key = s.referredUserId;
+      if (!sums.has(key)) sums.set(key, []);
+      sums.get(key).push({
+        affiliateUserId: s.affiliateUserId,
+        currency: s.currency,
+        status: s.status,
+        count: Number(s.n),
+        amount: Number(s.amount),
+      });
+    }
+  }
+  return {
+    total,
+    rows: rows.map((row) => ({ ...row, paidOrders: Number(row.paidOrders), commissions: sums.get(row.userId) ?? [] })),
+  };
 }
 
 /** Every voucher, filterable by status (admin list). */

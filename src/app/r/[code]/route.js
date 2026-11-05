@@ -2,7 +2,7 @@
 //
 // Public by design (PUBLIC_PAGE_PATHS in dashboardGuard.js): the visitor has no
 // cookie and no account yet. A valid code sets `dr_ref` and sends the visitor to
-// the register form; anything else redirects there without a cookie.
+// the landing page (referral popup); anything else goes to /register without a cookie.
 //
 // Relative imports only would be wrong here — this is a Next route, where the `@/`
 // alias resolves; `src/lib/affiliate/*` itself stays driver-free.
@@ -66,7 +66,9 @@ export async function GET(request, { params }) {
   const days = Math.max(1, Math.floor(Number(settings.affiliateCookieDays) || 30));
   // Same reason as above: the scheme the visitor used, not the listen address's.
   const secure = getPublicOrigin(request).startsWith("https:");
-  return redirectTo(`/register?ref=${encodeURIComponent(normalized)}`, {
+  // To the landing page, where the visitor can read about the service; the
+  // referral popup there lists what they get and leads to /register?ref=CODE.
+  return redirectTo("/", {
     cookie: {
       name: REF_COOKIE,
       value: normalized,
