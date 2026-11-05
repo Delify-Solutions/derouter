@@ -30,6 +30,8 @@ const ACTION_LABEL = {
   referrer_changed: "Đổi người giới thiệu",
   affiliate_updated: "Sửa CTV",
   telegram_unlinked: "Gỡ liên kết Telegram",
+  // Order cancelled by an admin from the Telegram bot (change telegram-bot-commands).
+  order_cancelled: "Hủy đơn hàng",
   affiliate_invited: "Mời làm CTV",
   affiliate_commission_reversed: "Hủy hoa hồng",
   affiliate_commission_released: "Duyệt sớm hoa hồng",
