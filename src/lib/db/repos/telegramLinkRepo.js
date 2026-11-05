@@ -8,6 +8,8 @@
 // Synchronous, db-first: callers run these inside db.transaction().
 
 import crypto from "node:crypto";
+import { insertAuditSync } from "../../billing/audit.js";
+import { insertActivitySync } from "./activityRepo.js";
 
 export const LINK_TOKEN_TTL_MS = 10 * 60 * 1000;
 
@@ -118,4 +120,82 @@ export function maskEmail(email) {
   const at = value.indexOf("@");
   if (at <= 0) return "***";
   return `${value[0]}***${value.slice(at)}`;
+}
+
+// ── Admin (change telegram-admin) ────────────────────────────────────────────
+
+/**
+ * Accounts with a linked Telegram user, newest link first. `q` matches the
+ * email, the Telegram username (with or without "@") or the Telegram id; `%`
+ * and `_` are literal.
+ * @returns {{ rows: object[], total: number }}
+ */
+export function listTelegramLinksSync(db, { q = "", limit = 50, offset = 0 } = {}) {
+  const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const where = ["u.telegramUserId IS NOT NULL"];
+  const params = [];
+  const raw = String(q || "").trim().toLowerCase();
+  // "@alice" is a Telegram username search only; anything else matches the
+  // email, the username or the Telegram id.
+  const usernameOnly = raw.startsWith("@");
+  const term = usernameOnly ? raw.slice(1) : raw;
+  if (term) {
+    const like = `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    if (usernameOnly) {
+      where.push(`LOWER(COALESCE(u.telegramUsername, '')) LIKE ? ESCAPE '\\'`);
+      params.push(like);
+    } else {
+      where.push(
+        `(LOWER(u.email) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(u.telegramUsername, '')) LIKE ? ESCAPE '\\' OR u.telegramUserId LIKE ? ESCAPE '\\')`
+      );
+      params.push(like, like, like);
+    }
+  }
+  const whereSql = `WHERE ${where.join(" AND ")}`;
+  const total = Number(db.get(`SELECT COUNT(*) AS n FROM users u ${whereSql}`, params)?.n ?? 0);
+  const rows = db.all(
+    `SELECT u.id, u.email, u.displayName, u.status, u.telegramUserId, u.telegramUsername,
+            u.telegramLinkedAt, u.telegramDmBlockedAt
+       FROM users u ${whereSql}
+      ORDER BY u.telegramLinkedAt DESC, u.rowid DESC LIMIT ? OFFSET ?`,
+    [...params, take, skip]
+  );
+  return {
+    total,
+    rows: rows.map((row) => ({
+      userId: row.id,
+      email: row.email,
+      displayName: row.displayName ?? null,
+      status: row.status,
+      telegramUserId: row.telegramUserId,
+      telegramUsername: row.telegramUsername ?? null,
+      linkedAt: row.telegramLinkedAt ?? null,
+      dmBlockedAt: row.telegramDmBlockedAt ?? null,
+    })),
+  };
+}
+
+/**
+ * Admin removes an account's Telegram link (change telegram-admin). Audited on
+ * the account (`telegram_unlinked`) and written to its activity log as
+ * `telegram_unlink` with `by: "admin"`, so the customer's history shows it.
+ * Past gift redemptions keep their Telegram snapshot: unlinking never lets the
+ * same Telegram user claim a new-user gift again.
+ *
+ * @returns {{ ok: true, before: object } | { error: "not_found" | "not_linked" }}
+ */
+export function adminUnlinkTelegramSync(db, userId, { actor = "admin", reason = null, expectTelegramUserId = null, now = new Date().toISOString() } = {}) {
+  const user = db.get(`SELECT id FROM users WHERE id = ?`, [userId]);
+  if (!user) return { error: "not_found" };
+  const before = getTelegramLinkSync(db, userId);
+  if (!before.linked) return { error: "not_linked" };
+  // The link changed since the admin's notice was sent (the customer relinked
+  // meanwhile): do not remove a link nobody was told about.
+  if (expectTelegramUserId && before.telegramUserId !== expectTelegramUserId) return { error: "changed" };
+  unlinkTelegramSync(db, userId);
+  const details = { telegramUserId: before.telegramUserId, telegramUsername: before.telegramUsername };
+  insertAuditSync(db, { userId, actor, action: "telegram_unlinked", reason, details, now });
+  insertActivitySync(db, { userId, action: "telegram_unlink", details: { ...details, by: "admin" }, createdAt: now });
+  return { ok: true, before };
 }
