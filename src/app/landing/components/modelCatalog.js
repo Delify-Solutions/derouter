@@ -130,7 +130,7 @@ async function attachDiscounts(models, { groupId, planIds }) {
     }
     const shape = (model, found) => {
       const low = applyBpToPricing({ input: model.input, output: model.output, cached: model.cached }, found.totalBp);
-      return { percentBp: found.totalBp, capped: found.capped, endsAt: found.endsAt, input: low.input, output: low.output, cached: low.cached };
+      return { percentBp: found.totalBp, capped: found.capped, endsAt: found.endsAt, reasons: found.reasons ?? [], input: low.input, output: low.output, cached: low.cached };
     };
     return models.map((model) => {
       const out = { ...model };

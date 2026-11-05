@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
 import { fmtUsd as fmtCost } from "@/shared/utils/money";
 import { fmtRate, fmtUsd } from "./salesData";
-import { percentLabel, dateTimeLabel } from "@/shared/utils/discountFormat";
+import { percentLabel, dateTimeLabel, reasonsLabel } from "@/shared/utils/discountFormat";
 
 // Rows revealed per click. The catalogue can be hundreds of models long, so the
 // table starts short and the reader searches or asks for more.
@@ -33,11 +33,15 @@ function RateCell({ list, shown, discounted, className }) {
 
 function DiscountTag({ discount }) {
   if (!discount) return null;
+  const reason = reasonsLabel(discount.reasons);
   return (
-    <span className="mt-1 inline-block border border-brand-500/30 bg-brand-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-text-main">
-      Giảm {percentLabel(discount.percentBp)}
-      {discount.endsAt ? ` · đến ${dateTimeLabel(discount.endsAt)}` : ""}
-    </span>
+    <>
+      <span className="mt-1 inline-block border border-brand-500/30 bg-brand-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-text-main">
+        Giảm {percentLabel(discount.percentBp)}
+        {discount.endsAt ? ` · đến ${dateTimeLabel(discount.endsAt)}` : ""}
+      </span>
+      {reason ? <span className="mt-1 block text-xs text-text-muted">Lý do: {reason}</span> : null}
+    </>
   );
 }
 

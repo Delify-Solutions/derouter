@@ -16,6 +16,7 @@ import { listPlans } from "@/lib/db/repos/billingRepo.js";
 import { offeredMethodsSync } from "@/lib/payments/checkout.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
+import { channelUrlOf } from "@/lib/telegram/channel.js";
 import { planTerms, termLabel, termPrice } from "@/lib/billing/terms.js";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { fmtUsdNano } from "@/shared/utils/money.js";
@@ -106,7 +107,7 @@ export default async function LandingPage({ copy }) {
 
   return (
     <div className="min-h-screen bg-bg text-text-main antialiased">
-      <Navigation session={session} />
+      <Navigation session={session} channelUrl={channelUrlOf(settings)} />
 
       <main>
         <AnnouncementBanner
@@ -122,7 +123,7 @@ export default async function LandingPage({ copy }) {
         <FaqSection plans={visiblePlans} models={MODELS} copy={copy} />
       </main>
 
-      <Footer modelCount={MODELS.length} plans={visiblePlans} featured={featured} />
+      <Footer modelCount={MODELS.length} plans={visiblePlans} featured={featured} channelUrl={channelUrlOf(settings)} />
       <PromoPopupSlot signedIn={session === "customer"} copy={copy} />
     </div>
   );

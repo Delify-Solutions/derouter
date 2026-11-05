@@ -41,6 +41,7 @@ const navItems = [
   // reason this item exists in the sidebar rather than buried in settings.
   { href: "/dashboard/payments", label: "Thanh toán", icon: "account_balance", badge: "needsReview" },
   { href: "/dashboard/content", label: "Nội dung", icon: "article" },
+  { href: "/dashboard/announcements", label: "Thông báo", icon: "notifications" },
   { href: "/dashboard/telegram", label: "Telegram", icon: "campaign" },
 ];
 

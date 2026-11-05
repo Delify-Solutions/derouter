@@ -19,8 +19,9 @@ import { cn } from "@/shared/utils/cn";
  *
  * `items`: [{ href, label, icon, active }].
  */
-export default function MobileMenu({ items, pathname, email = "", onSignOut, signingOut = false }) {
+export default function MobileMenu({ items, extraItem = null, pathname, email = "", onSignOut, signingOut = false }) {
   const [open, setOpen] = useState(false);
+  const hasUnread = items.some((item) => Boolean(item.badge));
   const buttonRef = useRef(null);
   const panelRef = useRef(null);
   const panelId = useId();
@@ -123,6 +124,12 @@ export default function MobileMenu({ items, pathname, email = "", onSignOut, sig
                 >
                   <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{item.icon}</span>
                   <span className="flex-1">{item.label}</span>
+                  {item.badge ? (
+                    <span className="min-w-6 bg-zinc-900 px-1.5 text-center font-mono text-[12px] leading-6 text-white dark:bg-white dark:text-zinc-900">
+                      {item.badge}
+                      <span className="sr-only"> chưa đọc</span>
+                    </span>
+                  ) : null}
                   {/* Not colour alone: the current page also carries a mark. */}
                   {item.active ? (
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">check</span>
@@ -130,6 +137,21 @@ export default function MobileMenu({ items, pathname, email = "", onSignOut, sig
                 </Link>
               </li>
             ))}
+            {extraItem ? (
+              <li>
+                <a
+                  href={extraItem.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={close}
+                  className="liquid-glass-item flex min-h-11 items-center gap-3 px-3 text-[15px] font-medium text-zinc-800 transition-colors duration-150 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                >
+                  <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{extraItem.icon}</span>
+                  <span className="flex-1">{extraItem.label}</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">open_in_new</span>
+                </a>
+              </li>
+            ) : null}
           </ul>
         </nav>
         <div className="relative mt-1 border-t border-black/10 pt-1 dark:border-white/10">
@@ -156,10 +178,13 @@ export default function MobileMenu({ items, pathname, email = "", onSignOut, sig
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-haspopup="dialog"
-        aria-label={open ? "Đóng menu" : "Mở menu"}
-        className="flex size-8 items-center justify-center border border-border text-text-main transition-colors duration-150 hover:bg-surface-2 lg:hidden"
+        aria-label={open ? "Đóng menu" : hasUnread ? "Mở menu, có thông báo chưa đọc" : "Mở menu"}
+        className="relative flex size-8 items-center justify-center border border-border text-text-main transition-colors duration-150 hover:bg-surface-2 lg:hidden"
       >
         <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{open ? "close" : "menu"}</span>
+        {hasUnread && !open ? (
+          <span aria-hidden="true" className="absolute -right-1 -top-1 size-2.5 border border-bg bg-red-600" />
+        ) : null}
       </button>
       {panel ? createPortal(panel, document.body) : null}
     </>

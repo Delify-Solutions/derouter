@@ -12,6 +12,7 @@ import { getAdapter } from "../db/driver.js";
 import { getSettings } from "../db/repos/settingsRepo.js";
 import { fmtCreditNano } from "../../shared/utils/money.js";
 import { escapeHtml, sendTelegramMessage } from "./telegramApi.js";
+import { recordInboxSync } from "./inbox.js";
 
 export const NOTIFY_GROUPS = ["billing", "expiry", "announcements"];
 export const SECURITY = "security";
@@ -83,6 +84,11 @@ export function mergeNotifyPrefs(currentText, update) {
   return prefs;
 }
 
+/** The site name messages are headed with (for callers that store a copy). */
+export async function loadSiteName() {
+  return (await loadBot()).siteName;
+}
+
 async function loadBot() {
   try {
     const settings = (await getSettings()) || {};
@@ -110,10 +116,24 @@ export function setTelegramTransportForTests(fn) {
  * @param {{ force?: boolean }} [options] force: try even when marked blocked (test message, fresh link)
  * @returns {Promise<{ ok: boolean, reason?: string, retryAfterSec?: number }>}
  */
-export async function notifyCustomer(userId, group, buildText, { force = false } = {}) {
+export async function notifyCustomer(userId, group, buildText, { force = false, inbox = true } = {}) {
   try {
     if (!userId) return { ok: false, reason: "no_user" };
     const { token, siteName } = await loadBot();
+    // The web copy first (change models-notifications D4): a customer without
+    // Telegram, or who muted the group there, still finds it on the site.
+    // Broadcasts ("announcements") live in the announcements list instead, and
+    // `inbox: false` callers (routine sign-in alerts, the test message, the plan
+    // reminders that store their own copy once) skip it.
+    if (inbox && group !== "announcements") {
+      try {
+        const db = await getAdapter();
+        const text = typeof buildText === "function" ? buildText(siteName) : String(buildText || "");
+        recordInboxSync(db, userId, group, text, { siteName });
+      } catch (error) {
+        console.error(`[notify] inbox write skipped: ${error?.message || "unknown error"}`);
+      }
+    }
     if (!token) return { ok: false, reason: "not_configured" };
     const db = await getAdapter();
     const row = db.get(

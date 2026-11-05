@@ -130,7 +130,9 @@ export async function POST(request) {
   // send budget that payment and admin alerts share.
   if (!repeat) {
     fireAndForget(
-      notifyCustomer(user.id, "security", messages.login({ ip: loggedIp, userAgent: getRequestUserAgent(request), newIp }))
+      // Telegram only: sign-ins are listed in the account history, and storing
+      // each one would raise the unread badge on every login.
+      notifyCustomer(user.id, "security", messages.login({ ip: loggedIp, userAgent: getRequestUserAgent(request), newIp }), { inbox: false })
     );
   }
 

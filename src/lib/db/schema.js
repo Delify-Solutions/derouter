@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -304,6 +304,10 @@ export const TABLES = {
       // become an affiliate itself. NULL = not referred.
       referredByUserId: "TEXT",
       referredAt: "TEXT",
+      // Last time the customer opened /account/notifications (change
+      // models-notifications D5); announcements and own notifications after it
+      // count as unread. NULL = the account's creation time.
+      notificationsSeenAt: "TEXT",
     },
     indexes: [
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
@@ -792,6 +796,37 @@ export const TABLES = {
       skipped: "INTEGER DEFAULT 0",
       finishedAt: "TEXT",
     },
+  },
+  // Announcements the admin publishes to every customer on /account/notifications
+  // (change models-notifications D3). Plain text, never HTML.
+  announcements: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      title: "TEXT NOT NULL",
+      body: "TEXT NOT NULL",
+      important: "INTEGER DEFAULT 0",
+      createdBy: "TEXT",
+      // telegramBroadcasts.id when it was also sent through Telegram.
+      telegramBroadcastId: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_ann_created ON announcements(createdAt)"],
+  },
+  // The web copy of every personal message notifyCustomer sends (billing, expiry,
+  // security), stored whether or not Telegram is linked (D4). Broadcasts are not
+  // stored here: they are announcements.
+  customerNotifications: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      // notifyCustomer group: 'billing' | 'expiry' | 'security'
+      kind: "TEXT NOT NULL",
+      title: "TEXT NOT NULL",
+      body: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_cn_user_ts ON customerNotifications(userId, createdAt)"],
   },
   // Owner of a customer key that has been deleted. A request admitted before the
   // delete is saved (and charged) only when it finishes, so the charge still has
