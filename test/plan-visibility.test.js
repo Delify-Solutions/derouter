@@ -44,7 +44,7 @@ const plan = (overrides = {}) => repo.createPlan({
 });
 
 test("no plan paying: no RPM/TPM applies", () => {
-  assert.deepEqual(payingRatesSync(db, "u1"), { userPlanId: null, planId: null, planName: null, rpm: null, tpm: null });
+  assert.deepEqual(payingRatesSync(db, "u1"), { userPlanId: null, planId: null, planName: null, rateKey: null, rpm: null, tpm: null });
 });
 
 test("the paying plan's RPM/TPM and name are reported, and each queue entry carries its own", async () => {

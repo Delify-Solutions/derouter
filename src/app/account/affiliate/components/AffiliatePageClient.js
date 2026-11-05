@@ -103,6 +103,22 @@ export default function AffiliatePageClient() {
   const { enabled, wallet, redeem } = data;
   const hasHistory = data.hasHistory === true;
   const blocked = data.status === "blocked";
+  // Invite-only mode and this account was not invited: no link, but whatever it
+  // already has (wallet, earlier referrals that still earn) stays on the page.
+  const uninvited = enabled && data.inviteOnly === true && data.canRefer !== true;
+
+  // Invite-only and nothing to keep: the nav item is hidden too.
+  if (data.available === false && uninvited) {
+    return (
+      <Page title="Giới thiệu">
+        <Empty
+          icon="group_add"
+          title="Chương trình dành cho CTV được mời"
+          body="Chương trình giới thiệu hiện chỉ mở cho cộng tác viên được quản trị viên mời. Liên hệ quản trị viên nếu bạn muốn tham gia."
+        />
+      </Page>
+    );
+  }
 
   // The program is off and this account has no history: nothing to show, and the
   // nav item would not be there either.
@@ -121,9 +137,11 @@ export default function AffiliatePageClient() {
   return (
     <Page
       title="Giới thiệu"
-      description={enabled
+      description={uninvited
+        ? "Chương trình giới thiệu hiện chỉ dành cho CTV được mời. Số dư, hoa hồng và những người bạn đã giới thiệu trước đây vẫn được giữ."
+        : enabled
         ? "Chia sẻ đường dẫn của bạn. Người đăng ký qua đường dẫn đó được ghi nhận là do bạn giới thiệu, và bạn nhận hoa hồng trên các đơn họ đã thanh toán."
-        : "Chương trình giới thiệu đang tắt. Trang này giữ số dư và lịch sử rút tiền của bạn cho đến khi chương trình bật lại."}
+        : "Chương trình giới thiệu đang tắt. Trang này giữ số dư và voucher của bạn cho đến khi chương trình bật lại."}
     >
       {enabled && data.link ? (
         <Section
@@ -152,10 +170,17 @@ export default function AffiliatePageClient() {
             ) : null}
           </div>
         </Section>
+      ) : uninvited ? (
+        <Section
+          title="Đường dẫn tạm ngừng"
+          description="Chương trình hiện chỉ dành cho CTV được mời nên đường dẫn của bạn không ghi nhận người đăng ký mới. Người bạn đã giới thiệu trước đây vẫn mang lại hoa hồng như cũ."
+        >
+          <Empty icon="link_off" title="Không ghi nhận người mới" body="Liên hệ quản trị viên nếu bạn muốn trở thành CTV được mời." />
+        </Section>
       ) : (
         <Section
           title="Chương trình đang tắt"
-          description="Chương trình giới thiệu đang tắt nên chưa có đường dẫn mới. Số dư và lịch sử rút tiền của bạn vẫn được giữ."
+          description="Chương trình giới thiệu đang tắt nên chưa có đường dẫn mới. Số dư và voucher của bạn vẫn được giữ."
         >
           <Empty icon="link_off" title="Không có đường dẫn mới" body="Bật lại chương trình để tiếp tục giới thiệu." />
         </Section>

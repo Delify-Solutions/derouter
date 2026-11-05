@@ -14,12 +14,18 @@ import {
   effectiveTermsSync,
   resolveFirstReferralSync,
   hasWalletHistorySync,
+  affiliateAreaAvailableSync,
+  isInviteOnly,
+  mayRefer,
+  linkActive,
 } from "../../affiliate/core.js";
 import { readAffiliateSettingsSync } from "../../affiliate/settings.js";
 import {
   accrueCommissionSync,
   releaseAllDueSync,
   releaseDueSync,
+  releaseCommissionNowSync,
+  reverseCommissionByIdSync,
 } from "../../affiliate/commission.js";
 import {
   walletSync,
@@ -49,6 +55,15 @@ export async function hasAffiliateHistory(userId) {
 }
 
 /**
+ * Whether the customer area shows the "Giới thiệu" item and page for this
+ * account (program on and allowed to refer, or something to keep).
+ */
+export async function isAffiliateAreaAvailable(userId) {
+  const db = await getAdapter();
+  return affiliateAreaAvailableSync(db, userId);
+}
+
+/**
  * The first valid referral of `candidates` for registration (see
  * resolveFirstReferralSync). Async because the route is; the lookup itself must
  * not create anything.
@@ -67,7 +82,13 @@ export async function getAffiliateOverview(userId) {
   return db.transaction(() => {
     const settings = readAffiliateSettingsSync(db);
     const enabled = settings.affiliateEnabled === true;
-    const row = enabled ? ensureAffiliateSync(db, userId) : getAffiliateSync(db, userId);
+    const inviteOnly = isInviteOnly(settings);
+    // Opening the page creates the code only for an account that may refer: in
+    // invite-only mode an uninvited account gets no row (and no link).
+    const existing = getAffiliateSync(db, userId);
+    const row = enabled && mayRefer(existing, settings)
+      ? ensureAffiliateSync(db, userId)
+      : existing;
     const terms = row ? effectiveTermsSync(row, settings) : null;
     const wallet = walletSync(db, userId);
 
@@ -84,6 +105,13 @@ export async function getAffiliateOverview(userId) {
 
     return {
       enabled,
+      inviteOnly,
+      invited: Boolean(row?.invitedAt),
+      // The link records new users (program on, not blocked, admitted by mode).
+      // A blocked affiliate still sees its link with the "blocked" notice.
+      canRefer: enabled && Boolean(row) && mayRefer(row, settings),
+      linkActive: linkActive(row, settings),
+      available: affiliateAreaAvailableSync(db, userId, settings),
       code: row?.code ?? null,
       status: row?.status ?? null,
       rateBp: terms?.rateBp ?? null,
@@ -212,7 +240,7 @@ export async function listMyReferrals(userId, { limit = 20, offset = 0 } = {}) {
  * All figures come from set-based queries over the page's ids — a list of 50 must
  * not become 200 queries.
  */
-export async function listAffiliates({ q = "", status = "", limit = 50, offset = 0 } = {}) {
+export async function listAffiliates({ q = "", status = "", invited = "", limit = 50, offset = 0 } = {}) {
   const db = await getAdapter();
   const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
@@ -229,6 +257,8 @@ export async function listAffiliates({ q = "", status = "", limit = 50, offset =
     where.push(`a.status = ?`);
     params.push(status);
   }
+  if (invited === "yes") where.push(`a.invitedAt IS NOT NULL`);
+  if (invited === "no") where.push(`a.invitedAt IS NULL`);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   const total = Number(
@@ -344,6 +374,7 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
     const before = getAffiliateSync(db, userId);
     if (!before) return null;
 
+    const at = nowIso();
     const sets = [];
     const values = [];
     for (const key of ["rateBp", "maxOrders", "buyerBonusBp", "buyerBonusMaxOrders", "giftCodeId", "status", "adminNote"]) {
@@ -351,9 +382,13 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
       sets.push(`${key} = ?`);
       values.push(patch[key]);
     }
+    // `invited: true` keeps an existing invitation date; `false` withdraws it.
+    if (Object.prototype.hasOwnProperty.call(patch, "invited")) {
+      sets.push(`invitedAt = ?`);
+      values.push(patch.invited ? (before.invitedAt || at) : null);
+    }
     if (sets.length === 0) return before;
 
-    const at = nowIso();
     db.run(`UPDATE affiliates SET ${sets.join(", ")}, updatedAt = ? WHERE userId = ?`, [...values, at, userId]);
 
     insertAuditSync(db, {
@@ -366,6 +401,7 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
           rateBp: before.rateBp, maxOrders: before.maxOrders,
           buyerBonusBp: before.buyerBonusBp, buyerBonusMaxOrders: before.buyerBonusMaxOrders,
           giftCodeId: before.giftCodeId, status: before.status, adminNote: before.adminNote,
+          invited: Boolean(before.invitedAt),
         },
         after: patch,
       },
@@ -373,6 +409,42 @@ export async function updateAffiliate(userId, patch, { actor = "admin", reason =
     });
 
     return getAffiliateSync(db, userId);
+  });
+}
+
+/**
+ * Admin adds an account as an invited affiliate (spec "Affiliate access mode"):
+ * `who` is a user id or an email. Creates the affiliate row (and its code) when
+ * missing and records the invitation; inviting an already invited account
+ * changes nothing. Audited on the account as `affiliate_invited`.
+ *
+ * @returns {{ affiliate: object, user: object, alreadyInvited: boolean } | { error: "user_not_found" }}
+ */
+export async function inviteAffiliate(who, { actor = "admin", reason = null } = {}) {
+  const db = await getAdapter();
+  const key = typeof who === "string" ? who.trim() : "";
+  if (!key) return { error: "user_not_found" };
+  return db.transaction(() => {
+    const user = db.get(
+      `SELECT id, email, displayName FROM users WHERE id = ? OR LOWER(email) = LOWER(?) LIMIT 1`,
+      [key, key]
+    );
+    if (!user) return { error: "user_not_found" };
+
+    const row = ensureAffiliateSync(db, user.id);
+    if (row.invitedAt) return { affiliate: row, user, alreadyInvited: true };
+
+    const at = nowIso();
+    db.run(`UPDATE affiliates SET invitedAt = ?, updatedAt = ? WHERE userId = ?`, [at, at, user.id]);
+    insertAuditSync(db, {
+      userId: user.id,
+      actor,
+      action: "affiliate_invited",
+      reason,
+      details: { code: row.code },
+      now: at,
+    });
+    return { affiliate: getAffiliateSync(db, user.id), user, alreadyInvited: false };
   });
 }
 
@@ -408,6 +480,110 @@ export async function listCommissions({ affiliateUserId = "", status = "", limit
     [...params, take, skip]
   );
   return { rows, total };
+}
+
+/**
+ * Admin action on one commission (spec "Admin commission actions"):
+ * `release` makes a held commission available now, `reverse` cancels it with a
+ * mandatory reason. Returns `{ error }` for a missing row or a status the action
+ * does not apply to.
+ */
+export async function actOnCommission(commissionId, action, { actor = "admin", reason = null } = {}) {
+  const db = await getAdapter();
+  return db.transaction(() => {
+    const row = db.get(
+      `SELECT c.id, c.status, EXISTS (SELECT 1 FROM users u WHERE u.id = c.affiliateUserId) AS affiliateExists
+         FROM affiliateCommissions c WHERE c.id = ?`,
+      [commissionId]
+    );
+    if (!row) return { error: "not_found" };
+    if (action === "release") {
+      if (row.status !== "pending") return { error: "not_pending" };
+      // A deleted affiliate has no wallet to credit (design D10).
+      if (!Number(row.affiliateExists)) return { error: "affiliate_deleted" };
+      const result = releaseCommissionNowSync(db, commissionId, { actor, reason });
+      return result.released ? { commission: result.row } : { error: "not_pending" };
+    }
+    if (action === "reverse") {
+      if (row.status === "reversed") return { error: "already_reversed" };
+      const result = reverseCommissionByIdSync(db, commissionId, { actor, reason });
+      return result.reversed ? { commission: result.row } : { error: "already_reversed" };
+    }
+    return { error: "bad_action" };
+  });
+}
+
+/**
+ * Admin list of referred accounts (spec "Admin referral list"): every user with a
+ * referrer, the referrer, signup date, paid orders and commission per status.
+ * Filterable by referrer and by an email/code search over either side.
+ */
+export async function listReferrals({ q = "", affiliateUserId = "", limit = 50, offset = 0 } = {}) {
+  const db = await getAdapter();
+  const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  db.transaction(() => releaseAllDueSync(db));
+
+  const where = [`u.referredByUserId IS NOT NULL`];
+  const params = [];
+  if (affiliateUserId) {
+    where.push(`u.referredByUserId = ?`);
+    params.push(affiliateUserId);
+  }
+  const term = typeof q === "string" ? q.trim().toLowerCase() : "";
+  if (term) {
+    // `%` and `_` typed in the search are literal characters, not wildcards.
+    const like = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    where.push(
+      `(LOWER(u.email) LIKE ? ESCAPE '\\' OR LOWER(ref.email) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(af.code, '')) LIKE ? ESCAPE '\\')`
+    );
+    params.push(like, like, like);
+  }
+  const whereSql = `WHERE ${where.join(" AND ")}`;
+  const from = `FROM users u
+       LEFT JOIN users ref ON ref.id = u.referredByUserId
+       LEFT JOIN affiliates af ON af.userId = u.referredByUserId`;
+
+  const total = Number(db.get(`SELECT COUNT(*) AS n ${from} ${whereSql}`, params)?.n ?? 0);
+  const rows = db.all(
+    `SELECT u.id AS userId, u.email, u.status AS userStatus, u.createdAt AS signedUpAt, u.referredAt,
+            u.referredByUserId AS affiliateUserId, ref.email AS affiliateEmail, af.code AS affiliateCode,
+            (SELECT COUNT(*) FROM orders o WHERE o.userId = u.id AND o.status = 'paid') AS paidOrders
+       ${from} ${whereSql}
+      ORDER BY COALESCE(u.referredAt, u.createdAt) DESC, u.rowid DESC LIMIT ? OFFSET ?`,
+    [...params, take, skip]
+  );
+
+  // Commission per referred account, one grouped query for the page. Only what
+  // the CURRENT referrer earned from the account is reported: after a referrer
+  // change, the earlier referrer's amounts are not this CTV's.
+  const sums = new Map();
+  if (rows.length) {
+    const placeholders = rows.map(() => "?").join(", ");
+    const referrerOf = new Map(rows.map((row) => [row.userId, row.affiliateUserId]));
+    for (const s of db.all(
+      `SELECT referredUserId, affiliateUserId, currency, status, COUNT(*) AS n, COALESCE(SUM(amount), 0) AS amount
+         FROM affiliateCommissions
+        WHERE referredUserId IN (${placeholders})
+        GROUP BY referredUserId, affiliateUserId, currency, status`,
+      rows.map((row) => row.userId)
+    )) {
+      if (s.affiliateUserId !== referrerOf.get(s.referredUserId)) continue;
+      const key = s.referredUserId;
+      if (!sums.has(key)) sums.set(key, []);
+      sums.get(key).push({
+        affiliateUserId: s.affiliateUserId,
+        currency: s.currency,
+        status: s.status,
+        count: Number(s.n),
+        amount: Number(s.amount),
+      });
+    }
+  }
+  return {
+    total,
+    rows: rows.map((row) => ({ ...row, paidOrders: Number(row.paidOrders), commissions: sums.get(row.userId) ?? [] })),
+  };
 }
 
 /** Every voucher, filterable by status (admin list). */

@@ -37,6 +37,7 @@ const settingsRepo = await import("../src/lib/db/repos/settingsRepo.js");
 const userRepo = await import("../src/lib/db/repos/userRepo.js");
 const billingRepo = await import("../src/lib/db/repos/billingRepo.js");
 const giftRepo = await import("../src/lib/db/repos/giftRepo.js");
+const affiliateRepo = await import("../src/lib/db/repos/affiliateRepo.js");
 const reconcile = await import("../src/lib/payments/reconcile.js");
 const { NANO } = await import("../src/shared/utils/money.js");
 
@@ -1256,4 +1257,299 @@ test("spend amounts and admin deltas accept whole numbers only, from any caller"
   }
   const after = db.transaction(() => wallet.adjustWalletSync(db, "aff", { currency: "VND", delta: "-5000", reason: "test adj" }));
   assert.equal(after.VND.available, 300000 - 5000);
+});
+
+// ── Admin commission actions (spec "Admin commission actions") ───────────────
+
+test("admin early release makes a held commission available now, exactly once", () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  const row = commissions("o1")[0];
+  assert.equal(row.status, "pending");
+
+  const first = db.transaction(() =>
+    commission.releaseCommissionNowSync(db, row.id, { actor: "admin:a", now: at(T0 + DAY) })
+  );
+  assert.equal(first.released, true);
+  assert.equal(first.row.status, "available");
+  assert.equal(first.row.releasedAt, at(T0 + DAY));
+  assert.equal(ledger("aff").length, 1);
+  const w = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY)));
+  assert.equal(w.VND.available, 25000, "available before the hold would have ended");
+
+  // A second release, and the later automatic release, change nothing.
+  const again = db.transaction(() => commission.releaseCommissionNowSync(db, row.id, { now: at(T0 + 2 * DAY) }));
+  assert.equal(again.released, false);
+  db.transaction(() => commission.releaseDueSync(db, "aff", at(T0 + 8 * DAY)));
+  assert.equal(ledger("aff").length, 1);
+
+  const audit = db.get(`SELECT * FROM userAuditLog WHERE userId = 'aff' AND action = 'affiliate_commission_released'`);
+  assert.ok(audit, "early release is audited on the affiliate");
+  assert.equal(audit.actor, "admin:a");
+});
+
+test("admin cancel needs a reason and claws back an available commission", () => {
+  enableProgram({ affiliateHoldDays: 0 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  db.transaction(() => wallet.walletSync(db, "aff", at(T0 + MIN)));
+  const row = commissions("o1")[0];
+  assert.equal(row.status, "available");
+
+  assert.throws(
+    () => db.transaction(() => commission.reverseCommissionByIdSync(db, row.id, { reason: "  " })),
+    /reason/i
+  );
+  assert.equal(commissions("o1")[0].status, "available", "a refused cancel changes nothing");
+
+  const res = db.transaction(() =>
+    commission.reverseCommissionByIdSync(db, row.id, { actor: "admin:a", reason: "fraud", now: at(T0 + DAY) })
+  );
+  assert.equal(res.reversed, true);
+  assert.equal(commissions("o1")[0].status, "reversed");
+  const w = db.transaction(() => wallet.walletSync(db, "aff", at(T0 + DAY)));
+  assert.equal(w.VND.available, 0, "the reversal row cancels the commission row");
+  assert.equal(ledger("aff").filter((l) => l.kind === "reversal").length, 1);
+  const audit = db.get(`SELECT * FROM userAuditLog WHERE userId = 'aff' AND action = 'affiliate_commission_reversed'`);
+  assert.equal(audit.reason, "fraud");
+
+  // Cancelled cannot be released or cancelled again.
+  assert.equal(db.transaction(() => commission.releaseCommissionNowSync(db, row.id)).released, false);
+  assert.equal(
+    db.transaction(() => commission.reverseCommissionByIdSync(db, row.id, { reason: "again" })).reversed,
+    false
+  );
+  assert.equal(ledger("aff").filter((l) => l.kind === "reversal").length, 1);
+});
+
+test("admin actions through the repo report the status they cannot apply to", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  const id = commissions("o1")[0].id;
+
+  assert.deepEqual(await affiliateRepo.actOnCommission("nope", "release"), { error: "not_found" });
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "frobnicate"), { error: "bad_action" });
+  const cancelled = await affiliateRepo.actOnCommission(id, "reverse", { reason: "test" });
+  assert.equal(cancelled.commission.status, "reversed");
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "release"), { error: "not_pending" });
+  assert.deepEqual(await affiliateRepo.actOnCommission(id, "reverse", { reason: "x" }), { error: "already_reversed" });
+});
+
+test("admin referral list shows each referred account with its referrer and commission", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff", { code: "AFFONE" });
+  makeAffiliate("aff2", { code: "AFFTWO" });
+  plan();
+  user("buyer", { referredByUserId: "aff", email: "buyer@x.com" });
+  user("lurker", { referredByUserId: "aff2", email: "lurker@x.com" });
+  user("organic", { email: "organic@x.com" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+
+  const all = await affiliateRepo.listReferrals({});
+  assert.equal(all.total, 2, "only accounts with a referrer are listed");
+  const buyer = all.rows.find((r) => r.userId === "buyer");
+  assert.equal(buyer.affiliateUserId, "aff");
+  assert.equal(buyer.affiliateCode, "AFFONE");
+  assert.equal(buyer.paidOrders, 1);
+  assert.deepEqual(
+    buyer.commissions.map((c) => [c.currency, c.status, c.amount]),
+    [["VND", "pending", 25000]]
+  );
+  assert.deepEqual(all.rows.find((r) => r.userId === "lurker").commissions, []);
+
+  const filtered = await affiliateRepo.listReferrals({ affiliateUserId: "aff2" });
+  assert.deepEqual(filtered.rows.map((r) => r.userId), ["lurker"]);
+  const searched = await affiliateRepo.listReferrals({ q: "afftwo" });
+  assert.deepEqual(searched.rows.map((r) => r.userId), ["lurker"], "search matches the referrer's code");
+});
+
+test("early release refuses a deleted affiliate and moves availableAt to now", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff");
+  makeAffiliate("gone");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  user("buyer2", { referredByUserId: "gone" });
+  orderRow({ id: "o1", userId: "buyer" });
+  orderRow({ id: "o2", userId: "buyer2" });
+  approve("o1", T0);
+  approve("o2", T0);
+
+  const kept = commissions("o1")[0];
+  db.transaction(() => commission.releaseCommissionNowSync(db, kept.id, { now: at(T0 + DAY) }));
+  assert.equal(commissions("o1")[0].availableAt, at(T0 + DAY), "available from the release, not the old hold end");
+
+  db.run(`DELETE FROM users WHERE id = 'gone'`);
+  const orphan = commissions("o2")[0];
+  assert.deepEqual(await affiliateRepo.actOnCommission(orphan.id, "release"), { error: "affiliate_deleted" });
+  assert.equal(db.transaction(() => commission.releaseCommissionNowSync(db, orphan.id)).released, false);
+  assert.equal(commissions("o2")[0].status, "pending");
+  assert.equal(ledger("gone").length, 0, "no wallet entry for a deleted account");
+});
+
+test("referral list counts only the current referrer's commission and escapes LIKE", async () => {
+  enableProgram({ affiliateHoldDays: 7 });
+  makeAffiliate("aff", { code: "AFFONE" });
+  makeAffiliate("aff2", { code: "AFFTWO" });
+  plan();
+  user("buyer", { referredByUserId: "aff", email: "buyer_1@x.com" });
+  user("other", { referredByUserId: "aff", email: "buyerx1@x.com" });
+  orderRow({ id: "o1", userId: "buyer" });
+  approve("o1", T0);
+  await affiliateRepo.setUserReferrer("buyer", "aff2", { actor: "admin", reason: "moved" });
+
+  const row = (await affiliateRepo.listReferrals({ affiliateUserId: "aff2" })).rows[0];
+  assert.equal(row.userId, "buyer");
+  assert.deepEqual(row.commissions, [], "aff's commission is not shown under aff2");
+
+  const hit = await affiliateRepo.listReferrals({ q: "buyer_1" });
+  assert.deepEqual(hit.rows.map((r) => r.userId), ["buyer"], "_ is a literal character, not a wildcard");
+});
+
+// ── Invite-only access (change affiliate-landing-admin) ──────────────────────
+
+test("access mode is validated and defaults to open", () => {
+  assert.equal(settingsLib.AFFILIATE_SETTING_DEFAULTS.affiliateAccess, "open");
+  assert.deepEqual(settingsLib.validateAffiliateSettings({ affiliateAccess: "invite" }).value, { affiliateAccess: "invite" });
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateAccess: "everyone" }).error);
+  assert.ok(settingsLib.validateAffiliateSettings({ affiliateAccess: true }).error);
+});
+
+test("invite-only: an uninvited link stops recording new users, an invited one keeps working", () => {
+  enableProgram();
+  makeAffiliate("plain", { code: "PLAIN1" });
+  makeAffiliate("vip", { code: "VIPVIP" });
+  db.run(`UPDATE affiliates SET invitedAt = ? WHERE userId = 'vip'`, [at(T0)]);
+
+  assert.equal(affiliate.resolveReferrerSync(db, "PLAIN1"), "plain", "open mode: every link works");
+  saveSettings({ affiliateAccess: "invite" });
+  assert.equal(affiliate.resolveReferrerSync(db, "PLAIN1"), null, "uninvited link refused");
+  assert.equal(affiliate.resolveReferrerSync(db, "VIPVIP"), "vip", "invited link works");
+  assert.deepEqual(
+    affiliate.resolveFirstReferralSync(db, ["PLAIN1", "VIPVIP"]),
+    { code: "VIPVIP", referrerId: "vip" },
+    "the register page falls through to the next valid code"
+  );
+
+  db.run(`UPDATE affiliates SET status = 'blocked' WHERE userId = 'vip'`);
+  assert.equal(affiliate.resolveReferrerSync(db, "VIPVIP"), null, "blocking still wins");
+});
+
+test("invite-only: an uninvited affiliate keeps earning from users it already referred", () => {
+  enableProgram({ affiliateDefaultMaxOrders: 0 });
+  makeAffiliate("aff");
+  plan();
+  user("buyer", { referredByUserId: "aff" });
+  saveSettings({ affiliateAccess: "invite" });
+
+  orderRow({ id: "o1" });
+  approve("o1");
+  const rows = commissions("o1");
+  assert.equal(rows.length, 1, "existing referral still accrues");
+  assert.equal(rows[0].affiliateUserId, "aff");
+});
+
+test("invite-only: the customer area hides the page unless invited or something to keep", () => {
+  enableProgram();
+  user("newbie");
+  makeAffiliate("referrer");
+  user("child", { referredByUserId: "referrer" });
+  makeAffiliate("vip");
+  db.run(`UPDATE affiliates SET invitedAt = ? WHERE userId = 'vip'`, [at(T0)]);
+
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "newbie"), true, "open mode: everyone");
+  saveSettings({ affiliateAccess: "invite" });
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "newbie"), false, "uninvited, nothing to keep");
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "referrer"), true, "has referred users");
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "vip"), true, "invited");
+  saveSettings({ affiliateEnabled: false });
+  assert.equal(affiliate.affiliateAreaAvailableSync(db, "vip"), false, "program off, no history");
+});
+
+test("invite-only: opening the page creates no code for an uninvited account", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  user("newbie");
+  const overview = await affiliateRepo.getAffiliateOverview("newbie");
+  assert.equal(overview.canRefer, false);
+  assert.equal(overview.code, null);
+  assert.equal(overview.available, false);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM affiliates WHERE userId = 'newbie'`).n, 0, "no row created");
+
+  saveSettings({ affiliateAccess: "open" });
+  const open = await affiliateRepo.getAffiliateOverview("newbie");
+  assert.equal(open.canRefer, true);
+  assert.ok(open.code, "open mode creates the code on first visit");
+});
+
+test("invite-only: an uninvited affiliate can still spend its wallet", () => {
+  fundedAffiliate();
+  saveSettings({ affiliateAccess: "invite" });
+  const voucher = db.transaction(() => vouchers.createVoucherSync(db, "aff", { currency: "VND", amount: 100000 }, { now: at(T0 + DAY) }));
+  assert.equal(voucher.status, "active");
+});
+
+test("admin invite by email or id creates the code once and is audited", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  user("cand", { email: "Cand@Test.Local" });
+
+  assert.deepEqual(await affiliateRepo.inviteAffiliate("nobody@test.local"), { error: "user_not_found" });
+
+  const first = await affiliateRepo.inviteAffiliate("cand@test.local", { actor: "admin:t", reason: "VIP" });
+  assert.equal(first.alreadyInvited, false);
+  assert.equal(first.user.id, "cand");
+  assert.ok(first.affiliate.code);
+  assert.ok(first.affiliate.invitedAt);
+  assert.equal(affiliate.resolveReferrerSync(db, first.affiliate.code), "cand");
+
+  const again = await affiliateRepo.inviteAffiliate("cand");
+  assert.equal(again.alreadyInvited, true);
+  assert.equal(again.affiliate.code, first.affiliate.code, "same code");
+  const audits = db.all(`SELECT action, actor FROM userAuditLog WHERE userId = 'cand' AND action = 'affiliate_invited'`);
+  assert.deepEqual(audits, [{ action: "affiliate_invited", actor: "admin:t" }], "audited once");
+});
+
+test("admin can withdraw and restore an invitation; the list filters by it", async () => {
+  enableProgram({ affiliateAccess: "invite" });
+  makeAffiliate("a1", { code: "AAAAA1" });
+  makeAffiliate("a2", { code: "AAAAA2" });
+  await affiliateRepo.inviteAffiliate("a1");
+  const invitedAt = db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt;
+
+  const invitedOnly = await affiliateRepo.listAffiliates({ invited: "yes" });
+  assert.deepEqual(invitedOnly.rows.map((r) => r.userId), ["a1"]);
+  const notInvited = await affiliateRepo.listAffiliates({ invited: "no" });
+  assert.deepEqual(notInvited.rows.map((r) => r.userId), ["a2"]);
+
+  await affiliateRepo.updateAffiliate("a1", { invited: true });
+  assert.equal(db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt, invitedAt, "re-inviting keeps the date");
+
+  await affiliateRepo.updateAffiliate("a1", { invited: false });
+  assert.equal(db.get(`SELECT invitedAt FROM affiliates WHERE userId = 'a1'`).invitedAt, null);
+  assert.equal(affiliate.resolveReferrerSync(db, "AAAAA1"), null, "withdrawn invitation stops the link");
+
+  await affiliateRepo.updateAffiliate("a2", { invited: true });
+  assert.equal(affiliate.resolveReferrerSync(db, "AAAAA2"), "a2");
+});
+
+test("invite-only: a buyer referred earlier keeps the buyer bonus", async () => {
+  enableProgram({ affiliateBuyerBonusBp: 1000, affiliateBuyerBonusMaxOrders: 2 });
+  makeAffiliate("aff");
+  user("buyer", { referredByUserId: "aff" });
+  saveSettings({ affiliateAccess: "invite" });
+  const { buyerBonusTermsSync } = await import("../src/lib/affiliate/buyerBonus.js");
+  const terms = buyerBonusTermsSync(db, "buyer");
+  assert.equal(terms?.bp, 1000, "the earlier referral still gets its bonus");
+  assert.equal(affiliate.resolveReferrerSync(db, db.get(`SELECT code FROM affiliates WHERE userId = 'aff'`).code), null, "but the link records nobody new");
 });

@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import PropTypes from "prop-types";
 import {
+  combinePopup,
   giftPageHref,
   isPopupDismissed,
+  normalizePromoCode,
   promoTargetHref,
   readPopupDismissal,
-  readPromoPopup,
   savePendingGiftCode,
   savePopupDismissal,
 } from "@/shared/utils/promoPopup.js";
@@ -42,7 +43,9 @@ async function copyText(text) {
  */
 export function PromoPopupDialog({ popup, signedIn = false, onClose, onCopy, onFollow, copied = false, copyFailed = false, preview = false }) {
   const titleId = preview ? undefined : "promo-popup-title";
-  const href = promoTargetHref(popup.code, { signedIn });
+  // With no promo code, a referral's welcome gift is the code to carry along.
+  const carriedCode = popup.code || normalizePromoCode(popup.referral?.giftCode);
+  const href = promoTargetHref(carriedCode, { signedIn, refCode: popup.referral?.code });
   const loginHref = `/login?next=${encodeURIComponent(giftPageHref(popup.code))}`;
 
   return (
@@ -60,6 +63,22 @@ export function PromoPopupDialog({ popup, signedIn = false, onClose, onCopy, onF
           <h2 id={titleId} className="pr-8 text-xl font-semibold tracking-tight">{popup.title}</h2>
         )}
         {popup.body && <p className="whitespace-pre-line text-sm text-text-muted">{popup.body}</p>}
+        {popup.referral && popup.referral.benefits.length > 0 && (
+          <div className="flex flex-col gap-2 border border-brand-500/40 bg-brand-500/5 px-4 py-3">
+            <span className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-brand-700 dark:text-brand-400">
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">group_add</span>
+              Quyền lợi khi đăng ký qua lời mời
+            </span>
+            <ul className="flex flex-col gap-1.5 text-sm text-text-main">
+              {popup.referral.benefits.map((line) => (
+                <li key={line} className="flex gap-2">
+                  <span aria-hidden="true" className="text-brand-700 dark:text-brand-400">✓</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {popup.code && (
           <div className="flex flex-col gap-1.5">
             <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Mã ưu đãi</span>
@@ -125,11 +144,14 @@ PromoPopupDialog.propTypes = {
  * `hideOn` lists path prefixes where it must not open (the gift page itself:
  * the code is already prefilled there).
  */
-export default function PromoPopup({ copy, signedIn = false, hideOn = [], eligibilityUrl = null }) {
-  const popup = readPromoPopup(copy);
+export default function PromoPopup({ copy, signedIn = false, hideOn = [], eligibilityUrl = null, referral = null }) {
+  // The promotional popup and, for a visitor who came through a referral link,
+  // the referral benefits — merged into one dialog (spec affiliate-program
+  // "Referral popup"). Null when there is nothing to show.
+  const popup = combinePopup(copy, referral) || { enabled: false, version: "", delaySec: 0, repeatMinutes: 0 };
   const pathname = usePathname() || "";
   const hidden = hideOn.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-  const live = !hidden && popup.enabled && Boolean(popup.title || popup.body || popup.code);
+  const live = !hidden && popup.enabled && Boolean(popup.title || popup.body || popup.code || popup.referral);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -209,6 +231,7 @@ export default function PromoPopup({ copy, signedIn = false, hideOn = [], eligib
   // Acting on the offer counts as closing it, for the same repeat window.
   const onFollow = () => {
     if (popup.code) savePendingGiftCode(popup.code);
+    else if (popup.referral?.giftCode) savePendingGiftCode(popup.referral.giftCode);
     savePopupDismissal(version);
   };
 
@@ -253,4 +276,5 @@ PromoPopup.propTypes = {
   signedIn: PropTypes.bool,
   hideOn: PropTypes.arrayOf(PropTypes.string),
   eligibilityUrl: PropTypes.string,
+  referral: PropTypes.object,
 };

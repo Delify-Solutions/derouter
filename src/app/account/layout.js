@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccountSession } from "@/lib/auth/userSession";
-import { getAffiliateSettings, hasAffiliateHistory } from "@/lib/db/repos/affiliateRepo.js";
+import { isAffiliateAreaAvailable } from "@/lib/db/repos/affiliateRepo.js";
 import AccountShell from "./components/AccountShell";
 import PromoPopupSlot from "@/app/landing/components/PromoPopupSlot";
 
@@ -16,16 +16,13 @@ export default async function AccountLayout({ children }) {
 
   const { user } = session;
 
-  // The "Giới thiệu" item appears when the program is enabled or the account
-  // already has affiliate wallet history (spec "Customer affiliate page"). Both
-  // checks are cheap and must not take the whole account area down if they fail.
+  // The "Giới thiệu" item appears when the program is enabled and the account may
+  // refer under the access mode, or when the account has something to keep
+  // (wallet history, users it already referred). The check must not take the
+  // whole account area down if it fails.
   let affiliateAvailable = false;
   try {
-    const [settings, history] = await Promise.all([
-      getAffiliateSettings(),
-      hasAffiliateHistory(user.id),
-    ]);
-    affiliateAvailable = settings.affiliateEnabled === true || history;
+    affiliateAvailable = await isAffiliateAreaAvailable(user.id);
   } catch {
     affiliateAvailable = false;
   }

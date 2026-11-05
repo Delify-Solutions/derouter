@@ -11,6 +11,7 @@ import { parseCountInput, parseSignedAmountInput, parseUsdInput, parseVndInput }
 const TABS = [
   { value: "settings", label: "Cài đặt" },
   { value: "affiliates", label: "CTV" },
+  { value: "referrals", label: "Người được giới thiệu" },
   { value: "commissions", label: "Hoa hồng" },
   { value: "vouchers", label: "Voucher" },
 ];
@@ -20,7 +21,7 @@ const PAGE_SIZE = 25;
 const COMMISSION_STATUS = {
   pending: { label: "Đang giữ", tone: "warning" },
   available: { label: "Khả dụng", tone: "success" },
-  reversed: { label: "Đã hoàn", tone: "danger" },
+  reversed: { label: "Đã hủy", tone: "danger" },
 };
 
 // `Badge` calls its red "error"; the tone names here stay semantic.
@@ -82,6 +83,8 @@ function fmtDate(value) {
 export default function AffiliatesPageClient({ initialTab = "", initialQuery = "" }) {
   const [tab, setTab] = useState(TABS.some((entry) => entry.value === initialTab) ? initialTab : "settings");
   const [notice, setNotice] = useState(null);
+  // "Xem người được giới thiệu" on a CTV row opens the referrals tab filtered to it.
+  const [referralAffiliate, setReferralAffiliate] = useState(null);
 
   return (
     <div className="flex flex-col gap-8 max-w-7xl">
@@ -91,7 +94,7 @@ export default function AffiliatesPageClient({ initialTab = "", initialQuery = "
           <h1 className="text-2xl font-semibold text-text-main">Affiliate</h1>
           <p className="max-w-2xl text-sm text-text-muted">
             Chương trình giới thiệu: mỗi tài khoản có một đường dẫn riêng, hoa hồng tính trên
-            các đơn đã thanh toán của người được giới thiệu và được giữ một thời gian trước khi rút.
+            các đơn đã thanh toán của người được giới thiệu, được giữ một thời gian rồi mới dùng được (đổi credit hoặc tạo voucher).
           </p>
         </div>
       </header>
@@ -130,8 +133,24 @@ export default function AffiliatesPageClient({ initialTab = "", initialQuery = "
       </div>
 
       {tab === "settings" && <SettingsTab onNotice={setNotice} />}
-      {tab === "affiliates" && <AffiliatesTab initialQuery={initialQuery} onNotice={setNotice} />}
-      {tab === "commissions" && <CommissionsTab />}
+      {tab === "affiliates" && (
+        <AffiliatesTab
+          initialQuery={initialQuery}
+          onNotice={setNotice}
+          onShowReferrals={(row) => {
+            setReferralAffiliate({ userId: row.userId, email: row.email });
+            setTab("referrals");
+          }}
+        />
+      )}
+      {tab === "referrals" && (
+        <ReferralsTab
+          affiliate={referralAffiliate}
+          onClearAffiliate={() => setReferralAffiliate(null)}
+          onNotice={setNotice}
+        />
+      )}
+      {tab === "commissions" && <CommissionsTab onNotice={setNotice} />}
       {tab === "vouchers" && <VouchersTab />}
     </div>
   );
@@ -147,6 +166,7 @@ function SettingsTab({ onNotice }) {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
     affiliateEnabled: false,
+    affiliateAccess: "open",
     affiliateDefaultRatePercent: "",
     affiliateDefaultMaxOrders: "",
     affiliateHoldDays: "",
@@ -178,6 +198,7 @@ function SettingsTab({ onNotice }) {
       setPlans(Array.isArray(planBody.plans) ? planBody.plans : []);
       setForm({
         affiliateEnabled: settings.affiliateEnabled === true,
+        affiliateAccess: settings.affiliateAccess === "invite" ? "invite" : "open",
         affiliateDefaultRatePercent: bpToPercentText(settings.affiliateDefaultRateBp),
         affiliateDefaultMaxOrders: String(settings.affiliateDefaultMaxOrders ?? ""),
         affiliateHoldDays: String(settings.affiliateHoldDays ?? ""),
@@ -240,6 +261,7 @@ function SettingsTab({ onNotice }) {
 
       const payload = {
         affiliateEnabled: form.affiliateEnabled,
+        affiliateAccess: form.affiliateAccess,
         affiliateDefaultRateBp: rateBp,
         affiliateDefaultMaxOrders: maxOrders,
         affiliateHoldDays: holdDays,
@@ -291,6 +313,19 @@ function SettingsTab({ onNotice }) {
             onChange={(value) => setForm((f) => ({ ...f, affiliateEnabled: value }))}
           />
         </div>
+
+        <Select
+          label="Ai được làm CTV"
+          value={form.affiliateAccess}
+          onChange={(e) => setForm((f) => ({ ...f, affiliateAccess: e.target.value }))}
+          options={[
+            { value: "open", label: "Mở cho tất cả khách hàng" },
+            { value: "invite", label: "Chỉ CTV được mời" },
+          ]}
+          hint={form.affiliateAccess === "invite"
+            ? "Chỉ tài khoản admin thêm ở tab CTV mới có đường dẫn. Người khác: đường dẫn ngừng ghi nhận người mới, số dư và người đã giới thiệu vẫn giữ."
+            : "Mọi khách hàng mở mục Giới thiệu đều nhận được đường dẫn riêng."}
+        />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
@@ -427,15 +462,17 @@ function SettingsTab({ onNotice }) {
 
 // ── Affiliates ────────────────────────────────────────────────────────────
 
-function AffiliatesTab({ onNotice, initialQuery = "" }) {
+function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState(initialQuery);
   const [status, setStatus] = useState("");
+  const [invited, setInvited] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
+  const [inviting, setInviting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -447,6 +484,7 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
       });
       if (q.trim()) params.set("q", q.trim());
       if (status) params.set("status", status);
+      if (invited) params.set("invited", invited);
       const res = await fetch(`/api/affiliates?${params.toString()}`, { cache: "no-store" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Không tải được danh sách CTV");
@@ -458,7 +496,7 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
     } finally {
       setLoading(false);
     }
-  }, [page, q, status]);
+  }, [page, q, status, invited]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -478,7 +516,18 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
             { value: "blocked", label: "Đã khóa" },
           ]}
         />
+        <Select
+          label="Lời mời"
+          value={invited}
+          onChange={(e) => { setInvited(e.target.value); setPage(1); }}
+          options={[
+            { value: "", label: "Tất cả" },
+            { value: "yes", label: "Được mời" },
+            { value: "no", label: "Chưa mời" },
+          ]}
+        />
         <Button variant="secondary" onClick={load} icon="refresh">Tải lại</Button>
+        <Button onClick={() => setInviting(true)} icon="person_add">Thêm CTV</Button>
       </div>
 
       {error ? (
@@ -491,7 +540,7 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
         </p>
       ) : (
         <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[1040px] border-collapse text-left">
+          <table className="w-full min-w-[1180px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2">
                 {["CTV", "Mã", "Trạng thái", "Lượt mở", "Đăng ký", "Đã mua", "Tỷ lệ / N", "Số dư", "Tổng nhận", ""].map((label) => (
@@ -513,9 +562,12 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.code}</td>
                   <td className="px-4 py-2.5">
-                    <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
-                      {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
+                        {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
+                      </Badge>
+                      {row.invitedAt ? <Badge variant="info">Được mời</Badge> : null}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.clickCount}</td>
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.signups}</td>
@@ -537,8 +589,11 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
                   <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">
                     {money("VND", row.earned.VND)} · {money("USD", row.earned.USD)}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(row)}>Quản lý</Button>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => onShowReferrals(row)}>Đã giới thiệu</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setEditing(row)}>Quản lý</Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -557,6 +612,17 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
         </div>
       )}
 
+      {inviting && (
+        <InviteAffiliateModal
+          onClose={() => setInviting(false)}
+          onDone={(text) => {
+            setInviting(false);
+            onNotice({ tone: "ok", text });
+            load();
+          }}
+        />
+      )}
+
       {editing && (
         <AffiliateModal
           row={editing}
@@ -573,6 +639,71 @@ function AffiliatesTab({ onNotice, initialQuery = "" }) {
   );
 }
 
+function InviteAffiliateModal({ onClose, onDone }) {
+  const [who, setWho] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (!who.trim()) {
+      setError("Nhập email hoặc ID tài khoản.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: who.trim(), reason: "Thêm CTV được mời từ trang Affiliate" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Không thêm được CTV");
+        return;
+      }
+      const label = body.affiliate?.email || who.trim();
+      onDone(body.alreadyInvited
+        ? `${label} đã là CTV được mời (mã ${body.affiliate?.code}).`
+        : `Đã thêm ${label} làm CTV được mời (mã ${body.affiliate?.code}).`);
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Thêm CTV được mời"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Hủy</Button>
+          <Button onClick={submit} loading={busy}>Thêm CTV</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-text-muted">
+          Tài khoản được thêm sẽ có mã giới thiệu ngay và được đánh dấu là CTV được mời. Khi chương trình
+          chỉ mở cho CTV được mời, chỉ những tài khoản này mới ghi nhận người đăng ký mới.
+        </p>
+        <Input
+          label="Email hoặc ID tài khoản"
+          value={who}
+          maxLength={320}
+          onChange={(e) => setWho(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          autoFocus
+        />
+        {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
 function AffiliateModal({ row, onClose, onSaved, onError }) {
   const [ratePercent, setRatePercent] = useState(row.rateBp == null ? "" : bpToPercentText(row.rateBp));
   const [maxOrders, setMaxOrders] = useState(row.maxOrders == null ? "" : String(row.maxOrders));
@@ -580,6 +711,7 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
   const [buyerMaxOrders, setBuyerMaxOrders] = useState(row.buyerBonusMaxOrders == null ? "" : String(row.buyerBonusMaxOrders));
   const [giftCodeId, setGiftCodeId] = useState(row.giftCodeId || "");
   const [status, setStatus] = useState(row.status || "active");
+  const [invitedChoice, setInvitedChoice] = useState(row.invitedAt ? "yes" : "no");
   const [adminNote, setAdminNote] = useState(row.adminNote || "");
   const [codes, setCodes] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -633,6 +765,7 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
     if (buyerMaxValue !== (row.buyerBonusMaxOrders ?? null)) patch.buyerBonusMaxOrders = buyerMaxValue;
     if ((giftCodeId || null) !== (row.giftCodeId || null)) patch.giftCodeId = giftCodeId || null;
     if (status !== (row.status || "active")) patch.status = status;
+    if ((invitedChoice === "yes") !== Boolean(row.invitedAt)) patch.invited = invitedChoice === "yes";
     if ((adminNote.trim() || null) !== (row.adminNote || null)) patch.adminNote = adminNote;
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -762,6 +895,16 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
             { value: "blocked", label: "Khóa" },
           ]}
         />
+        <Select
+          label="CTV được mời"
+          value={invitedChoice}
+          onChange={(e) => setInvitedChoice(e.target.value)}
+          options={[
+            { value: "yes", label: "Được mời" },
+            { value: "no", label: "Chưa mời" },
+          ]}
+          hint="Khi chương trình chỉ mở cho CTV được mời, chỉ CTV được mời mới ghi nhận người đăng ký mới."
+        />
         <Input label="Ghi chú nội bộ" value={adminNote} onChange={(e) => setAdminNote(e.target.value)} />
 
         <div className="border-t border-border pt-4">
@@ -807,7 +950,8 @@ function AffiliateModal({ row, onClose, onSaved, onError }) {
 
 // ── Commissions ───────────────────────────────────────────────────────────
 
-function CommissionsTab() {
+function CommissionsTab({ onNotice }) {
+  const [acting, setActing] = useState(null);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -854,7 +998,7 @@ function CommissionsTab() {
             { value: "", label: "Tất cả" },
             { value: "pending", label: "Đang giữ" },
             { value: "available", label: "Khả dụng" },
-            { value: "reversed", label: "Đã hoàn" },
+            { value: "reversed", label: "Đã hủy" },
           ]}
         />
         <Input
@@ -879,7 +1023,7 @@ function CommissionsTab() {
           <table className="w-full min-w-[900px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2">
-                {["Ngày", "CTV", "Người mua", "Đơn", "Tỷ lệ", "Hoa hồng", "Trạng thái", "Khả dụng từ"].map((label) => (
+                {["Ngày", "CTV", "Người mua", "Đơn", "Tỷ lệ", "Hoa hồng", "Trạng thái", "Khả dụng từ", ""].map((label) => (
                   <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
                 ))}
               </tr>
@@ -897,6 +1041,16 @@ function CommissionsTab() {
                     <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></td>
                     <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.availableAt)}</td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      {row.status !== "reversed" && (
+                        <div className="flex justify-end gap-2">
+                          {row.status === "pending" && (
+                            <Button size="sm" variant="secondary" onClick={() => setActing({ row, action: "release" })}>Duyệt ngay</Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => setActing({ row, action: "reverse" })}>Hủy</Button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -914,7 +1068,320 @@ function CommissionsTab() {
           </div>
         </div>
       )}
+      {acting && (
+        <CommissionActionModal
+          row={acting.row}
+          action={acting.action}
+          onClose={() => setActing(null)}
+          onDone={(text) => {
+            setActing(null);
+            onNotice({ tone: "ok", text });
+            load();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * Confirm one commission action. Early release needs no reason (it only moves the
+ * hold date); a cancel does, and says what happens to money already available.
+ */
+function CommissionActionModal({ row, action, onClose, onDone }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const isReverse = action === "reverse";
+
+  const submit = async () => {
+    setError("");
+    const typed = reason.trim();
+    if ((isReverse || typed) && (typed.length < 3 || typed.length > 500)) {
+      setError(isReverse ? "Cần ghi lý do (3–500 ký tự) khi hủy hoa hồng" : "Ghi chú phải có từ 3 đến 500 ký tự");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/affiliates/commissions/${encodeURIComponent(row.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason: reason.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Không thực hiện được");
+      onDone(isReverse ? "Đã hủy khoản hoa hồng" : "Đã duyệt khoản hoa hồng, CTV dùng được ngay");
+    } catch (e) {
+      setError(e.message || "Không thực hiện được");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={isReverse ? "Hủy hoa hồng" : "Duyệt hoa hồng ngay"}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Đóng</Button>
+          <Button variant={isReverse ? "danger" : "primary"} onClick={submit} loading={busy}>
+            {isReverse ? "Hủy hoa hồng" : "Duyệt ngay"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-text-muted">CTV</dt>
+          <dd className="font-mono text-[12px] text-text-main">{row.affiliateEmail || row.affiliateUserId}</dd>
+          <dt className="text-text-muted">Người mua</dt>
+          <dd className="font-mono text-[12px] text-text-main">{row.buyerEmail || "—"}</dd>
+          <dt className="text-text-muted">Hoa hồng</dt>
+          <dd className="font-mono text-[12px] text-text-main">{money(row.currency, row.amount)}</dd>
+        </dl>
+        <p className="text-xs text-text-muted">
+          {isReverse
+            ? row.status === "available"
+              ? "Khoản này đã vào số dư của CTV: hủy sẽ trừ lại đúng số tiền này (số dư có thể âm nếu CTV đã dùng)."
+              : "Khoản này đang giữ: hủy thì CTV không bao giờ nhận được nó."
+            : `Bỏ thời gian giữ (đến ${fmtDate(row.availableAt)}): khoản này vào số dư của CTV ngay.`}
+        </p>
+        <Input
+          label={isReverse ? "Lý do (bắt buộc)" : "Ghi chú (không bắt buộc)"}
+          value={reason}
+          maxLength={500}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        {error && (
+          <p role="alert" className="flex items-center gap-1 text-[11px] text-danger">
+            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
+            {error}
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── Referrals ─────────────────────────────────────────────────────────────
+
+const USER_STATUS_LABEL = { suspended: "đã khóa", unverified: "chưa xác minh email" };
+
+/** Sum of the non-cancelled commission per currency, split held / available. */
+function referralEarnings(commissions = []) {
+  const out = { VND: { pending: 0, available: 0 }, USD: { pending: 0, available: 0 } };
+  for (const c of commissions) {
+    if (!out[c.currency] || (c.status !== "pending" && c.status !== "available")) continue;
+    out[c.currency][c.status] += Number(c.amount) || 0;
+  }
+  return out;
+}
+
+function ReferralsTab({ affiliate, onClearAffiliate, onNotice }) {
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [detaching, setDetaching] = useState(null);
+
+  const affiliateUserId = affiliate?.userId || "";
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String((page - 1) * PAGE_SIZE),
+      });
+      if (q.trim()) params.set("q", q.trim());
+      if (affiliateUserId) params.set("affiliateUserId", affiliateUserId);
+      const res = await fetch(`/api/affiliates/referrals?${params.toString()}`, { cache: "no-store" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Không tải được danh sách giới thiệu");
+      setRows(Array.isArray(body.referrals) ? body.referrals : []);
+      setTotal(Number(body.total) || 0);
+    } catch (e) {
+      setError(e.message || "Không tải được danh sách giới thiệu");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, q, affiliateUserId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          label="Tìm"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setPage(1); }}
+          placeholder="email hoặc mã CTV"
+        />
+        {affiliate && (
+          <div className="flex h-9 items-center gap-2 border border-border px-3 text-sm">
+            <span className="text-text-muted">CTV:</span>
+            <span className="font-mono text-[12px] text-text-main">{affiliate.email}</span>
+            <button
+              type="button"
+              onClick={() => { onClearAffiliate(); setPage(1); }}
+              className="text-text-muted hover:text-text-main"
+              aria-label="Bỏ lọc theo CTV"
+            >
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>
+            </button>
+          </div>
+        )}
+        <Button variant="secondary" onClick={load} icon="refresh">Tải lại</Button>
+      </div>
+
+      {error ? (
+        <p role="alert" className="text-sm text-danger">{error}</p>
+      ) : loading ? (
+        <CardSkeleton />
+      ) : rows.length === 0 ? (
+        <p className="border border-dashed border-border px-6 py-12 text-center text-sm text-text-muted">
+          Chưa có tài khoản nào đăng ký qua lời giới thiệu.
+        </p>
+      ) : (
+        <div className="overflow-x-auto border border-border bg-surface">
+          <table className="w-full min-w-[860px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-border bg-surface-2">
+                {["Người được giới thiệu", "CTV", "Gắn từ", "Đơn đã trả", "Hoa hồng", ""].map((label) => (
+                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const earned = referralEarnings(row.commissions);
+                return (
+                  <tr key={row.userId} className="border-b border-border last:border-b-0">
+                    <td className="px-4 py-2.5">
+                      <a href={`/dashboard/users/${encodeURIComponent(row.userId)}`} className="font-mono text-[12px] text-text-main underline-offset-2 hover:underline">
+                        {row.email}
+                      </a>
+                      <p className="text-xs text-text-muted">
+                        Đăng ký {fmtDate(row.signedUpAt)}
+                        {row.userStatus && row.userStatus !== "active" ? ` · ${USER_STATUS_LABEL[row.userStatus] || "không hoạt động"}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <p className="font-mono text-[12px] text-text-main">{row.affiliateEmail || row.affiliateUserId}</p>
+                      <p className="font-mono text-[11px] text-text-muted">{row.affiliateCode || "—"}</p>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.referredAt || row.signedUpAt)}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.paidOrders}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap">
+                      <p className="text-text-muted">Đang giữ {money("VND", earned.VND.pending)} · {money("USD", earned.USD.pending)}</p>
+                      <p className="text-text-main">Khả dụng {money("VND", earned.VND.available)} · {money("USD", earned.USD.available)}</p>
+                    </td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      <Button size="sm" variant="ghost" onClick={() => setDetaching(row)}>Gỡ giới thiệu</Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-mono text-[11px] text-text-muted">{total} tài khoản · trang {page}/{totalPages}</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
+            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
+          </div>
+        </div>
+      )}
+
+      {detaching && (
+        <DetachReferrerModal
+          row={detaching}
+          onClose={() => setDetaching(null)}
+          onDone={(text) => {
+            setDetaching(null);
+            onNotice({ tone: "ok", text });
+            load();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * Remove an account's referrer (PATCH /api/users/[id]/referrer). Later orders stop
+ * earning; commissions already recorded stay until cancelled in "Hoa hồng".
+ */
+function DetachReferrerModal({ row, onClose, onDone }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (reason.trim().length < 3) {
+      setError("Cần ghi lý do (3–500 ký tự)");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(row.userId)}/referrer`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referrerUserId: null, reason: reason.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Không gỡ được người giới thiệu");
+      onDone(`Đã gỡ người giới thiệu của ${row.email}`);
+    } catch (e) {
+      setError(e.message || "Không gỡ được người giới thiệu");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Gỡ người giới thiệu"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Đóng</Button>
+          <Button variant="danger" onClick={submit} loading={busy}>Gỡ</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-text-main">
+          <span className="font-mono text-[12px]">{row.email}</span> sẽ không còn thuộc CTV{" "}
+          <span className="font-mono text-[12px]">{row.affiliateEmail || row.affiliateUserId}</span>.
+        </p>
+        <p className="text-xs text-text-muted">
+          Các đơn sau này không tạo hoa hồng cho CTV này nữa. Hoa hồng đã ghi vẫn giữ nguyên: muốn thu hồi thì hủy từng khoản ở tab Hoa hồng.
+        </p>
+        <Input label="Lý do (bắt buộc)" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+        {error && (
+          <p role="alert" className="flex items-center gap-1 text-[11px] text-danger">
+            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
+            {error}
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -41,6 +41,9 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     planName: entry.planName,
     rpm: entry.rpm ?? null,
     tpm: entry.tpm ?? null,
+    // The purchase's own override (null = follows the plan); the admin editor reads it.
+    rpmOverride: entry.rpmOverride ?? null,
+    tpmOverride: entry.tpmOverride ?? null,
     source: entry.source,
     creditTotalNanoUsd: entry.creditTotalNanoUsd,
     creditRemainingNanoUsd: entry.creditRemainingNanoUsd,
@@ -109,7 +112,7 @@ export function getPlanHistorySync(db, userId, { limit = 50 } = {}) {
  * @param {{ page?:number, pageSize?:number, planId?:string|null, kind?:string|null }} filters
  * @returns {{ entries:Array, total:number, page:number, pageSize:number }}
  */
-export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, planId = null, kind = null } = {}) {
+export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, planId = null, kind = null, hideUpstream = false } = {}) {
   const take = Math.min(Math.max(1, Math.floor(Number(pageSize) || 25)), 100);
   const current = Math.max(1, Math.floor(Number(page) || 1));
   const skip = (current - 1) * take;
@@ -129,7 +132,7 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
 
   const rows = db.all(
     `SELECT cl.*, p.name AS planName, p.code AS planCode,
-            uh.model AS usageModel, uh.promptTokens AS usagePrompt,
+            uh.model AS usageModel, uh.meta AS usageMeta, uh.promptTokens AS usagePrompt,
             uh.completionTokens AS usageCompletion
        FROM creditLedger cl
        LEFT JOIN userPlans up ON up.id = cl.userPlanId
@@ -154,6 +157,12 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
   return {
     entries: rows.map((row) => {
       const meta = parseJson(row.meta, null);
+      // The model a charge is shown under is the combo the customer called
+      // (usageHistory.meta.requestedModel); usageHistory.model is the upstream
+      // model, which a customer never sees (spec model-privacy). A row with no
+      // recorded combo shows no model to a customer; the admin keeps both.
+      const requestedModel = parseJson(row.usageMeta, null)?.requestedModel || null;
+      const upstreamModel = row.usageModel ?? null;
       return {
         id: row.id,
         createdAt: row.createdAt,
@@ -163,7 +172,8 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
         // A back-charged row is a `charge` with meta.backfill; the page labels it
         // so support and the customer see the same word.
         backfill: meta?.backfill === true,
-        model: row.usageModel ?? null,
+        model: requestedModel || (hideUpstream ? null : upstreamModel),
+        ...(hideUpstream ? {} : { upstreamModel }),
         promptTokens: row.usagePrompt == null ? null : nano(row.usagePrompt),
         completionTokens: row.usageCompletion == null ? null : nano(row.usageCompletion),
         deltaNanoUsd: nano(row.deltaNanoUsd),
@@ -242,14 +252,27 @@ function formatVnd(value) {
  */
 export function listBindablePlansSync(db, userId, nowIsoArg = null) {
   if (!userId) return [];
-  return db.all(
-    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name, p.rpm AS rpm, p.tpm AS tpm
+  const rows = db.all(
+    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name
        FROM userPlans up
        JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
       ORDER BY p.name ASC, p.id ASC`,
     [userId, nowIsoArg || nowIso()]
   );
+  if (rows.length === 0) return rows;
+  // The rate a key pinned to the plan gets is that of the plan's first purchase in
+  // queue order, with its own override applied (spec plan-templates "Per-purchase
+  // rate override"), the same purchase admission picks first.
+  const firstByPlan = new Map();
+  for (const entry of queueViewSync(db, userId, nowIsoArg || nowIso())) {
+    if (entry.planId && !firstByPlan.has(entry.planId)) firstByPlan.set(entry.planId, entry);
+  }
+  return rows.map((row) => ({
+    ...row,
+    rpm: firstByPlan.get(row.id)?.rpm ?? null,
+    tpm: firstByPlan.get(row.id)?.tpm ?? null,
+  }));
 }
 
 /**

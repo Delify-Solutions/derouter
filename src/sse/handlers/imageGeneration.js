@@ -14,7 +14,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
-import { modelNotFoundMessage } from "@/lib/auth/platformError";
+import { modelNotFoundMessage, markPlatform } from "@/lib/auth/platformError";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
@@ -22,6 +22,8 @@ import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 import { costFromImagesNano } from "@/shared/utils/money";
 import { withErrorLog } from "../utils/withErrorLog.js";
 import { getRequestIp } from "@/lib/auth/clientIp.js";
+import { publicModelContextSync, maskOptionsFor, isCustomerKeySync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
+import { maskResponse } from "@/lib/models/publicModel.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -40,10 +42,12 @@ async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) 
   if (!resolveApiKeyOwner(db, apiKey)) return null;
   const { pricing } = await resolvePrice({ provider, model, requestedModel });
   if (costFromImagesNano(1, pricing) > 0) return null;
-  return errorResponse(
+  // A router decision, not an upstream error: platform-marked so a customer
+  // reads it as written (spec model-privacy).
+  return markPlatform(errorResponse(
     HTTP_STATUS.FORBIDDEN,
     `Image model "${requestedModel || model}" has no per-image price, so it is not available on this key`
-  );
+  ));
 }
 
 /** Record a finished image request so it is priced and charged like any other. */
@@ -67,13 +71,14 @@ function recordImageUsage({ provider, model, connectionId = null, apiKey, reques
  * Handle image generation request
  * @param {Request} request
  */
-async function handleImageGenerationRequest(request) {
+async function handleImageGenerationRequestInner(request, ctx) {
   let body;
   try {
     body = await request.json();
   } catch {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
   }
+  ctx.publicName = typeof body?.model === "string" ? body.model : null;
 
   const url = new URL(request.url);
   const preferredConnectionId = request.headers.get("x-connection-id") || null;
@@ -84,9 +89,9 @@ async function handleImageGenerationRequest(request) {
   const apiKey = extractApiKey(request);
   const settings = await getSettings();
   if (settings.requireApiKey) {
-    if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
+    if (!apiKey) return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key"));
     const valid = await isValidApiKey(apiKey);
-    if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+    if (!valid) return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key"));
   }
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
@@ -212,4 +217,33 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
 }
 
 // Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+/**
+ * Image generation with the response masked for customer keys (spec
+ * model-privacy): errors read "[provider/model] …" and "No credentials for
+ * provider: …" otherwise. Binary image output is never touched.
+ */
+async function handleImageGenerationRequest(request) {
+  const ctx = {};
+  const response = await handleImageGenerationRequestInner(request, ctx);
+  const apiKey = extractApiKey(request);
+  if (!ctx.publicName || !apiKey) return response;
+  // Admin keys skip the lookups below entirely.
+  try {
+    if (!hideUpstreamModelsEnabled(await getSettings()) || !isCustomerKeySync(await getAdapter(), apiKey)) return response;
+  } catch { /* unknown: fall through and mask (fail closed) */ }
+  const members = (await getComboModels(ctx.publicName).catch(() => null)) || [];
+  const info = await getModelInfo(ctx.publicName).catch(() => null);
+  const upstream = info?.provider ? [info.model, `${info.provider}/${info.model}`] : [];
+  const providers = info?.provider ? [info.provider] : [];
+  let masking = null;
+  try {
+    masking = publicModelContextSync(await getAdapter(), await getSettings(), {
+      apiKey, publicName: ctx.publicName, members, upstream, providers,
+    });
+  } catch {
+    masking = maskOptionsFor({ publicName: ctx.publicName, members, upstream, providers });
+  }
+  return masking ? maskResponse(response, masking) : response;
+}
+
 export const handleImageGeneration = withErrorLog(handleImageGenerationRequest, { cloneBody: true });

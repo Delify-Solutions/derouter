@@ -88,6 +88,64 @@ export function readPromoPopup(copy = {}) {
   };
 }
 
+/** Basis points as a Vietnamese percent number: 1000 → "10", 1250 → "12,5". */
+function percentText(bp) {
+  const n = Number(bp) || 0;
+  return (n / 100).toFixed(2).replace(/\.?0+$/, "").replace(".", ",");
+}
+
+/**
+ * What a referred visitor gets, as short Vietnamese lines (spec affiliate-program
+ * "Referral popup"). `referral` = { code, bonus: { bp, maxOrders } | null,
+ * giftCode | null } as resolved on the server.
+ */
+export function referralBenefits(referral) {
+  const lines = [];
+  const bp = Number(referral?.bonus?.bp) || 0;
+  if (bp > 0) {
+    const n = Number(referral.bonus.maxOrders) || 0;
+    const scope = n === 0 ? "mọi đơn đã thanh toán" : `${n} đơn đầu đã thanh toán`;
+    lines.push(`Tặng thêm ${percentText(bp)}% credit cho ${scope}.`);
+    lines.push(`Gói không giới hạn credit: giảm ${percentText(bp)}% ngay khi thanh toán.`);
+  }
+  if (referral?.giftCode) {
+    lines.push(`Mã quà chào mừng ${referral.giftCode}: liên kết Telegram rồi nhập ở trang Mã quà tặng.`);
+  }
+  return lines;
+}
+
+/**
+ * The popup a visitor sees: the promotional popup, the referral announcement, or
+ * both merged into ONE dialog (never two stacked). Null when there is nothing to
+ * show. A referral version differs from the plain promo version, so closing one
+ * does not hide the other.
+ */
+export function combinePopup(copy = {}, referral = null) {
+  const promo = readPromoPopup(copy);
+  const promoLive = promo.enabled && Boolean(promo.title || promo.body || promo.code);
+  const benefits = referral?.code ? referralBenefits(referral) : [];
+  // A referral that gives the visitor nothing (no buyer bonus, no welcome gift)
+  // is not announced: an empty "you are invited" dialog would promise offers
+  // that do not exist, and would re-open a promo the visitor already closed.
+  if (benefits.length === 0) return promoLive ? promo : null;
+  return {
+    enabled: true,
+    title: promoLive && promo.title ? promo.title : "Bạn được mời dùng thử",
+    body: promoLive ? promo.body : "",
+    code: promoLive ? promo.code : "",
+    cta: promoLive ? promo.cta : "Đăng ký nhận ưu đãi",
+    // Shown sooner than a plain promo: the visitor came through the link for it.
+    delaySec: promoLive ? Math.min(promo.delaySec, 1) : 1,
+    repeatMinutes: promo.repeatMinutes,
+    referral: {
+      code: referral.code,
+      benefits,
+      giftCode: referral.giftCode || null,
+    },
+    version: hashText(`${promo.version}|ref:${referral.code}|${benefits.join("|")}`),
+  };
+}
+
 /** "live" | "disabled" | "empty": the same rule the landing page applies. */
 export function promoPopupState(copy) {
   const popup = readPromoPopup(copy);
@@ -107,11 +165,21 @@ export function giftPageHref(code) {
  * page; a visitor registers first and lands there afterwards (register honours
  * a safe `next`). Without a code the button is a plain sign-up.
  */
-export function promoTargetHref(code, { signedIn = false } = {}) {
+export function promoTargetHref(code, { signedIn = false, refCode = null } = {}) {
   const key = normalizePromoCode(code);
-  if (!key) return signedIn ? "/account" : "/register";
+  // A referred visitor registers with the referral code, so the register page
+  // shows its banner even if the cookie was blocked.
+  const ref = normalizePromoCode(refCode);
+  const params = new URLSearchParams();
+  if (ref) params.set("ref", ref);
+  if (!key) {
+    if (signedIn) return "/account";
+    return params.toString() ? `/register?${params}` : "/register";
+  }
   const gift = giftPageHref(key);
-  return signedIn ? gift : `/register?next=${encodeURIComponent(gift)}`;
+  if (signedIn) return gift;
+  params.set("next", gift);
+  return `/register?${params}`;
 }
 
 /**

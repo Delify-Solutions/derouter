@@ -7,30 +7,28 @@
 // show a limit the request path does not apply.
 //
 // Relative imports only: tests import this under plain `node --test`.
-import { admitSync } from "./planQueue.js";
-
-function positive(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
+import { admitSync, effectiveRate, rateKeyOf } from "./planQueue.js";
 
 /**
- * RPM/TPM allowances are counted per (user, plan): callers count usage with the
- * returned `planId` (see getUserRateUsage).
+ * The rate is the paying purchase's own override when it has one, else its plan's
+ * (spec plan-templates "Per-purchase rate override"). Allowances are counted per
+ * `rateKey` (see getUserRateUsage and ratePlanIdSync): the plan id, or the purchase
+ * for a planless purchase with an override. null rateKey = nothing to count.
  *
  * @returns {{ userPlanId: string|null, planId: string|null, planName: string|null,
- *             rpm: number|null, tpm: number|null }}
- *          null rpm/tpm = no limit (no paying plan, or the plan sets none)
+ *             rateKey: string|null, rpm: number|null, tpm: number|null }}
+ *          null rpm/tpm = no limit (no paying plan, or none set)
  */
 export function payingRatesSync(db, userId, nowIso = null, { planId = null } = {}) {
-  const none = { userPlanId: null, planId: null, planName: null, rpm: null, tpm: null };
+  const none = { userPlanId: null, planId: null, planName: null, rateKey: null, rpm: null, tpm: null };
   if (!db || !userId) return none;
   // `planId` = the plan a pinned key is paid by; omitted = the head of the queue.
   const admitted = admitSync(db, userId, nowIso, { planId });
   if (!admitted.ok) return none;
   const row = db.get(
-    `SELECT p.id AS planId, p.name AS name, p.code AS code, p.rpm AS rpm, p.tpm AS tpm
-       FROM userPlans up JOIN plans p ON p.id = up.planId
+    `SELECT up.id AS id, up.planId AS planId, up.rpm AS rpm, up.tpm AS tpm,
+            p.name AS name, p.code AS code, p.rpm AS planRpm, p.tpm AS planTpm
+       FROM userPlans up LEFT JOIN plans p ON p.id = up.planId
       WHERE up.id = ?`,
     [admitted.planId]
   );
@@ -38,7 +36,8 @@ export function payingRatesSync(db, userId, nowIso = null, { planId = null } = {
     userPlanId: admitted.planId,
     planId: row?.planId ?? null,
     planName: row?.name || row?.code || null,
-    rpm: positive(row?.rpm),
-    tpm: positive(row?.tpm),
+    rateKey: rateKeyOf(row),
+    rpm: effectiveRate(row?.rpm, row?.planRpm),
+    tpm: effectiveRate(row?.tpm, row?.planTpm),
   };
 }

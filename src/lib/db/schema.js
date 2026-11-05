@@ -620,6 +620,10 @@ export const TABLES = {
       // Snapshot of the plan's per-window limits at grant time (JSON array of
       // { hours, maxNanoUsd }); NULL/[] = no limits.
       limits: "TEXT",
+      // Per-purchase request/token rate (spec plan-templates "Per-purchase rate
+      // override"). NULL = the plan's live RPM/TPM; 0 = no limit; > 0 = this rate.
+      rpm: "INTEGER",
+      tpm: "INTEGER",
       createdAt: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_up_user ON userPlans(userId, status, expiresAt)"],
@@ -689,6 +693,13 @@ export const TABLES = {
       // no purchase and a linked Telegram user, one per Telegram user across
       // every new-user code. perUserLimit is pinned to 1.
       newUserOnly: "INTEGER DEFAULT 0",
+      // RPM/TPM written onto each purchase this code grants (userPlans.rpm/tpm).
+      // NULL = the plan's own (a credit gift then has none); 0 = no limit.
+      rpm: "INTEGER",
+      tpm: "INTEGER",
+      // Soft delete of a code that was already redeemed: hidden from the admin
+      // list and never redeemable, while its redemptions keep their history.
+      deletedAt: "TEXT",
       note: "TEXT",
       createdBy: "TEXT",
       createdAt: "TEXT",
@@ -848,6 +859,9 @@ export const TABLES = {
       buyerBonusBp: "INTEGER",
       buyerBonusMaxOrders: "INTEGER",
       status: "TEXT NOT NULL DEFAULT 'active'", // 'active' | 'blocked'
+      // Set when an admin adds this account as an invited affiliate. With
+      // affiliateAccess = 'invite', only rows with invitedAt may refer new users.
+      invitedAt: "TEXT",
       clickCount: "INTEGER DEFAULT 0",
       // Unused since withdrawals were removed (change affiliate-credit-vouchers);
       // kept declared so existing databases and the sync agree.

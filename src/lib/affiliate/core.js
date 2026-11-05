@@ -87,15 +87,61 @@ export function resolveReferrerSync(db, code, { settings = null } = {}) {
   if (s.affiliateEnabled !== true) return null;
 
   const affiliate = db.get(
-    `SELECT a.userId, a.status FROM affiliates a WHERE a.code = ?`,
+    `SELECT a.userId, a.status, a.invitedAt FROM affiliates a WHERE a.code = ?`,
     [normalized]
   );
-  if (!affiliate || affiliate.status !== "active") return null;
+  // Invite-only mode: a link of an account the admin did not invite stops
+  // recording new users (the account keeps its wallet and existing referrals).
+  if (!linkActive(affiliate, s)) return null;
 
   const user = db.get(`SELECT id FROM users WHERE id = ?`, [affiliate.userId]);
   if (!user) return null;
 
   return affiliate.userId;
+}
+
+/** True when the program only admits affiliates an admin invited. */
+export function isInviteOnly(settings) {
+  return settings?.affiliateAccess === "invite";
+}
+
+/**
+ * Whether this account may hold a referral link at all under the access mode:
+ * every account in "open" mode, only invited ones in "invite" mode. Blocking and
+ * the program switch are separate checks (see linkActive).
+ */
+export function mayRefer(affiliateRow, settings) {
+  if (!isInviteOnly(settings)) return true;
+  return Boolean(affiliateRow?.invitedAt);
+}
+
+/**
+ * Whether an affiliate's link records new users right now: the program is on,
+ * the affiliate is not blocked and the access mode admits it.
+ */
+export function linkActive(affiliateRow, settings) {
+  if (settings?.affiliateEnabled !== true) return false;
+  if (!affiliateRow || affiliateRow.status !== "active") return false;
+  return mayRefer(affiliateRow, settings);
+}
+
+/**
+ * Whether the customer area shows the "Giới thiệu" item for this account:
+ * the program is on and the account may refer, or the account has something to
+ * keep (wallet history, or users it already referred — those still earn
+ * commission after invite-only mode leaves the account out).
+ */
+export function affiliateAreaAvailableSync(db, userId, settings = null) {
+  if (!db) throw new Error("affiliateAreaAvailableSync requires the db adapter");
+  if (!userId) return false;
+  const s = settings || readAffiliateSettingsSync(db);
+  if (s.affiliateEnabled === true) {
+    if (!isInviteOnly(s)) return true;
+    const row = getAffiliateSync(db, userId);
+    if (row?.invitedAt) return true;
+    if (row && db.get(`SELECT 1 AS x FROM users WHERE referredByUserId = ? LIMIT 1`, [userId])) return true;
+  }
+  return hasWalletHistorySync(db, userId);
 }
 
 /**

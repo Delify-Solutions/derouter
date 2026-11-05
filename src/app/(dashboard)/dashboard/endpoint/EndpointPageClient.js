@@ -27,6 +27,7 @@ export default function APIPageClient({ machineId }) {
   // key-protected so a failed fetch can neither advertise "exposed without a
   // key" nor let an operator save the flag as off by accident.
   const [requireApiKey, setRequireApiKey] = useState(true);
+  const [hideUpstreamModels, setHideUpstreamModels] = useState(true);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
   const [hasPassword, setHasPassword] = useState(true);
@@ -216,6 +217,7 @@ export default function APIPageClient({ machineId }) {
         // `data.requireApiKey` is absent from an older payload; treat absence as
         // "on" so the switch never renders off without evidence.
         setRequireApiKey(data.requireApiKey !== false);
+        setHideUpstreamModels(data.hideUpstreamModels !== false);
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
@@ -253,6 +255,19 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) setTunnelDashboardAccess(value);
     } catch (error) {
       console.error("Error updating tunnelDashboardAccess:", error);
+    }
+  };
+
+  const handleHideUpstreamModels = async (value) => {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hideUpstreamModels: value }),
+      });
+      if (res.ok) setHideUpstreamModels(value);
+    } catch (error) {
+      console.error("Error updating hideUpstreamModels:", error);
     }
   };
 
@@ -927,6 +942,22 @@ export default function APIPageClient({ machineId }) {
             <SecurityWarning message="Endpoint is exposed without an API key." />
           </div>
         )}
+
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
+          <div>
+            <p className="font-medium">Ẩn model gốc với khách</p>
+            <p className="text-sm text-text-muted">
+              Key của khách chỉ gọi và chỉ thấy combo. Câu trả lời và thông báo lỗi ghi tên combo khách đã gọi,
+              không lộ model của nhà cung cấp. Key admin không bị ảnh hưởng.
+            </p>
+          </div>
+          <Toggle
+            aria-label="Ẩn model gốc với khách"
+            checked={hideUpstreamModels}
+            onChange={() => handleHideUpstreamModels(!hideUpstreamModels)}
+            disabled={!settingsLoaded}
+          />
+        </div>
 
         <p className="text-sm text-text-muted">
           Công cụ CLI, ví dụ gọi API và nút test model dùng một key mặc định do hệ thống tự giữ, không cần quản lý ở
