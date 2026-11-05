@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById, getPlanById } from "@/lib/localDb";
 import { validateAffiliateSettings } from "@/lib/affiliate/settings.js";
 import { normalizeChannelUrl } from "@/lib/telegram/channel.js";
+import { normalizeChannelChatId } from "@/lib/telegram/channelMember.js";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -171,6 +172,14 @@ export async function PATCH(request) {
         return NextResponse.json({ error: channel.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
       }
       body.telegramChannelUrl = channel.value;
+    }
+    // The chat the bot checks for channel-join gift codes (change channel-gift).
+    if (Object.prototype.hasOwnProperty.call(body, "telegramChannelChatId")) {
+      const chat = normalizeChannelChatId(body.telegramChannelChatId);
+      if (chat.error) {
+        return NextResponse.json({ error: chat.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
+      }
+      body.telegramChannelChatId = chat.value;
     }
 
     // Affiliate program settings (spec affiliate-program "Program settings").

@@ -57,6 +57,8 @@ export async function PATCH(request, { params }) {
       expiresAt: body.expiresAt,
       isActive: body.isActive,
       newUserOnly: body.newUserOnly === undefined ? undefined : body.newUserOnly === true,
+      channelJoinOnly: body.channelJoinOnly === undefined ? undefined : body.channelJoinOnly === true,
+      listed: body.listed === undefined ? undefined : body.listed === true,
       note: body.note,
     });
     if (!code) return NextResponse.json({ error: "Gift code not found" }, { status: 404 });

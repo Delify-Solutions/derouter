@@ -80,7 +80,12 @@ export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
       if (!res.ok) {
         // A new-user code on an account without Telegram: the one refusal the
         // customer can fix here. The code stays in the field for the retry.
-        setResult({ error: data.error || "Không nhập được mã này.", needsTelegram: data.code === "telegram_required" });
+        setResult({
+          error: data.error || "Không nhập được mã này.",
+          needsTelegram: data.code === "telegram_required",
+          // Channel-join code (change channel-gift): where to join before retrying.
+          channelUrl: data.code === "channel_required" && typeof data.channelUrl === "string" ? data.channelUrl : "",
+        });
         return;
       }
       setResult({ ok: true, ...data });
@@ -96,7 +101,7 @@ export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
       } catch {
         /* ignore */
       }
-      if (onRedeemed) onRedeemed();
+      if (onRedeemed) onRedeemed(data);
     } catch {
       setResult({ error: "Không kết nối được máy chủ." });
     } finally {
@@ -149,6 +154,16 @@ export default function GiftRedeemForm({ onRedeemed, initialCode = "" }) {
       )}
 
       {result?.needsTelegram && <TelegramLinkPrompt onLinked={onTelegramLinked} />}
+
+      {result?.channelUrl ? (
+        <p className="text-sm text-text-muted">
+          Tham gia{" "}
+          <a href={result.channelUrl} target="_blank" rel="noopener noreferrer" className="text-text-main underline underline-offset-4">
+            kênh Telegram
+          </a>{" "}
+          bằng tài khoản Telegram đã liên kết, rồi bấm Nhập mã lại.
+        </p>
+      ) : null}
 
       {result?.ok && (
         <div role="status" className="flex flex-col gap-4 border border-brand-500/30 bg-brand-500/5 p-5">

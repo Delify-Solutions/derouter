@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -697,6 +697,14 @@ export const TABLES = {
       // no purchase and a linked Telegram user, one per Telegram user across
       // every new-user code. perUserLimit is pinned to 1.
       newUserOnly: "INTEGER DEFAULT 0",
+      // 1 = channel-join code (change channel-gift): needs a linked Telegram user
+      // who is a member of the admin's Telegram channel; one per Telegram user
+      // per code (giftRedemptions.telegramUserId snapshot). Any account, new or
+      // not. perUserLimit is pinned to 1; never combined with newUserOnly.
+      channelJoinOnly: "INTEGER DEFAULT 0",
+      // 1 = listed under "Mã có thể sử dụng" on the customer gift page, so the
+      // customer can take it without being told the code.
+      listed: "INTEGER DEFAULT 0",
       // RPM/TPM written onto each purchase this code grants (userPlans.rpm/tpm).
       // NULL = the plan's own (a credit gift then has none); 0 = no limit.
       rpm: "INTEGER",
