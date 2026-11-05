@@ -7,7 +7,7 @@
 // Moved out of billingRepo.js (design D13) so the driver-free engine and the admin
 // actions can call it without importing an adapter-resolving module (D8).
 import { v4 as uuidv4 } from "uuid";
-import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, nano } from "./ledger.js";
+import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { serializeLimits } from "./limits.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -116,8 +116,8 @@ export function stackedStartMsSync(db, { userId, planId, unlimited, nowMs }) {
  * repaid from the first period's credit, then the next.
  *
  * `unlimitedCredit` grants a plan with no credit ceiling: both credit columns are
- * 0 and nothing is repaid out of it, so an existing debt stays on the account (the
- * plan never runs dry, so admission does not look at the debt). An unlimited grant
+ * 0, and the plan takes over the account's whole existing debt, which is written
+ * off (change debt-clear; reported as appliedToOverdraftNanoUsd). An unlimited grant
  * is queued behind any running unlimited purchase of the same plan
  * (`stackedStartMsSync`).
  *
@@ -203,7 +203,7 @@ function insertPeriodSync(db, {
 
   // 1. Repay overdraft out of the granted credit.
   const overdraftBefore = getDebtNanoSync(db, userId);
-  const paydown = Math.min(credit, overdraftBefore);
+  let paydown = Math.min(credit, overdraftBefore);
   if (paydown > 0) {
     setDebtNanoSync(db, userId, overdraftBefore - paydown);
     insertLedgerSync(db, {
@@ -247,6 +247,15 @@ function insertPeriodSync(db, {
       userPlan.limits, userPlan.rpm, userPlan.tpm, userPlan.createdAt,
     ]
   );
+
+  // An unlimited plan takes over all older debt (change debt-clear).
+  if (unlimited) {
+    paydown += writeOffDebtSync(db, userId, {
+      userPlanId: userPlan.id,
+      meta: { reason: "overdraft_absorbed", source, orderId, planId },
+      createdAt: at,
+    });
+  }
 
   const extra = {
     ...(unlimited ? { unlimited: true } : {}),

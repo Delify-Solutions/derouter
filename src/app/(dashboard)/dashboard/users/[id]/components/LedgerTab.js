@@ -104,6 +104,7 @@ export default function LedgerTab({ userId }) {
                   <td className="px-4 py-2 font-mono text-[12px] text-text-main">
                     {KIND_LABEL[entry.kind] || entry.kind}
                     {entry.backfill && <span className="ml-1 text-[10px] text-text-subtle">truy trừ</span>}
+                    {entry.debtNote && <span className="ml-1 text-[10px] text-text-subtle">{entry.debtNote}</span>}
                   </td>
                   <td className="px-4 py-2 text-sm text-text-main">{entry.planName || "—"}</td>
                   <td className="max-w-[200px] truncate px-4 py-2 font-mono text-[12px] text-text-muted" title={[entry.model, entry.upstreamModel].filter(Boolean).join(" → ")}>

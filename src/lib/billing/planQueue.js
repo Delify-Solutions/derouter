@@ -20,7 +20,7 @@
 // asserts.
 //
 // SYNCHRONOUS + DRIVER-FREE (D8): every function takes the adapter.
-import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, nano } from "./ledger.js";
+import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { parseLimits, serializeLimits } from "./limits.js";
 import { insertAuditSync } from "./audit.js";
 
@@ -466,6 +466,28 @@ export function chargeSync(db, {
       ledgerRows += 1;
       remaining -= take;
       parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 2 });
+    }
+  }
+
+  // An unlimited plan that paid takes over OLDER debt (change debt-clear, D2):
+  // an account that held one before this rule existed is cleared on its next
+  // request. Only debt from before the plan started: a shortfall recorded since
+  // (a key pinned to a finite plan) is new debt and stays.
+  const payer = parts
+    .map((part) => queue.find((entry) => entry.id === part.userPlanId))
+    .find((entry) => entry?.unlimitedCredit);
+  if (payer && getDebtNanoSync(db, userId) > 0) {
+    const newer = db.get(
+      `SELECT 1 AS x FROM creditLedger
+        WHERE userId = ? AND kind = 'charge' AND userPlanId IS NULL AND createdAt >= ? LIMIT 1`,
+      [userId, payer.startsAt]
+    );
+    if (!newer) {
+      writeOffDebtSync(db, userId, {
+        userPlanId: payer.id,
+        meta: { reason: "overdraft_absorbed" },
+        createdAt: at,
+      });
     }
   }
 
