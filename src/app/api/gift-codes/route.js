@@ -75,6 +75,9 @@ export async function POST(request) {
       perUserLimit,
       // Welcome code (spec gift-codes "New-user codes"); the repo pins perUserLimit to 1.
       newUserOnly: body.newUserOnly === true,
+      // RPM/TPM for the purchases the code grants; empty = the plan's own.
+      rpm: body.rpm,
+      tpm: body.tpm,
       startsAt: body.startsAt || null,
       expiresAt: body.expiresAt || null,
       note: body.note || null,

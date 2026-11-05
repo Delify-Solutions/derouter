@@ -15,7 +15,9 @@ export async function GET(request, { params }) {
   }
 }
 
-// PATCH /api/gift-codes/:id — flip active, extend expiry, change limits or note.
+// PATCH /api/gift-codes/:id — edit any field of a code: the code string, what it
+// grants (plan / credit / amount / duration), RPM/TPM, limits, dates, flags, note.
+// Applies to later redemptions; earlier ones keep what they received.
 export async function PATCH(request, { params }) {
   try {
     const { id } = await params;
@@ -41,9 +43,13 @@ export async function PATCH(request, { params }) {
     }
 
     const code = await updateGiftCode(id, {
+      code: body.code,
       planId: body.planId,
       creditNanoUsd: body.creditNanoUsd,
+      amountVnd: body.amountVnd,
       durationDays: body.durationDays,
+      rpm: body.rpm,
+      tpm: body.tpm,
       maxRedemptions: body.maxRedemptions,
       perUserLimit: body.perUserLimit,
       startsAt: body.startsAt,
@@ -59,14 +65,15 @@ export async function PATCH(request, { params }) {
   }
 }
 
-// DELETE /api/gift-codes/:id — soft delete (isActive = 0); history is kept.
+// DELETE /api/gift-codes/:id — a never-redeemed code is removed; a redeemed one is
+// hidden and stops working, keeping its redemption history (spec gift-codes).
 export async function DELETE(request, { params }) {
   try {
     const { id } = await params;
-    const ok = await deleteGiftCode(id);
-    if (!ok) return NextResponse.json({ error: "Gift code not found" }, { status: 404 });
-    return NextResponse.json({ success: true });
+    const result = await deleteGiftCode(id);
+    if (!result) return NextResponse.json({ error: "Không tìm thấy mã" }, { status: 404 });
+    return NextResponse.json({ success: true, deleted: result.deleted });
   } catch {
-    return NextResponse.json({ error: "Failed to disable gift code" }, { status: 500 });
+    return NextResponse.json({ error: "Không xóa được mã" }, { status: 500 });
   }
 }
