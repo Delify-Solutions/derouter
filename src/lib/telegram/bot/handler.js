@@ -13,6 +13,7 @@ import {
 } from "./customer.js";
 import {
   planBuyReply, createOrderReply, orderStatusReply, cancelOwnOrderReply, myOrdersReply, payAgainReply,
+  topupAskReply, topupAmountReply, AMOUNT_PROMPT_MARK,
 } from "./orders.js";
 import { isAdmin, statsReply, ordersReply, orderConfirmReply, approveDo, cancelDo, userReply } from "./admin.js";
 import { escapeHtml } from "./format.js";
@@ -91,9 +92,15 @@ async function callbackReply(data, ctx) {
   // Buying (change bot-orders): plan → method → order with payment details.
   if (kind === "bp") return { mode: "edit", ...(await planBuyReply(ctx, value)) };
   if (kind === "bm") {
-    const [planId, method] = value.split(":");
-    return { mode: "send", ...(await createOrderReply(ctx, planId, method)) };
+    const [planId, method, amount = null] = value.split(":");
+    return { mode: "send", ...(await createOrderReply(ctx, planId, method, amount)) };
   }
+  // Custom-amount plans: a quick amount, or ask for one.
+  if (kind === "ba") {
+    const [planId, amount] = value.split(":");
+    return { mode: "edit", ...(await topupAmountReply(ctx, planId, Number(amount))) };
+  }
+  if (kind === "bn") return { mode: "send", ...(await topupAskReply(ctx, value)) };
   if (kind === "up") return { mode: "send", ...(await payAgainReply(ctx, value)) };
   if (kind === "us") return { mode: "send", ...(await orderStatusReply(ctx, value)) };
   if (kind === "uc") return { mode: "edit", ...(await cancelOwnOrderReply(ctx, value)) };
@@ -151,6 +158,15 @@ export async function handleUpdate(update, deps) {
 
   try {
     ctx.user = findCustomerSync(db, from.id);
+    // The customer just wrote to the bot, so the bot can write to them again:
+    // notifications paused after Telegram refused a message resume.
+    if (ctx.user) {
+      db.run(
+        `UPDATE users SET telegramDmBlockedAt = NULL
+          WHERE id = ? AND telegramUserId = ? AND telegramDmBlockedAt IS NOT NULL`,
+        [ctx.user.id, String(from.id)]
+      );
+    }
     if (callback) {
       // Answer first: the tap's spinner stops while the reply is worked out.
       await api.answer(callback.id);
@@ -167,6 +183,19 @@ export async function handleUpdate(update, deps) {
 
     const text = typeof message.text === "string" ? message.text : "";
     const parsed = parseCommand(text);
+    // A reply to the bot's own "Nhập số tiền" prompt: the prompt names the plan.
+    const prompt = message.reply_to_message;
+    if (!parsed && ctx.user && prompt?.from?.is_bot && typeof prompt.text === "string") {
+      // The marker is the prompt's last line (a plan name above it may contain the same words).
+      const m = prompt.text.match(new RegExp(`(?:^|\\n)${AMOUNT_PROMPT_MARK}\\s*([A-Za-z0-9_-]{1,64})\\s*$`));
+      if (m) {
+        const reply = ctx.user.status === "suspended"
+          ? { text: "Tài khoản đang bị khoá. Vui lòng liên hệ hỗ trợ.", markup: null }
+          : await topupAmountReply(ctx, m[1], text);
+        await api.send(chat.id, reply.text, reply.markup);
+        return { handled: true };
+      }
+    }
     if (!parsed) {
       await api.send(chat.id, "Gõ /help để xem các lệnh, hoặc <code>/gift MÃ</code> để nhập mã quà.", ctx.user ? mainMenu() : null);
       return { handled: true };
