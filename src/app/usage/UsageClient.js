@@ -6,7 +6,7 @@ import Link from "next/link";
 import Pagination from "@/shared/components/Pagination";
 import ModelPlayground from "@/shared/components/ModelPlayground";
 import { fmtUsd } from "@/shared/utils/money";
-import { percentLabel, remainingLabel } from "@/shared/utils/discountFormat";
+import { percentLabel, remainingLabel, reasonsLabel } from "@/shared/utils/discountFormat";
 import { getCurrentLocale } from "@/i18n/runtime";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
@@ -815,6 +815,7 @@ export default function UsageClient({ hasUserSession = false }) {
                               <div className="text-[10px] text-text-muted" title="Giá niêm yết và mức giảm đã áp dụng">
                                 {r.listCost != null && <span className="line-through mr-1">{fmtCost(r.listCost)}</span>}
                                 giảm {percentLabel(r.discountBp)}
+                                {reasonsLabel(r.discountReasons) ? <span className="block">{reasonsLabel(r.discountReasons)}</span> : null}
                               </div>
                             )}
                           </td>
@@ -875,6 +876,9 @@ export default function UsageClient({ hasUserSession = false }) {
                                   Giảm {percentLabel(m.discount.percentBp)}
                                 </span>
                                 {m.discount.endsAt && <span className="ml-1">{remainingLabel(m.discount.endsAt)}</span>}
+                                {reasonsLabel(m.discount.reasons) ? (
+                                  <span className="block mt-0.5">Lý do: {reasonsLabel(m.discount.reasons)}</span>
+                                ) : null}
                               </div>
                             )}
                           </td>

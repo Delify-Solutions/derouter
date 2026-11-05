@@ -202,6 +202,7 @@ export default function AccountUsageTable({
                         <span className="block text-[11px] text-text-muted">
                           {row.listCostLabel && <span className="mr-1 line-through">{row.listCostLabel}</span>}
                           {row.discountLabel}
+                          {row.discountReason ? <span className="block">{row.discountReason}</span> : null}
                         </span>
                       )}
                     </td>

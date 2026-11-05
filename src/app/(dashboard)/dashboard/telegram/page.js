@@ -1,9 +1,16 @@
 import TelegramBroadcastClient from "./TelegramBroadcastClient";
+import TelegramChannelCard from "./TelegramChannelCard";
 
 export const metadata = {
-  title: "Thông báo Telegram - derouter",
+  title: "Telegram - derouter",
 };
 
+/** `/dashboard/telegram`: broadcasts and the public channel link. */
 export default function TelegramBroadcastPage() {
-  return <TelegramBroadcastClient />;
+  return (
+    <div className="flex flex-col gap-10">
+      <TelegramBroadcastClient />
+      <TelegramChannelCard />
+    </div>
+  );
 }

@@ -28,7 +28,7 @@ export async function POST(request) {
     );
   }
 
-  const result = await notifyCustomer(session.userId, "security", messages.test(), { force: true });
+  const result = await notifyCustomer(session.userId, "security", messages.test(), { force: true, inbox: false });
   if (result.ok) return NextResponse.json({ ok: true }, { headers: NO_STORE });
   return NextResponse.json(
     { error: ERROR_TEXT[result.reason] || "Không gửi được tin nhắn. Thử lại sau.", code: result.reason },

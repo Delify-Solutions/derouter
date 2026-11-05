@@ -4,6 +4,7 @@ import { USER_COOKIE, verifyUserToken } from "@/lib/auth/userSession";
 import { getApiKeys, getKeyUsageSummary, getUsageHistory, getUserById } from "@/lib/db/index.js";
 import { fmtUsd, fmtUsdNano } from "@/shared/utils/money";
 import { percentLabel } from "@/shared/utils/discountFormat";
+import { getDiscountLabels } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { Empty, Page, ButtonLink } from "@/app/account/components/ui";
 import AccountUsageTable from "./AccountUsageTable";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
@@ -35,7 +36,7 @@ function normalizeStatus(s) {
   return String(s);
 }
 
-function toRow(r, hide) {
+function toRow(r, hide, labels = new Map()) {
   const t = r.tokens || {};
   const input = t.prompt_tokens ?? t.input_tokens ?? 0;
   const output = t.completion_tokens ?? t.output_tokens ?? 0;
@@ -60,6 +61,11 @@ function toRow(r, hide) {
     // much was taken off (spec model-discounts "Receipts").
     discountLabel: r.meta?.discountBp > 0 ? `giảm ${percentLabel(r.meta.discountBp)}` : null,
     listCostLabel: r.meta?.discountBp > 0 && r.meta?.listCostNanoUsd != null ? fmtUsdNano(r.meta.listCostNanoUsd) : null,
+    // The reasons of the rules that discounted it (spec model-discounts
+    // "Discount reason shown to customers"); a deleted rule has none.
+    discountReason: r.meta?.discountBp > 0 && Array.isArray(r.meta?.discountRuleIds)
+      ? [...new Set(r.meta.discountRuleIds.map((id) => labels.get(id)).filter(Boolean))].join(" · ") || null
+      : null,
   };
 }
 
@@ -96,11 +102,14 @@ export default async function AccountUsagePage({ searchParams }) {
       getUsageHistory({ apiKey: selected.key, startDate, endDate }),
     ]);
     summary = keySummary;
-    history = rows
-      .slice()
-      .reverse()
-      .slice(0, HISTORY_LIMIT)
-      .map((row) => toRow(row, hide));
+    const shown = rows.slice().reverse().slice(0, HISTORY_LIMIT);
+    let labels = new Map();
+    try {
+      labels = await getDiscountLabels(shown.flatMap((row) => (Array.isArray(row.meta?.discountRuleIds) ? row.meta.discountRuleIds : [])));
+    } catch {
+      labels = new Map();
+    }
+    history = shown.map((row) => toRow(row, hide, labels));
   }
 
   const keysView = keys.map((key) => ({

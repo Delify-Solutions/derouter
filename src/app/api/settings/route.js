@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById, getPlanById } from "@/lib/localDb";
 import { validateAffiliateSettings } from "@/lib/affiliate/settings.js";
+import { normalizeChannelUrl } from "@/lib/telegram/channel.js";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -161,6 +162,15 @@ export async function PATCH(request) {
           { status: 400, headers: SETTINGS_RESPONSE_HEADERS }
         );
       }
+    }
+
+    // Public Telegram channel link (change models-notifications D6).
+    if (Object.prototype.hasOwnProperty.call(body, "telegramChannelUrl")) {
+      const channel = normalizeChannelUrl(body.telegramChannelUrl);
+      if (channel.error) {
+        return NextResponse.json({ error: channel.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
+      }
+      body.telegramChannelUrl = channel.value;
     }
 
     // Affiliate program settings (spec affiliate-program "Program settings").
