@@ -147,16 +147,16 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function htmlShell(siteName, bodyLines, link, linkLabel) {
+function htmlShell(siteName, bodyLines, link, linkLabel, { lang = "en", fallback = "If the button does not work, open this link:" } = {}) {
   const paragraphs = bodyLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("\n    ");
   return [
     "<!doctype html>",
-    '<html lang="en">',
+    `<html lang="${lang}">`,
     "<body style=\"font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#09090b;line-height:1.5\">",
     `  <p style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#71717a;margin:0 0 16px">${escapeHtml(siteName)}</p>`,
     `    ${paragraphs}`,
     `  <p><a href="${escapeHtml(link)}" style="display:inline-block;border:1px solid #16a34a;padding:10px 18px;color:#16a34a;text-decoration:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase">${escapeHtml(linkLabel)}</a></p>`,
-    `  <p style="color:#71717a;font-size:13px">If the button does not work, open this link:</p>`,
+    `  <p style="color:#71717a;font-size:13px">${escapeHtml(fallback)}</p>`,
     `  <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${escapeHtml(link)}</p>`,
     "</body>",
     "</html>",
@@ -183,6 +183,53 @@ export function buildVerificationEmail({ email, link, siteName = "derouter" } = 
     link,
     "Verify email",
   );
+  return { subject, text, html };
+}
+
+/** Confirmation link for an email change, sent to the NEW address (Vietnamese). */
+export function buildEmailChangeConfirmEmail({ newEmail, link, siteName = "derouter" } = {}) {
+  const subject = `Xác nhận đổi email đăng nhập ${siteName}`;
+  const lines = [
+    `Tài khoản ${siteName} của bạn yêu cầu đổi email đăng nhập sang ${newEmail || "địa chỉ này"}.`,
+    "Mở liên kết bên dưới để xác nhận. Liên kết dùng được một lần và hết hạn sau 24 giờ.",
+    "Nếu bạn không yêu cầu, hãy bỏ qua thư này: email đăng nhập sẽ không thay đổi.",
+  ];
+  const text = [lines[0], "", lines[1], link, "", lines[2]].join("\n");
+  return {
+    subject,
+    text,
+    html: htmlShell(siteName, lines, link, "Xác nhận email", { lang: "vi", fallback: "Nếu nút không bấm được, mở liên kết này:" }),
+  };
+}
+
+/**
+ * Notice to the OLD address: a change was requested (`stage: "requested"`) or
+ * has happened (`stage: "changed"`). No link: nothing to click in a security notice.
+ */
+export function buildEmailChangeNoticeEmail({ newEmail, stage = "requested", siteName = "derouter" } = {}) {
+  const changed = stage === "changed";
+  const subject = changed
+    ? `Email đăng nhập ${siteName} đã được đổi`
+    : `Yêu cầu đổi email đăng nhập ${siteName}`;
+  const lines = changed
+    ? [
+        `Email đăng nhập tài khoản ${siteName} của bạn đã được đổi sang ${newEmail}.`,
+        "Từ giờ hãy đăng nhập bằng địa chỉ mới. Nếu không phải bạn, liên hệ hỗ trợ ngay.",
+      ]
+    : [
+        `Có yêu cầu đổi email đăng nhập tài khoản ${siteName} sang ${newEmail}.`,
+        "Email chỉ đổi khi liên kết gửi tới địa chỉ mới được mở. Nếu không phải bạn, hãy đổi mật khẩu ngay.",
+      ];
+  const text = lines.join("\n\n");
+  const html = [
+    "<!doctype html>",
+    '<html lang="vi">',
+    "<body style=\"font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#09090b;line-height:1.5\">",
+    `  <p style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#71717a;margin:0 0 16px">${escapeHtml(siteName)}</p>`,
+    ...lines.map((line) => `  <p>${escapeHtml(line)}</p>`),
+    "</body>",
+    "</html>",
+  ].join("\n");
   return { subject, text, html };
 }
 

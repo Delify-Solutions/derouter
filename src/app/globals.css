@@ -787,3 +787,80 @@ button:disabled,
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
+
+/*
+ * Liquid glass: the customer area's mobile menu panel only (change
+ * account-settings, design D4). A documented exception to openspec/ui-dna.md,
+ * which is otherwise square, unblurred and shadowless. Translucent fill, heavy
+ * backdrop blur and saturation, a specular top edge and a soft lift.
+ */
+.liquid-glass {
+  /* No position here: unlayered CSS would override the Tailwind utility that
+     places the panel (absolute), which is also what anchors ::before. */
+  border-radius: 22px;
+  /* 0.78: with zinc-800 labels this keeps AA even over dark page content. */
+  background: rgb(255 255 255 / 0.78);
+  border: 1px solid rgb(255 255 255 / 0.55);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.75),
+    inset 0 -1px 0 rgb(0 0 0 / 0.04),
+    0 18px 48px -12px rgb(0 0 0 / 0.28);
+}
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.45) 0%, rgb(255 255 255 / 0) 38%);
+}
+.dark .liquid-glass {
+  background: rgb(24 24 27 / 0.72);
+  border-color: rgb(255 255 255 / 0.12);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 18px 48px -12px rgb(0 0 0 / 0.6);
+}
+.dark .liquid-glass::before {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.08) 0%, rgb(255 255 255 / 0) 38%);
+}
+.liquid-glass-item {
+  border-radius: 14px;
+}
+.liquid-glass-item[aria-current="page"] {
+  background: rgb(255 255 255 / 0.7);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.dark .liquid-glass-item[aria-current="page"] {
+  background: rgb(255 255 255 / 0.12);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+.liquid-glass-dim {
+  background: rgb(0 0 0 / 0.18);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+@keyframes liquid-glass-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.liquid-glass-enter {
+  transform-origin: top left;
+  animation: liquid-glass-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .liquid-glass-enter { animation: none; }
+}
+/* Reduced transparency or more contrast: an opaque panel keeps text AA. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .liquid-glass,
+  .dark .liquid-glass {
+    background: var(--color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .liquid-glass::before { display: none; }
+  .liquid-glass-dim { background: rgb(0 0 0 / 0.4); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

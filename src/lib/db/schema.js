@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 32;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -355,6 +355,9 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       tokenHash: "TEXT UNIQUE NOT NULL",
       purpose: "TEXT NOT NULL",
+      // Purpose 'change_email': the address the account moves to once the link
+      // mailed there is opened (change account-settings). NULL otherwise.
+      newEmail: "TEXT",
       expiresAt: "TEXT NOT NULL",
       consumedAt: "TEXT",
       createdAt: "TEXT",
