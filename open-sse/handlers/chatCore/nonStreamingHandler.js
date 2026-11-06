@@ -345,7 +345,21 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   let rawText = null;
 
   if (contentType.includes("text/event-stream")) {
-    const sseText = await readBodyWithTimeout(providerResponse, requestSignal, timeoutMs, "text");
+    let sseText;
+    try {
+      sseText = await readBodyWithTimeout(providerResponse, requestSignal, timeoutMs, "text");
+    } catch (err) {
+      if (err?.name === "TimeoutError") {
+        appendLog({ status: `FAILED ${HTTP_STATUS.GATEWAY_TIMEOUT}` });
+        return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream body read timed out after ${timeoutMs}ms from ${provider}`);
+      }
+      if (err?.name === "AbortError" || requestSignal?.aborted === true) {
+        appendLog({ status: "FAILED 499" });
+        return createErrorResult(499, "Request aborted");
+      }
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+      return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Failed to read the response from ${provider}`);
+    }
     const parsed = parseSSEToOpenAIResponse(sseText, model);
     if (!parsed) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
@@ -364,7 +378,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
       if (err?.name === "TimeoutError") {
         return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream body read timed out after ${timeoutMs}ms from ${provider}`);
       }
-      if (err?.name === "AbortError") {
+      if (err?.name === "AbortError" || requestSignal?.aborted === true) {
         return createErrorResult(499, "Request aborted");
       }
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${provider}`);

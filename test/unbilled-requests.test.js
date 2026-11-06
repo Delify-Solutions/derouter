@@ -223,6 +223,26 @@ test("usage of a key deleted a moment ago still counts toward the user's RPM/TPM
   assert.deepEqual(await getUserRateUsage("u1"), { requests: 2, tokens: 20 }, "deleting the key does not reset the minute");
 });
 
+test("failed attempts and platform denials do not use the customer's RPM; abandoned requests do", async () => {
+  const { getUserRateUsage, getKeyRateUsage } = await import("../src/lib/db/repos/usageRepo.js");
+  plan("A"); user();
+  grant("A");
+  const secret = key("k1");
+  await saveRequestUsage({ provider: "test", model: "model-a", apiKey: secret, tokens: { prompt_tokens: 5, completion_tokens: 5 }, endpoint: "/v1/chat/completions" });
+  // Embeddings and images record their served rows as "success".
+  await saveRequestUsage({ provider: "test", model: "model-a", apiKey: secret, tokens: { prompt_tokens: 7, completion_tokens: 0 }, endpoint: "/v1/embeddings", status: "success" });
+  // A combo whose members all failed upstream, and a 429 denial.
+  for (const [provider, status] of [["test", "502"], ["test", "503"], ["platform", "429"]]) {
+    await saveRequestUsage({ provider, model: `m-${status}`, apiKey: secret, tokens: { prompt_tokens: 0, completion_tokens: 0 }, status });
+  }
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM usageHistory`).n, 5, "every attempt stays in the history");
+  assert.deepEqual(await getUserRateUsage("u1"), { requests: 2, tokens: 17 });
+  assert.deepEqual(await getKeyRateUsage(secret), { requests: 2, tokens: 17 });
+  // A request the client abandoned did reach the upstream: it uses the rate.
+  await saveRequestUsage({ provider: "test", model: "m-abandoned", apiKey: secret, tokens: { prompt_tokens: 0, completion_tokens: 0 }, status: "499" });
+  assert.deepEqual(await getUserRateUsage("u1"), { requests: 3, tokens: 17 });
+});
+
 test("a pinned key deleted after its owner was cached is still charged to the pinned plan", async () => {
   plan("A"); plan("B"); user();
   const upA = grant("A", { usd: 100, priority: 1 });

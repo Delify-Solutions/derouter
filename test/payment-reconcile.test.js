@@ -261,8 +261,20 @@ const reviewCases = [
   {
     label: "the order expired before the payment",
     setup: () => { user(); plan(); provider(); order({ status: "expired" }); },
-    tx: { content: "DR8K3Q7MZP" },
+    tx: { content: "DR8K3Q7MZP", occurredAt: at(T0 + 31 * MIN) },
     reason: "order_expired",
+  },
+  {
+    label: "an expired order and a payment with no time",
+    setup: () => { user(); plan(); provider(); order({ status: "expired" }); },
+    tx: { content: "DR8K3Q7MZP", occurredAt: null },
+    reason: "order_expired",
+  },
+  {
+    label: "an expired order paid in its window but for the wrong amount",
+    setup: () => { user(); plan(); provider(); order({ status: "expired" }); },
+    tx: { content: "DR8K3Q7MZP", amount: 200000 },
+    reason: "amount_mismatch",
   },
   {
     label: "a still-pending order paid after its expiry",
@@ -394,6 +406,60 @@ test("a second payment for an already-paid order cannot grant a second plan", ()
   assert.equal(second.outcome, "needs_review");
   assert.equal(second.reason, "order_not_pending");
   assert.equal(userPlanCount(), 1, "still exactly one grant");
+});
+
+test("a payment made inside the window approves an order the sweep already expired", async () => {
+  user(); plan(); const p = provider(); order();
+  // The sweep runs on our clock after the window closed, before the poll brings
+  // in a transfer the customer made at minute 29.
+  const { expireGatewayOrdersSync } = await import("../src/lib/payments/checkout.js");
+  const expired = db.transaction(() => expireGatewayOrdersSync(db, at(T0 + 35 * MIN)));
+  assert.deepEqual(expired, ["o1"]);
+  assert.equal(orderRow().status, "expired");
+
+  const result = db.transaction(() => reconcile.ingestTransactionSync(db, {
+    provider: p, tx: tx({ occurredAt: at(T0 + 29 * MIN) }), via: "poll", nowIso: at(T0 + 35 * MIN),
+  }));
+  assert.equal(result.outcome, "matched");
+  assert.equal(orderRow().status, "paid");
+  assert.equal(orderRow().paymentTransactionId, result.transactionId);
+  assert.equal(userPlanCount(), 1);
+
+  const again = db.transaction(() => reconcile.ingestTransactionSync(db, {
+    provider: p, tx: tx({ externalId: "other", occurredAt: at(T0 + 29 * MIN) }), via: "poll", nowIso: at(T0 + 36 * MIN),
+  }));
+  assert.equal(again.outcome, "needs_review");
+  assert.equal(again.reason, "order_not_pending", "a second transfer never grants twice");
+  assert.equal(userPlanCount(), 1);
+});
+
+test("an expired order whose voucher went to another order is not revived automatically", () => {
+  db.run(`DELETE FROM affiliateVouchers`);
+  user(); plan(); const p = provider(); order({ status: "expired" });
+  db.run(`UPDATE orders SET voucherId = 'v1', voucherDiscount = 10000 WHERE id = 'o1'`);
+  db.run(
+    `INSERT INTO affiliateVouchers(id, code, ownerUserId, currency, amount, status, heldByOrderId, usedOrderId, createdAt)
+     VALUES('v1', 'VC1', 'u1', 'VND', 10000, 'used', 'o2', 'o2', ?)`,
+    [at(T0)]
+  );
+  const result = ingest(p, { occurredAt: at(T0 + 29 * MIN) });
+  assert.equal(result.outcome, "needs_review");
+  assert.equal(result.reason, "order_expired");
+  assert.equal(orderRow().status, "expired");
+  assert.equal(userPlanCount(), 0);
+  db.run(`DELETE FROM affiliateVouchers`);
+});
+
+test("an expired order is not revived past the plan's monthly purchase limit", () => {
+  user(); plan(); const p = provider();
+  db.run(`UPDATE plans SET purchaseLimitPerMonth = 1 WHERE id = 'p1'`);
+  order({ status: "expired" });
+  // The slot the expiry gave back was used by another paid order.
+  order({ id: "o2", code: "DR2222222Z", status: "paid", createdAt: T0 + 5 * MIN });
+  const result = ingest(p, { occurredAt: at(T0 + 29 * MIN) });
+  assert.equal(result.outcome, "needs_review");
+  assert.equal(result.reason, "order_expired");
+  assert.equal(orderRow().status, "expired");
 });
 
 // ── Admin resolution ───────────────────────────────────────────────────────
