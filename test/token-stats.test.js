@@ -60,12 +60,14 @@ test("buckets are Vietnam local time; weeks start on Monday", () => {
 test("totals, per-day series and grouping by requested model", () => {
   usage({ ts: "2026-11-03T03:00:00.000Z", requested: "gpt-5", input: 100, output: 50, cached: 20, cost: 1000 });
   usage({ ts: "2026-11-03T04:00:00.000Z", requested: "claude-x", provider: "anthropic", model: "claude-up", input: 300, output: 100, cost: 3000 });
-  usage({ ts: "2026-11-04T03:00:00.000Z", requested: "gpt-5", input: 10, output: 5, status: "error", cost: 0 });
+  usage({ ts: "2026-11-04T03:00:00.000Z", requested: "gpt-5", input: 10, output: 5, status: "502", cost: 0 });
   usage({ ts: "2026-11-04T03:00:00.000Z", provider: "platform", requested: "gpt-5", input: 0, output: 0 });
+  usage({ ts: "2026-11-04T05:00:00.000Z", requested: "gpt-5", input: 0, output: 0, status: "success", cost: 0 });
+  usage({ ts: "2026-11-04T05:00:00.000Z", requested: "gpt-5", input: 0, output: 0, status: "499", cost: 0 });
 
   const res = q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", granularity: "day", groupBy: "model" });
-  assert.equal(res.totals.requests, 3, "platform rows are left out");
-  assert.equal(res.totals.errors, 1);
+  assert.equal(res.totals.requests, 5, "platform rows are left out");
+  assert.equal(res.totals.errors, 1, "a numeric status is an error; 'success' and a client abort (499) are not");
   assert.equal(res.totals.input, 410);
   assert.equal(res.totals.output, 155);
   assert.equal(res.totals.cached, 20);

@@ -59,7 +59,33 @@ const TPM_MAX_WAIT_MS = (() => {
 
 const RATE_WINDOW_MS = 60_000;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Resolves after `ms`, or as soon as `signal` aborts.
+const sleep = (ms, signal = null) => new Promise((resolve) => {
+  if (signal?.aborted) return resolve();
+  const timer = setTimeout(done, ms);
+  function done() {
+    clearTimeout(timer);
+    signal?.removeEventListener?.("abort", done);
+    resolve();
+  }
+  signal?.addEventListener?.("abort", done, { once: true });
+});
+
+// `promise`, or CLIENT_GONE as soon as `signal` aborts, whichever comes first.
+function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.resolve(CLIENT_GONE);
+  let onAbort;
+  const gone = new Promise((resolve) => {
+    onAbort = () => resolve(CLIENT_GONE);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([promise, gone]).finally(() => signal.removeEventListener("abort", onAbort));
+}
+
+// The client disconnected while the request waited: not a denial of the key
+// holder, so callers neither log it nor answer it as a rate limit.
+const CLIENT_GONE = Object.freeze({ ok: false, status: 499, code: "client_closed", message: "Client closed request", clientGone: true });
 
 // Per-identity serialization queue for the TPM check. Concurrent requests for the
 // same identity chain through this promise so they don't all re-check and retry at
@@ -117,7 +143,7 @@ function statusDenial(owner) {
  *
  * @param {{ kind:"user", userId:string, planId:string }|{ kind:"key", apiKey:string, keyId:string }} scope
  */
-async function enforceRate(scope, resolved) {
+async function enforceRate(scope, resolved, { signal = null } = {}) {
   const read = scope.kind === "user"
     ? () => getUserRateUsage(scope.userId, RATE_WINDOW_MS, scope.planId)
     : () => getKeyRateUsage(scope.apiKey, RATE_WINDOW_MS);
@@ -138,14 +164,20 @@ async function enforceRate(scope, resolved) {
   if (resolved.tpm != null) {
     const lockKey = scope.kind === "user" ? `user:${scope.userId}:plan:${scope.planId}` : `key:${scope.keyId}`;
     const tpmDenial = deny(429, "rate_limit", PLATFORM_MESSAGES.rate_limit_tpm, { retryAfterSec: 60 });
+    // The wait budget starts when the request joins the queue, not when it reaches
+    // the front: N queued requests then all give up within TPM_MAX_WAIT_MS instead
+    // of N × TPM_MAX_WAIT_MS.
+    const deadline = Date.now() + TPM_MAX_WAIT_MS;
     const tpmCheck = async () => {
+      // A client that hung up while queued needs no answer; stop holding the queue.
+      if (signal?.aborted) return CLIENT_GONE;
       if (TPM_MAX_WAIT_MS <= 0) {
         // Wait disabled — behave like the old hard-429 path.
         const { tokens } = await read();
         return tokens >= resolved.tpm ? tpmDenial : { ok: true };
       }
-      const deadline = Date.now() + TPM_MAX_WAIT_MS;
       while (Date.now() < deadline) {
+        if (signal?.aborted) return CLIENT_GONE;
         const { tokens } = await read();
         if (tokens < resolved.tpm) return { ok: true };
         // Sleep until the oldest token in the window should fall out (frees
@@ -158,12 +190,18 @@ async function enforceRate(scope, resolved) {
         }
         waitMs = Math.min(waitMs, deadline - Date.now(), 5000);
         if (waitMs <= 0) break;
-        await sleep(waitMs);
+        await sleep(waitMs, signal);
       }
-      // Still over TPM after the max-wait budget — give up with a 429.
-      return tpmDenial;
+      // The budget is spent (possibly while queued behind other requests): one
+      // last look, so a request that reached the front late is not refused while
+      // there is room.
+      if (signal?.aborted) return CLIENT_GONE;
+      const { tokens } = await read();
+      return tokens < resolved.tpm ? { ok: true } : tpmDenial;
     };
-    return withTpmLock(lockKey, tpmCheck);
+    // A request queued behind others leaves as soon as its client does; its turn
+    // in the queue then passes at once (tpmCheck sees the aborted signal).
+    return untilAborted(withTpmLock(lockKey, tpmCheck), signal);
   }
 
   return { ok: true };
@@ -179,7 +217,7 @@ async function enforceRate(scope, resolved) {
  *   { ok: false, status: number, code: string, message: string, retryAfterSec?: number, resetAt?: string }
  * >}
  */
-export async function enforceKeyLimits(apiKey, model) {
+export async function enforceKeyLimits(apiKey, model, { signal = null } = {}) {
   if (!apiKey) return { ok: true, auth: null }; // no key (requireApiKey false) → no limits
 
   const auth = await getApiKeyForAuth(apiKey);
@@ -220,7 +258,7 @@ export async function enforceKeyLimits(apiKey, model) {
     const pinnedPlanId = key.planId ?? null;
     const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
     const rate = rates.rateKey
-      ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.rateKey }, rates)
+      ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.rateKey }, rates, { signal })
       : { ok: true };
     if (!rate.ok) return rate;
 
@@ -284,7 +322,7 @@ export async function enforceKeyLimits(apiKey, model) {
   }
 
   // 2-3. RPM/TPM per key
-  const rate = await enforceRate({ kind: "key", apiKey, keyId: key.id }, resolved);
+  const rate = await enforceRate({ kind: "key", apiKey, keyId: key.id }, resolved, { signal });
   if (!rate.ok) return rate;
 
   // 4. Budget ($ cost) with optional reset window. Admin keys keep this: unlike a

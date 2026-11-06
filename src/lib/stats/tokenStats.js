@@ -167,7 +167,7 @@ export function tokenStatsSync(db, q) {
   const rows = db.all(
     `SELECT ${bucket} AS bucket, ${group} AS grp,
             COUNT(*) AS requests,
-            SUM(CASE WHEN u.status = 'error' THEN 1 ELSE 0 END) AS errors,
+            SUM(CASE WHEN COALESCE(u.status, 'ok') NOT IN ('ok', 'success', '499') THEN 1 ELSE 0 END) AS errors,
             SUM(${INPUT_SQL}) AS input, SUM(${OUTPUT_SQL}) AS output, SUM(${CACHED_SQL}) AS cached,
             SUM(${COST_SQL}) AS cost
        FROM ${USAGE_FROM}

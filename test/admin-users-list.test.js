@@ -22,7 +22,9 @@ const { NANO } = await import("../src/shared/utils/money.js");
 let db;
 const USD = (n) => Math.round(n * NANO);
 const DAY = 86_400_000;
-const T0 = Date.UTC(2026, 9, 29, 10, 0, 0);
+// Anchored to the real clock: the code under test compares stored times with
+// Date.now(), so a fixed date makes plans "expire" once that date is old.
+const T0 = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 8 * 86_400_000;
 const at = (ms) => new Date(ms).toISOString();
 
 before(async () => { db = await getAdapter(); });

@@ -1,7 +1,7 @@
 import { translateResponse, initState } from "../translator/index.js";
 import { FORMATS } from "../translator/formats.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
-import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, canonicalizeUsage, logUsage, pickRecordedUsage, COLORS } from "./usageTracking.js";
+import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, canonicalizeUsage, logUsage, pickRecordedUsage, floorAbortedOutput, isClosingUsageChunk, COLORS } from "./usageTracking.js";
 import { chunkText, bodyText } from "./chunkText.js";
 import { extractUsageFromResponse } from "../handlers/chatCore/requestDetail.js";
 import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE } from "./streamHelpers.js";
@@ -165,8 +165,11 @@ export function createSSEStream(options = {}) {
     if (t.tool) countGenerated(t.tool);
     const extracted = extractUsage(parsed);
     if (extracted) upstreamUsage = mergeUsage(upstreamUsage, extracted);
+    if (isClosingUsageChunk(parsed)) closingUsageSeen = true;
   };
 
+  // The upstream already sent the count it bills from: a later cut changes nothing.
+  let closingUsageSeen = false;
   let ttftAt = null;
   let sseLineCount = 0;
   let sseEmittedCount = 0;
@@ -229,6 +232,10 @@ export function createSSEStream(options = {}) {
         ? estimateUsage(body, contentStats, FORMATS.OPENAI) // internal shape: never sent to a client
         : null),
     }) || finalUsage;
+    // A cut stream never got the upstream's closing count: bill at least what was streamed.
+    if (reason === "aborted" && !closingUsageSeen && totalContentLength > 0 && hasValidUsage(finalUsage)) {
+      finalUsage = floorAbortedOutput(finalUsage, contentStats);
+    }
 
     if (hasValidUsage(finalUsage)) {
       logUsage(isPassthrough ? provider : (state?.provider || targetFormat), finalUsage, model, connectionId, apiKey);

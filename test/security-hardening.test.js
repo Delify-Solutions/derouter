@@ -129,3 +129,15 @@ test("custom-server.js and clientIp.js pick the same forwarded client IP", async
     assert.equal(server.forwardedClientIp(real, xff), forwardedClientIp(real, xff), `${real} | ${xff}`);
   }
 });
+
+// ── Encoded paths never reach the guard's prefix rules (change hardening-wave1) ──
+
+test("the guard refuses paths that encode letters, digits, dots or slashes", async () => {
+  const { isObfuscatedPath } = await import("../src/lib/auth/obfuscatedPath.js");
+  for (const p of ["/%61pi/settings", "/%41pi/keys", "/api%2fsettings", "/api%2Fsettings", "/api/%73ettings", "/api/tunnel/%65nable", "/%64ashboard", "/x/%2e%2e/api/settings", "/api%5Csettings", "/api\\settings", "/%7Ex"]) {
+    assert.equal(isObfuscatedPath(p), true, p);
+  }
+  for (const p of ["/api/settings", "/api/combos/my%20combo", "/docs/%E1%BA%BF", "/api/x/%25", "/v1beta/models/gemini-2.5-pro:generateContent", "/api/x/%3A", "/"]) {
+    assert.equal(isObfuscatedPath(p), false, p);
+  }
+});

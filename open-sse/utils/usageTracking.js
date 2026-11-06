@@ -35,6 +35,46 @@ export function pickRecordedUsage({ real, estimate }) {
 }
 
 /**
+ * Whether a stream chunk carries the upstream's closing usage (the count the
+ * request is billed from): Anthropic `message_delta`, a Responses terminal event,
+ * an OpenAI usage chunk, or a Gemini chunk that finishes a candidate.
+ */
+export function isClosingUsageChunk(chunk) {
+  if (!chunk || typeof chunk !== "object") return false;
+  if (chunk.type === "message_delta" && chunk.usage && typeof chunk.usage === "object") return true;
+  if ((chunk.type === "response.completed" || chunk.type === "response.done" || chunk.type === "response.incomplete" || chunk.type === "response.failed") && chunk.response?.usage) return true;
+  if (chunk.usage && typeof chunk.usage === "object" && (chunk.usage.completion_tokens !== undefined || chunk.usage.output_tokens !== undefined) && chunk.type === undefined) return true;
+  const gem = chunk.response && typeof chunk.response === "object" ? chunk.response : chunk;
+  if (gem.usageMetadata && Array.isArray(gem.candidates) && gem.candidates.some((c) => c?.finishReason)) return true;
+  return false;
+}
+
+/**
+ * Usage of a stream that ended before the upstream sent its final count (client cancel,
+ * upstream reset, stall). Anthropic reports `output_tokens: 1` in `message_start` and the
+ * real figure only in the closing `message_delta`, so a cut stream would otherwise be
+ * billed one output token for everything already streamed. The output side becomes the
+ * larger of what the upstream reported and the estimate from the text the client got;
+ * when the estimate wins the row is flagged `estimated`. Input and cache figures stay as
+ * reported.
+ * @param {object|null} usage reported usage (OpenAI or Claude field names)
+ * @param {{ascii:number, wide:number}} generated character counts of the streamed text
+ */
+export function floorAbortedOutput(usage, generated) {
+  if (!usage || typeof usage !== "object") return usage;
+  const estimate = estimateOutputTokens(generated);
+  if (!(estimate > 0)) return usage;
+  const key = typeof usage.completion_tokens === "number" || typeof usage.output_tokens !== "number"
+    ? "completion_tokens"
+    : "output_tokens";
+  const reported = Number(usage[key]) || 0;
+  if (reported >= estimate) return usage;
+  const raised = { ...usage, [key]: estimate, estimated: true };
+  if (typeof usage.total_tokens === "number") raised.total_tokens = usage.total_tokens + (estimate - reported);
+  return raised;
+}
+
+/**
  * Anthropic-style usage from an OpenAI usage object. Anthropic reports the cached part of the
  * prompt separately: input_tokens excludes it and cache_read_input_tokens /
  * cache_creation_input_tokens carry it.
@@ -360,7 +400,7 @@ export function mergeUsage(prev, next) {
 // by their encoded length, which used to inflate a single screenshot into ~100k tokens.
 const ASCII_CHARS_PER_TOKEN = 4;
 const WIDE_CHARS_PER_TOKEN = 2;
-const MEDIA_ITEM_TOKENS = 1000;
+export const MEDIA_ITEM_TOKENS = 1000;
 // Keys whose value is a JSON document the model reads as text (tool schemas): count it whole.
 const JSON_TEXT_KEYS = new Set(["tools", "functions", "tool_choice", "response_format", "toolConfig", "tool_config"]);
 // Keys that carry opaque or binary data and never reach the model as text.

@@ -125,7 +125,14 @@ export class BaseExecutor {
       }
       retryAttemptsByUrl[urlIndex]++;
       log?.debug?.("RETRY", `${reason} retry ${retryAttemptsByUrl[urlIndex]}/${attempts} after ${waitMs / 1000}s`);
-      await new Promise(resolve => setTimeout(resolve, waitMs));
+      // A client that leaves during the wait ends it: no resend for nobody.
+      const aborted = await new Promise((resolve) => {
+        if (signal?.aborted) return resolve(true);
+        const timer = setTimeout(() => { signal?.removeEventListener?.("abort", onAbort); resolve(false); }, waitMs);
+        function onAbort() { clearTimeout(timer); resolve(true); }
+        signal?.addEventListener?.("abort", onAbort, { once: true });
+      });
+      if (aborted) return false;
       return true;
     };
 
@@ -188,8 +195,11 @@ export class BaseExecutor {
         // rejects with that reason (an Error), not an AbortError, so the name cannot be checked.
         const isConnectTimeout = connectCtrl.signal.aborted;
         dbg("FETCH", `${this.provider.toUpperCase()} ✖ ${error.name}: ${error.message}${isConnectTimeout ? " (connect timeout)" : ""}`);
-        // Connect timeout is internal — convert to retryable network error, don't propagate AbortError
-        if (error.name === "AbortError" && !isConnectTimeout) throw error;
+        // Connect timeout is internal — convert to retryable network error, don't propagate AbortError.
+        // The caller's signal can abort with its own reason (Next aborts a disconnected
+        // request's signal with a non-AbortError), so its state is checked too: a client
+        // that left is never retried.
+        if ((error.name === "AbortError" || signal?.aborted) && !isConnectTimeout) throw error;
 
         // Map network/fetch exceptions to 502 retry config. A connect timeout is not a network
         // blip: the upstream is slow or hung, and resending the whole prompt would only

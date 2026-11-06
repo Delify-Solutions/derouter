@@ -152,3 +152,30 @@ test("an upstream that never answers is tried once, not resent three more times"
   assert.equal(hits, 1, "a connect timeout must not be retried");
   assert.ok(Date.now() - t0 < 2000, "no retry delay (3s each) may be spent");
 });
+
+test("a caller abort with its own reason is not retried as a network error", async () => {
+  let hits = 0;
+  const server = http.createServer(() => { hits++; /* answers too late */ });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+  const executor = new BaseExecutor("openai-compatible-chat-test", { timeoutMs: 30_000 });
+  // Next aborts a disconnected request's signal with its own Error, not an AbortError.
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error("ResponseAborted")), 150);
+  const t0 = Date.now();
+  try {
+    await assert.rejects(
+      executor.execute({
+        model: "m", body: { messages: [{ role: "user", content: "hi" }] }, stream: false,
+        credentials: { apiKey: "k", providerSpecificData: { baseUrl: `http://127.0.0.1:${port}/v1` } },
+        signal: controller.signal, log: null,
+      }),
+      /ResponseAborted/
+    );
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+  assert.equal(hits, 1, "the abort ends the attempt; nothing is resent");
+  assert.ok(Date.now() - t0 < 1000, "no retry delay is spent for a client that left");
+});

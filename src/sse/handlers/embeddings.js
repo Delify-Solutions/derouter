@@ -21,15 +21,7 @@ import { getRequestIp } from "@/lib/auth/clientIp.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { publicModelContextSync, maskOptionsFor } from "@/lib/models/customerModels.js";
 import { maskResponse } from "@/lib/models/publicModel.js";
-
-function exactEmbeddingUsage(raw) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
-  const promptTokens = raw.prompt_tokens ?? raw.input_tokens;
-  const completionTokens = raw.completion_tokens ?? raw.output_tokens ?? 0;
-  const totalTokens = raw.total_tokens;
-  if (!Number.isSafeInteger(promptTokens) || promptTokens <= 0 || completionTokens !== 0 || totalTokens !== promptTokens) return null;
-  return { prompt_tokens: promptTokens, completion_tokens: 0, total_tokens: totalTokens };
-}
+import { embeddingUsage } from "open-sse/utils/embeddingUsage.js";
 
 /**
  * Handle embeddings request for the SSE/Next.js server.
@@ -164,7 +156,9 @@ async function handleEmbeddingsRequestInner(request, ctx) {
     });
 
     if (result.success) {
-      const usage = exactEmbeddingUsage(result.usage);
+      // The upstream's exact count, or an estimate from the input when it reported
+      // none (Gemini always answers zeros): an embedding is never served free.
+      const usage = embeddingUsage(result.usage, body.input);
       if (usage) {
         saveRequestUsage({
           provider,
@@ -172,7 +166,8 @@ async function handleEmbeddingsRequestInner(request, ctx) {
           connectionId: credentials.connectionId,
           apiKey,
           endpoint: url.pathname,
-          tokens: usage,
+          tokens: usage.tokens,
+          estimated: usage.estimated,
           status: "success",
           clientIp: getRequestIp(request),
           // Original client model (bare combo name when the request was for a combo);

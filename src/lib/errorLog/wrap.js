@@ -82,7 +82,10 @@ export function createWithErrorLog({ resolveKey, record = recordErrorLog }) {
         throw error;
       }
 
-      if (response && response.status >= 400) {
+      // A client that hung up is not a failure to investigate, whatever status the
+      // engine settled on (a fusion or combo can turn the abort into a 503).
+      const clientGone = request?.signal?.aborted === true;
+      if (response && response.status >= 400 && !clientGone) {
         // Clone synchronously: the framework consumes the original right after we return.
         const copy = response.clone();
         readErrorBody(copy).then((responseText) => write({ status: response.status, responseText })).catch(() => {});

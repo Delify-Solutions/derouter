@@ -108,6 +108,8 @@ async function handlePost(request, { params }) {
       method: "POST",
       headers: request.headers,
       body: JSON.stringify(convertedBody),
+      // The client's disconnect must reach the engine (it cancels the upstream call).
+      signal: request.signal,
     });
 
     const response = await handleChat(newRequest);
