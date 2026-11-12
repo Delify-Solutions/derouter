@@ -331,6 +331,15 @@ export async function deleteUser(id, { actor = "system" } = {}) {
     db.run(`DELETE FROM userPlans WHERE userId = ?`, [id]);
     db.run(`DELETE FROM creditLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM giftRedemptions WHERE userId = ?`, [id]);
+    // Support chat (spec telegram-support): the conversation goes with the account.
+    // It is customer-written text, so it must not outlive a deletion request. The
+    // table only exists from schema 33 on; an older database must not fail here.
+    try {
+      db.run(`DELETE FROM supportMessages WHERE userId = ?`, [id]);
+      // The relay map points an admin-chat message at this account; without the
+      // account it can only answer a reply into nothing.
+      db.run(`DELETE FROM kv WHERE scope = 'telegramSupportRelay' AND value = ?`, [id]);
+    } catch { /* pre-33 schema has no supportMessages yet */ }
     // Request logs keep the owner snapshotted at request time so a deleted KEY
     // still names its customer. A deleted ACCOUNT must not: drop the snapshot
     // (columns and the email inside the stored record), as it was before the

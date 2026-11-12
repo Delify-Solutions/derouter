@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -792,6 +792,35 @@ export const TABLES = {
       createdAt: "TEXT NOT NULL",
     },
     indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_tn_kind_ref ON telegramNotices(kind, refId)"],
+  },
+  // Two-way support chat over the bot (spec telegram-support). One row per message,
+  // inbound (customer → admin) or outbound (admin → customer). The customer's side
+  // of the conversation IS the bot chat, so no thread table is needed: a thread is
+  // every row of one userId.
+  supportMessages: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      direction: "TEXT NOT NULL", // in | out
+      body: "TEXT NOT NULL",
+      // Telegram id of the message. Only inbound rows need it (a re-delivered update
+      // must not store twice), but outbound rows keep the admin-chat id so the origin
+      // of an answer is traceable. Ids are per chat, so this is only unique together
+      // with `direction`: a customer message 50 and an admin message 50 are different
+      // messages.
+      telegramMessageId: "INTEGER",
+      // For an admin reply: the admin identity that wrote it. NULL on inbound.
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      readAt: "TEXT",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_support_user ON supportMessages(userId, createdAt)",
+      // Telegram update idempotency: one row per (account, direction, telegram id).
+      // `direction` is part of the key because the two sides are different chats and
+      // their message ids are independent series.
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tg ON supportMessages(userId, direction, telegramMessageId)",
+    ],
   },
   // Admin announcements sent to every linked customer who keeps them on.
   telegramBroadcasts: {

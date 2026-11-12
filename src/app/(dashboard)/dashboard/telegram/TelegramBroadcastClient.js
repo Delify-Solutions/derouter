@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, Button, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
+import SupportInbox from "./SupportInbox";
 
 const POLL_MS = 3000;
 
@@ -196,6 +197,9 @@ export default function TelegramBroadcastClient() {
           </Card>
         </>
       )}
+
+      {/* The customer's other direction: messages they typed into the bot. */}
+      <SupportInbox />
 
       <ConfirmModal
         isOpen={confirming}

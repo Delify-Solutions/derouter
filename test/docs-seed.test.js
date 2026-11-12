@@ -129,6 +129,8 @@ const EXPECTED_SLUGS = [
   "cc-switch", "sdk", "models", "plans", "troubleshooting",
   // Affiliate program (spec affiliate-program "Customer affiliate page").
   "gioi-thieu",
+  // Two-way support chat over the bot (spec telegram-support).
+  "support",
 ];
 
 test("every shipped docs page parses, has a valid slug and seeds", () => {
