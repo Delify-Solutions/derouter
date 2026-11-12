@@ -11,4 +11,4 @@
 ## 3. Check
 
 - [x] 3.1 `npm run lint`, `npm test`, `npm run build`
-- [ ] 3.2 Merge the delta into `openspec/specs/account-registration/spec.md` and archive the change
+- [x] 3.2 Merge the delta into `openspec/specs/account-registration/spec.md` and archive the change

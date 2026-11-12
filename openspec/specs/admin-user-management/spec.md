@@ -36,6 +36,7 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 | Set expiry | an exact `expiresAt`, or signed `days` (non-zero, absolute value 1–3650) | purchase `active` or `exhausted`; the resulting expiry later than now and later than the purchase's `startsAt` | `expiresAt` replaced, earlier or later; balance, windows and status unchanged | — |
 | Adjust credit | non-zero signed amount, absolute value ≤ $10,000 | purchase `active` or `exhausted`, result ≥ 0 | result 0 → `exhausted`; from 0 to > 0 with expiry in the future → `active` | `adjust` |
 | Edit limits | limits valid per `plan-templates` against this purchase's credit and duration | purchase `active` or `exhausted` | window state of removed lengths deleted; spent kept for kept lengths | — |
+| Edit RPM/TPM | per purchase: empty (follow the plan), 0 (no limit) or an integer up to 1,000,000,000 | purchase `active` or `exhausted`; an unlimited-credit purchase must keep a window limit or a rate | the purchase's override is saved and applies on the next request (spec plan-templates "Per-purchase rate override"); audit `plan_rates_changed` | — |
 | Revoke | — | purchase `active` or `exhausted` | status `revoked`, remaining credit set to 0 | `revoke` (negative remaining) |
 | Reorder queue | full ordered id list (reason not required) | as in `plan-queue-billing` | priorities 1..n | — |
 | Disable / enable / delete key | key id; delete needs confirmation | key belongs to the user | effective on the next request | — |
@@ -124,3 +125,16 @@ The users list SHALL offer a checkbox per row, a select-all for the current page
 #### Scenario: Changing the page clears the selection
 - **WHEN** an admin selects rows and then changes the page or a filter
 - **THEN** nothing remains selected and the bulk action disappears
+
+### Requirement: Lock and delete from the user page
+The user detail header SHALL offer:
+- **"Khóa tài khoản"**, or **"Mở khóa"** when the account is suspended. It SHALL perform the audited status change to `suspended` or `active`, with a required reason.
+- **"Xóa tài khoản"**. It SHALL perform the cascade delete. The confirm button SHALL be enabled only once the account's email is typed back, and the dialog SHALL list what is removed and what is kept. After deletion the admin SHALL return to the users list.
+
+#### Scenario: Lock from the header
+- **WHEN** the admin clicks "Khóa tài khoản" and confirms with a reason
+- **THEN** the account becomes `suspended`, its sessions are revoked, its API keys are refused, and the header offers "Mở khóa"
+
+#### Scenario: Delete needs the email
+- **WHEN** the admin opens "Xóa tài khoản" and types a different email
+- **THEN** the delete button stays disabled

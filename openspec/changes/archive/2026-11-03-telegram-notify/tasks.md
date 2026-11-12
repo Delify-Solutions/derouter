@@ -24,5 +24,5 @@
 
 - [x] 5.1 Tests: transport mapping, prefs, marker, link clears marker, escaping, order summary, new IP, reminders (due, dedupe, retry), broadcast audience and counts
 - [x] 5.2 `npm run lint`, `npm test`, `npm run build`
-- [ ] 5.3 Merge deltas into `openspec/specs/` and archive
+- [x] 5.3 Merge deltas into `openspec/specs/` and archive
 - [x] 5.4 Every customer login announced (new IP called out, same-IP repeats within 15 min silent); admin sign-in alerts for password, OIDC, SAML

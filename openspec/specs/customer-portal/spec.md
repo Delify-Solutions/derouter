@@ -4,7 +4,7 @@
 Defines the signed-in customer's self-service area: creating and revoking API keys, seeing and reordering purchased plans with live window status, buying plans, and auditing every charge — entirely in Vietnamese and usable by keyboard.
 ## Requirements
 ### Requirement: API key page
-`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status, and the time of the key's last request recorded in usage history as "dùng lần cuối HH:MM DD/MM/YYYY" in the browser's local time, or "chưa dùng" when no request is on record within the usage retention period) and SHALL let the customer create a key with a name of 1–80 characters and delete a key after confirmation. After creation the full secret SHALL be shown with a copy control and the advice "Sao chép key ngay để dán vào ứng dụng. Sau này bạn vẫn xem lại được ở danh sách key." Each row SHALL offer, as buttons with accessible names: show/hide the full key ("Hiện key"/"Ẩn key"), copy the full key ("Sao chép key", confirmed as "Đã sao chép"), and "Usage", which opens the public `/usage` page already loaded with that key. The list response SHALL NOT contain secrets; a key's secret SHALL be sent only by `POST /api/account/keys/{id}/secret`, only to the signed-in owner of that key (any other key, or another customer's key, answers 404), with `Cache-Control: no-store`, at most 60 times a minute per customer (then HTTP 429), and only when the customer presses one of those buttons. A revealed secret SHALL live only in the page's memory (a reload hides it). "Usage" SHALL hand the key to `/usage` through the browser storage slot `/usage` reads on load, never through the URL, and signing out of the account SHALL clear that slot. The page SHALL show the API base URL (`<public base URL>/v1`, the public base URL being the `publicBaseUrl` setting or the request origin) with a copy control. With no keys it SHALL show "Bạn chưa có API key" and a "Tạo key" action.
+`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status, the plan the key is pinned to or "Tất cả gói", and the time of the key's last request recorded in usage history as "dùng lần cuối HH:MM DD/MM/YYYY" in the browser's local time, or "chưa dùng" when no request is on record within the usage retention period) and SHALL let the customer create a key with a name of 1–80 characters and an "Áp dụng cho" choice (all plans, or one plan the customer currently holds, showing its RPM/TPM), change that choice afterwards ("Đổi gói"), and delete a key after confirmation. The form SHALL explain that RPM/TPM follow the plan and are shared by every key of that plan. A key whose pinned plan has no live purchase SHALL show a "Gói hết hạn" status. The API SHALL refuse (400) a plan the customer does not currently hold and SHALL treat another customer's key as not found.
 
 #### Scenario: List carries no secret
 - **WHEN** a customer creates a key and reloads the page
@@ -17,6 +17,18 @@ Defines the signed-in customer's self-service area: creating and revoking API ke
 #### Scenario: Last used and usage page
 - **WHEN** a customer's key made its last request at 20:53 on 01/11/2026 and the customer opens `/account/keys`
 - **THEN** the row shows "dùng lần cuối 20:53 01/11/2026", and pressing "Usage" opens `/usage` showing that key's usage with no key in the address bar
+
+#### Scenario: Creating a key for one plan
+- **WHEN** a customer holding plans A and B creates a key choosing plan B
+- **THEN** the key is listed with plan B and its requests are paid from B only
+
+#### Scenario: Plan not held
+- **WHEN** a customer submits a plan id they do not currently hold, or one that belongs to another customer
+- **THEN** the response is HTTP 400 and the key is not created or changed
+
+#### Scenario: Moving a key
+- **WHEN** a customer changes a key from plan B to "Tất cả gói"
+- **THEN** the key's next request may be paid by the head of the queue
 
 ### Requirement: Plan queue page
 `/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), its balance with a progress bar, expiry date and days left, every limit in the plan's own unit, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. The balance SHALL be remaining and total credit for a credit plan (an unlimited-credit plan showing "Không giới hạn" instead of a bar), and remaining and total images, labelled "ảnh", for an image plan. Each limit SHALL read "<window label>: $<spent> / $<max> · reset <HH:MM>" for a credit plan and "<window label>: <spent> / <max> ảnh · reset <HH:MM>" for an image plan, or "<window label>: chưa dùng" when no window is open. Times SHALL be shown in the browser's local time.

@@ -144,7 +144,21 @@ A completed `POST /v1/images/generations` SHALL be recorded as a usage row and c
 - **THEN** the call is refused with 403 and nothing is charged or forwarded
 
 ### Requirement: Unlimited-credit plans
-A plan MAY be flagged `unlimitedCredit`. Such a plan SHALL store credit 0, SHALL be snapshotted as a flag into its orders and purchases, and its purchases SHALL be eligible while unexpired and not blocked by a window, regardless of credit. Charging one SHALL NOT change its credit or status (it never becomes `exhausted`) but SHALL still write a `charge` ledger row (tagged `unlimited`) and advance its windows; a request admitted through one SHALL always be paid in full by it, so no debt arises while one is queued. When every unlimited purchase is window-blocked, admission SHALL answer 429 `plan_limit` with the earliest reopen time, like any plan. A grant of an unlimited plan (order, admin grant, plan gift) SHALL repay no debt. An unlimited plan SHALL carry at least one bound: a window limit, an RPM or a TPM, and a plan without any SHALL be rejected with a Vietnamese message. Adjusting credit on an unlimited purchase SHALL be refused with HTTP 409, and its window limits SHALL NOT be cleared while the plan has no RPM or TPM. Screens SHALL show "Không giới hạn" in place of its credit figure.
+A plan MAY be flagged `unlimitedCredit`. Such a plan SHALL store credit 0 and SHALL be snapshotted as a flag into its orders and purchases.
+
+Admission and charging:
+- Its purchases SHALL be eligible while unexpired and not blocked by a window, regardless of credit.
+- Charging one SHALL NOT change its credit or status (it never becomes `exhausted`). It SHALL still write a `charge` ledger row (tagged `unlimited`) and advance its windows.
+- A request admitted through one SHALL always be paid in full by it, so no debt arises while one is queued.
+- When every unlimited purchase is window-blocked, admission SHALL answer 429 `plan_limit` with the earliest reopen time, like any plan.
+- A grant of an unlimited plan (order, admin grant, plan gift) SHALL repay no debt.
+
+Bounds:
+- An unlimited plan SHALL carry at least one bound: a window limit, an RPM or a TPM. A plan without any SHALL be rejected with a Vietnamese message.
+- An unlimited purchase SHALL likewise keep at least one bound. Its window limits SHALL NOT be cleared, and its RPM/TPM override SHALL NOT be set to no limit, while it would be left with no window limit and no effective RPM or TPM (its override, else its plan's).
+- A gift code for an unlimited plan without window limits SHALL NOT be saved with RPM/TPM that remove every bound. Redeeming such a code SHALL be refused.
+
+Adjusting credit on an unlimited purchase SHALL be refused with HTTP 409. Screens SHALL show "Không giới hạn" in place of its credit figure.
 
 #### Scenario: Charging an unlimited plan
 - **WHEN** a customer whose only plan is unlimited with `{5h, $20}` makes a $3 request
@@ -157,6 +171,10 @@ A plan MAY be flagged `unlimitedCredit`. Such a plan SHALL store credit 0, SHALL
 #### Scenario: No bound on the plan
 - **WHEN** an admin saves an unlimited plan with no limits and no RPM/TPM
 - **THEN** the response is HTTP 400 and nothing is saved
+
+#### Scenario: No unbounded gift
+- **WHEN** an admin saves a gift code for an unlimited plan bounded only by RPM 30, with RPM 0 and TPM 0
+- **THEN** the save is refused with a Vietnamese message
 
 ### Requirement: Expiry
 A plan whose expiry has passed SHALL never be selected by admission or charged, even before the periodic sweep runs. The sweep, running at least every 5 minutes, SHALL mark such plans `expired`, set their remaining credit to zero, record a ledger row of kind `expire` with the forfeited amount, and delete window state belonging to plans that are no longer `active`.

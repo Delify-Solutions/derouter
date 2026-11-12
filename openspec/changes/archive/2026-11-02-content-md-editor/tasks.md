@@ -14,4 +14,4 @@
 ## 4. Tests and checks
 - [x] 4.1 `test/docs-markdown-file.test.js`, `test/markdown-commands.test.js`.
 - [x] 4.2 `npm test`, `npm run lint`, `npm run build`; screenshots of the content page from the built app.
-- [ ] 4.3 Merge the deltas into `openspec/specs/` and archive the change (after owner review).
+- [x] 4.3 Merge the deltas into `openspec/specs/` and archive the change (after owner review).

@@ -16,7 +16,7 @@ The setting `compatNormalization` (default `false`) SHALL select the behaviour f
 - **THEN** the next request again gets the legacy repairs (for example `developer` becomes `system`, a missing tool response is inserted, `[DONE]` is added to a stream that lacks it), and no token count is ever inflated
 
 ### Requirement: Same-format response streams from a custom node are forwarded byte for byte
-For a streamed response where the upstream is a custom node and its format equals the client format, the router SHALL enqueue each upstream SSE line exactly as received (including comment lines, `event:` lines, spacing of `data:`, non-standard fields, empty `tool_calls`, Azure fields, short ids, empty-content chunks and non-JSON data lines) and SHALL only observe usage and generated text on the side. Chunk boundaries of the network SHALL NOT change the bytes. Only these lines MAY be withheld: the usage-only chunk the router itself requested, a finish chunk that repeats one already delivered, and a second `[DONE]`.
+For a streamed response where the upstream is a custom node and its format equals the client format, the router SHALL enqueue each upstream SSE line exactly as received (including comment lines, `event:` lines, spacing of `data:`, non-standard fields, empty `tool_calls`, Azure fields, short ids, empty-content chunks and non-JSON data lines) and SHALL only observe usage and generated text on the side. Chunk boundaries of the network SHALL NOT change the bytes. Only these lines MAY be withheld: the usage-only chunk the router itself requested, a finish chunk that repeats one already delivered, and a second `[DONE]`. One exception: for a customer key with `hideUpstreamModels` on, the model fields, the `provider` field and error texts of each JSON `data:` line are rewritten as specified in model-privacy, and that line is re-serialised; every other line is still forwarded unchanged.
 
 #### Scenario: Usage inside the finish chunk
 - **WHEN** an OpenAI-compatible upstream streams a reply whose finish chunk carries usage
@@ -34,6 +34,10 @@ For a streamed response where the upstream is a custom node and its format equal
 - **WHEN** the upstream streams Anthropic events or Responses events to a client of the same format
 - **THEN** the client receives the bytes unchanged and no `[DONE]` is appended to the Anthropic stream or the Responses stream
 
+#### Scenario: Customer key
+- **WHEN** a customer key streams a combo from a custom node with `hideUpstreamModels` on
+- **THEN** each JSON `data:` line carries the combo name in its model field and is otherwise the same data
+
 ### Requirement: One `[DONE]` at most, never invented in strict mode
 The router SHALL deliver at most one `[DONE]` sentinel per stream. In strict mode it SHALL NOT synthesise one for an upstream that did not send it. In compat mode it SHALL add it for OpenAI chat streams only, never for Anthropic, Responses or Gemini-family streams.
 
@@ -42,7 +46,7 @@ The router SHALL deliver at most one `[DONE]` sentinel per stream. In strict mod
 - **THEN** the client receives one
 
 ### Requirement: Same-format JSON responses from a custom node are forwarded as received
-For a non-streamed response where the upstream is a custom node and its format equals the client format, and no tool name was cloaked on the way in, the router SHALL return the upstream's body text as received (whitespace, field order and unknown fields included) with the upstream's content type, and SHALL read usage from a parsed copy. Rewrites of the body (forcing `finish_reason`, filling `object`/`created`, stripping Azure fields, whitelisting usage fields, removing `reasoning_content` when `content` is non-empty) SHALL happen only in compat mode.
+For a non-streamed response where the upstream is a custom node and its format equals the client format, and no tool name was cloaked on the way in, the router SHALL return the upstream's body text as received (whitespace, field order and unknown fields included) with the upstream's content type, and SHALL read usage from a parsed copy. Rewrites of the body (forcing `finish_reason`, filling `object`/`created`, stripping Azure fields, whitelisting usage fields, removing `reasoning_content` when `content` is non-empty) SHALL happen only in compat mode. One exception: for a customer key with `hideUpstreamModels` on, the body is re-serialised with its model fields, `provider` field and errors rewritten as specified in model-privacy.
 
 #### Scenario: Reasoning is not removed
 - **WHEN** an upstream returns a message with both `content` and `reasoning_content`

@@ -15,4 +15,4 @@
 ## 4. Tests and checks
 - [x] 4.1 `test/key-plan-binding.test.js`; `test/access-enforcement.test.js` stamps `ratePlanId` on its usage rows.
 - [x] 4.2 `npm test`, `npm run lint`, `npm run build` pass.
-- [ ] 4.3 Merge the deltas into `openspec/specs/` and archive the change (after owner review).
+- [x] 4.3 Merge the deltas into `openspec/specs/` and archive the change (after owner review).

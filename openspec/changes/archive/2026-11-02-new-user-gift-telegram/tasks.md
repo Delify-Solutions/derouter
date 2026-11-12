@@ -22,4 +22,4 @@
 
 - [x] 4.1 Tests: initData verification, link token lifecycle, new-user redemption rules
 - [x] 4.2 `npm run lint`, `npm test`, `npm run build`
-- [ ] 4.3 Merge deltas into `openspec/specs/` and archive
+- [x] 4.3 Merge deltas into `openspec/specs/` and archive

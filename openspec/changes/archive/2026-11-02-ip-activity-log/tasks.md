@@ -22,4 +22,4 @@
 
 - [x] 5.1 Tests: IP resolution, activity repo queries, usage clientIp
 - [x] 5.2 lint, test, build; live check
-- [ ] 5.3 Merge deltas and archive
+- [x] 5.3 Merge deltas and archive
