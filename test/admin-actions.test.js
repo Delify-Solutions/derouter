@@ -329,6 +329,28 @@ test("adjust adds and removes credit with one ledger row and one audit row", () 
   assert.equal(auditRows("credit_adjusted").length, 2);
 });
 
+test("adjust refuses an image purchase so the two balances never blend", () => {
+  user();
+  plan("pimg", { code: "img", creditUsd: 0 });
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, startsAt, expiresAt, status, priority, limits, createdAt)
+     VALUES('upimg', 'u1', 'pimg', NULL, 'admin', 'image', 0, 0, 10, 10, ?, ?, 'active', NULL, NULL, ?)`,
+    [at(T0), at(T0 + 720 * 3_600_000), at(T0)]
+  );
+
+  const res = db.transaction(() =>
+    actions.adjustCreditSync(db, "u1", "upimg", { deltaNanoUsd: USD(10), reason: REASON, actor: ACTOR, now: at(T0) })
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 409);
+
+  const row = db.get(`SELECT creditRemainingNanoUsd AS credit, imageRemaining AS images FROM userPlans WHERE id = 'upimg'`);
+  assert.equal(row.credit, 0, "no credit written onto an image purchase");
+  assert.equal(row.images, 10, "the image balance is untouched");
+  assert.equal(db.all(`SELECT * FROM creditLedger WHERE kind = 'adjust'`).length, 0);
+  assert.equal(auditRows("credit_adjusted").length, 0);
+});
+
 test("adjust below zero is refused and nothing changes", () => {
   user();
   plan();

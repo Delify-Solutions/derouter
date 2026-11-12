@@ -194,8 +194,9 @@ export default function PlansTab({ userId, onChanged }) {
   const renderActions = (entry) => (
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="secondary" onClick={() => openAction("expiry", entry)}>Sửa hạn dùng</Button>
-      {/* An unlimited purchase has no credit to move; the API refuses it too. */}
-      {!entry.unlimitedCredit && (
+      {/* An unlimited purchase has no credit to move, and an image purchase's
+          balance is a count; the API refuses both too. */}
+      {!entry.unlimitedCredit && entry.kind !== "image" && (
         <Button size="sm" variant="secondary" onClick={() => openAction("adjust", entry)}>Điều chỉnh credit</Button>
       )}
       <Button size="sm" variant="secondary" onClick={() => openAction("limits", entry)}>Sửa hạn mức</Button>
@@ -300,7 +301,14 @@ export default function PlansTab({ userId, onChanged }) {
             label="Gói"
             value={draft.planId}
             onChange={(event) => setDraft((d) => ({ ...d, planId: event.target.value }))}
-            options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}` }))}
+            options={plans.map((plan) => ({
+              value: plan.id,
+              // An image plan holds no credit, so its price line is a count: "$0.00"
+              // would read as a free plan.
+              label: `${plan.name} · ${plan.kind === "image"
+                ? `${Number(plan.imageCount || 0).toLocaleString("vi-VN")} ảnh`
+                : fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}`,
+            }))}
           />
         )}
       />

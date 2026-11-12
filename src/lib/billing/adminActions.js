@@ -22,7 +22,7 @@ import {
   serializeLimits,
   normalizeLimits,
 } from "./limits.js";
-import { imageCount } from "./planKind.js";
+import { imageCount, isImagePlan } from "./planKind.js";
 
 const REASON_MIN = 3;
 const REASON_MAX = 500;
@@ -274,6 +274,12 @@ export function adjustCreditSync(db, userId, userPlanId, { deltaNanoUsd, reason,
   // finite one with a made-up balance, so it is refused instead of interpreted.
   if (Number(purchase.unlimitedCredit) === 1) {
     return fail(409, "Gói không giới hạn credit nên không có credit để điều chỉnh");
+  }
+  // An image purchase's balance is a count. Writing dollars onto it would leave a
+  // purchase that holds two balances and pays for two kinds of request, which the
+  // queue, the ledger and every card are written to assume cannot happen.
+  if (isImagePlan(purchase.kind)) {
+    return fail(409, "Gói ảnh không có credit để điều chỉnh; hãy cấp thêm gói ảnh nếu cần");
   }
 
   const delta = nano(deltaNanoUsd);

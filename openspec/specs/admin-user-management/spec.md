@@ -34,7 +34,7 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 | Grant plan | plan id | any plan, including inactive ones | new purchase with source `admin`, limits snapshotted | `grant` |
 | Grant credit | $0.01–$10,000, 1–3650 days | always | new purchase without limits | `grant` |
 | Set expiry | an exact `expiresAt`, or signed `days` (non-zero, absolute value 1–3650) | purchase `active` or `exhausted`; the resulting expiry later than now and later than the purchase's `startsAt` | `expiresAt` replaced, earlier or later; balance, windows and status unchanged | — |
-| Adjust credit | non-zero signed amount, absolute value ≤ $10,000 | purchase `active` or `exhausted`, result ≥ 0 | result 0 → `exhausted`; from 0 to > 0 with expiry in the future → `active` | `adjust` |
+| Adjust credit | non-zero signed amount, absolute value ≤ $10,000 | purchase `active` or `exhausted`, `kind = llm`, result ≥ 0 | result 0 → `exhausted`; from 0 to > 0 with expiry in the future → `active`; an image purchase is refused (409) | `adjust` |
 | Edit limits | limits valid per `plan-templates` against this purchase's credit and duration | purchase `active` or `exhausted` | window state of removed lengths deleted; spent kept for kept lengths | — |
 | Edit RPM/TPM | per purchase: empty (follow the plan), 0 (no limit) or an integer up to 1,000,000,000 | purchase `active` or `exhausted`; an unlimited-credit purchase must keep a window limit or a rate | the purchase's override is saved and applies on the next request (spec plan-templates "Per-purchase rate override"); audit `plan_rates_changed` | — |
 | Revoke | — | purchase `active` or `exhausted` | status `revoked`, remaining credit set to 0 | `revoke` (negative remaining) |
@@ -46,6 +46,10 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 | Change status | `active`, `suspended`, `unverified` | always | `suspended`/`unverified` also revokes all sessions and blocks the API | — |
 | Edit note (reason not required) | text ≤ 2000 characters | always | `adminNote` saved | — |
 | Reset password | password per `account-registration` | always | all sessions revoked; the password is never logged | — |
+
+#### Scenario: No credit on an image purchase
+- **WHEN** an admin adds $10 of credit to a purchase that sells images
+- **THEN** the response is HTTP 409, the purchase keeps $0 credit and its image count, no ledger row and no audit row are written, and the admin screen does not offer the action
 
 #### Scenario: Adjust below zero refused
 - **WHEN** the admin subtracts $30 from a purchase with $20 remaining
