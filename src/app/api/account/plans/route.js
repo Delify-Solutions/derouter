@@ -34,7 +34,7 @@ export async function GET(request) {
     const [plans, availableNanoUsd, used] = await Promise.all([
       listPlans({ onlyActive: true }),
       getAvailableNanoUsd(session.userId),
-      rates.planId ? getUserRateUsage(session.userId, 60_000, rates.planId) : { requests: 0, tokens: 0 },
+      rates.rateKey ? getUserRateUsage(session.userId, 60_000, rates.rateKey) : { requests: 0, tokens: 0 },
     ]);
 
     // Buyability is decided in one place (planPurchaseBlocker) so the catalogue,

@@ -13,11 +13,14 @@ import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
-import { modelNotFoundMessage } from "@/lib/auth/platformError";
+import { modelNotFoundMessage, markPlatform } from "@/lib/auth/platformError";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
 import { getRequestIp } from "@/lib/auth/clientIp.js";
+import { getAdapter } from "@/lib/db/driver.js";
+import { publicModelContextSync, maskOptionsFor } from "@/lib/models/customerModels.js";
+import { maskResponse } from "@/lib/models/publicModel.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -34,7 +37,7 @@ function exactEmbeddingUsage(raw) {
  *
  * @param {Request} request
  */
-async function handleEmbeddingsRequest(request) {
+async function handleEmbeddingsRequestInner(request, ctx) {
   let body;
   try {
     body = await request.json();
@@ -61,12 +64,12 @@ async function handleEmbeddingsRequest(request) {
   if (settings.requireApiKey) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
+      return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key"));
     }
     const valid = await isValidApiKey(apiKey);
     if (!valid) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+      return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key"));
     }
   }
 
@@ -93,6 +96,11 @@ async function handleEmbeddingsRequest(request) {
   }
 
   const { provider, model } = modelInfo;
+  // For the customer response mask (spec model-privacy): what was asked, and
+  // the ids that name the provider/model behind it.
+  ctx.publicName = modelStr;
+  ctx.upstream = [model, `${provider}/${model}`];
+  ctx.providers = [provider];
 
   // Customer keys pay per token: an unpriced embedding model would be free.
   if (apiKey) {
@@ -190,4 +198,25 @@ async function handleEmbeddingsRequest(request) {
 }
 
 // Failed requests are kept in the error log (spec error-log); the body is read back through a clone.
+/**
+ * Embeddings with the response masked for customer keys (spec model-privacy):
+ * the `model` field names what the customer asked for, and errors never name the
+ * provider (they read "[provider/model] …" otherwise).
+ */
+async function handleEmbeddingsRequest(request) {
+  const ctx = {};
+  const response = await handleEmbeddingsRequestInner(request, ctx);
+  const apiKey = extractApiKey(request);
+  if (!ctx.publicName || !apiKey) return response;
+  let masking = null;
+  try {
+    masking = publicModelContextSync(await getAdapter(), await getSettings(), {
+      apiKey, publicName: ctx.publicName, upstream: ctx.upstream, providers: ctx.providers,
+    });
+  } catch {
+    masking = maskOptionsFor({ publicName: ctx.publicName, upstream: ctx.upstream, providers: ctx.providers });
+  }
+  return masking ? maskResponse(response, masking) : response;
+}
+
 export const handleEmbeddings = withErrorLog(handleEmbeddingsRequest, { cloneBody: true });

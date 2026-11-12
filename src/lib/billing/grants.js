@@ -160,6 +160,10 @@ export function grantUserPlan(db, {
   durationDays,
   periods = 1,
   limits = [],
+  // Per-purchase RPM/TPM override (userPlans.rpm/tpm): null = the plan's own,
+  // 0 = no limit, > 0 = this rate. A gift code passes its own.
+  rpm = null,
+  tpm = null,
   meta = null,
   now = null,
   // Ledger kind for the credit entry. A refund is still a grant of credit, but it
@@ -191,6 +195,8 @@ export function grantUserPlan(db, {
       // count, so credit stays 0 and every grant of images is counted, never priced.
       credit: isImagePlan(kind) || unlimited ? 0 : Math.max(0, nano(creditNanoUsd)),
       images: isImagePlan(kind) ? imageCount(grantedImages) : 0,
+      // Per-purchase override: null follows the plan, 0 disables the limit.
+      rpm: rateOverride(rpm), tpm: rateOverride(tpm),
       // Keep the caller's own timestamp string when the period starts right away.
       startsAt: startMs === atMs ? at : new Date(startMs).toISOString(),
       durationDays,
@@ -206,9 +212,17 @@ export function grantUserPlan(db, {
 }
 
 /** One period of a grant: debt paydown, the userPlans row and its ledger row. */
+/** A stored rate override: null (follow the plan) or a non-negative integer. */
+function rateOverride(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new Error("RPM/TPM must be a non-negative integer");
+  return n;
+}
+
 function insertPeriodSync(db, {
   userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
-  kind, credit, images = 0, startsAt, durationDays, at, period,
+  kind, credit, images = 0, rpm = null, tpm = null, startsAt, durationDays, at, period,
 }) {
   const planId = planIdValue;
   const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
@@ -250,18 +264,20 @@ function insertPeriodSync(db, {
     status: "active",
     priority: null,
     limits: serializeLimits(limits),
+    rpm,
+    tpm,
     createdAt: at,
   };
 
   db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, unlimitedCredit, startsAt, expiresAt, status, priority, limits, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, unlimitedCredit, startsAt, expiresAt, status, priority, limits, rpm, tpm, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source, userPlan.kind,
       userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
       userPlan.imageTotal, userPlan.imageRemaining, userPlan.unlimitedCredit,
       userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.priority,
-      userPlan.limits, userPlan.createdAt,
+      userPlan.limits, userPlan.rpm, userPlan.tpm, userPlan.createdAt,
     ]
   );
 

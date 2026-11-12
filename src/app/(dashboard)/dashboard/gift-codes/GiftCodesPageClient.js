@@ -4,22 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Card,
   Button,
-  Input,
-  Select,
   Modal,
   ConfirmModal,
   Badge,
   CardSkeleton,
-  Toggle,
 } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
+import { fmtUsdNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
-import { topupCreditForAmount } from "@/lib/billing/topup.js";
 import UserPicker from "./components/UserPicker";
 import AssignResults from "./components/AssignResults";
-import EditGiftCodeModal from "./components/EditGiftCodeModal";
+import GiftCodeFormModal from "./components/GiftCodeFormModal";
 
 const FILTERS = [
   { value: "all", label: "All" },
@@ -91,6 +87,12 @@ function grantLabel(gift) {
   return fmtUsdNano(gift.creditNanoUsd ?? 0);
 }
 
+/** One RPM/TPM value of a code: empty follows the plan (none for credit), 0 = no limit. */
+function giftRateText(gift, value) {
+  if (value == null) return gift.grantKind === "plan" ? "theo gói" : "∞";
+  return Number(value) > 0 ? Number(value).toLocaleString("vi-VN") : "∞";
+}
+
 function matchesFilter(gift, filter) {
   if (filter === "all") return true;
   const status = giftStatus(gift);
@@ -100,13 +102,33 @@ function matchesFilter(gift, filter) {
   return true;
 }
 
-// Local date input → end of that day in ISO, so "expires 2026-03-01" means the
-// whole of the 1st, not midnight at its start.
-function dateInputToExpiryIso(value) {
-  if (!value) return null;
-  const [y, m, d] = value.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+
+/** The places a code is used, in words ("" when unused). */
+function usagePlaces(usage) {
+  if (!usage) return [];
+  const places = [];
+  if (usage.referralDefault) places.push("quà chào mừng mặc định của chương trình giới thiệu");
+  if (Number(usage.affiliateCount) > 0) places.push(`quà riêng của ${usage.affiliateCount} CTV`);
+  if (usage.popup) places.push("mã của popup khuyến mãi");
+  return places;
+}
+
+/** Delete dialog warning: what deleting the code unlinks. */
+function usageWarning(usage) {
+  const places = usagePlaces(usage);
+  if (places.length === 0) return "";
+  const popupNote = usage.popup ? " Chữ trong popup giữ nguyên, hãy sửa lại nếu có nhắc tới mã." : "";
+  return `Mã đang được dùng làm ${places.join(", ")}: xóa sẽ tự gỡ mã khỏi các chỗ này.${popupNote}`;
+}
+
+/** After a delete: what was unlinked, from the server's count. */
+function unlinkedText(unlinked) {
+  if (!unlinked) return "";
+  return usagePlaces({
+    referralDefault: unlinked.referralDefault,
+    affiliateCount: unlinked.affiliates,
+    popup: unlinked.popup,
+  }).join(", ");
 }
 
 export default function GiftCodesPageClient() {
@@ -119,6 +141,7 @@ export default function GiftCodesPageClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createdCode, setCreatedCode] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+  const [notice, setNotice] = useState("");
   const [redemptionsFor, setRedemptionsFor] = useState(null);
   const [redemptions, setRedemptions] = useState([]);
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
@@ -177,7 +200,7 @@ export default function GiftCodesPageClient() {
     }
   };
 
-  const disableCode = async () => {
+  const deleteCode = async () => {
     const gift = confirmState?.gift;
     if (!gift) return;
     setRowBusyId(gift.id);
@@ -186,11 +209,15 @@ export default function GiftCodesPageClient() {
       const res = await fetch(`/api/gift-codes/${gift.id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setLoadError(data.error || "Could not disable the code.");
+        setLoadError(data.error || "Không xóa được mã.");
         return;
       }
-      setCodes((prev) => prev.map((g) => (g.id === gift.id ? { ...g, isActive: false } : g)));
+      // Hard or soft, the code leaves the list: a soft-deleted one only keeps its
+      // redemption history for the accounts that used it.
+      setCodes((prev) => prev.filter((g) => g.id !== gift.id));
       setConfirmState(null);
+      const removed = unlinkedText(data.unlinked);
+      setNotice(`Đã xóa mã ${gift.displayCode || gift.code}.${removed ? ` Đã gỡ khỏi ${removed}.` : ""}`);
     } catch {
       setLoadError("Could not reach the server.");
     } finally {
@@ -225,8 +252,8 @@ export default function GiftCodesPageClient() {
           <span className="meta text-text-muted">Access</span>
           <h1 className="text-2xl font-semibold tracking-tight text-text-main">Gift codes</h1>
           <p className="max-w-xl text-sm text-text-muted">
-            Codes grant a plan or a credit balance when a user redeems one. Disabling a code keeps its redemption
-            history.
+            Codes grant a plan or a credit balance when a user redeems one. Every field can be edited later; changes apply
+            to later redemptions only. Deleting a used code keeps its redemption history.
           </p>
         </div>
         <Button icon="add" onClick={openCreate}>New code</Button>
@@ -252,6 +279,13 @@ export default function GiftCodesPageClient() {
           </button>
         ))}
       </div>
+
+      {notice && (
+        <p role="status" className="flex items-start gap-2 border border-brand-500/40 bg-brand-500/5 px-4 py-2 text-sm text-brand-700 dark:text-brand-400">
+          <span className="flex-1">{notice}</span>
+          <button type="button" className="text-xs underline" onClick={() => setNotice("")}>Đóng</button>
+        </p>
+      )}
 
       {loadError && (
         <div className="flex items-start gap-2 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
@@ -324,6 +358,11 @@ export default function GiftCodesPageClient() {
                       {gift.grantKind === "credit" && gift.durationDays ? (
                         <p className="text-xs text-text-subtle">{gift.durationDays} days</p>
                       ) : null}
+                      {(gift.rpm != null || gift.tpm != null) && (
+                        <p className="font-mono text-[11px] text-text-subtle whitespace-nowrap">
+                          RPM {giftRateText(gift, gift.rpm)} · TPM {giftRateText(gift, gift.tpm)}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className="font-mono text-sm text-text-main">
@@ -393,11 +432,12 @@ export default function GiftCodesPageClient() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          icon="block"
-                          disabled={!gift.isActive || busy}
+                          icon="delete"
+                          className="text-danger hover:bg-red-500/10"
+                          disabled={busy}
                           onClick={() => setConfirmState({ gift })}
                         >
-                          Disable
+                          Xóa
                         </Button>
                       </div>
                     </td>
@@ -410,7 +450,8 @@ export default function GiftCodesPageClient() {
       )}
 
       {editFor && (
-        <EditGiftCodeModal
+        <GiftCodeFormModal
+          plans={plans}
           gift={editFor}
           onClose={() => setEditFor(null)}
           onSaved={(code) => {
@@ -431,10 +472,10 @@ export default function GiftCodesPageClient() {
       )}
 
       {createOpen && (
-        <NewGiftCodeModal
+        <GiftCodeFormModal
           plans={plans}
           onClose={() => setCreateOpen(false)}
-          onCreated={async (code, assigned) => {
+          onSaved={async (code, assigned) => {
             setCreateOpen(false);
             setCreatedCode({ ...code, assigned: assigned ?? null });
             await fetchCodes();
@@ -569,315 +610,18 @@ export default function GiftCodesPageClient() {
       <ConfirmModal
         isOpen={Boolean(confirmState)}
         onClose={() => setConfirmState(null)}
-        onConfirm={disableCode}
-        title="Disable gift code"
-        message="The code stops working immediately. Redemptions already granted are untouched."
-        confirmText="Disable"
+        onConfirm={deleteCode}
+        title={`Xóa mã ${confirmState?.gift?.displayCode || confirmState?.gift?.code || ""}`}
+        message={[
+          Number(confirmState?.gift?.redeemedCount) > 0
+            ? `Mã đã được dùng ${confirmState.gift.redeemedCount} lượt: mã sẽ biến mất khỏi danh sách và không nhập được nữa. Gói/credit đã cấp và lịch sử các lượt dùng giữ nguyên. Có thể tạo mã mới trùng chuỗi này.`
+            : "Mã chưa ai dùng sẽ bị xóa hẳn. Không thể hoàn tác.",
+          usageWarning(confirmState?.gift?.usage),
+        ].filter(Boolean).join(" ")}
+        confirmText="Xóa"
         loading={Boolean(confirmState?.gift && rowBusyId === confirmState.gift.id)}
       />
     </div>
-  );
-}
-
-function NewGiftCodeModal({ plans, onClose, onCreated }) {
-  const activePlans = useMemo(() => plans.filter((p) => p.isActive), [plans]);
-  // Mounted only while open, so these initialisers are the reset.
-  const [grantType, setGrantType] = useState(activePlans.length ? "plan" : "credit");
-  const [planId, setPlanId] = useState(activePlans[0]?.id || "");
-  const [creditUsd, setCreditUsd] = useState("");
-  const [durationDays, setDurationDays] = useState("30");
-  const [maxRedemptions, setMaxRedemptions] = useState("1");
-  const [perUserLimit, setPerUserLimit] = useState("1");
-  const [newUserOnly, setNewUserOnly] = useState(false);
-  const [expiresOn, setExpiresOn] = useState("");
-  const [note, setNote] = useState("");
-  const [customCode, setCustomCode] = useState("");
-  const [amountVnd, setAmountVnd] = useState("");
-  const [assignees, setAssignees] = useState([]);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const selectedPlan = activePlans.find((p) => p.id === planId) ?? null;
-  const topupPlan = grantType === "plan" && selectedPlan?.allowCustomAmount === true;
-  const amountCredit = topupPlan && amountVnd ? topupCreditForAmount(selectedPlan, Number(amountVnd)) : 0;
-
-  // Picking accounts raises the total so every one of them can receive the code.
-  const pickAssignees = (next) => {
-    setAssignees(next);
-    if (next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
-  };
-
-  const submit = async () => {
-    setError("");
-
-    const max = Number(maxRedemptions);
-    if (!Number.isInteger(max) || max < 1) {
-      setError("Total redemptions must be at least 1.");
-      return;
-    }
-    // A new-user code is one per account; the server pins it too.
-    const perUser = newUserOnly ? 1 : Number(perUserLimit);
-    if (!Number.isInteger(perUser) || perUser < 1) {
-      setError("Per-user limit must be at least 1.");
-      return;
-    }
-    if (perUser > max) {
-      setError("Per-user limit cannot exceed total redemptions.");
-      return;
-    }
-
-    // Optional code the admin chooses (WELCOME2026); empty = a random one. The
-    // server applies the same rule and also refuses a code that already exists.
-    const typedCode = customCode.trim();
-    if (typedCode) {
-      const key = typedCode.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!/^[A-Za-z0-9 -]+$/.test(typedCode)) {
-        setError("Mã chỉ gồm chữ không dấu, số và dấu gạch ngang.");
-        return;
-      }
-      if (key.length < 4 || key.length > 32) {
-        setError("Mã phải dài từ 4 đến 32 ký tự (không tính dấu gạch).");
-        return;
-      }
-    }
-
-    const body = {
-      code: typedCode || undefined,
-      maxRedemptions: max,
-      perUserLimit: perUser,
-      newUserOnly,
-      expiresAt: dateInputToExpiryIso(expiresOn),
-      note: note.trim() || null,
-    };
-
-    if (grantType === "plan") {
-      if (!planId) {
-        setError("Select a plan.");
-        return;
-      }
-      body.planId = planId;
-      if (topupPlan && String(amountVnd).trim() !== "") {
-        if (!(Number(amountVnd) > 0) || amountCredit <= 0) {
-          setError("Số tiền phải là số đồng nguyên dương, đủ lớn để quy đổi ra credit.");
-          return;
-        }
-        body.amountVnd = Number(amountVnd);
-      }
-    } else {
-      const usd = Number(creditUsd);
-      if (!Number.isFinite(usd) || usd <= 0) {
-        setError("Enter a credit amount above zero.");
-        return;
-      }
-      const days = Number(durationDays);
-      if (!Number.isInteger(days) || days < 1) {
-        setError("Duration must be at least 1 day.");
-        return;
-      }
-      body.creditNanoUsd = usdToNano(usd);
-      body.durationDays = days;
-    }
-
-    if (assignees.length > max) {
-      setError("Tổng lượt dùng phải đủ cho số tài khoản được gắn.");
-      return;
-    }
-    if (assignees.length > 0) body.assignUserIds = assignees.map((user) => user.id);
-
-    setSaving(true);
-    try {
-      const res = await fetch("/api/gift-codes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Could not create the code.");
-        return;
-      }
-      await onCreated(data.code, data.assigned);
-    } catch {
-      setError("Could not reach the server.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const planOptions = activePlans.map((p) => ({
-    value: p.id,
-    label: `${p.name} · ${p.allowCustomAmount ? "nạp tùy ý" : fmtCreditNano(p.creditNanoUsd, p.unlimitedCredit)} · ${p.durationDays}d`,
-  }));
-
-  return (
-    <Modal
-      isOpen
-      onClose={onClose}
-      title="New gift code"
-      size="lg"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={submit} loading={saving}>Create code</Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Input
-          label="Mã tự đặt (tùy chọn)"
-          value={customCode}
-          onChange={(e) => setCustomCode(e.target.value.toUpperCase())}
-          placeholder="WELCOME2026"
-          maxLength={40}
-          hint="4–32 chữ hoặc số. Để trống để tạo mã ngẫu nhiên 16 ký tự."
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Grant</span>
-          <div className="inline-flex w-full border border-border">
-            {[
-              { value: "plan", label: "Plan" },
-              { value: "credit", label: "Credit" },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setGrantType(opt.value)}
-                aria-pressed={grantType === opt.value}
-                className={`h-9 flex-1 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors duration-150 ${
-                  grantType === opt.value
-                    ? "bg-brand-500 text-white"
-                    : "bg-transparent text-text-muted hover:text-text-main"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {grantType === "plan" ? (
-          activePlans.length === 0 ? (
-            <p className="border border-border bg-surface-2 px-3 py-2 text-sm text-text-muted">
-              No active plans exist yet. Create a plan first, or grant credit instead.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <Select
-                label="Plan"
-                options={planOptions}
-                value={planId}
-                onChange={(e) => setPlanId(e.target.value)}
-                placeholder="Select a plan"
-              />
-              {topupPlan && (
-                // A custom-amount plan is gifted like a top-up: an amount in đồng,
-                // credited at the plan's own rate, with its duration and limits.
-                <Input
-                  label="Số tiền tặng (đồng)"
-                  inputMode="numeric"
-                  value={amountVnd}
-                  onChange={(e) => setAmountVnd(e.target.value.replace(/\D/g, ""))}
-                  placeholder={selectedPlan?.priceVnd ? String(selectedPlan.priceVnd) : "100000"}
-                  hint={amountVnd
-                    ? (amountCredit > 0
-                        ? `${formatVnd(Number(amountVnd))} = ${fmtUsdNano(amountCredit)} credit theo tỷ lệ của gói (${formatVnd(selectedPlan.priceVnd)} = ${fmtUsdNano(selectedPlan.creditNanoUsd)}), dùng ${selectedPlan.durationDays} ngày.`
-                        : "Số tiền quá nhỏ để quy đổi ra credit.")
-                    : `Để trống = tặng ${fmtUsdNano(selectedPlan.creditNanoUsd)} credit như mua 1 lần với giá gốc.`}
-                />
-              )}
-            </div>
-          )
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Input
-              label="Credit amount (USD)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={creditUsd}
-              onChange={(e) => setCreditUsd(e.target.value)}
-              placeholder="5.00"
-              hint={creditUsd && Number.isFinite(Number(creditUsd))
-                ? fmtUsdNano(usdToNano(Number(creditUsd)))
-                : undefined}
-            />
-            <Input
-              label="Valid for (days)"
-              type="number"
-              min="1"
-              step="1"
-              value={durationDays}
-              onChange={(e) => setDurationDays(e.target.value)}
-            />
-          </div>
-        )}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Total redemptions"
-            type="number"
-            min="1"
-            step="1"
-            value={maxRedemptions}
-            onChange={(e) => setMaxRedemptions(e.target.value)}
-            hint="How many users may redeem this code in total."
-          />
-          <Input
-            label="Per-user limit"
-            type="number"
-            min="1"
-            step="1"
-            value={newUserOnly ? "1" : perUserLimit}
-            onChange={(e) => setPerUserLimit(e.target.value)}
-            disabled={newUserOnly}
-            hint={newUserOnly ? "Mã người mới: mỗi tài khoản 1 lần." : "Each account can redeem this code up to this many times."}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1 border border-border p-3">
-          <Toggle
-            checked={newUserOnly}
-            onChange={setNewUserOnly}
-            label="Mã người mới (cần liên kết Telegram)"
-          />
-          <p className="text-xs text-text-muted">
-            Chỉ tài khoản chưa từng mua gói và đã liên kết Telegram mới nhập được. Mỗi Telegram chỉ nhận một mã
-            người mới, tính chung mọi mã người mới. Gắn trực tiếp cho tài khoản thì bỏ qua các điều kiện này.
-          </p>
-        </div>
-
-        <Input
-          label="Expires on (optional)"
-          type="date"
-          value={expiresOn}
-          onChange={(e) => setExpiresOn(e.target.value)}
-          hint="Leave empty for a code that does not expire."
-        />
-
-        <UserPicker
-          value={assignees}
-          onChange={pickAssignees}
-          label="Gắn trực tiếp cho tài khoản (tùy chọn)"
-          hint="Tài khoản được chọn nhận quà ngay khi tạo mã, không cần nhập mã. Mỗi tài khoản tính 1 lượt dùng."
-        />
-
-        <Input
-          label="Note (optional)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Launch promo, support credit, ..."
-          maxLength={200}
-        />
-
-        {error && (
-          <p className="flex items-center gap-1 text-[11px] text-red-600">
-            <span className="material-symbols-outlined text-[14px]">error</span>
-            {error}
-          </p>
-        )}
-      </div>
-    </Modal>
   );
 }
 

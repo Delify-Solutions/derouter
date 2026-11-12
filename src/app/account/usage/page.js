@@ -6,6 +6,8 @@ import { fmtUsd, fmtUsdNano } from "@/shared/utils/money";
 import { percentLabel } from "@/shared/utils/discountFormat";
 import { Empty, Page, ButtonLink } from "@/app/account/components/ui";
 import AccountUsageTable from "./AccountUsageTable";
+import { getSettings } from "@/lib/db/repos/settingsRepo.js";
+import { hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +35,7 @@ function normalizeStatus(s) {
   return String(s);
 }
 
-function toRow(r) {
+function toRow(r, hide) {
   const t = r.tokens || {};
   const input = t.prompt_tokens ?? t.input_tokens ?? 0;
   const output = t.completion_tokens ?? t.output_tokens ?? 0;
@@ -41,7 +43,9 @@ function toRow(r) {
   const ttftMs = Number.isFinite(r.meta?.ttftMs) ? r.meta.ttftMs : null;
   return {
     timestamp: r.timestamp,
-    model: r.model || "—",
+    // The combo the customer called; the upstream model only when the
+    // protection is off (spec model-privacy). Old rows without a combo read "—".
+    model: (hide ? r.requestedModel : r.model) || "—",
     status: normalizeStatus(r.status),
     latencyMs,
     ttftMs,
@@ -80,6 +84,9 @@ export default async function AccountUsagePage({ searchParams }) {
   const period = PERIODS.some((p) => p.id === params.period) ? params.period : "7d";
   const selected = keys.find((key) => key.id === params.key) || keys[0] || null;
 
+  let hide = true;
+  try { hide = hideUpstreamModelsEnabled(await getSettings()); } catch { hide = true; }
+
   let summary = null;
   let history = [];
   if (selected) {
@@ -93,7 +100,7 @@ export default async function AccountUsagePage({ searchParams }) {
       .slice()
       .reverse()
       .slice(0, HISTORY_LIMIT)
-      .map(toRow);
+      .map((row) => toRow(row, hide));
   }
 
   const keysView = keys.map((key) => ({

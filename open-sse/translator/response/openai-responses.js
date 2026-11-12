@@ -557,7 +557,11 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       // Surface the error as an OpenAI-compatible error chunk
       return buildChunk(
         { id: state.chatId || `chatcmpl-${Date.now()}`, created: state.created || Math.floor(Date.now() / 1000), model: state.model || MODEL_FALLBACK },
-        { content: `[Error] ${error.message || JSON.stringify(error)}` },
+        // The raw upstream text becomes message content here, out of reach of any
+        // response mask, so a customer key's filter (spec model-privacy) runs first.
+        { content: `[Error] ${typeof state.errorTextFilter === "function"
+          ? state.errorTextFilter(error.message || JSON.stringify(error))
+          : (error.message || JSON.stringify(error))}` },
         OPENAI_FINISH.STOP
       );
     }

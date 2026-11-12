@@ -40,6 +40,16 @@ function shiftLocal(value, days) {
 }
 import ReasonModal from "./ReasonModal";
 
+/** "60 request/phút", or "không giới hạn" for a null rate. */
+function rateLabel(value, unit) {
+  return value ? `${Number(value).toLocaleString("vi-VN")} ${unit}/phút` : `không giới hạn ${unit}`;
+}
+
+/** An RPM/TPM field: empty (follow the plan) or digits. */
+function rateDraftValid(value) {
+  return value.trim() === "" || /^\d{1,10}$/.test(value.trim());
+}
+
 const WINDOW_OPTIONS = [
   { value: "5", label: "5 giờ" },
   { value: "24", label: "1 ngày" },
@@ -60,7 +70,7 @@ export default function PlansTab({ userId, onChanged }) {
   const [data, setData] = useState({ queue: [], history: [] });
   const [plans, setPlans] = useState([]);
   const [action, setAction] = useState(null); // { type, entry }
-  const [draft, setDraft] = useState({ planId: "", amountUsd: "", days: "30", deltaUsd: "", limits: [] });
+  const [draft, setDraft] = useState({ planId: "", amountUsd: "", days: "30", deltaUsd: "", limits: [], rpm: "", tpm: "" });
   const [savingOrder, setSavingOrder] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [notice, setNotice] = useState("");
@@ -112,11 +122,14 @@ export default function PlansTab({ userId, onChanged }) {
       // spent/reset state), which is what the card renders — `limits` is the raw
       // stored JSON and is not part of the queue payload.
       imageUnit: entry?.kind === "image",
-      limits: (entry?.windows ?? []).map((window) => ({
-        hours: String(window.hours),
-        maxUsd: entry?.kind === "image" ? "" : String((window.maxNanoUsd || 0) / 1e9),
-        maxImages: entry?.kind === "image" ? String(window.maxImages ?? 0) : "",
+      limits: (entry?.limits ?? entry?.windows ?? []).map((limit) => ({
+        hours: String(limit.hours),
+        maxUsd: entry?.kind === "image" ? "" : String((limit.maxNanoUsd || 0) / 1e9),
+        maxImages: entry?.kind === "image" ? String(limit.maxImages ?? 0) : "",
       })),
+      // Empty = follow the plan; the override is what is stored on the purchase.
+      rpm: entry?.rpmOverride == null ? "" : String(entry.rpmOverride),
+      tpm: entry?.tpmOverride == null ? "" : String(entry.tpmOverride),
     });
     setAction({ type, entry });
   };
@@ -186,6 +199,7 @@ export default function PlansTab({ userId, onChanged }) {
         <Button size="sm" variant="secondary" onClick={() => openAction("adjust", entry)}>Điều chỉnh credit</Button>
       )}
       <Button size="sm" variant="secondary" onClick={() => openAction("limits", entry)}>Sửa hạn mức</Button>
+      <Button size="sm" variant="secondary" onClick={() => openAction("rates", entry)}>Sửa RPM/TPM</Button>
       <Button size="sm" variant="ghost" className="text-danger hover:bg-red-500/10" onClick={() => openAction("revoke", entry)}>
         Thu hồi
       </Button>
@@ -458,6 +472,39 @@ export default function PlansTab({ userId, onChanged }) {
             >
               Thêm hạn mức
             </Button>
+          </div>
+        )}
+      />
+
+      {/* RPM / TPM */}
+      <ReasonModal
+        isOpen={action?.type === "rates"}
+        title="Sửa RPM/TPM của gói đã mua"
+        description={`Đang áp: ${rateLabel(action?.entry?.rpm, "request")} · ${rateLabel(action?.entry?.tpm, "token")}. Chỉ đổi gói đã mua này, không đổi gói gốc. Có hiệu lực từ request kế tiếp.`}
+        confirmLabel="Lưu RPM/TPM"
+        onClose={() => setAction(null)}
+        extraValid={rateDraftValid(draft.rpm) && rateDraftValid(draft.tpm)}
+        onConfirm={({ reason }) =>
+          patchPurchase({ action: "rates", rpm: draft.rpm.trim(), tpm: draft.tpm.trim(), reason })
+        }
+        renderFields={() => (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label="RPM (request mỗi phút)"
+              value={draft.rpm}
+              onChange={(event) => setDraft((d) => ({ ...d, rpm: event.target.value.replace(/[^\d]/g, "") }))}
+              inputMode="numeric"
+              placeholder={action?.entry?.planId ? "theo gói" : "không giới hạn"}
+              hint={action?.entry?.planId ? "Để trống = theo gói · 0 = không giới hạn" : "Để trống hoặc 0 = không giới hạn"}
+            />
+            <Input
+              label="TPM (token mỗi phút)"
+              value={draft.tpm}
+              onChange={(event) => setDraft((d) => ({ ...d, tpm: event.target.value.replace(/[^\d]/g, "") }))}
+              inputMode="numeric"
+              placeholder={action?.entry?.planId ? "theo gói" : "không giới hạn"}
+              hint={action?.entry?.planId ? "Để trống = theo gói · 0 = không giới hạn" : "Để trống hoặc 0 = không giới hạn"}
+            />
           </div>
         )}
       />

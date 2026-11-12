@@ -30,13 +30,17 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { noteClientBody } from "open-sse/utils/errorTrace.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { publicModelContextSync, customerMayCallSync, maskOptionsFor, isCustomerKeySync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
+import { platformErrorResponse, logPlatformDenial, markPlatform } from "@/lib/auth/platformError";
+import { maskResponse, upstreamError } from "@/lib/models/publicModel.js";
+import { getAdapter } from "@/lib/db/driver.js";
 
 /**
  * Handle chat completion request
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
  */
-async function handleChatRequest(request, clientRawRequest = null) {
+async function handleChatRequestInner(request, clientRawRequest, ctx) {
   let body;
   let rawBody;
   try {
@@ -67,11 +71,20 @@ async function handleChatRequest(request, clientRawRequest = null) {
   const { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
   if (contextMarker) body.model = modelStr;
 
+  // What the customer asked for, and the upstream ids the engine will use
+  // (recorded by chatCore into this set): the response is masked with both.
+  ctx.publicName = modelStr || null;
+  ctx.upstream = new Set();
+  ctx.providers = new Set();
+  clientRawRequest.upstreamModels = ctx.upstream;
+  clientRawRequest.upstreamProviders = ctx.providers;
+
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
   // Log API key (masked)
   const authHeader = request.headers.get("Authorization");
   const apiKey = extractApiKey(request);
+  ctx.apiKey = apiKey;
   if (authHeader && apiKey) {
     const masked = log.maskKey(apiKey);
     log.debug("AUTH", `API Key: ${masked}`);
@@ -84,12 +97,12 @@ async function handleChatRequest(request, clientRawRequest = null) {
   if (settings.requireApiKey) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
+      return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key"));
     }
     const valid = await isValidApiKey(apiKey);
     if (!valid) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+      return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key"));
     }
   }
 
@@ -109,11 +122,31 @@ async function handleChatRequest(request, clientRawRequest = null) {
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming, { compat: settings.compatNormalization === true });
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
+  // Customers call combos only (spec model-privacy): an upstream model id is not
+  // a product. After the bypass, so Claude Code's local naming/warmup requests
+  // (sent with its default haiku id) are still answered locally. Same denial
+  // format and denial log as the group allow-list.
+  if (apiKey && !customerMayCallSync(await getAdapter(), { apiKey, model: modelStr, settings })) {
+    const message = `Model "${modelStr}" không có trong danh sách model của bạn. Xem danh sách tại /v1/models.`;
+    await logPlatformDenial({ apiKey, model: modelStr, status: 403, message, clientIp: getRequestIp(request) });
+    return platformErrorResponse({ status: 403, code: "model_not_allowed", message });
+  }
+
+  // A translator that turns an upstream error event into message text (Responses
+  // → chat) runs this filter first for a customer key: that text is content, out
+  // of reach of the response mask. Read lazily: the ids are known once routed.
+  if (apiKey && hideUpstreamModelsEnabled(settings) && isCustomerKeySync(await getAdapter(), apiKey)) {
+    clientRawRequest.errorTextFilter = (text) => upstreamError(0, text, maskOptionsFor({
+      publicName: ctx.publicName, members: ctx.members || [], upstream: ctx.upstream || [], providers: ctx.providers || [],
+    })).message;
+  }
+
   const requiredCapabilities = detectRequiredCapabilities(body);
 
   // Check if model is a combo (has multiple models with fallback)
   const comboInfo = await getComboInfo(modelStr);
   const comboModels = comboInfo?.models ?? null;
+  if (comboModels) ctx.members = comboModels;
   if (comboModels) {
     // Combo option: estimated cached tokens for upstreams that report no usage (default off).
     // The combo the client called decides; it is passed down (also to fusion) as a boolean.
@@ -127,6 +160,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
       declaredCaps: comboInfo.capabilities,
     });
     const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
+    ctx.members = augmentedModels;
 
     if (comboStrategy === "fusion") {
       log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
@@ -167,6 +201,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
   // Single model request — may still switch to a capacity-adapter model if the
   // target lacks a capability the request needs (e.g. no vision, request has an image).
   const soloAugmented = augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, settings, { requestedModel: modelStr });
+  ctx.members = soloAugmented;
   if (soloAugmented.length > 1) {
     const adapterAdded = soloAugmented.filter((m) => m !== modelStr);
     log.info("CHAT", `Capacity adapter for [${[...requiredCapabilities].join(",")}] on "${modelStr}" → trying ${soloAugmented.join(", ")}`);
@@ -184,6 +219,37 @@ async function handleChatRequest(request, clientRawRequest = null) {
   }
 
   return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+}
+
+/**
+ * The chat handler with the response masked for customer keys (spec
+ * model-privacy): the model fields name what the customer asked for, and error
+ * texts never name an upstream model. Admin keys and keyless local use see the
+ * engine's response unchanged.
+ */
+async function handleChatRequest(request, clientRawRequest = null) {
+  const ctx = {};
+  const response = await handleChatRequestInner(request, clientRawRequest, ctx);
+  if (!ctx.publicName || !ctx.apiKey) return response;
+  let masking = null;
+  try {
+    masking = publicModelContextSync(await getAdapter(), await getSettings(), {
+      apiKey: ctx.apiKey,
+      publicName: ctx.publicName,
+      members: ctx.members || [],
+      upstream: ctx.upstream || [],
+      providers: ctx.providers || [],
+    });
+  } catch (error) {
+    // Fail closed: when it cannot be told whether the key is a customer's, the
+    // response is masked anyway. An admin may then read a combo name once;
+    // a customer must never read an upstream id.
+    log.warn("CHAT", `model masking check failed, masking anyway: ${error?.message || error}`);
+    masking = maskOptionsFor({
+      publicName: ctx.publicName, members: ctx.members || [], upstream: ctx.upstream || [], providers: ctx.providers || [],
+    });
+  }
+  return masking ? maskResponse(response, masking) : response;
 }
 
 // Every failed chat request is kept in the error log (spec error-log).

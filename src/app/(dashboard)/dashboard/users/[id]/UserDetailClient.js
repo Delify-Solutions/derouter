@@ -16,6 +16,7 @@ import SessionsTab from "./components/SessionsTab";
 import GiftsTab from "./components/GiftsTab";
 import AuditTab from "./components/AuditTab";
 import IpTab from "./components/IpTab";
+import AccountActions from "./components/AccountActions";
 
 // The tabs of the spec, in its order (IP: spec activity-ip-log). `?tab=<id>` selects one; an unknown value
 // falls back to the overview rather than a blank screen.
@@ -127,10 +128,13 @@ export default function UserDetailClient() {
         {loading ? (
           <div className="h-8 w-64 bg-surface-2" aria-hidden="true" />
         ) : (
-          <>
-            <h1 className="break-all text-2xl font-semibold text-text-main">{user?.displayName || user?.email}</h1>
-            <p className="font-mono text-[12px] text-text-muted">{headerLine}</p>
-          </>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex min-w-0 flex-col gap-2">
+              <h1 className="break-all text-2xl font-semibold text-text-main">{user?.displayName || user?.email}</h1>
+              <p className="font-mono text-[12px] text-text-muted">{headerLine}</p>
+            </div>
+            <AccountActions user={user} onChanged={load} />
+          </div>
         )}
       </div>
 

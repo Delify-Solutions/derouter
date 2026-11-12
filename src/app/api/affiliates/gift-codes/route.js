@@ -18,7 +18,7 @@ export async function GET() {
     const rows = db.all(
       `SELECT id, code, isActive, startsAt, expiresAt, redeemedCount, maxRedemptions, newUserOnly
          FROM giftCodes
-        WHERE newUserOnly = 1
+        WHERE newUserOnly = 1 AND deletedAt IS NULL
         ORDER BY createdAt DESC, rowid DESC`
     );
     return NextResponse.json(

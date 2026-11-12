@@ -91,7 +91,8 @@ export function createSSEStream(options = {}) {
     compat = false,
     suppressUsageChunk = false,
     clientFormat = sourceFormat,
-    finishHoldMs = FINISH_HOLD_RELEASE_MS
+    finishHoldMs = FINISH_HOLD_RELEASE_MS,
+    errorTextFilter = null
   } = options;
 
   let buffer = "";
@@ -105,7 +106,12 @@ export function createSSEStream(options = {}) {
   const decoder = new TextDecoder("utf-8", { fatal: false });
 
   const state = mode === STREAM_MODE.TRANSLATE
-    ? { ...initState(sourceFormat), provider, toolNameMap, customToolNames: new Set(customToolNames || []), model }
+    ? {
+      ...initState(sourceFormat), provider, toolNameMap, customToolNames: new Set(customToolNames || []), model,
+      // Set by the caller for a customer key (spec model-privacy): a translator that
+      // turns an upstream error event into message text passes the text through it.
+      errorTextFilter: typeof errorTextFilter === "function" ? errorTextFilter : null,
+    }
     : null;
 
   let totalContentLength = 0;
@@ -670,7 +676,8 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
     onStreamComplete,
     apiKey,
     compat: options.compat === true,
-    finishHoldMs: Number.isFinite(options.finishHoldMs) ? options.finishHoldMs : FINISH_HOLD_RELEASE_MS
+    finishHoldMs: Number.isFinite(options.finishHoldMs) ? options.finishHoldMs : FINISH_HOLD_RELEASE_MS,
+    errorTextFilter: options.errorTextFilter || null
   });
 }
 

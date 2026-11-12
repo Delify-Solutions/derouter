@@ -7,6 +7,7 @@ import {
   setPlanExpirySync,
   adjustCreditSync,
   setPurchaseLimitsSync,
+  setPurchaseRatesSync,
   revokePlanSync,
 } from "@/lib/billing/adminActions.js";
 
@@ -21,6 +22,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
  *    time. Either way it must land in the future: ending a plan now is `revoke`.
  *    | `{ action: "adjust", deltaNanoUsd, reason }`
  *    | `{ action: "limits", limits, reason }`
+ *    | `{ action: "rates", rpm, tpm, reason }` (null/"" = follow the plan, 0 = no limit)
  *    | `{ action: "revoke", reason }`
  *
  * The purchase must belong to this user (the repo scopes every query by userId), so
@@ -62,6 +64,13 @@ export async function PATCH(request, { params }) {
       case "limits":
         return setPurchaseLimitsSync(db, id, userPlanId, {
           limits: body?.limits,
+          reason: body?.reason,
+          actor,
+        });
+      case "rates":
+        return setPurchaseRatesSync(db, id, userPlanId, {
+          rpm: body?.rpm,
+          tpm: body?.tpm,
           reason: body?.reason,
           actor,
         });
