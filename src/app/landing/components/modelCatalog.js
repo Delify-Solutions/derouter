@@ -62,9 +62,17 @@ export async function buildModelListForGroup({ planIds = [] } = {}) {
 
   // No `skipDynamicFetch`: that flag switches ON the provider-pool listing used for
   // cross-instance discovery. The default path returns combos only, with no network.
+  //
+  // Image combos ride along with `kind: "image"` and their per-image price: an
+  // image plan's customer needs to see what an image costs, and a token table
+  // cannot express that (there are no tokens).
   let listed = [];
   try {
-    listed = await buildModelsList(["llm"], { allowedModels });
+    const [text, image] = await Promise.all([
+      buildModelsList(["llm"], { allowedModels }),
+      buildModelsList(["image"], { allowedModels }),
+    ]);
+    listed = [...text, ...image];
   } catch {
     listed = [];
   }
@@ -99,13 +107,19 @@ export async function buildModelListForGroup({ planIds = [] } = {}) {
       if (!rate || (rate.input == null && rate.output == null)) {
         rate = resolveRate(poolModel);
       }
+      const combo = comboByName.get(id);
+      const isImage = combo?.kind === "image";
       return {
         id,
         name: model.name || id,
+        kind: isImage ? "image" : "llm",
         formats: PROTOCOLS.map((p) => p.id),
-        input: rate?.input ?? null,
-        output: rate?.output ?? null,
-        cached: rate?.cached ?? null,
+        input: isImage ? null : rate?.input ?? null,
+        output: isImage ? null : rate?.output ?? null,
+        cached: isImage ? null : rate?.cached ?? null,
+        // USD per generated image; null when the admin set no per-image price (the
+        // request path refuses such a model for customer keys anyway).
+        image: isImage ? (Number(rate?.image) > 0 ? Number(rate.image) : null) : null,
       };
     })
   );

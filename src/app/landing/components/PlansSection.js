@@ -2,7 +2,7 @@ import Link from "next/link";
 import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
 import { fitFigureStyle } from "@/shared/utils/fitFigure";
-import { fmtUsd, interpolate, DEFAULT_PERKS } from "./salesData";
+import { fmtUsd, interpolate, DEFAULT_PERKS, IMAGE_PERKS } from "./salesData";
 
 /**
  * Where "Chọn <plan>" goes (spec public-landing "Plan selection entry flow"):
@@ -76,9 +76,11 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                     <p className="mt-2 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>
                   ) : null}
                   <p className="mt-4 text-sm font-medium text-text-main">
-                    {plan.unlimitedCredit
-                      ? "Credit không giới hạn, dùng cho mọi model"
-                      : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`}
+                    {plan.kind === "image"
+                      ? `${plan.imageText} — mỗi lần tạo ảnh trừ 1 ảnh`
+                      : plan.unlimitedCredit
+                        ? "Credit không giới hạn, dùng cho mọi model"
+                        : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`}
                   </p>
                   <p className="mt-1 text-sm text-text-muted">Dùng {plan.durationDays} ngày</p>
                   {plan.terms?.length > 0 ? (
@@ -102,7 +104,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                 </div>
 
                 <ul className="mt-6 flex flex-1 flex-col gap-2.5 border-t border-border px-6 py-5">
-                  {[...(plan.limitsText || []), ...DEFAULT_PERKS].map((line) => (
+                  {[...(plan.limitsText || []), ...(plan.kind === "image" ? IMAGE_PERKS : DEFAULT_PERKS)].map((line) => (
                     <li key={line} className="flex items-start gap-2.5 text-sm text-text-muted">
                       <span className="material-symbols-outlined mt-0.5 text-[16px] text-text-subtle" aria-hidden="true">check</span>
                       {line}

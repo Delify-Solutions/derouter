@@ -9,6 +9,7 @@ import { randomInt } from "crypto";
 import { getAdapter } from "../driver.js";
 import { grantUserPlan, listPlans } from "./billingRepo.js";
 import { parseLimits } from "../../billing/limits.js";
+import { imageCount, isImagePlan, normalizePlanKind } from "../../billing/planKind.js";
 // The redeemability window, shared with the affiliate welcome-gift check so an
 // advertised code is always one redeemGiftCode would accept (design D7).
 import { inWindow } from "../../gift/window.js";
@@ -289,6 +290,9 @@ export async function listGiftPlans() {
     id: plan.id,
     code: plan.code,
     name: plan.name ?? plan.code,
+    // The picker says what a gift of this plan hands out: images or credit.
+    kind: normalizePlanKind(plan.kind),
+    imageCount: plan.imageCount ?? 0,
     creditNanoUsd: plan.creditNanoUsd ?? 0,
     unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: plan.durationDays ?? 0,
@@ -515,7 +519,11 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
     if (amountCredit === 0) return { ok: false, reason: "invalid_plan" };
     grant = {
       planId: plan.id,
-      creditNanoUsd: amountCredit ?? (Number(plan.creditNanoUsd) || 0),
+      // What the gift redeems: images for an image plan, credit otherwise. Like
+      // the limits, the kind is snapshotted at grant time.
+      kind: normalizePlanKind(plan.kind),
+      imageCount: isImagePlan(plan.kind) ? imageCount(plan.imageCount) : 0,
+      creditNanoUsd: isImagePlan(plan.kind) ? 0 : (amountCredit ?? (Number(plan.creditNanoUsd) || 0)),
       unlimitedCredit: Number(plan.unlimitedCredit) === 1,
       durationDays: Number(plan.durationDays) || 30,
       planName: plan.name ?? null,
@@ -528,6 +536,8 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
     if (credit <= 0) return { ok: false, reason: "invalid_plan" };
     grant = {
       planId: row.planId || null,
+      kind: "llm",
+      imageCount: 0,
       creditNanoUsd: credit,
       durationDays: Number(row.durationDays) || 30,
       planName: null,
@@ -583,6 +593,8 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
         planId: grant.planId,
         orderId: null,
         source: "gift",
+        kind: grant.kind,
+        imageCount: grant.imageCount,
         creditNanoUsd: grant.creditNanoUsd,
         unlimitedCredit: grant.unlimitedCredit === true,
         durationDays: grant.durationDays,

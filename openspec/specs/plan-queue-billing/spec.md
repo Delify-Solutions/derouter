@@ -4,7 +4,7 @@
 Defines how a customer's purchased plans form a queue, which plan pays for each request, how per-plan time-window limits block and reopen a plan, and how credit is granted, charged, expired, carried as debt and back-charged — so that "pay $10, get $250 usable on any model, drained one plan at a time in the order I choose" holds exactly.
 ## Requirements
 ### Requirement: Each grant creates an independent purchased plan
-Every grant — approving an order, redeeming a plan gift code, redeeming a credit gift code, an admin "grant plan" and an admin "grant credit" — SHALL create one purchased plan holding: total credit, remaining credit, start time, expiry (start + duration days), source (`purchase`, `gift` or `admin`; legacy rows may carry `refund`), status `active`, no priority, and a snapshot of time-window limits. Plan-based grants SHALL snapshot the limits from the order (approval) or from the plan at grant time (gift, admin). Credit-only grants SHALL have no limits. Credit SHALL first repay any existing debt and only the rest SHALL become the plan's credit (existing rule). All money is integer nano-USD.
+Every grant — approving an order, redeeming a plan gift code, redeeming a credit gift code, an admin "grant plan" and an admin "grant credit" — SHALL create one purchased plan holding: `kind`, total `credit` and total `imageCount` for its kind, the remaining balance in that same unit, start time, expiry (start + duration days), source (`purchase`, `gift` or `admin`; legacy rows may carry `refund`), status `active`, no priority, and a snapshot of time-window limits. Plan-based grants SHALL snapshot the limits from the order (approval) or from the plan at grant time (gift, admin). Credit-only gifts and admin credit grants SHALL be `kind = 'llm'` with no limits; an image purchase SHALL hold `imageTotal = imageRemaining = the purchased count` and `creditTotalNanoUsd = creditRemainingNanoUsd = 0`. Credit SHALL first repay any existing debt and only the rest SHALL become the plan's credit (existing rule); an image grant repays no debt. All money is integer nano-USD; all image balances are integers.
 
 #### Scenario: Gift plan snapshots limits
 - **WHEN** a user redeems a gift code for plan "Go" whose limits are `[{5h, $20}, {168h, $80}]`
@@ -17,6 +17,10 @@ Every grant — approving an order, redeeming a plan gift code, redeeming a cred
 #### Scenario: Credit gift has no limits
 - **WHEN** a user redeems a credit gift code worth $5 for 30 days
 - **THEN** the new purchased plan has $5 credit, a 30-day expiry and no limits
+
+#### Scenario: Image gift
+- **WHEN** a user redeems a gift code for an image plan of 100 images
+- **THEN** the new purchased plan has 100 images, 0 credit and the plan's limits snapshot
 
 ### Requirement: Queue order
 A user's queue SHALL consist of the purchased plans with status `active` and expiry later than now. They SHALL be ordered: plans with a priority first, by ascending priority; then plans without a priority by ascending expiry; ties by ascending creation time, then by id.
@@ -37,12 +41,12 @@ A reorder request SHALL carry the complete list of the queue's plan ids in the d
 - **THEN** the response is HTTP 409 `queue_changed` and no priority changes
 
 ### Requirement: Time-window limits
-A limit SHALL be a window length in whole hours plus a maximum amount for that window. Each limit of each purchased plan SHALL have its own window state:
+A limit SHALL be a window length in whole hours plus a maximum for that window, expressed in the unit the purchase sells: a nano-USD maximum (`maxNanoUsd`) for a credit purchase, an image maximum (`maxImages`) for an image purchase. Each limit of each purchased plan SHALL have its own window state:
 - the window opens at the first charge to that plan when no window of that length is open, and closes at open time + length;
-- while open, its spent amount is the sum of all amounts charged to that plan since it opened;
+- while open, its spent amount is the sum of all amounts charged to that plan since it opened, in the purchase's own unit;
 - after it closes, its spent amount counts as zero until the next charge opens a new window.
 
-A plan SHALL be window-blocked while any open window's spent amount is greater than or equal to its maximum. A window-blocked plan SHALL reopen at the latest closing time among its full windows.
+A plan SHALL be window-blocked while any open window's spent amount is greater than or equal to its maximum. A window-blocked plan SHALL reopen at the latest closing time among its full windows. A limit of the other unit SHALL NOT be compared: an image limit never blocks a dollar charge and a dollar limit never blocks an image charge.
 
 #### Scenario: Window opens on first charge
 - **WHEN** a plan with limit `{5h, $20}` is charged for the first time at 10:00
@@ -56,10 +60,14 @@ A plan SHALL be window-blocked while any open window's spent amount is greater t
 - **WHEN** a plan has limits `{5h, $20}` and `{168h, $80}`, its 168-hour window holds $80 spent and its 5-hour window has closed
 - **THEN** the plan stays window-blocked until the 168-hour window closes
 
+#### Scenario: Image window counted in images
+- **WHEN** an image plan with limit `{5h, maxImages: 20}` has generated 20 images since 10:00
+- **THEN** the plan is window-blocked until 15:00, its 5-hour window shows 20 of 20 images, and its dollar spend stays 0
+
 ### Requirement: Admission
-Before forwarding a request made with a customer key (after the access checks of `api-access-enforcement`), the system SHALL look for the first plan in the queue that has remaining credit greater than zero, an expiry later than now and is not window-blocked.
-- If such a plan exists, the request SHALL proceed.
-- Otherwise, if at least one queued plan has remaining credit and is only window-blocked, the system SHALL respond HTTP 429 with error code `plan_limit`, a `Retry-After` header equal to the whole seconds (rounded up) until the earliest reopen time among those plans, `resetAt` set to that time in ISO-8601 UTC inside the error object, and a Vietnamese message stating the relative wait (for example "Các gói đang chạm hạn mức, mở lại sau 1 giờ 12 phút").
+Before forwarding a request made with a customer key (after the access checks of `api-access-enforcement`), the system SHALL filter the queue by the request's kind (`image-plans` "The queue admits by kind") and then look for the first eligible plan: one whose own balance is greater than zero (`imageRemaining` for `kind = 'image'`, `creditRemainingNanoUsd` for `kind = 'llm'`), whose `startsAt` is not later than now, whose expiry is later than now, and which is not window-blocked.
+- If such a plan exists, the request SHALL proceed on it.
+- Otherwise, if at least one candidate plan is funded and unexpired and only window-blocked, the system SHALL respond HTTP 429 with error code `plan_limit`, a `Retry-After` header equal to the whole seconds (rounded up) until the earliest reopen time among those plans, `resetAt` set to that time in ISO-8601 UTC inside the error object, and a Vietnamese message stating the relative wait (for example "Các gói đang chạm hạn mức, mở lại sau 1 giờ 12 phút").
 - Otherwise the system SHALL respond HTTP 402 with error code `insufficient_quota` and the message "Hết quota — mua gói hoặc nhập mã quà tặng tại /account/plans".
 
 Admin keys and keyless local requests SHALL bypass admission.
@@ -76,13 +84,18 @@ Admin keys and keyless local requests SHALL bypass admission.
 - **WHEN** the user has no queued plan with credit
 - **THEN** the response is HTTP 402 `insufficient_quota`
 
+#### Scenario: Image purchase cannot pay a text request
+- **WHEN** the user's only funded plan is an image purchase and the request is a chat completion
+- **THEN** the response is HTTP 402 `insufficient_quota`
+
 ### Requirement: Charging a completed request
-When a request made with a customer key completes with a cost C greater than zero (computed from the router's token pricing, as today), the system SHALL, in the same database transaction that records the usage row:
-1. **Pass 1** — walk the queue as it is at charge time; for each plan with remaining credit and an expiry later than now, take `min(C left, remaining credit, room)` where room is the smallest `maximum − spent` over the plan's open windows, a closed or unopened window counting with its full maximum (no limits = unlimited room);
-2. **Pass 2** — take whatever is left of C from plans in queue order that still have remaining credit and an unexpired expiry, ignoring windows;
+When a request made with a customer key completes with a cost C greater than zero (computed from the router's token pricing, as today) and a number of generated images I (0 for any non-image request), the system SHALL, in the same database transaction that records the usage row:
+0. **Images** — for each `kind = 'image'` purchase in queue order that is eligible, take up to `min(I left, images remaining, room in its image windows)` images and record one ledger row of kind `charge` carrying `deltaImages = −taken` and `deltaNanoUsd = 0`; the taken images are paid for, so their share of C (`floor(C × taken / I)`) SHALL be dropped from C before the money passes;
+1. **Pass 1** — walk the queue as it is at charge time; for each `kind = 'llm'` plan with remaining credit and an expiry later than now, take `min(C left, remaining credit, room)` where room is the smallest `maximum − spent` over the plan's open windows, a closed or unopened window counting with its full maximum (no limits = unlimited room);
+2. **Pass 2** — take whatever is left of C from `kind = 'llm'` plans in queue order that still have remaining credit and an unexpired expiry, ignoring windows;
 3. record anything still left as debt, as today.
 
-Each amount taken SHALL produce one ledger row of kind `charge` carrying the plan, the API key, the usage row and the amount, and SHALL be added to that plan's window spent amounts — opening windows where needed — including amounts taken in pass 2. A plan whose remaining credit reaches zero SHALL become `exhausted`. A cost of zero SHALL write nothing. Charging SHALL be idempotent per request: a request already charged SHALL produce no new ledger rows and no change to any window.
+Each amount taken SHALL produce one ledger row of kind `charge` carrying the plan, the API key, the usage row and the amount, and SHALL be added to that plan's window spent amounts — opening windows where needed — including amounts taken in pass 2. A plan whose remaining balance reaches zero SHALL become `exhausted`. A cost of zero and no images SHALL write nothing. Charging SHALL be idempotent per request: a request already charged SHALL produce no new ledger rows and no change to any window.
 
 #### Scenario: Split at the window edge
 - **WHEN** plan 1 (limit `{5h, $20}`, $19.50 spent in its open window) and plan 2 are queued and a request costs $1
@@ -100,12 +113,24 @@ Each amount taken SHALL produce one ledger row of kind `charge` carrying the pla
 - **WHEN** the same completed request is recorded twice
 - **THEN** exactly one set of ledger rows exists and window spent amounts increased once
 
+#### Scenario: Image request paid by images
+- **WHEN** an image purchase holds 5 images and a request returns 2 images priced at $0.08 total
+- **THEN** one `charge` row records `−2` images and 0 nano-USD, 3 images remain, and no debt is recorded
+
+#### Scenario: Images covered, money split
+- **WHEN** an image purchase holds 1 image, a credit plan holds $10, and a request returns 2 images priced at $0.10
+- **THEN** the image purchase is exhausted on 1 image, $0.05 is charged to the credit plan and no debt is recorded
+
 ### Requirement: Refunding an order takes its credit back
-Refunding a paid order SHALL set the order to `refunded` and, for every `active` plan that order produced, set the plan to `refunded`, set its remaining credit to zero, delete its window state and record one ledger row of kind `revoke` with the negative forfeited amount; it SHALL NOT grant any plan or credit. Credit already spent SHALL stay spent. Refunding an already refunded order SHALL be a no-op, and an order that granted nothing SHALL only change status. A one-time start-up repair SHALL apply the same closing to plans of orders that were refunded before this rule (including the old compensation plans with source `refund`).
+Refunding a paid order SHALL set the order to `refunded` and, for every `active` plan that order produced, set the plan to `refunded`, set its remaining balance to zero (credit, or images for an image purchase), delete its window state and record one ledger row of kind `revoke` with the negative forfeited amount in the plan's own unit; it SHALL NOT grant any plan or credit. Credit already spent SHALL stay spent, and images already generated SHALL stay paid for. Refunding an already refunded order SHALL be a no-op, and an order that granted nothing SHALL only change status. A one-time start-up repair SHALL apply the same closing to plans of orders that were refunded before this rule (including the old compensation plans with source `refund`).
 
 #### Scenario: Refund with partly spent credit
 - **WHEN** an order granted $25, $5 has been spent, and the order is refunded
 - **THEN** the plan becomes `refunded` with $0 remaining, a `revoke` row of -$20 exists, and no new plan is created
+
+#### Scenario: Refund of an image order
+- **WHEN** an order granted 100 images, 30 were generated, and the order is refunded
+- **THEN** the purchase becomes `refunded` with 0 images, a `revoke` row of −70 images exists, and no credit is granted
 
 ### Requirement: Image generation is priced per image
 A completed `POST /v1/images/generations` SHALL be recorded as a usage row and charged exactly like any other request, at `image` USD per generated image (a price field on per-model pricing and on combo pricing, resolved with the same combo-first order as token prices) times the number of images returned (at least 1). A customer key SHALL be refused with HTTP 403 before any upstream call when the resolved model has no positive image price; admin and local keys are not billed and SHALL NOT be refused. A custom OpenAI-compatible provider node SHALL be usable for image generation at `<baseUrl>/images/generations` with the request body forwarded as sent except for `model`, so model-specific fields (`condition_images`, `seed`, `num_inference_steps`, ...) reach the upstream; built-in provider adapters keep their field whitelists.

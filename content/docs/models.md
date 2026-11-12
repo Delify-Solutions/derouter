@@ -81,7 +81,7 @@ curl https://YOUR-DOMAIN/v1/chat/completions \
   -d '{"model":"MODEL-ID","messages":[{"role":"user","content":[{"type":"text","text":"Ảnh này có gì?"},{"type":"image_url","image_url":{"url":"https://example.com/anh.png"}}]}]}'
 ```
 
-Tạo ảnh: gọi `POST /v1/images/generations` theo định dạng OpenAI với một model tạo ảnh có trong `/v1/models`.
+Tạo ảnh: gọi `POST /v1/images/generations` theo định dạng OpenAI với một model tạo ảnh. Danh sách model tạo ảnh nằm ở `GET /v1/models/image`; `GET /v1/models` chỉ liệt kê model văn bản.
 
 ```bash
 curl https://YOUR-DOMAIN/v1/images/generations \
@@ -89,6 +89,17 @@ curl https://YOUR-DOMAIN/v1/images/generations \
   -H "Content-Type: application/json" \
   -d '{"model":"IMAGE-MODEL-ID","prompt":"Một con mèo đội mũ phi hành gia"}'
 ```
+
+Model tạo ảnh là một combo ảnh do quản trị viên đặt tên, giống combo văn bản nhưng khác ở chỗ **tính giá theo ảnh, không theo token**: mỗi ảnh trả về trừ đúng một mức giá/ảnh của combo. Nếu tên model của bạn không có trong `/v1/models/image`, model đó chưa được mở cho nhóm của bạn.
+
+Có hai cách trả tiền cho ảnh, và cả hai đều đúng:
+
+| Bạn đang có | Cách trừ |
+| --- | --- |
+| Gói ảnh (ví dụ "100 ảnh") | Mỗi ảnh trừ 1 ảnh. Không đụng tới credit, không phát sinh nợ. |
+| Gói credit | Mỗi ảnh trừ đúng giá/ảnh của combo khỏi credit của gói. |
+
+Khi bạn có cả hai, request ảnh dùng gói ảnh trước (vì đó là thứ bạn mua để tạo ảnh) rồi mới tới gói credit. Request văn bản thì không bao giờ dùng gói ảnh.
 
 Ảnh đầu vào dạng base64 làm request lớn. Nếu bị từ chối vì kích thước, giảm độ phân giải hoặc dùng URL.
 

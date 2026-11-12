@@ -481,7 +481,15 @@ export async function saveRequestUsage(entry) {
       let ratePlanId = null;
       if (owner) {
         try {
-          ratePlanId = ratePlanIdSync(db, owner.userId, keyPlanId, entry.timestamp || null);
+          // The unit decides which purchase pays, so the rate recorded is the one of
+          // the plan that actually covers this request.
+          ratePlanId = ratePlanIdSync(
+            db,
+            owner.userId,
+            keyPlanId,
+            entry.timestamp || null,
+            imageCount > 0 ? "image" : "llm"
+          );
         } catch (e) {
           console.error("[rates] could not resolve rate plan", e.message);
         }
@@ -520,6 +528,9 @@ export async function saveRequestUsage(entry) {
             usageId: insertedUsage.lastInsertRowid,
             requestKey: "usage:" + insertedUsage.lastInsertRowid,
             costNanoUsd: entry.costNanoUsd || 0,
+            // An image request is billed in images by an image purchase; whatever
+            // it cannot cover falls back to the dollar cost on a credit purchase.
+            imageCount,
             nowIso: entry.timestamp || new Date().toISOString(),
             planId: keyPlanId,
           });

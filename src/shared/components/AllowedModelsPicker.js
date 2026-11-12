@@ -4,12 +4,17 @@ import { useState, useEffect, useMemo } from "react";
 import PropTypes from "prop-types";
 
 /**
- * Multi-select picker for allowed models, backed by /api/combos (LLM combos only).
+ * Multi-select picker for allowed models, backed by /api/combos (text AND image
+ * combos).
  *
  * A key/group's allowedModels stores **combo names** (not raw pool model ids), so
  * key-holders consume curated named combos rather than individual pool models —
  * this keeps internal pool ids (e.g. vinGLM-5.2) out of the admin UI and avoids
  * duplicate models across pools.
+ *
+ * Image combos are listed here on purpose: the allow-list is the ONLY way a group
+ * may call a model, so an image combo missing from this picker would make an image
+ * plan impossible to use. The kind badge tells the two apart.
  *
  * Props:
  *   value: string[]              - selected combo names
@@ -24,13 +29,14 @@ export default function AllowedModelsPicker({ value = [], onChange, placeholder 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    // LLM combos only (kind null or "llm") — same filter the combos dashboard uses.
+    // Text and image combos — the same set a customer can be granted. webSearch /
+    // webFetch combos are configured elsewhere and are not models a key calls here.
     fetch("/api/combos")
       .then((r) => (r.ok ? r.json() : { combos: [] }))
       .then((data) => {
         if (cancelled) return;
-        const llm = (data.combos || []).filter((c) => !c.kind || c.kind === "llm");
-        setCombos(llm);
+        const usable = (data.combos || []).filter((c) => !c.kind || c.kind === "llm" || c.kind === "image");
+        setCombos(usable);
         setLoading(false);
       })
       .catch(() => {
@@ -108,6 +114,7 @@ export default function AllowedModelsPicker({ value = [], onChange, placeholder 
           {filtered.map((c) => {
             const isSel = selected.includes(c.name);
             const count = (c.models || []).length;
+            const isImage = c.kind === "image";
             return (
               <button
                 key={c.id || c.name}
@@ -119,6 +126,11 @@ export default function AllowedModelsPicker({ value = [], onChange, placeholder 
                   <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
                     {isSel ? "check_box" : "check_box_outline_blank"}
                   </span>
+                  {isImage && (
+                    <span className="shrink-0 border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                      Ảnh
+                    </span>
+                  )}
                   <span className="font-mono text-xs truncate">{c.name}</span>
                 </span>
                 <span className="text-[11px] text-text-muted shrink-0">{count} model{count !== 1 ? "s" : ""}</span>

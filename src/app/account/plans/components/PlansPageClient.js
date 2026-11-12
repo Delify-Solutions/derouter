@@ -36,7 +36,7 @@ export default function PlansPageClient() {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [data, setData] = useState({ availableNanoUsd: 0, hasUnlimitedCredit: false, debtNanoUsd: 0, queue: [], history: [], plans: [] });
+  const [data, setData] = useState({ availableNanoUsd: 0, availableImages: 0, hasUnlimitedCredit: false, debtNanoUsd: 0, queue: [], history: [], plans: [] });
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [buyingId, setBuyingId] = useState(null);
@@ -57,6 +57,8 @@ export default function PlansPageClient() {
       if (!res.ok) throw new Error(body.error || "Không tải được gói của bạn");
       setData({
         availableNanoUsd: body.availableNanoUsd || 0,
+        // Images are a separate balance and never added to the dollar figure.
+        availableImages: body.availableImages || 0,
         hasUnlimitedCredit: body.hasUnlimitedCredit === true,
         debtNanoUsd: body.debtNanoUsd || 0,
         queue: Array.isArray(body.queue) ? body.queue : [],
@@ -205,7 +207,7 @@ export default function PlansPageClient() {
   return (
     <Page
       title="Gói của tôi"
-      description="Mỗi gói là một khoản credit dùng chung cho mọi model trong nhóm của bạn. Request trừ vào gói đầu tiên còn credit và chưa chạm hạn mức; đổi thứ tự bên dưới để quyết định gói nào trả trước."
+      description="Gói credit trừ theo giá token cho mọi model trong nhóm của bạn; gói ảnh trừ 1 ảnh mỗi lần tạo ảnh. Request trừ vào gói phù hợp đầu tiên còn số dư và chưa chạm hạn mức — request tạo ảnh dùng gói ảnh trước; đổi thứ tự bên dưới để quyết định gói nào trả trước."
     >
       {loadError && (
         <div role="alert" className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-5 py-4">
@@ -239,7 +241,7 @@ export default function PlansPageClient() {
         </div>
       )}
 
-      <div className={`grid gap-px border border-border bg-border sm:grid-cols-2 ${data.debtNanoUsd > 0 ? "lg:grid-cols-3" : ""}`}>
+      <div className={`grid gap-px border border-border bg-border ${data.availableImages > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2"} ${data.debtNanoUsd > 0 ? "lg:grid-cols-4" : ""}`}>
         <div className="bg-surface p-6">
           <Stat
             label="Credit khả dụng"
@@ -249,6 +251,16 @@ export default function PlansPageClient() {
               : "Tổng credit còn lại của các gói chưa hết hạn."}
           />
         </div>
+        {data.availableImages > 0 && (
+          <div className="bg-surface p-6">
+            <Stat
+              label="Ảnh còn lại"
+              value={loading ? "…" : Number(data.availableImages).toLocaleString("vi-VN")}
+              unit="ảnh"
+              hint="Số ảnh còn lại của các gói ảnh chưa hết hạn."
+            />
+          </div>
+        )}
         <div className="min-w-0 bg-surface p-6">
           {loading ? <p className="text-sm text-text-muted">…</p> : <RateNow rate={data.rate} />}
         </div>
@@ -265,7 +277,7 @@ export default function PlansPageClient() {
 
       <Section
         title="Gói của bạn"
-        description="Gói đang hoạt động trả tiền theo thứ tự trong hàng đợi. Gói hết credit, hết hạn, bị hủy hoặc đã hoàn tiền nằm ở tab Không hoạt động."
+        description="Gói đang hoạt động trả tiền theo thứ tự trong hàng đợi. Gói hết credit (hoặc hết ảnh), hết hạn, bị hủy hoặc đã hoàn tiền nằm ở tab Không hoạt động."
       >
         <PlanTabs
           tab={tab}

@@ -21,7 +21,8 @@
 //
 // SYNCHRONOUS + DRIVER-FREE (D8): every function takes the adapter.
 import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, nano } from "./ledger.js";
-import { parseLimits, serializeLimits } from "./limits.js";
+import { parseLimits, serializeLimits, limitCeiling } from "./limits.js";
+import { imageCount, isImagePlan, normalizePlanKind } from "./planKind.js";
 import { insertAuditSync } from "./audit.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -44,9 +45,44 @@ const QUEUE_ORDER = `
            up.createdAt ASC,
            up.id ASC`;
 
-/** Can this plan still pay? An unlimited plan always can; a finite one while it has credit. */
+/**
+ * Can this purchase still pay? An unlimited plan always can; an image plan while
+ * it has images left; a credit plan while it has credit left.
+ *
+ * The unit follows the purchase's own `kind`, so an image balance can never be
+ * read as a dollar balance (or the reverse) — the two are separate columns and a
+ * purchase is one or the other.
+ */
 function hasCredit(entry) {
+  if (entry.kind === "image") {
+    return entry.unlimitedCredit === true || imageCount(entry.imageRemaining) > 0;
+  }
   return entry.unlimitedCredit === true || nano(entry.creditRemainingNanoUsd) > 0;
+}
+
+/** The request unit a model endpoint bills in. */
+export const REQUEST_KIND_LLM = "llm";
+export const REQUEST_KIND_IMAGE = "image";
+
+/**
+ * May a purchase of `entry.kind` pay for a request of `requestKind`?
+ *
+ *   image request → an image purchase first, but a credit purchase may also pay
+ *                   (it is charged the per-image price); see `preferredKind`
+ *   text request  → only a credit purchase; an image plan cannot be spent on it
+ */
+function coversRequest(entry, requestKind) {
+  if (requestKind === REQUEST_KIND_IMAGE) return true;
+  return entry.kind !== "image";
+}
+
+/**
+ * The purchase kind admission should look for first. An image request prefers an
+ * image purchase (images are what it was sold for) and falls back to credit; any
+ * other request only ever uses credit.
+ */
+function preferredKind(requestKind) {
+  return requestKind === REQUEST_KIND_IMAGE ? "image" : "llm";
 }
 
 /**
@@ -65,7 +101,13 @@ function rowToEntry(row, windowsByPlan) {
   const windows = {};
   for (const limit of limits) {
     const state = stored.get(limit.hours);
-    if (state) windows[limit.hours] = { startedAt: state.startedAt, spentNanoUsd: nano(state.spentNanoUsd) };
+    if (state) {
+      windows[limit.hours] = {
+        startedAt: state.startedAt,
+        spentNanoUsd: nano(state.spentNanoUsd),
+        spentImages: imageCount(state.spentImages),
+      };
+    }
   }
   return {
     id: row.id,
@@ -78,8 +120,14 @@ function rowToEntry(row, windowsByPlan) {
     rpm: Number(row.planRpm) > 0 ? Number(row.planRpm) : null,
     tpm: Number(row.planTpm) > 0 ? Number(row.planTpm) : null,
     source: row.source ?? null,
+    // What this purchase pays for: "llm" (credit) or "image" (images). Read from
+    // the purchase, not the template, so a plan edited after the sale cannot turn
+    // a credited image purchase into a dollar pool.
+    kind: normalizePlanKind(row.kind),
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
+    imageTotal: imageCount(row.imageTotal),
+    imageRemaining: imageCount(row.imageRemaining),
     // No credit ceiling: the plan pays for any request its windows allow.
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
@@ -120,7 +168,7 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
   const ids = rows.map((r) => r.id);
   const placeholders = ids.map(() => "?").join(", ");
   const windowRows = db.all(
-    `SELECT userPlanId, hours, startedAt, spentNanoUsd FROM userPlanWindows WHERE userPlanId IN (${placeholders})`,
+    `SELECT userPlanId, hours, startedAt, spentNanoUsd, spentImages FROM userPlanWindows WHERE userPlanId IN (${placeholders})`,
     ids
   );
   const windowsByPlan = new Map();
@@ -129,6 +177,7 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
     windowsByPlan.get(row.userPlanId).set(nano(row.hours), {
       startedAt: row.startedAt,
       spentNanoUsd: nano(row.spentNanoUsd),
+      spentImages: imageCount(row.spentImages),
     });
   }
 
@@ -152,8 +201,13 @@ export function evaluatePlan(entry, nowMs) {
     const state = entry.windows?.[limit.hours] ?? null;
     const closedAtMs = state ? new Date(state.startedAt).getTime() + limit.hours * HOUR_MS : null;
     const isOpen = state != null && Number.isFinite(closedAtMs) && now < closedAtMs;
-    const spent = isOpen ? nano(state.spentNanoUsd) : 0;
-    const full = isOpen && spent >= limit.maxNanoUsd;
+    // The ceiling belongs to the plan's unit: images for an image purchase, dollars
+    // otherwise. Reading the wrong one would compare images with cents.
+    const ceiling = limitCeiling(limit);
+    const spent = isOpen
+      ? (ceiling.images ? imageCount(state.spentImages) : nano(state.spentNanoUsd))
+      : 0;
+    const full = isOpen && spent >= ceiling.max;
 
     if (full) {
       blocked = true;
@@ -165,8 +219,12 @@ export function evaluatePlan(entry, nowMs) {
 
     windows.push({
       hours: limit.hours,
-      maxNanoUsd: limit.maxNanoUsd,
-      spentNanoUsd: spent,
+      // One ceiling pair, in the limit's own unit, for both the queue card and the
+      // meters; the unused half is 0 so a renderer can branch on it.
+      maxNanoUsd: ceiling.images ? 0 : ceiling.max,
+      maxImages: ceiling.images ? ceiling.max : 0,
+      spentNanoUsd: ceiling.images ? 0 : spent,
+      spentImages: ceiling.images ? spent : 0,
       startedAt: isOpen ? state.startedAt : null,
       resetAt: isOpen ? isoOf(closedAtMs) : null,
       open: isOpen,
@@ -174,14 +232,23 @@ export function evaluatePlan(entry, nowMs) {
     });
   }
 
-  // Room is the tightest window. A closed or unopened window contributes its full
-  // maximum (nothing is spent in it yet). No limits = unlimited (`null`).
+  // Room is the tightest window, in the plan's own unit. A closed or unopened
+  // window contributes its full maximum (nothing is spent in it yet). No limits =
+  // unlimited (`null`).
   let roomNanoUsd = null;
+  let roomImages = null;
   if (windows.length > 0) {
     roomNanoUsd = Number.POSITIVE_INFINITY;
+    roomImages = Number.POSITIVE_INFINITY;
     for (const w of windows) {
-      roomNanoUsd = Math.min(roomNanoUsd, Math.max(0, w.maxNanoUsd - w.spentNanoUsd));
+      if (w.maxImages > 0) {
+        roomImages = Math.min(roomImages, Math.max(0, w.maxImages - w.spentImages));
+      } else {
+        roomNanoUsd = Math.min(roomNanoUsd, Math.max(0, w.maxNanoUsd - w.spentNanoUsd));
+      }
     }
+    if (!Number.isFinite(roomNanoUsd)) roomNanoUsd = null;
+    if (!Number.isFinite(roomImages)) roomImages = null;
   }
 
   const expiresMs = new Date(entry.expiresAt).getTime();
@@ -193,6 +260,8 @@ export function evaluatePlan(entry, nowMs) {
     blocked,
     reopenAt: reopenMs == null ? null : isoOf(reopenMs),
     roomNanoUsd,
+    // Room left in the tightest IMAGE window (null when the purchase has none).
+    roomImages,
     windows,
   };
 }
@@ -214,9 +283,9 @@ export function scopeQueue(queue, planId) {
  * Allowances are per (user, plan) and shared by every key, so minting more keys
  * never opens a second allowance.
  */
-export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
+export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null, requestKind = REQUEST_KIND_LLM) {
   if (keyPlanId) return keyPlanId;
-  const paying = admitSync(db, userId, nowIsoArg);
+  const paying = admitSync(db, userId, nowIsoArg, { requestKind });
   if (!paying.ok) return null;
   const row = db.get(`SELECT planId FROM userPlans WHERE id = ?`, [paying.planId]);
   return row?.planId ?? null;
@@ -229,18 +298,33 @@ export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null) {
  *   only window-blocked ones → 429 plan_limit with the EARLIEST reopen and the
  *                              seconds until it
  *   nothing with credit      → 402 insufficient_quota
+ *
+ * `requestKind` ("llm" by default) decides which purchases may pay: a text request
+ * only ever uses a credit purchase, an image request prefers an image purchase and
+ * falls back to credit (charged the per-image price). Both passes keep queue order,
+ * so the customer's own ordering still wins inside a unit.
  */
-export function admitSync(db, userId, nowIsoArg = null, { planId = null } = {}) {
+export function admitSync(db, userId, nowIsoArg = null, { planId = null, requestKind = REQUEST_KIND_LLM } = {}) {
   const at = nowIsoArg || nowIso();
   const nowMs = new Date(at).getTime();
-  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId)
+    .filter((entry) => coversRequest(entry, requestKind));
+
+  // Image purchases first for an image request; one pass otherwise.
+  const prefer = preferredKind(requestKind);
+  const ordered = requestKind === REQUEST_KIND_IMAGE
+    ? [
+        ...queue.filter((entry) => entry.kind === prefer),
+        ...queue.filter((entry) => entry.kind !== prefer),
+      ]
+    : queue;
 
   let earliestReopenMs = null;
   let anyOnlyBlocked = false;
 
-  for (const entry of queue) {
+  for (const entry of ordered) {
     const state = evaluatePlan(entry, nowMs);
-    if (state.eligible) return { ok: true, planId: entry.id };
+    if (state.eligible) return { ok: true, planId: entry.id, kind: entry.kind };
     // "Only blocked" = has credit and is unexpired, but a window is full.
     if (!state.scheduled && hasCredit(entry) && state.blocked) {
       anyOnlyBlocked = true;
@@ -344,6 +428,74 @@ function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass 
 }
 
 /**
+ * Write one image take against an IMAGE purchase: decrement its image balance,
+ * insert the ledger row (images, not dollars) and advance its image windows.
+ *
+ * Money and images are separate columns on purpose: an image plan sells counts, so
+ * a charge against it must never invent a dollar cost or a dollar balance. The
+ * entry is updated in place for the same reason as `applyTake` — a later take in
+ * the same charge must start from the live remainder.
+ *
+ * @returns {number} images left on the purchase AFTER this take
+ */
+function applyImageTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass }) {
+  const left = Math.max(0, imageCount(entry.imageRemaining) - amount);
+  if (left === 0) {
+    db.run(`UPDATE userPlans SET imageRemaining = 0, status = 'exhausted' WHERE id = ?`, [entry.id]);
+  } else {
+    db.run(`UPDATE userPlans SET imageRemaining = ? WHERE id = ?`, [left, entry.id]);
+  }
+  entry.imageRemaining = left;
+
+  insertLedgerSync(db, {
+    userId: entry.userId,
+    userPlanId: entry.id,
+    apiKeyId,
+    usageId,
+    requestKey,
+    deltaNanoUsd: 0,
+    deltaImages: -amount,
+    kind: "charge",
+    meta: { pass, images: amount },
+    createdAt: at,
+  });
+
+  const atMs = new Date(at).getTime();
+  for (const limit of entry.limits ?? []) {
+    const ceiling = limitCeiling(limit);
+    // Only image-unit limits move with an image take; a dollar limit on an image
+    // purchase cannot be compared with a count.
+    if (!ceiling.images) continue;
+
+    const state = entry.windows?.[limit.hours] ?? null;
+    const closedAtMs = state ? new Date(state.startedAt).getTime() + limit.hours * HOUR_MS : null;
+    const isOpen = state != null && Number.isFinite(closedAtMs) && atMs < closedAtMs;
+
+    if (isOpen) {
+      const spent = imageCount(state.spentImages) + amount;
+      db.run(
+        `UPDATE userPlanWindows SET spentImages = ?, updatedAt = ? WHERE userPlanId = ? AND hours = ?`,
+        [spent, at, entry.id, limit.hours]
+      );
+      state.spentImages = spent;
+    } else {
+      db.run(
+        `INSERT INTO userPlanWindows(userPlanId, hours, startedAt, spentNanoUsd, spentImages, updatedAt)
+         VALUES(?, ?, ?, 0, ?, ?)
+         ON CONFLICT(userPlanId, hours) DO UPDATE SET
+           startedAt = excluded.startedAt,
+           spentNanoUsd = 0,
+           spentImages = excluded.spentImages,
+           updatedAt = excluded.updatedAt`,
+        [entry.id, limit.hours, at, amount, at]
+      );
+      if (!entry.windows) entry.windows = {};
+      entry.windows[limit.hours] = { startedAt: at, spentNanoUsd: 0, spentImages: amount };
+    }
+  }
+}
+
+/**
  * Charge a completed request (spec plan-queue-billing "Charging a completed
  * request", design D4/D9).
  *
@@ -363,6 +515,10 @@ export function chargeSync(db, {
   usageId = null,
   requestKey,
   costNanoUsd = 0,
+  // Images this request generated. An image request is paid in images by an
+  // image purchase; whatever is left over falls back to the dollar cost on a
+  // credit purchase, exactly like a request that a window split in two.
+  imageCount: images = 0,
   nowIso: atArg = null,
   planId = null,
 } = {}) {
@@ -378,7 +534,8 @@ export function chargeSync(db, {
   }
 
   const cost = Math.max(0, nano(costNanoUsd));
-  if (cost === 0) {
+  const wantedImages = imageCount(images);
+  if (cost === 0 && wantedImages === 0) {
     return { charged: 0, alreadyCharged: false, parts: [], debtNanoUsd: getDebtNanoSync(db, userId) };
   }
 
@@ -391,6 +548,7 @@ export function chargeSync(db, {
 
   const parts = [];
   let remaining = cost;
+  let remainingImages = wantedImages;
   let ledgerRows = 0;
 
   const rowKey = () => {
@@ -398,9 +556,52 @@ export function chargeSync(db, {
     return ledgerRows === 0 ? requestKey : `${requestKey}#${ledgerRows + 1}`;
   };
 
+  // ── Images first, on image purchases only ─────────────────────────────────
+  // An image purchase cannot pay dollars, so it is asked for images before the
+  // dollar passes below run; a text request never reaches this block because it
+  // carries no images.
+  if (remainingImages > 0) {
+    for (const entry of queue) {
+      if (remainingImages <= 0) break;
+      if (entry.kind !== "image") continue;
+      if (!hasStarted(entry, nowMs)) continue;
+      const state = evaluatePlan(entry, nowMs);
+      if (!state.eligible) continue;
+      // Room in the tightest image window; null = no image limits.
+      const capacity = state.roomImages == null
+        ? remainingImages
+        : Math.min(remainingImages, state.roomImages);
+      // An image purchase is always finite: validation refuses `unlimitedCredit`
+      // with `kind = 'image'`, so its own count is the whole ceiling.
+      const take = Math.min(capacity, imageCount(entry.imageRemaining));
+      if (take <= 0) continue;
+
+      applyImageTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 1 });
+      ledgerRows += 1;
+      remainingImages -= take;
+      parts.push({ userPlanId: entry.id, images: take, pass: 1 });
+    }
+  }
+
+  // An image purchase paid for some or all of the images: those images are already
+  // paid for, so their share of the dollar cost is dropped. The share is computed
+  // in integers (rounded down) and the REMAINDER is taken from the total, so the
+  // two parts always add back to exactly `cost` — provenance cannot leak a nano.
+  if (wantedImages > 0 && remainingImages < wantedImages) {
+    const coveredImages = wantedImages - remainingImages;
+    const coveredNano = Math.floor((cost * coveredImages) / wantedImages);
+    remaining = Math.max(0, cost - coveredNano);
+  }
+
+  if (remaining <= 0) {
+    return { charged: cost, alreadyCharged: false, parts, debtNanoUsd: getDebtNanoSync(db, userId) };
+  }
+
   // ── Pass 1: respect windows ───────────────────────────────────────────────
   for (const entry of queue) {
     if (remaining <= 0) break;
+    // An image purchase pays in images, never in dollars.
+    if (entry.kind === "image") continue;
     if (!hasCredit(entry)) continue;
     const state = evaluatePlan(entry, nowMs);
     if (state.scheduled) continue;
@@ -420,6 +621,8 @@ export function chargeSync(db, {
   if (remaining > 0) {
     for (const entry of queue) {
       if (remaining <= 0) break;
+      // An image purchase pays in images, never in dollars.
+      if (entry.kind === "image") continue;
       // A period that has not started cannot pay, even past its windows.
       if (!hasStarted(entry, nowMs)) continue;
       // applyTake already wrote the post-pass-1 balance back into the entry, so
@@ -561,14 +764,16 @@ export function rebuildWindowsSync(db, userPlanId, nowIsoArg = null) {
   if (limits.length === 0) return {};
 
   const rows = db.all(
-    `SELECT deltaNanoUsd, createdAt, meta FROM creditLedger
+    `SELECT deltaNanoUsd, deltaImages, createdAt, meta FROM creditLedger
       WHERE userPlanId = ? AND kind = 'charge'
       ORDER BY createdAt ASC, id ASC`,
     [userPlanId]
   );
 
   const out = {};
-  for (const limit of limits) out[limit.hours] = { startedAt: null, spentNanoUsd: 0 };
+  for (const limit of limits) {
+    out[limit.hours] = { startedAt: null, spentNanoUsd: 0, spentImages: 0 };
+  }
 
   for (const row of rows) {
     let meta = null;
@@ -576,19 +781,36 @@ export function rebuildWindowsSync(db, userPlanId, nowIsoArg = null) {
     if (meta?.backfill) continue;
 
     const amount = Math.abs(nano(row.deltaNanoUsd));
-    if (amount === 0) continue;
+    // A charge stores images as a NEGATIVE delta, and `imageCount` floors at zero
+    // (it reads balances, not movements), so the magnitude is taken from the raw
+    // integer here.
+    const images = Math.abs(Math.round(Number(row.deltaImages) || 0));
+    if (amount === 0 && images === 0) continue;
     const atMs = new Date(row.createdAt).getTime();
     if (!Number.isFinite(atMs)) continue;
 
     for (const limit of limits) {
+      // Each limit replays in its own unit: a dollar limit ignores image rows and
+      // an image limit ignores dollar rows.
+      const ceiling = limitCeiling(limit);
+      const delta = ceiling.images ? images : amount;
+      if (delta === 0) continue;
+
       const state = out[limit.hours];
       const closedAtMs = state.startedAt ? new Date(state.startedAt).getTime() + limit.hours * HOUR_MS : null;
       const isOpen = state.startedAt != null && atMs < closedAtMs;
       if (isOpen) {
-        state.spentNanoUsd += amount;
+        if (ceiling.images) state.spentImages += delta;
+        else state.spentNanoUsd += delta;
       } else {
         state.startedAt = row.createdAt;
-        state.spentNanoUsd = amount;
+        if (ceiling.images) {
+          state.spentImages = delta;
+          state.spentNanoUsd = 0;
+        } else {
+          state.spentNanoUsd = delta;
+          state.spentImages = 0;
+        }
       }
     }
   }
@@ -600,7 +822,7 @@ export function rebuildWindowsSync(db, userPlanId, nowIsoArg = null) {
     if (!state.startedAt) continue;
     const closedAtMs = new Date(state.startedAt).getTime() + limit.hours * HOUR_MS;
     if (nowMs >= closedAtMs) {
-      out[limit.hours] = { startedAt: null, spentNanoUsd: 0 };
+      out[limit.hours] = { startedAt: null, spentNanoUsd: 0, spentImages: 0 };
     }
   }
 

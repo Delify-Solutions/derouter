@@ -34,6 +34,7 @@ export async function GET(request) {
         revenueUsdNano: 0,
         revenueNanoUsd: 0,
         consumedNanoUsd: 0,
+        consumedImages: 0,
       },
     }));
     return NextResponse.json({ plans: withStats, groups }, { headers: NO_STORE });

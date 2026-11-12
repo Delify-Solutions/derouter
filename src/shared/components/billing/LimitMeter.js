@@ -18,17 +18,26 @@ export default function LimitMeter({ window: limit, className = "" }) {
   if (!limit) return null;
 
   const label = limit.label || `${limit.hours} giờ`;
-  const max = Math.max(0, Number(limit.maxNanoUsd) || 0);
-  const spent = Math.max(0, Number(limit.spentNanoUsd) || 0);
+  // A limit is measured in the purchase's own unit: images for an image plan,
+  // dollars otherwise. Formatting both through the money helper would print an
+  // image count as "$40".
+  const imageMax = Math.max(0, Number(limit.maxImages) || 0);
+  const images = imageMax > 0;
+  const max = images ? imageMax : Math.max(0, Number(limit.maxNanoUsd) || 0);
+  const spent = images
+    ? Math.max(0, Number(limit.spentImages) || 0)
+    : Math.max(0, Number(limit.spentNanoUsd) || 0);
   const open = limit.open === true;
   const full = limit.full === true;
+  const amount = (value) => (images ? `${Number(value).toLocaleString("vi-VN")} ảnh` : fmtUsdNano(value));
+  const ceiling = images ? amount(max) : fmtLimitAmount(max);
 
   if (!open) {
     // The maximum is part of what was sold, so it is shown even before the
     // window opens: "Tối đa $20 mỗi 5 giờ · chưa dùng".
     return (
       <div className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm ${className}`}>
-        <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
+        <span className="text-text-muted">Tối đa {ceiling} mỗi {label}</span>
         <span className="whitespace-nowrap font-mono text-xs text-text-subtle">chưa dùng</span>
       </div>
     );
@@ -39,23 +48,23 @@ export default function LimitMeter({ window: limit, className = "" }) {
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
-        <span className="text-text-muted">Tối đa {fmtLimitAmount(max)} mỗi {label}</span>
+        <span className="text-text-muted">Tối đa {ceiling} mỗi {label}</span>
         {/* Each piece stays whole; the line breaks between pieces, never inside one. */}
         <span className="flex max-w-full flex-wrap justify-end gap-x-1 font-mono text-xs tabular-nums text-text-main">
-          <span className="whitespace-nowrap">{fmtUsdNano(spent)}</span>
-          <span className="whitespace-nowrap text-text-subtle">/ {fmtUsdNano(max)}</span>
+          <span className="whitespace-nowrap">{amount(spent)}</span>
+          <span className="whitespace-nowrap text-text-subtle">/ {amount(max)}</span>
           {limit.resetAt ? <span className="whitespace-nowrap text-text-subtle">· reset {timeOf(limit.resetAt)}</span> : null}
         </span>
       </div>
       <div
         role="progressbar"
-        aria-label={`${label}: đã dùng ${fmtUsdNano(spent)} trên ${fmtUsdNano(max)}${
+        aria-label={`${label}: đã dùng ${amount(spent)} trên ${amount(max)}${
           limit.resetAt ? `, reset lúc ${timeOf(limit.resetAt)}` : ""
         }`}
         aria-valuemin={0}
         aria-valuemax={max}
         aria-valuenow={spent}
-        aria-valuetext={`${fmtUsdNano(spent)} trên ${fmtUsdNano(max)}${full ? ", đã đầy" : ""}`}
+        aria-valuetext={`${amount(spent)} trên ${amount(max)}${full ? ", đã đầy" : ""}`}
         className="h-1 w-full bg-surface-2"
       >
         <div className={`h-1 ${full ? "bg-amber-500" : "bg-text-main"}`} style={{ width: `${pct}%` }} />

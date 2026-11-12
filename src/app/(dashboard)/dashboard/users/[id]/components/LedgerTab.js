@@ -5,6 +5,16 @@ import { Button, Pagination, Select } from "@/shared/components";
 import { dateOf, timeOf } from "@/shared/components/billing";
 import { fmtUsdNano } from "@/shared/utils/money";
 
+// The same kinds in the image unit: an image grant is not "Được cấp credit".
+const IMAGE_KIND_LABEL = {
+  charge: "Trừ ảnh",
+  grant: "Được cấp ảnh",
+  expire: "Hết hạn ảnh",
+  revoke: "Thu hồi ảnh",
+  adjust: "Điều chỉnh ảnh",
+  refund: "Hoàn ảnh",
+};
+
 const KIND_LABEL = {
   charge: "Trừ tiền",
   grant: "Cấp",
@@ -102,7 +112,9 @@ export default function LedgerTab({ userId }) {
                     {dateOf(entry.createdAt)} {timeOf(entry.createdAt)}
                   </td>
                   <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                    {KIND_LABEL[entry.kind] || entry.kind}
+                    {entry.deltaImages
+                      ? IMAGE_KIND_LABEL[entry.kind] || KIND_LABEL[entry.kind] || entry.kind
+                      : KIND_LABEL[entry.kind] || entry.kind}
                     {entry.backfill && <span className="ml-1 text-[10px] text-text-subtle">truy trừ</span>}
                   </td>
                   <td className="px-4 py-2 text-sm text-text-main">{entry.planName || "—"}</td>
@@ -112,10 +124,20 @@ export default function LedgerTab({ userId }) {
                   <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">
                     {entry.promptTokens == null ? "—" : `${entry.promptTokens} / ${entry.completionTokens ?? 0}`}
                   </td>
+                  {/* An image-plan row moves images, not money: "$0.00" would read as
+                      a free charge. */}
                   <td className="px-4 py-2 text-right font-mono text-[12px] text-text-main">
-                    {entry.deltaNanoUsd > 0 ? "+" : ""}{fmtUsdNano(entry.deltaNanoUsd)}
+                    {entry.deltaImages
+                      ? `${entry.deltaImages > 0 ? "+" : ""}${entry.deltaImages.toLocaleString("vi-VN")} ảnh`
+                      : `${entry.deltaNanoUsd > 0 ? "+" : ""}${fmtUsdNano(entry.deltaNanoUsd)}`}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">{entry.balanceAfterUsd ?? "—"}</td>
+                  <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">
+                    {entry.deltaImages
+                      ? entry.balanceAfterImages == null
+                        ? "—"
+                        : `${entry.balanceAfterImages.toLocaleString("vi-VN")} ảnh`
+                      : entry.balanceAfterUsd ?? "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

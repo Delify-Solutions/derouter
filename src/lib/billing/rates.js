@@ -18,15 +18,19 @@ function positive(value) {
  * RPM/TPM allowances are counted per (user, plan): callers count usage with the
  * returned `planId` (see getUserRateUsage).
  *
+ * `requestKind` ("llm" by default) is what admission uses to decide which purchase
+ * pays — a text request never picks an image plan, so the rate it applies must be
+ * the one of the purchase that will actually be charged.
+ *
  * @returns {{ userPlanId: string|null, planId: string|null, planName: string|null,
  *             rpm: number|null, tpm: number|null }}
  *          null rpm/tpm = no limit (no paying plan, or the plan sets none)
  */
-export function payingRatesSync(db, userId, nowIso = null, { planId = null } = {}) {
+export function payingRatesSync(db, userId, nowIso = null, { planId = null, requestKind = "llm" } = {}) {
   const none = { userPlanId: null, planId: null, planName: null, rpm: null, tpm: null };
   if (!db || !userId) return none;
   // `planId` = the plan a pinned key is paid by; omitted = the head of the queue.
-  const admitted = admitSync(db, userId, nowIso, { planId });
+  const admitted = admitSync(db, userId, nowIso, { planId, requestKind });
   if (!admitted.ok) return none;
   const row = db.get(
     `SELECT p.id AS planId, p.name AS name, p.code AS code, p.rpm AS rpm, p.tpm AS tpm

@@ -1,11 +1,22 @@
 ---
 slug: plans
-title: Gói, credit và hạn mức
+title: Gói, credit, gói ảnh và hạn mức
 section: Tham khảo
-excerpt: Credit trừ thế nào, hàng đợi gói, hạn mức theo khung giờ, rate limit và các trang xem mức dùng.
+excerpt: Credit trừ thế nào, gói ảnh tính theo ảnh ra sao, hàng đợi gói, hạn mức theo khung giờ, rate limit và các trang xem mức dùng.
 summary: Cơ chế đằng sau lỗi 402 và 429: mỗi gói là một khoản credit riêng, xếp hàng đợi, có hạn và có hạn mức.
 sortOrder: 220
 ---
+
+## Hai loại gói
+
+Mỗi gói bán ra là một trong hai loại, và loại quyết định gói đó trả tiền cho cái gì:
+
+| Loại gói | Bạn nhận | Trả cho |
+| --- | --- | --- |
+| Gói credit | Một khoản credit (ví dụ $250) | Mọi model văn bản (theo giá token) và model tạo ảnh (theo giá/ảnh) |
+| Gói ảnh | Một số ảnh (ví dụ 100 ảnh) | Chỉ tạo ảnh, mỗi ảnh trừ 1 ảnh |
+
+Hai loại không trộn vào nhau: credit không dùng được như ảnh, và ảnh không quy ra credit. Trong tài khoản, credit và số ảnh hiện thành hai con số riêng.
 
 ## Credit và giá token
 
@@ -20,6 +31,16 @@ Ví dụ: một model giá $A cho 1 triệu token input và $B cho 1 triệu tok
 ```
 
 Giá thật của từng model nằm trong bảng giá trên trang chủ. Credit được trừ sau khi request hoàn tất.
+
+## Gói ảnh và giá theo ảnh
+
+Gói ảnh không có credit. Mỗi lần tạo ảnh thành công trừ đúng 1 ảnh cho mỗi ảnh trả về, nên một request tạo 2 ảnh trừ 2 ảnh. Khi gói hết ảnh, nó chuyển sang "hết" và request đi tiếp tới gói kế tiếp trong hàng đợi, hoặc báo hết quota nếu không còn gì.
+
+Giá tiền của một ảnh do quản trị viên đặt trên combo ảnh. Với gói credit, đó là số credit bị trừ. Với gói ảnh, giá đó không ảnh hưởng tới số ảnh bị trừ — bạn đã mua số ảnh, không mua số tiền.
+
+Hạn mức theo khung giờ của gói ảnh tính bằng **ảnh**, ví dụ "tối đa 20 ảnh mỗi 5 giờ". Vượt hạn mức thì gói tạm khóa cho tới khi khung giờ kế tiếp mở, giống hệt gói credit.
+
+Gói ảnh không có "credit không giới hạn" và không nạp số tiền tùy ý: một gói ảnh luôn là một số ảnh xác định trong một thời hạn xác định.
 
 ## Hàng đợi gói
 
@@ -54,7 +75,7 @@ Gói còn có thể giới hạn số request mỗi phút (RPM) và số token m
 
 | Tình huống | Phản hồi |
 | --- | --- |
-| Không còn gói nào có credit | 402 `insufficient_quota` |
+| Không còn gói nào có credit (hoặc ảnh, với request tạo ảnh) | 402 `insufficient_quota` |
 | Mọi gói còn credit đều đang chạm hạn mức khung giờ | 429 `plan_limit`, kèm `Retry-After` (giây) và `resetAt` (giờ UTC) |
 | Vượt RPM hoặc TPM của gói | 429 `rate_limit`, `Retry-After: 60` |
 | Số request đang chạy cùng lúc đã bằng RPM của gói (gói không có RPM thì không giới hạn, trừ khi quản trị viên đặt mức chung) | 429 `concurrency_limit`, `Retry-After: 5` |
@@ -67,7 +88,7 @@ Với `plan_limit`, `Retry-After` và `resetAt` trỏ tới thời điểm sớm
 | --- | --- |
 | Tổng quan | Gói đang trả, credit còn lại, nhóm và model được dùng |
 | Gói của tôi | Hàng đợi, đơn hàng, lịch sử gói, mua thêm gói |
-| Nhật ký credit | Từng khoản cộng và trừ credit, thuộc gói nào |
+| Nhật ký credit | Từng khoản cộng và trừ credit (và ảnh, với gói ảnh), thuộc gói nào |
 | Lịch sử dùng | Từng request: model, token, chi phí |
 | Trang `/usage` | Dán một API key để xem mức dùng của key đó, không cần đăng nhập |
 

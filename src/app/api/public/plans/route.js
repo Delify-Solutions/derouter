@@ -6,12 +6,18 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 function rowToPlan(row) {
+  const imagePlan = row.kind === "image";
+  const images = imagePlan ? Math.max(0, Math.floor(Number(row.imageCount) || 0)) : 0;
   return {
     id: row.id,
     code: row.code,
     name: row.name ?? row.code,
     description: row.description ?? null,
     priceNanoUsd: row.priceNanoUsd ?? 0,
+    // What the plan sells: an image plan's credit fields are 0 and this count is
+    // its balance.
+    kind: imagePlan ? "image" : "llm",
+    imageCount: images,
     creditNanoUsd: row.creditNanoUsd ?? 0,
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: row.durationDays ?? 0,

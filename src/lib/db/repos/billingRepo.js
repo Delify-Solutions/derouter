@@ -49,6 +49,7 @@ import { reverseCommissionForOrderSync } from "../../affiliate/commission.js";
 import { applyCheckoutDiscountsSync, recordCheckoutDiscountsSync } from "../../affiliate/checkoutDiscounts.js";
 import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
+import { imageCount, isImagePlan, normalizePlanKind } from "../../billing/planKind.js";
 import { quoteTopup, topupBounds } from "../../billing/topup.js";
 
 // Ceiling for an admin-set top-up bound: 1 billion đồng, far above any real top-up.
@@ -94,9 +95,14 @@ function rowToUserPlan(row) {
     planId: planIdOrNull(row.planId),
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
+    // "llm" credit or "image" images; an image purchase's credit columns are 0.
+    kind: normalizePlanKind(row.kind),
     creditTotalNanoUsd: total,
     creditRemainingNanoUsd: remaining,
     creditUsedNanoUsd: Math.max(0, total - remaining),
+    imageTotal: imageCount(row.imageTotal),
+    imageRemaining: imageCount(row.imageRemaining),
+    imageUsed: Math.max(0, imageCount(row.imageTotal) - imageCount(row.imageRemaining)),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
     expiresAt: row.expiresAt,
@@ -127,6 +133,7 @@ export async function walletSummary(userId) {
   const overdraftNanoUsd = getDebtNanoSync(db, userId);
 
   let liveCredit = 0;
+  let liveImages = 0;
   let totalGrantedNanoUsd = 0;
   let hasUnlimitedCredit = false;
   for (const plan of plans) {
@@ -134,6 +141,9 @@ export async function walletSummary(userId) {
     // A period whose start is still ahead (spec plan-terms) cannot be spent yet.
     if (plan.status === "active" && plan.expiresAt > now && !(plan.startsAt > now)) {
       liveCredit += plan.creditRemainingNanoUsd;
+      // Images are a separate balance: an image purchase contributes nothing to
+      // the dollar headline and must not be added to it.
+      liveImages += plan.imageRemaining;
       if (plan.unlimitedCredit) hasUnlimitedCredit = true;
     }
   }
@@ -144,6 +154,8 @@ export async function walletSummary(userId) {
     // the customer can spend, so the screens say "Không giới hạn" instead.
     hasUnlimitedCredit,
     liveCreditNanoUsd: liveCredit,
+    // Images left across the live image purchases — the headline for image plans.
+    liveImages,
     overdraftNanoUsd,
     totalGrantedNanoUsd,
     plans,
@@ -222,7 +234,7 @@ export function expireStalePlans(db, now = nowIso()) {
   if (!db) throw new Error("expireStalePlans requires the db adapter");
 
   const rows = db.all(
-    `SELECT id, userId, creditRemainingNanoUsd
+    `SELECT id, userId, creditRemainingNanoUsd, imageRemaining
        FROM userPlans
       WHERE status = 'active' AND expiresAt < ?
       ORDER BY expiresAt ASC`,
@@ -230,18 +242,31 @@ export function expireStalePlans(db, now = nowIso()) {
   );
 
   let forfeitedNanoUsd = 0;
+  let forfeitedImages = 0;
   for (const row of rows) {
     const remaining = nano(row.creditRemainingNanoUsd);
-    db.run(`UPDATE userPlans SET status = 'expired', creditRemainingNanoUsd = 0 WHERE id = ?`, [row.id]);
-    insertLedgerSync(db, {
-      userId: row.userId,
-      userPlanId: row.id,
-      deltaNanoUsd: -remaining,
-      kind: "expire",
-      meta: { forfeitedNanoUsd: remaining },
-      createdAt: now,
-    });
+    const remainingImages = imageCount(row.imageRemaining);
+    db.run(
+      `UPDATE userPlans SET status = 'expired', creditRemainingNanoUsd = 0, imageRemaining = 0 WHERE id = ?`,
+      [row.id]
+    );
+    if (remaining > 0 || remainingImages > 0) {
+      insertLedgerSync(db, {
+        userId: row.userId,
+        userPlanId: row.id,
+        // One row per expiring balance: images are forfeited in images, and a
+        // dollar row is only written when there were dollars to lose.
+        deltaNanoUsd: -remaining,
+        deltaImages: -remainingImages,
+        kind: "expire",
+        meta: remainingImages > 0
+          ? { forfeitedNanoUsd: remaining, forfeitedImages: remainingImages }
+          : { forfeitedNanoUsd: remaining },
+        createdAt: now,
+      });
+    }
     if (remaining > 0) forfeitedNanoUsd += remaining;
+    if (remainingImages > 0) forfeitedImages += remainingImages;
   }
 
   // Window state belongs to an active purchase only. Leaving rows behind after a
@@ -253,7 +278,7 @@ export function expireStalePlans(db, now = nowIso()) {
       WHERE userPlanId IN (SELECT id FROM userPlans WHERE status <> 'active')`
   );
 
-  return { expired: rows.length, forfeitedNanoUsd };
+  return { expired: rows.length, forfeitedNanoUsd, forfeitedImages };
 }
 
 /** Async entry point for the janitor: resolves the adapter, then sweeps in one transaction. */
@@ -333,7 +358,11 @@ function rowToPlan(row) {
     priceNanoUsd: nano(row.priceNanoUsd),
     // Integer đồng, NULL when the plan is not sold by bank transfer.
     priceVnd: row.priceVnd == null ? null : nano(row.priceVnd),
+    // What the plan sells: "llm" credit or "image" images (see planKind.js).
+    kind: normalizePlanKind(row.kind),
     creditNanoUsd: nano(row.creditNanoUsd),
+    // Images per period for an image plan; 0 for a credit plan.
+    imageCount: isImagePlan(row.kind) ? imageCount(row.imageCount) : 0,
     unlimitedCredit: isUnlimitedInput(row.unlimitedCredit),
     allowCustomAmount: isUnlimitedInput(row.allowCustomAmount),
     customMinVnd: row.customMinVnd == null ? null : nano(row.customMinVnd),
@@ -382,10 +411,15 @@ function normalizeRate(value) {
  * createPlan/updatePlan and by the admin route so the message matches the rule.
  */
 export function validatePlanLimits(input = {}) {
+  const unlimited = isUnlimitedInput(input.unlimitedCredit);
   return validateLimits(input.limits ?? [], {
-    // No credit ceiling to compare a limit against on an unlimited plan.
-    creditNanoUsd: isUnlimitedInput(input.unlimitedCredit) ? 0 : nano(input.creditNanoUsd),
+    // No balance to compare a limit against on an unlimited plan; otherwise the
+    // comparison uses the plan's own unit (images or credit).
+    creditNanoUsd: unlimited ? 0 : nano(input.creditNanoUsd),
+    imageTotal: imageCount(input.imageCount),
+    kind: input.kind,
     durationDays: nano(input.durationDays),
+    unlimited,
   });
 }
 
@@ -407,8 +441,26 @@ export function validatePlanInput(input = {}) {
       return "priceVnd must be a non-negative integer (đồng)";
     }
   }
-  const unlimited = isUnlimitedInput(input.unlimitedCredit);
-  if (!unlimited) {
+  // What the plan sells. An image plan sells a COUNT of images, not credit, so it
+  // must carry a positive whole imageCount and stores no credit; a credit plan is
+  // validated exactly as before.
+  const imagePlan = isImagePlan(input.kind);
+  if (imagePlan) {
+    // An image plan has no credit ceiling concept, so the two flags that only make
+    // sense against credit are refused instead of being silently ignored.
+    if (isUnlimitedInput(input.unlimitedCredit)) {
+      return "Gói ảnh không dùng credit không giới hạn — đặt số ảnh của gói";
+    }
+    if (isUnlimitedInput(input.allowCustomAmount)) {
+      return "Gói ảnh không nạp số tiền tùy ý — đặt số ảnh của gói";
+    }
+    const images = Number(input.imageCount);
+    if (!Number.isInteger(images) || images <= 0) {
+      return "Gói ảnh cần số ảnh là số nguyên lớn hơn 0";
+    }
+  }
+  const unlimited = !imagePlan && isUnlimitedInput(input.unlimitedCredit);
+  if (!unlimited && !imagePlan) {
     const credit = Number(input.creditNanoUsd);
     if (!Number.isInteger(credit) || credit <= 0) return "creditNanoUsd must be an integer > 0";
   }
@@ -451,6 +503,10 @@ export function validatePlanInput(input = {}) {
       return "Gói không giới hạn credit cần ít nhất một hạn mức: theo khung giờ, RPM hoặc TPM";
     }
   }
+
+  // An image plan is finite by construction (imageCount), but it still sells a
+  // fixed period, so a window limit above that count is refused by the limits
+  // validation above; nothing extra to bound here.
 
   // Custom-amount top-up: the rate is the plan's own price/credit pair, so both
   // must exist, and an unlimited plan has no credit to scale.
@@ -518,6 +574,7 @@ export async function planStats() {
         revenueUsdNano: 0,
         revenueNanoUsd: 0,
         consumedNanoUsd: 0,
+        consumedImages: 0,
       });
     }
     return stats.get(planId);
@@ -570,14 +627,20 @@ export async function planStats() {
   // 3. Consumed: everything charged against the plan's purchases, including
   //    expired ones — that credit was still delivered and spent.
   const consumedRows = db.all(
-    `SELECT up.planId AS planId, COALESCE(SUM(-cl.deltaNanoUsd), 0) AS total
+    `SELECT up.planId AS planId,
+            COALESCE(SUM(-cl.deltaNanoUsd), 0) AS total,
+            COALESCE(SUM(-cl.deltaImages), 0) AS images
        FROM creditLedger cl
        JOIN userPlans up ON up.id = cl.userPlanId
       WHERE cl.kind = 'charge' AND up.planId IS NOT NULL
       GROUP BY up.planId`
   );
   for (const row of consumedRows) {
-    ensure(row.planId).consumedNanoUsd = nano(row.total);
+    const entry = ensure(row.planId);
+    entry.consumedNanoUsd = nano(row.total);
+    // Images consumed, reported next to the dollars so an image plan's admin card
+    // shows a real figure instead of "$0". 0 for a credit plan.
+    entry.consumedImages = imageCount(row.images);
   }
 
   return stats;
@@ -620,9 +683,15 @@ export async function createPlan(input = {}) {
     description: input.description == null ? null : String(input.description),
     priceNanoUsd: nano(input.priceNanoUsd),
     priceVnd: normalizePriceVnd(input.priceVnd),
+    // An image plan sells images instead of credit: it stores the count and keeps
+    // both credit columns at 0, so no reader can treat its balance as dollars.
+    kind: normalizePlanKind(input.kind),
+    imageCount: isImagePlan(input.kind) ? imageCount(input.imageCount) : null,
     // An unlimited plan stores 0 whatever the caller sent.
-    unlimitedCredit: isUnlimitedInput(input.unlimitedCredit),
-    creditNanoUsd: isUnlimitedInput(input.unlimitedCredit) ? 0 : nano(input.creditNanoUsd),
+    unlimitedCredit: isImagePlan(input.kind) ? false : isUnlimitedInput(input.unlimitedCredit),
+    creditNanoUsd: isImagePlan(input.kind) || isUnlimitedInput(input.unlimitedCredit)
+      ? 0
+      : nano(input.creditNanoUsd),
     ...customAmountColumns(input),
     durationDays: nano(input.durationDays),
     isActive: input.isActive !== false,
@@ -643,10 +712,11 @@ export async function createPlan(input = {}) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, kind, imageCount, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd, plan.creditNanoUsd,
+      plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd,
+      plan.kind, plan.imageCount, plan.creditNanoUsd,
       plan.unlimitedCredit ? 1 : 0, plan.allowCustomAmount ? 1 : 0, plan.customMinVnd, plan.customMaxVnd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
@@ -681,14 +751,23 @@ export function updatePlanSync(db, id, patch = {}) {
   const clash = db.get(`SELECT id FROM plans WHERE code = ? AND id != ?`, [code, id]);
   if (clash) throw new Error("A plan with this code already exists");
 
+  // Switching kind rewrites the balance columns, not only the label: an image plan
+  // must not keep a credit figure (readers would treat it as money) and a credit
+  // plan must not keep an image count (admission would count images it never sold).
+  // Purchases already granted keep their own snapshot, so this affects new orders.
+  const imagePlan = isImagePlan(merged.kind);
+  const unlimitedCredit = imagePlan ? false : isUnlimitedInput(merged.unlimitedCredit);
+
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, kind = ?, imageCount = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
       nano(merged.priceNanoUsd), normalizePriceVnd(merged.priceVnd),
-      isUnlimitedInput(merged.unlimitedCredit) ? 0 : nano(merged.creditNanoUsd),
-      isUnlimitedInput(merged.unlimitedCredit) ? 1 : 0,
+      imagePlan ? "image" : "llm",
+      imagePlan ? imageCount(merged.imageCount) : null,
+      imagePlan || unlimitedCredit ? 0 : nano(merged.creditNanoUsd),
+      unlimitedCredit ? 1 : 0,
       topupColumns.allowCustomAmount ? 1 : 0,
       topupColumns.customMinVnd,
       topupColumns.customMaxVnd,
@@ -858,8 +937,12 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     id: uuidv4(),
     userId,
     planId: plan.id,
+    // Snapshotted like the limits: what the buyer paid for cannot change under them.
+    kind: plan.kind,
+    imageCount: isImagePlan(plan.kind) ? imageCount(plan.imageCount) : null,
     amountNanoUsd: priceNanoUsd,
-    creditNanoUsd,
+    // An image plan sells no credit: its order carries the count instead.
+    creditNanoUsd: isImagePlan(plan.kind) ? 0 : creditNanoUsd,
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: plan.durationDays,
     periods: term.periods,
@@ -890,10 +973,11 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     if (!priced.ok) throw new Error(priced.error);
     order.amountNanoUsd = priced.amountNanoUsd;
     db.run(
-      `INSERT INTO orders(id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt, payCurrency, payAmount)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?)`,
+      `INSERT INTO orders(id, userId, planId, kind, imageCount, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt, payCurrency, payAmount)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?)`,
       [
-        order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
+        order.id, order.userId, order.planId, order.kind, order.imageCount,
+        order.amountNanoUsd, order.creditNanoUsd,
         order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.payerNote, order.emailSnapshot,
         order.limits, order.createdAt, priced.payAmount,
       ]

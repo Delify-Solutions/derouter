@@ -2,46 +2,71 @@
 
 import { Button, Input, Select } from "@/shared/components";
 import { usdToNano } from "@/shared/utils/money";
-import { WINDOW_PRESETS, validateLimits, windowLabel, describeLimit } from "@/lib/billing/limits.js";
+import { WINDOW_PRESETS, validateLimits, windowLabel, describeLimit, limitCeiling } from "@/lib/billing/limits.js";
+import { isImagePlan } from "@/lib/billing/planKind.js";
 
 // Limits editor for the admin plan form (spec plan-templates "Admin plan form").
 //
-// Rows of (window length, USD maximum). The window is one of the presets or a
-// custom number of hours. Validation and labels come from the shared pure module,
-// so the form cannot disagree with the API about what is valid.
+// Rows of (window length, maximum). The window is one of the presets or a custom
+// number of hours. The maximum is in the plan's own unit — dollars for a credit
+// plan, a number of images for an image plan — so a window is never compared with
+// the wrong balance. Validation and labels come from the shared pure module, so the
+// form cannot disagree with the API about what is valid.
 const CUSTOM = "custom";
 
-/** Draft rows: `{ hours: string, maxUsd: string }` — plain strings while typing. */
+/** Draft rows: `{ hours: string, maxUsd: string, maxImages: string }` — strings while typing. */
 export function limitsToDraft(limits) {
-  return (Array.isArray(limits) ? limits : []).map((limit) => ({
-    hours: String(limit.hours),
-    maxUsd: String(Math.round((Number(limit.maxNanoUsd) || 0) / 1e7) / 100),
-  }));
+  return (Array.isArray(limits) ? limits : []).map((limit) => {
+    const ceiling = limitCeiling(limit);
+    return {
+      hours: String(limit.hours),
+      maxUsd: ceiling.images ? "" : String(Math.round((Number(limit.maxNanoUsd) || 0) / 1e7) / 100),
+      maxImages: ceiling.images ? String(ceiling.max) : "",
+    };
+  });
 }
 
-/** Draft rows → the array the API wants, or `null` when the list is empty. */
-export function draftToLimits(rows) {
+/**
+ * Draft rows → the array the API wants, or `null` when the list is empty.
+ * `kind` decides which column carries the maximum: a row typed in the other unit
+ * is dropped rather than silently converted (images have no dollar price).
+ */
+export function draftToLimits(rows, kind = "llm") {
+  const images = isImagePlan(kind);
   const limits = (rows || [])
-    .filter((row) => row.hours !== "" && row.maxUsd !== "")
+    .filter((row) => row.hours !== "" && (images ? row.maxImages : row.maxUsd) !== "")
     .map((row) => ({
       hours: Number(row.hours),
-      maxNanoUsd: usdToNano(Number(row.maxUsd)),
+      maxNanoUsd: images ? 0 : usdToNano(Number(row.maxUsd)),
+      maxImages: images ? Math.floor(Number(row.maxImages)) : 0,
     }))
     .sort((a, b) => a.hours - b.hours);
   return limits.length ? limits : null;
 }
 
 /** Vietnamese errors for the limits block, computed from the same rules as the API. */
-export function draftLimitsError(rows, { creditUsd, durationDays }) {
-  const limits = draftToLimits(rows);
+export function draftLimitsError(rows, { creditUsd, durationDays, kind = "llm", imageCount = 0 }) {
+  const limits = draftToLimits(rows, kind);
   if (!limits) return null;
   return validateLimits(limits, {
+    kind,
+    imageTotal: Number(imageCount) || 0,
     creditNanoUsd: usdToNano(Number(creditUsd) || 0),
     durationDays: Number(durationDays) || 0,
   });
 }
 
-export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredit = false, durationDays, error }) {
+export default function LimitsEditor({
+  rows,
+  onChange,
+  creditUsd,
+  imageCount = 0,
+  kind = "llm",
+  unlimitedCredit = false,
+  durationDays,
+  error,
+}) {
+  const imagePlan = isImagePlan(kind);
   const update = (index, patch) => {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
@@ -52,7 +77,7 @@ export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredi
     // Offer the first preset not already used, so a fresh row is normally valid.
     const used = new Set(rows.map((row) => row.hours));
     const next = WINDOW_PRESETS.find((preset) => !used.has(String(preset.hours)));
-    onChange([...rows, { hours: next ? String(next.hours) : "", maxUsd: "" }]);
+    onChange([...rows, { hours: next ? String(next.hours) : "", maxUsd: "", maxImages: "" }]);
   };
 
   // The live preview sentence of the spec, e.g.
@@ -60,19 +85,21 @@ export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredi
   // Price is not a prop of this editor, so it renders the credit half; the form
   // wraps it with the price (see PlansPageClient).
   const preview = (() => {
-    const limits = draftToLimits(rows);
+    const limits = draftToLimits(rows, kind);
     if (!limits) return null;
     const days = Number(durationDays) || 0;
-    const credit = unlimitedCredit ? "credit không giới hạn" : `nhận $${formatNumber(creditUsd)}`;
-    return `${credit} dùng chung mọi model trong ${days} ngày; ${limits
-      .map(describeLimit)
-      .join(", ")}`;
+    const what = imagePlan
+      ? `nhận ${Number(imageCount || 0).toLocaleString("vi-VN")} ảnh`
+      : unlimitedCredit ? "credit không giới hạn" : `nhận $${formatNumber(creditUsd)}`;
+    return `${what} trong ${days} ngày; ${limits.map(describeLimit).join(", ")}`;
   })();
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="meta text-text-subtle">Hạn mức theo khung giờ</h3>
+        <h3 className="meta text-text-subtle">
+          Hạn mức theo khung giờ {imagePlan ? "(số ảnh)" : "(USD)"}
+        </h3>
         <Button
           type="button"
           variant="secondary"
@@ -86,15 +113,18 @@ export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredi
       </div>
 
       <p className="text-xs text-text-muted">
-        Mỗi hạn mức giới hạn số tiền một gói được dùng trong một khung giờ. Khung giờ mở ở lần
-        trừ tiền đầu tiên và tính lại sau đúng độ dài đó.
+        {imagePlan
+          ? "Mỗi hạn mức giới hạn số ảnh một gói được tạo trong một khung giờ. Khung giờ mở ở lần trừ đầu tiên và tính lại sau đúng độ dài đó."
+          : "Mỗi hạn mức giới hạn số tiền một gói được dùng trong một khung giờ. Khung giờ mở ở lần trừ tiền đầu tiên và tính lại sau đúng độ dài đó."}
       </p>
 
       {rows.length === 0 && (
         <p className="border border-border bg-surface-2 px-3 py-2 text-xs text-text-muted">
-          {unlimitedCredit
-            ? "Chưa có hạn mức theo khung giờ — gói không giới hạn credit cần ít nhất một hạn mức, hoặc RPM/TPM."
-            : "Không có hạn mức — gói chỉ dừng khi hết credit."}
+          {imagePlan
+            ? "Không có hạn mức — gói chỉ dừng khi hết số ảnh."
+            : unlimitedCredit
+              ? "Chưa có hạn mức theo khung giờ — gói không giới hạn credit cần ít nhất một hạn mức, hoặc RPM/TPM."
+              : "Không có hạn mức — gói chỉ dừng khi hết credit."}
         </p>
       )}
 
@@ -144,14 +174,25 @@ export default function LimitsEditor({ rows, onChange, creditUsd, unlimitedCredi
             )}
 
             <div className="flex items-end gap-2">
-              <Input
-                label="Tối đa ($)"
-                value={row.maxUsd}
-                onChange={(event) => update(index, { maxUsd: event.target.value })}
-                inputMode="decimal"
-                placeholder="20"
-                aria-label={`Mức tối đa của hạn mức ${index + 1}`}
-              />
+              {imagePlan ? (
+                <Input
+                  label="Tối đa (ảnh)"
+                  value={row.maxImages}
+                  onChange={(event) => update(index, { maxImages: event.target.value })}
+                  inputMode="numeric"
+                  placeholder="20"
+                  aria-label={`Số ảnh tối đa của hạn mức ${index + 1}`}
+                />
+              ) : (
+                <Input
+                  label="Tối đa ($)"
+                  value={row.maxUsd}
+                  onChange={(event) => update(index, { maxUsd: event.target.value })}
+                  inputMode="decimal"
+                  placeholder="20"
+                  aria-label={`Mức tối đa của hạn mức ${index + 1}`}
+                />
+              )}
               <Button
                 type="button"
                 variant="ghost"

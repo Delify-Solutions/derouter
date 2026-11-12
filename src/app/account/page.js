@@ -94,8 +94,16 @@ export default async function AccountOverviewPage() {
   // combos only and never touches the network). A customer with no group sees an
   // empty list and is told why.
   let models = [];
+  let imageModels = [];
   try {
-    models = await buildModelsList(["llm"], { allowedModels: group?.allowedModels ?? null });
+    // Both units: a customer holding an image plan must see the image combos their
+    // group allows, or the plan looks unusable.
+    const [text, image] = await Promise.all([
+      buildModelsList(["llm"], { allowedModels: group?.allowedModels ?? null }),
+      buildModelsList(["image"], { allowedModels: group?.allowedModels ?? null }),
+    ]);
+    models = text;
+    imageModels = image;
   } catch {
     models = [];
   }
@@ -108,6 +116,11 @@ export default async function AccountOverviewPage() {
   // An unlimited plan adds nothing to that sum, so a live one is what the headline
   // reports instead of a misleading figure.
   const hasUnlimitedCredit = started.some((entry) => entry.unlimitedCredit);
+  // Images are counted, never added to credit: a customer holding both sees two
+  // figures. Scheduled periods are excluded for the same reason as above.
+  const availableImages = started
+    .filter((entry) => entry.kind === "image")
+    .reduce((sum, entry) => sum + Math.max(0, entry.imageRemaining || 0), 0);
   const nearestReset = paying
     ? paying.windows
         .filter((window) => window.open && window.resetAt)
@@ -123,8 +136,9 @@ export default async function AccountOverviewPage() {
       description="Tổng quan tài khoản: credit còn lại, gói đang trả và cách kết nối."
       actions={<StatusTag status={user.status} />}
     >
-      {/* 1 + 2: the plan paying now and the total credit */}
-      <div className="grid gap-px border border-border bg-border md:grid-cols-3">
+      {/* 1 + 2: the plan paying now, the total credit, and the image balance when
+          the customer holds an image plan (a fourth card would be noise at zero). */}
+      <div className={`grid gap-px border border-border bg-border ${availableImages > 0 ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-3"}`}>
         <div className="bg-surface p-6">
           <Stat
             label="Credit khả dụng"
@@ -139,12 +153,26 @@ export default async function AccountOverviewPage() {
             <Stat
               label="Gói đang trả"
               value={paying.planName || paying.planCode || "Gói"}
-              hint={`${paying.unlimitedCredit ? "Credit không giới hạn" : `Còn ${fmtUsdNano(paying.creditRemainingNanoUsd)} / ${fmtUsdNano(paying.creditTotalNanoUsd)}`} · hết hạn ${fmtDate(paying.expiresAt)}${nearestReset ? ` · reset ${fmtTime(nearestReset)}` : ""}`}
+              hint={`${paying.kind === "image"
+                ? `Còn ${Number(paying.imageRemaining || 0).toLocaleString("vi-VN")} / ${Number(paying.imageTotal || 0).toLocaleString("vi-VN")} ảnh`
+                : paying.unlimitedCredit
+                  ? "Credit không giới hạn"
+                  : `Còn ${fmtUsdNano(paying.creditRemainingNanoUsd)} / ${fmtUsdNano(paying.creditTotalNanoUsd)}`} · hết hạn ${fmtDate(paying.expiresAt)}${nearestReset ? ` · reset ${fmtTime(nearestReset)}` : ""}`}
             />
           ) : (
             <Stat label="Gói đang trả" value="Chưa có" hint="Mua gói hoặc nhập mã quà tặng để nhận credit." />
           )}
         </div>
+        {availableImages > 0 && (
+          <div className="bg-surface p-6">
+            <Stat
+              label="Ảnh khả dụng"
+              value={Number(availableImages).toLocaleString("vi-VN")}
+              unit="ảnh"
+              hint="Mỗi lần tạo ảnh trừ 1 ảnh, không trừ credit."
+            />
+          </div>
+        )}
         <div className="bg-surface p-6">
           <Stat
             label="API key"
@@ -208,10 +236,10 @@ export default async function AccountOverviewPage() {
                 <p className="mt-1 text-sm font-medium text-text-main">{group?.name || "Chưa được gán nhóm"}</p>
               </div>
             </div>
-            <Tag>{models.length} model</Tag>
+            <Tag>{models.length + imageModels.length} model</Tag>
           </div>
 
-          {models.length === 0 ? (
+          {models.length + imageModels.length === 0 ? (
             <p className="border-t border-border px-6 py-5 text-sm text-text-muted">
               {group
                 ? "Nhóm này chưa mở model nào. Liên hệ admin để được cấp quyền."
@@ -226,6 +254,14 @@ export default async function AccountOverviewPage() {
                 {models.map((model) => (
                   <li key={model.id} className="truncate font-mono text-xs text-text-main" title={model.id}>
                     {model.id}
+                  </li>
+                ))}
+                {imageModels.map((model) => (
+                  <li key={model.id} className="flex min-w-0 items-center gap-1.5" title={model.id}>
+                    <span className="shrink-0 border border-border bg-surface-2 px-1 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                      Ảnh
+                    </span>
+                    <span className="truncate font-mono text-xs text-text-main">{model.id}</span>
                   </li>
                 ))}
               </ul>
