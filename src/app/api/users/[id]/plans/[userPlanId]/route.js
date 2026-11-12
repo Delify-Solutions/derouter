@@ -4,7 +4,7 @@ import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { getQueueSync } from "@/lib/db/repos/accountPlansRepo.js";
 import {
-  extendPlanSync,
+  setPlanExpirySync,
   adjustCreditSync,
   setPurchaseLimitsSync,
   revokePlanSync,
@@ -16,7 +16,9 @@ const NO_STORE = { "Cache-Control": "no-store" };
 /**
  * PATCH /api/users/[id]/plans/[userPlanId] — edit one purchase.
  *
- * Body `{ action: "extend", days? | expiresAt?, reason }`
+ * Body `{ action: "expiry", days? | expiresAt?, reason }`
+ *    `days` is signed (positive later, negative earlier); `expiresAt` sets an exact
+ *    time. Either way it must land in the future: ending a plan now is `revoke`.
  *    | `{ action: "adjust", deltaNanoUsd, reason }`
  *    | `{ action: "limits", limits, reason }`
  *    | `{ action: "revoke", reason }`
@@ -44,8 +46,8 @@ export async function PATCH(request, { params }) {
 
   const result = db.transaction(() => {
     switch (action) {
-      case "extend":
-        return extendPlanSync(db, id, userPlanId, {
+      case "expiry":
+        return setPlanExpirySync(db, id, userPlanId, {
           days: body?.days,
           expiresAt: body?.expiresAt,
           reason: body?.reason,

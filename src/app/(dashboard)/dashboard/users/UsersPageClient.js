@@ -75,6 +75,15 @@ export default function UsersPageClient() {
   const [dir, setDir] = useState(searchParams.get("dir") || "desc");
   const [page, setPage] = useState(Number(searchParams.get("page")) || 1);
 
+  // Bulk selection. Cleared whenever the visible page changes (filter, sort, page),
+  // because a selection the operator can no longer see is a mis-delete waiting to
+  // happen.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkReason, setBulkReason] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState({ email: "", displayName: "", password: "", groupId: "" });
   const [creating, setCreating] = useState(false);
@@ -127,6 +136,62 @@ export default function UsersPageClient() {
     () => data.groups.filter((group) => group.isActive !== false),
     [data.groups]
   );
+
+  // A new page/filter/sort means a different result set; keeping hidden ids selected
+  // is how an operator deletes accounts they never looked at.
+  useEffect(() => {
+    setSelected(new Set());
+    setBulkResult(null);
+  }, [page, q, groupFilter, statusFilter, planFilter, sort, dir]);
+
+  const pageIds = useMemo(() => data.users.map((user) => user.id), [data.users]);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
+  const toggleOne = (id) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllOnPage = () => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (pageIds.every((id) => next.has(id))) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const runBulkDelete = async () => {
+    const reason = bulkReason.trim();
+    if (reason.length < 3) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const res = await fetch("/api/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: [...selected], reason }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBulkResult({ error: body.error || "Không xoá được" });
+        return;
+      }
+      setBulkResult(body);
+      setSelected(new Set());
+      setBulkReason("");
+      setBulkOpen(false);
+      await load();
+    } catch {
+      setBulkResult({ error: "Không kết nối được máy chủ" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const toggleSort = (column) => {
     if (sort === column) {
@@ -277,10 +342,38 @@ export default function UsersPageClient() {
           )}
         </div>
       ) : (
+        <>
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-danger/40 bg-danger/5 px-4 py-3">
+            <span className="text-sm text-text-main">
+              Đã chọn <b>{selected.size}</b> tài khoản
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Bỏ chọn</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-danger"
+                onClick={() => { setBulkResult(null); setBulkOpen(true); }}
+              >
+                Xoá đã chọn
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto border border-border bg-surface">
           <table className="w-full min-w-[980px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2">
+                <th scope="col" className="w-10 px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-brand-500"
+                    checked={allOnPageSelected}
+                    onChange={toggleAllOnPage}
+                    aria-label="Chọn tất cả tài khoản trên trang này"
+                  />
+                </th>
                 <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Email</th>
                 <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Nhóm</th>
                 <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Trạng thái</th>
@@ -315,6 +408,15 @@ export default function UsersPageClient() {
                   onClick={() => router.push(`/dashboard/users/${user.id}`)}
                   className="cursor-pointer border-b border-border last:border-b-0 transition-colors duration-150 hover:bg-surface-2/60"
                 >
+                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-brand-500"
+                      checked={selected.has(user.id)}
+                      onChange={() => toggleOne(user.id)}
+                      aria-label={`Chọn ${user.email}`}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <Link
                       href={`/dashboard/users/${user.id}`}
@@ -347,6 +449,7 @@ export default function UsersPageClient() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {data.total > data.pageSize && (
@@ -356,6 +459,62 @@ export default function UsersPageClient() {
           totalItems={data.total}
           onPageChange={setPage}
         />
+      )}
+
+      {/* Bulk delete: the single-account route confirms with the account's email,
+          which is unusable for a selection — a written reason plus an explicit
+          count is the confirmation here. */}
+      <Modal
+        isOpen={bulkOpen}
+        onClose={() => { if (!bulkBusy) setBulkOpen(false); }}
+        title="Xoá tài khoản đã chọn"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setBulkOpen(false)} disabled={bulkBusy}>Huỷ</Button>
+            <Button
+              variant="secondary"
+              className="text-danger"
+              onClick={runBulkDelete}
+              disabled={bulkBusy || bulkReason.trim().length < 3}
+            >
+              {bulkBusy ? "Đang xoá…" : `Xoá ${selected.size} tài khoản`}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-text-main">
+            Xoá vĩnh viễn <b>{selected.size}</b> tài khoản cùng gói, API key, credit, nhật ký và hội thoại hỗ trợ.
+            Đơn hàng đã thanh toán vẫn được giữ để đối soát. Không khôi phục được.
+          </p>
+          <ul className="max-h-40 overflow-y-auto border border-border bg-surface-2 px-4 py-2 font-mono text-[12px] text-text-muted">
+            {data.users.filter((user) => selected.has(user.id)).map((user) => (
+              <li key={user.id} className="truncate py-0.5">{user.email}</li>
+            ))}
+          </ul>
+          <label className="flex flex-col gap-2">
+            <span className="meta text-text-muted">Lý do*</span>
+            <Input
+              value={bulkReason}
+              onChange={(event) => setBulkReason(event.target.value)}
+              placeholder="Ví dụ: dọn tài khoản test do trùng email"
+              maxLength={500}
+              autoFocus
+            />
+            <span className="text-xs text-text-muted">3–500 ký tự. Ghi vào nhật ký của từng tài khoản.</span>
+          </label>
+          {bulkResult?.error && (
+            <p role="alert" className="text-sm text-red-700 dark:text-red-400">{bulkResult.error}</p>
+          )}
+        </div>
+      </Modal>
+
+      {bulkResult && !bulkResult.error && (
+        <div role="status" className="border border-border bg-surface-2 px-4 py-3 text-sm text-text-main">
+          Đã xoá {bulkResult.deleted?.length ?? 0} tài khoản
+          {bulkResult.missing?.length ? ` · ${bulkResult.missing.length} không còn tồn tại` : ""}
+          {bulkResult.failed?.length ? ` · ${bulkResult.failed.length} lỗi` : ""}.
+        </div>
       )}
 
       <Modal

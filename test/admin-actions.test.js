@@ -203,51 +203,104 @@ test("grantCredit rejects an out-of-range amount and a missing reason", () => {
 
 // ── Extend ─────────────────────────────────────────────────────────────────
 
-test("extend adds days to a live purchase", () => {
+test("expiry moves later by days", () => {
   user();
   plan();
   purchase("up1", { hours: 24 });
 
   const before = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
   const result = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { days: 10, reason: REASON, actor: ACTOR, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 10, reason: REASON, actor: ACTOR, now: at(T0) })
   );
   assert.equal(result.ok, true);
+  assert.equal(result.direction, "extended");
 
   const after = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
   assert.ok(new Date(after) > new Date(before));
-  assert.equal(auditRows("plan_extended").length, 1);
+  assert.equal(auditRows("plan_expiry_set").length, 1);
 });
 
-test("extend accepts an explicit later date and refuses an earlier one", () => {
+test("expiry moves earlier by negative days, keeping the purchase running", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const before = db.get(`SELECT expiresAt, status FROM userPlans WHERE id = 'up1'`);
+  assert.equal(before.status, "active");
+
+  const result = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: -20, reason: REASON, now: at(T0) })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.direction, "shortened");
+  const after = db.get(`SELECT expiresAt, status, creditRemainingNanoUsd FROM userPlans WHERE id = 'up1'`);
+  // 720 hours = 30 days; 30 − 20 = 10 days from now.
+  assert.equal(new Date(after.expiresAt).getTime(), T0 + 10 * DAY);
+  assert.equal(after.status, "active", "the plan still runs, just for less time");
+  assert.ok(after.creditRemainingNanoUsd > 0, "shortening does not forfeit credit");
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM creditLedger WHERE kind = 'expire'`).n, 0);
+});
+
+test("expiry accepts an explicit date in either direction", () => {
   user();
   plan();
   purchase("up1", { hours: 720 });
 
-  const target = at(T0 + 60 * DAY);
+  const later = at(T0 + 60 * DAY);
   const ok = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { expiresAt: target, reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: later, reason: REASON, now: at(T0) })
   );
   assert.equal(ok.ok, true);
-  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, target);
+  assert.equal(ok.direction, "extended");
+  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, later);
+
+  // Shorter than the previous expiry but still in the future: allowed.
+  const sooner = at(T0 + 5 * DAY);
+  const shorter = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: sooner, reason: REASON, now: at(T0) })
+  );
+  assert.equal(shorter.ok, true);
+  assert.equal(shorter.direction, "shortened");
+  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, sooner);
+});
+
+test("expiry refuses a date that is not in the future", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const target = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
 
   const past = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { expiresAt: at(T0 - DAY), reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: at(T0 - DAY), reason: REASON, now: at(T0) })
   );
   assert.equal(past.status, 400);
-  // Unchanged by the refusal.
+  // Ending a plan is revoke's job, so an over-shortened day count is refused too.
+  const tooFar = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: -400, reason: REASON, now: at(T0) })
+  );
+  assert.equal(tooFar.status, 400);
   assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, target);
 });
 
-test("extend refuses a revoked purchase", () => {
+test("expiry refuses a zero-day change", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const result = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 0, reason: REASON, now: at(T0) })
+  );
+  assert.equal(result.status, 400);
+});
+
+test("expiry refuses a revoked purchase", () => {
   user();
   plan();
   purchase("up1", { status: "revoked" });
   const result = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { days: 5, reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 5, reason: REASON, now: at(T0) })
   );
   assert.equal(result.status, 409);
-  assert.equal(auditRows("plan_extended").length, 0);
+  assert.equal(auditRows("plan_expiry_set").length, 0);
 });
 
 // ── Adjust credit ──────────────────────────────────────────────────────────

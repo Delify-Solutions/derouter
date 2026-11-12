@@ -4,6 +4,40 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, CardSkeleton, Input, Select } from "@/shared/components";
 import { PlanQueue } from "@/shared/components/billing";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
+
+// ── Local datetime helpers ───────────────────────────────────────────────────
+// `<input type="datetime-local">` speaks local wall-clock "YYYY-MM-DDTHH:mm" with no
+// zone, so both directions go through the browser's own offset. Sending an ISO string
+// straight from the ISO value would shift the time by the customer's offset, which is
+// the classic way an "extend by a day" lands on the wrong hour.
+
+/** ISO → the value the input needs, in the operator's local time. */
+function toLocalInput(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The input's local value → an ISO instant. Empty when unparsable. */
+function fromLocalInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function expiryInFuture(value) {
+  const iso = fromLocalInput(value);
+  return Boolean(iso) && new Date(iso).getTime() > Date.now();
+}
+
+/** Shift a local input value by whole days, keeping the time of day. */
+function shiftLocal(value, days) {
+  const iso = fromLocalInput(value);
+  const base = iso ? new Date(iso) : new Date();
+  return toLocalInput(new Date(base.getTime() + days * 86_400_000).toISOString());
+}
 import ReasonModal from "./ReasonModal";
 
 const WINDOW_OPTIONS = [
@@ -68,7 +102,21 @@ export default function PlansTab({ userId, onChanged }) {
       amountUsd: "",
       days: "30",
       deltaUsd: "",
-      limits: (entry?.limits ?? []).map((limit) => ({ hours: String(limit.hours), maxUsd: String(limit.maxNanoUsd / 1e9) })),
+      // Expiry modal: an exact local datetime, pre-filled from the purchase so the
+      // operator edits the date instead of doing arithmetic.
+      expiresLocal: toLocalInput(entry?.expiresAt),
+      // The modal edits the purchase in ITS unit: an image purchase's ceilings are
+      // counts, so `maxUsd` would print "0" for every row.
+      //
+      // The API exposes the ceilings as `windows` (one row per limit, with the
+      // spent/reset state), which is what the card renders — `limits` is the raw
+      // stored JSON and is not part of the queue payload.
+      imageUnit: entry?.kind === "image",
+      limits: (entry?.windows ?? []).map((window) => ({
+        hours: String(window.hours),
+        maxUsd: entry?.kind === "image" ? "" : String((window.maxNanoUsd || 0) / 1e9),
+        maxImages: entry?.kind === "image" ? String(window.maxImages ?? 0) : "",
+      })),
     });
     setAction({ type, entry });
   };
@@ -132,7 +180,7 @@ export default function PlansTab({ userId, onChanged }) {
 
   const renderActions = (entry) => (
     <div className="flex flex-wrap items-center gap-2">
-      <Button size="sm" variant="secondary" onClick={() => openAction("extend", entry)}>Gia hạn</Button>
+      <Button size="sm" variant="secondary" onClick={() => openAction("expiry", entry)}>Sửa hạn dùng</Button>
       {/* An unlimited purchase has no credit to move; the API refuses it too. */}
       {!entry.unlimitedCredit && (
         <Button size="sm" variant="secondary" onClick={() => openAction("adjust", entry)}>Điều chỉnh credit</Button>
@@ -145,8 +193,12 @@ export default function PlansTab({ userId, onChanged }) {
   );
 
   const limitsPreview = useMemo(
-    () => draft.limits.map((limit) => `${fmtUsdNano(usdToNano(Number(limit.maxUsd) || 0))} mỗi ${limit.hours} giờ`).join(", "),
-    [draft.limits]
+    () => draft.limits
+      .map((limit) => (draft.imageUnit
+        ? `${Number(limit.maxImages) || 0} ảnh mỗi ${limit.hours} giờ`
+        : `${fmtUsdNano(usdToNano(Number(limit.maxUsd) || 0))} mỗi ${limit.hours} giờ`))
+      .join(", "),
+    [draft.limits, draft.imageUnit]
   );
 
   if (loading) return <CardSkeleton />;
@@ -202,7 +254,11 @@ export default function PlansTab({ userId, onChanged }) {
                   <tr key={row.id} className="border-b border-border last:border-b-0">
                     <td className="px-4 py-2 text-sm text-text-main">{row.planName || row.planCode || "Gói"}</td>
                     <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.source}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-main">{fmtCreditNano(row.creditTotalNanoUsd, row.unlimitedCredit)}</td>
+                    <td className="px-4 py-2 font-mono text-[12px] text-text-main">
+                      {row.kind === "image"
+                        ? `${Number(row.imageTotal || 0).toLocaleString("vi-VN")} ảnh`
+                        : fmtCreditNano(row.creditTotalNanoUsd, row.unlimitedCredit)}
+                    </td>
                     <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
                       {row.expiresAt ? new Date(row.expiresAt).toLocaleDateString("vi-VN") : "—"}
                     </td>
@@ -265,23 +321,44 @@ export default function PlansTab({ userId, onChanged }) {
         )}
       />
 
-      {/* Extend */}
+      {/* Expiry — set the exact end of the purchase, earlier or later. */}
       <ReasonModal
-        isOpen={action?.type === "extend"}
-        title="Gia hạn gói"
-        description={`Gói ${action?.entry?.planName || action?.entry?.planCode || ""} — cộng thêm số ngày vào ngày hết hạn hiện tại.`}
-        confirmLabel="Gia hạn"
+        isOpen={action?.type === "expiry"}
+        title="Sửa hạn dùng"
+        description={`Gói ${action?.entry?.planName || action?.entry?.planCode || ""} — đặt lại thời điểm kết thúc, sớm hơn hoặc muộn hơn. Hạn mới phải sau hiện tại; muốn kết thúc gói ngay thì dùng Thu hồi.`}
+        confirmLabel="Lưu hạn dùng"
         onClose={() => setAction(null)}
-        extraValid={Number(draft.days) > 0}
-        onConfirm={({ reason }) => patchPurchase({ action: "extend", days: Number(draft.days), reason })}
+        extraValid={Boolean(draft.expiresLocal) && expiryInFuture(draft.expiresLocal)}
+        onConfirm={({ reason }) =>
+          patchPurchase({ action: "expiry", expiresAt: fromLocalInput(draft.expiresLocal), reason })
+        }
         renderFields={() => (
-          <Input
-            label="Số ngày gia hạn"
-            value={draft.days}
-            onChange={(event) => setDraft((d) => ({ ...d, days: event.target.value }))}
-            inputMode="numeric"
-            hint="1–3650"
-          />
+          <div className="flex flex-col gap-2">
+            <Input
+              label="Hết hạn lúc"
+              type="datetime-local"
+              value={draft.expiresLocal}
+              onChange={(event) => setDraft((d) => ({ ...d, expiresLocal: event.target.value }))}
+              hint="Giờ trên máy bạn. Sớm hơn hiện tại sẽ bị từ chối."
+            />
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "+7 ngày", days: 7 },
+                { label: "+30 ngày", days: 30 },
+                { label: "-7 ngày", days: -7 },
+                { label: "-30 ngày", days: -30 },
+              ].map((preset) => (
+                <Button
+                  key={preset.label}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDraft((d) => ({ ...d, expiresLocal: shiftLocal(d.expiresLocal, preset.days) }))}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+          </div>
         )}
       />
 
@@ -317,7 +394,13 @@ export default function PlansTab({ userId, onChanged }) {
         onConfirm={({ reason }) =>
           patchPurchase({
             action: "limits",
-            limits: draft.limits.map((limit) => ({ hours: Number(limit.hours), maxNanoUsd: usdToNano(Number(limit.maxUsd) || 0) })),
+            // Only the populated unit is sent: the API rejects a count of 0 images,
+            // and sending both would let one silently win.
+            limits: draft.limits.map((limit) => ({
+              hours: Number(limit.hours),
+              maxNanoUsd: draft.imageUnit ? 0 : usdToNano(Number(limit.maxUsd) || 0),
+              maxImages: draft.imageUnit ? Math.floor(Number(limit.maxImages) || 0) : 0,
+            })),
             reason,
           })
         }
@@ -337,12 +420,18 @@ export default function PlansTab({ userId, onChanged }) {
                   options={WINDOW_OPTIONS}
                 />
                 <Input
-                  label="Tối đa ($)"
-                  value={limit.maxUsd}
+                  label={draft.imageUnit ? "Tối đa (ảnh)" : "Tối đa ($)"}
+                  value={draft.imageUnit ? limit.maxImages : limit.maxUsd}
                   onChange={(event) =>
                     setDraft((d) => ({
                       ...d,
-                      limits: d.limits.map((row, i) => (i === index ? { ...row, maxUsd: event.target.value } : row)),
+                      limits: d.limits.map((row, i) =>
+                        i === index
+                          ? draft.imageUnit
+                            ? { ...row, maxImages: event.target.value }
+                            : { ...row, maxUsd: event.target.value }
+                          : row
+                      ),
                     }))
                   }
                   inputMode="decimal"
@@ -360,7 +449,12 @@ export default function PlansTab({ userId, onChanged }) {
               size="sm"
               variant="secondary"
               icon="add"
-              onClick={() => setDraft((d) => ({ ...d, limits: [...d.limits, { hours: "24", maxUsd: "" }] }))}
+              onClick={() =>
+                setDraft((d) => ({
+                  ...d,
+                  limits: [...d.limits, { hours: "24", maxUsd: "", maxImages: "" }],
+                }))
+              }
             >
               Thêm hạn mức
             </Button>
@@ -372,7 +466,11 @@ export default function PlansTab({ userId, onChanged }) {
       <ReasonModal
         isOpen={action?.type === "revoke"}
         title="Thu hồi gói"
-        description={`Thu hồi gói ${action?.entry?.planName || action?.entry?.planCode || ""} sẽ đặt credit còn lại (${fmtUsdNano(action?.entry?.creditRemainingNanoUsd ?? 0)}) về 0 và ghi một dòng sổ cái. Không thể hoàn tác.`}
+        description={
+          action?.entry?.kind === "image"
+            ? `Thu hồi gói ${action?.entry?.planName || action?.entry?.planCode || ""} sẽ đặt số ảnh còn lại (${Number(action?.entry?.imageRemaining ?? 0).toLocaleString("vi-VN")} ảnh) và credit còn lại về 0, rồi ghi một dòng sổ cái. Không thể hoàn tác.`
+            : `Thu hồi gói ${action?.entry?.planName || action?.entry?.planCode || ""} sẽ đặt credit còn lại (${fmtUsdNano(action?.entry?.creditRemainingNanoUsd ?? 0)}) về 0 và ghi một dòng sổ cái. Không thể hoàn tác.`
+        }
         confirmLabel="Thu hồi"
         onClose={() => setAction(null)}
         onConfirm={({ reason }) => patchPurchase({ action: "revoke", reason })}

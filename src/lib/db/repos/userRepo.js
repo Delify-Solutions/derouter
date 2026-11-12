@@ -300,10 +300,14 @@ export async function activateUnverifiedUsers() {
  * reason.
  *
  * @param {string} id
- * @param {{ actor?: string }} options `actor` is an audit actor ("admin:<identity>")
+ * @param {{ actor?: string, reason?: string|null }} options `actor` is an audit actor
+ *   ("admin:<identity>"); `reason` is the operator's justification, carried into the
+ *   surviving `user_deleted` row. It is required by the bulk-delete UI, which has no
+ *   per-row email confirmation to fall back on, so losing it here would leave a
+ *   deletion with no record of why.
  * @returns {Promise<{deleted: boolean, email: string|null, keyCount: number}>}
  */
-export async function deleteUser(id, { actor = "system" } = {}) {
+export async function deleteUser(id, { actor = "system", reason = null } = {}) {
   if (!id) return { deleted: false, email: null, keyCount: 0 };
   const db = await getAdapter();
 
@@ -364,6 +368,9 @@ export async function deleteUser(id, { actor = "system" } = {}) {
       userId: id,
       actor,
       action: "user_deleted",
+      // The audit wipe above removed this account's own history, so this row is the
+      // only place the reason survives.
+      reason: typeof reason === "string" && reason.trim() ? reason.trim().slice(0, 500) : null,
       details: { userId: id, email },
       now: new Date().toISOString(),
     });
