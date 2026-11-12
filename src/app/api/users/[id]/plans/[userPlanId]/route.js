@@ -20,7 +20,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * Body `{ action: "expiry", days? | expiresAt?, reason }`
  *    `days` is signed (positive later, negative earlier); `expiresAt` sets an exact
  *    time. Either way it must land in the future: ending a plan now is `revoke`.
- *    | `{ action: "adjust", deltaNanoUsd, reason }`
+ *    | `{ action: "adjust", deltaNanoUsd, reason }` — a credit purchase only: an
+ *      image purchase holds a count, so adjusting it is a 409
  *    | `{ action: "limits", limits, reason }`
  *    | `{ action: "rates", rpm, tpm, reason }` (null/"" = follow the plan, 0 = no limit)
  *    | `{ action: "revoke", reason }`
