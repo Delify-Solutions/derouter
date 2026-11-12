@@ -1,26 +1,18 @@
-// Who still sees the promotional popup inside /account (spec promo-popup
-// "Promotional popup"): an account that never bought a plan and has not
-// redeemed the popup's own code. "Bought" means a purchase grant, the same
-// notion the new-user gift codes use.
+// Who still counts as a NEW account for the promotional popup (spec promo-popup
+// "Promotional popup"): an account that has never received any plan or
+// credit — bought, granted by an admin, from a gift code, affiliate credit or a
+// referral bonus — and has never redeemed a gift code. Owner decision: an old
+// account that only ever used admin-granted or gifted plans is not new.
+//
+// The popup code is no longer consulted on its own: redeeming it (or any code)
+// already makes the account not new.
 //
 // SYNCHRONOUS + DRIVER-FREE: takes the adapter. Relative imports only.
-import { normalizePromoCode } from "../../shared/utils/promoPopup.js";
 
-export function isNewAccountForPromoSync(db, userId, code) {
+export function isNewAccountForPromoSync(db, userId, _code = null) {
   if (!userId) return false;
-  const bought = db.get(
-    `SELECT 1 AS x FROM userPlans WHERE userId = ? AND source = 'purchase' LIMIT 1`,
-    [userId]
-  );
-  if (bought) return false;
-  const key = normalizePromoCode(code);
-  if (!key) return true;
-  // Separator-agnostic, like giftRepo.findGiftRowByCode: older codes may be
-  // stored with their dashes or spaces (WEL-COME), the popup key never has them.
-  const redeemed = db.get(
-    `SELECT 1 AS x FROM giftRedemptions r JOIN giftCodes g ON g.id = r.giftId
-      WHERE r.userId = ? AND REPLACE(REPLACE(UPPER(g.code), '-', ''), ' ', '') = ? LIMIT 1`,
-    [userId, key]
-  );
-  return !redeemed;
+  const anyPlan = db.get(`SELECT 1 AS x FROM userPlans WHERE userId = ? LIMIT 1`, [userId]);
+  if (anyPlan) return false;
+  const anyGift = db.get(`SELECT 1 AS x FROM giftRedemptions WHERE userId = ? LIMIT 1`, [userId]);
+  return !anyGift;
 }

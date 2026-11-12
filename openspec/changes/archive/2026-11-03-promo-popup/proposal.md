@@ -5,7 +5,7 @@ The owner wants to advertise promotions (typically a gift code) to visitors of t
 ## What Changes
 
 - A promotional popup, edited in Admin → Nội dung next to the announcement banner: on/off, title, body, gift code, button text, delay before showing, and minutes before showing again after a visitor closes it (default 5; 0 = every page load).
-- Shown on the landing page, `/register`, `/docs` and every `/account` page (except the gift page) of a new account: one that never bought a plan and has not redeemed the popup's code.
+- Shown on the landing page, `/register`, `/docs` and every `/account` page (except the gift page) of a new account. A new account (owner decision, change telegram-admin) never received any plan or credit of any source and never redeemed a gift code; signed-in customers on the public pages follow the same rule.
 - Clicking the code copies it. The button sends a visitor to `/register?next=/account/gift?code=…` (a signed-in customer straight to the gift page); a "Đăng nhập để nhập mã" link covers existing accounts.
 - The code is also remembered in the browser for 7 days, so a visitor who signs up another way still lands on the gift page with it prefilled.
 - `/account/gift` prefills `?code=` or the remembered code; a successful redemption clears both.

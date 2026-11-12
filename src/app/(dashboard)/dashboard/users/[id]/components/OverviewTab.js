@@ -5,6 +5,7 @@ import { Button, Input, Select } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import ReasonModal from "./ReasonModal";
 import ReferrerPanel from "./ReferrerPanel";
+import TelegramPanel from "./TelegramPanel";
 
 const STATUS_OPTIONS = [
   { value: "active", label: "Hoạt động" },
@@ -86,7 +87,16 @@ export default function OverviewTab({ user, summary, onChanged }) {
       <section className="border border-border bg-surface">
         <dl className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-surface px-5 py-4"><Field label="Credit khả dụng">{summary?.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(summary?.availableNanoUsd ?? 0)}</Field></div>
-          <div className="bg-surface px-5 py-4"><Field label="Đang nợ">{fmtUsdNano(summary?.debtNanoUsd ?? 0)}</Field></div>
+          <div className="bg-surface px-5 py-4">
+            <Field label="Đang nợ">
+              <span className="flex flex-wrap items-center gap-2">
+                <span>{fmtUsdNano(summary?.debtNanoUsd ?? 0)}</span>
+                {(summary?.debtNanoUsd ?? 0) > 0 ? (
+                  <Button size="sm" variant="secondary" onClick={() => setAction("debt")}>Xóa nợ</Button>
+                ) : null}
+              </span>
+            </Field>
+          </div>
           <div className="bg-surface px-5 py-4"><Field label="Chi 7 ngày">{fmtUsdNano(summary?.spend7dNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="Chi 30 ngày">{fmtUsdNano(summary?.spend30dNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="API key">{summary?.keyCount ?? 0}</Field></div>
@@ -174,6 +184,8 @@ export default function OverviewTab({ user, summary, onChanged }) {
 
       <ReferrerPanel user={user} onChanged={onChanged} />
 
+      <TelegramPanel user={user} onChanged={onChanged} />
+
       <section className="flex flex-col gap-3 border border-border bg-surface p-5">
         <h2 className="meta text-text-muted">Ghi chú nội bộ</h2>
         <p className="text-xs text-text-muted">
@@ -194,6 +206,29 @@ export default function OverviewTab({ user, summary, onChanged }) {
           {noteError && <span className="text-[11px] text-danger">{noteError}</span>}
         </div>
       </section>
+
+      {/* Debt write-off (change debt-clear): the amount on screen is sent back, so a
+          debt that grew meanwhile is refused instead of cleared unseen. */}
+      <ReasonModal
+        isOpen={action === "debt"}
+        title="Xóa nợ"
+        description={`Xóa toàn bộ khoản nợ ${fmtUsdNano(summary?.debtNanoUsd ?? 0)}. Khách không phải trả khoản này nữa; nhật ký credit ghi lại thao tác.`}
+        confirmLabel="Xóa nợ"
+        onClose={() => setAction(null)}
+        values={{ expectNanoUsd: summary?.debtNanoUsd ?? 0 }}
+        onConfirm={async ({ reason, expectNanoUsd }) => {
+          const res = await fetch(`/api/users/${encodeURIComponent(user.id)}/debt`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason, expectNanoUsd }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) return { ok: false, error: data.error || "Không xóa được nợ" };
+          await onChanged();
+          setNotice(`Đã xóa nợ ${fmtUsdNano(data.clearedNanoUsd ?? 0)}`);
+          return { ok: true };
+        }}
+      />
 
       <ReasonModal
         isOpen={action === "group"}

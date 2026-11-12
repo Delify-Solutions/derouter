@@ -12,10 +12,10 @@ const COLUMNS = [
   {
     title: "Gói",
     links: [
-      { href: "#plans", label: "Các gói" },
-      { href: "#models", label: "Model" },
-      { href: "#pricing", label: "Bảng giá" },
-      { href: "#faq", label: "Câu hỏi thường gặp" },
+      { href: "/#plans", label: "Các gói" },
+      { href: "/models", label: "Model" },
+      { href: "/#pricing", label: "Bảng giá" },
+      { href: "/#faq", label: "Câu hỏi thường gặp" },
     ],
   },
   {
@@ -38,7 +38,7 @@ const COLUMNS = [
   },
 ];
 
-export default function Footer({ modelCount, plans = [] }) {
+export default function Footer({ modelCount, plans = [], channelUrl = "" }) {
   return (
     <footer className="border-t border-border bg-bg">
       <div className="shell py-14">
@@ -56,7 +56,11 @@ export default function Footer({ modelCount, plans = [] }) {
             <p className="mt-1 font-mono text-[11px] text-text-subtle">{modelCount} model trong danh mục</p>
           </div>
 
-          {COLUMNS.map((column) => (
+          {(channelUrl
+            ? COLUMNS.map((column, index) => (index === COLUMNS.length - 1
+              ? { ...column, links: [...column.links, { href: channelUrl, label: "Kênh Telegram", external: true }] }
+              : column))
+            : COLUMNS).map((column) => (
             <div key={column.title}>
               <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{column.title}</p>
               <ul className="mt-4 flex flex-col gap-2.5">

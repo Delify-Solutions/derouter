@@ -2,7 +2,7 @@
 //
 // An unlimited plan stores 0 credit and a flag. These cases pin what a customer and
 // an operator would notice: it is never refused for lack of credit, only its window
-// limits stop it, it never exhausts or creates debt, every way of granting one
+// limits stop it, it never exhausts or creates debt and it takes over older debt, every way of granting one
 // carries the flag, and an operator cannot graft credit onto it.
 //
 // Throwaway SQLite, synchronous engine called with an explicit `now`.
@@ -200,11 +200,15 @@ test("7. createPlan stores 0 credit; the order snapshots the flag and approving 
   assert.equal(wallet.hasUnlimitedCredit, true);
 });
 
-test("8. buying an unlimited plan does not repay debt: there is no credit to take it from", () => {
+test("8. an unlimited plan takes over all older debt when granted (change debt-clear)", () => {
   user("u1", { debt: USD(4) });
   grantUnlimited();
-  assert.equal(db.get(`SELECT overdraftNanoUsd AS d FROM users WHERE id = 'u1'`).d, USD(4));
-  assert.equal(queue.admitSync(db, "u1", at(T0 + HOUR)).ok, true, "admission ignores debt while an unlimited plan can pay");
+  assert.equal(db.get(`SELECT overdraftNanoUsd AS d FROM users WHERE id = 'u1'`).d, 0);
+  const written = db.get(`SELECT deltaNanoUsd, kind, userPlanId, meta FROM creditLedger WHERE userId = 'u1' AND kind = 'adjust'`);
+  assert.equal(written.deltaNanoUsd, USD(4));
+  assert.equal(written.userPlanId, "up-unl");
+  assert.equal(JSON.parse(written.meta).reason, "overdraft_absorbed");
+  assert.equal(queue.admitSync(db, "u1", at(T0 + HOUR)).ok, true);
 });
 
 test("9. an admin grant carries the flag; adjusting credit on it is refused; revoke closes it quietly", () => {

@@ -21,6 +21,7 @@ const ACTION_LABEL = {
   credit_granted: "Cấp credit",
   plan_extended: "Gia hạn gói",
   credit_adjusted: "Điều chỉnh credit",
+  debt_cleared: "Xóa nợ",
   plan_limits_changed: "Sửa hạn mức gói",
   plan_rates_changed: "Sửa RPM/TPM gói",
   plan_revoked: "Thu hồi gói",
@@ -29,6 +30,9 @@ const ACTION_LABEL = {
   // Affiliate program (spec affiliate-program).
   referrer_changed: "Đổi người giới thiệu",
   affiliate_updated: "Sửa CTV",
+  telegram_unlinked: "Gỡ liên kết Telegram",
+  // Order cancelled by an admin from the Telegram bot (change telegram-bot-commands).
+  order_cancelled: "Hủy đơn hàng",
   affiliate_invited: "Mời làm CTV",
   affiliate_commission_reversed: "Hủy hoa hồng",
   affiliate_commission_released: "Duyệt sớm hoa hồng",

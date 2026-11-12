@@ -204,9 +204,20 @@ export function markSupportReadSync(db, userId, now = null) {
  * from a customer, and a reply from the admin chat. Everything else is ignored,
  * because a bot that echoes arbitrary updates is a spam amplifier.
  *
+ * `answerHelp` decides who owns commands. Standalone (the long-polling reader) this
+ * module owns them: `/help` explains that the chat IS the support channel. Wired
+ * into the command bot's webhook it does not: that bot already answers `/help` with
+ * the full command list, and two readers answering the same command would double
+ * every reply. In that mode every `/command` is left alone so the command bot sees
+ * it, and only free text and admin replies are taken.
+ *
  * @returns {Promise<{ handled: string }>} "command" | "customer" | "admin_reply" | "ignored"
  */
-export async function handleSupportUpdate(db, update, { config = null, send = sendTelegramMessage, typing = sendTelegramChatAction } = {}) {
+export async function handleSupportUpdate(
+  db,
+  update,
+  { config = null, send = sendTelegramMessage, typing = sendTelegramChatAction, answerHelp = true } = {}
+) {
   const message = update?.message;
   if (!message) return { handled: "ignored" };
 
@@ -255,6 +266,9 @@ export async function handleSupportUpdate(db, update, { config = null, send = se
   }
 
   if (isHelpCommand(text)) {
+    // Wired into the command bot, every `/command` belongs to it: it has the full
+    // list, and answering here too would send the customer two replies.
+    if (!answerHelp) return { handled: "ignored" };
     // A command is not part of the conversation: storing it would put "/help" in the
     // admin's thread and count it as an unread message the admin has to open.
     await send(cfg.token, chatId, [
@@ -264,6 +278,9 @@ export async function handleSupportUpdate(db, update, { config = null, send = se
     ].join("\n"));
     return { handled: "command" };
   }
+
+  // Any other command also belongs to the command bot when this module is wired in.
+  if (!answerHelp && isAnyCommand(text)) return { handled: "ignored" };
 
   if (text.length > MAX_INBOUND_LENGTH) {
     await send(cfg.token, chatId, `Tin nhắn dài quá ${MAX_INBOUND_LENGTH} ký tự, bạn chia nhỏ giúp nhé.`);
@@ -332,6 +349,11 @@ export function isHelpCommand(text) {
   // suffix so the same commands work either way.
   const first = String(text || "").trim().split(/\s+/)[0]?.toLowerCase().split("@")[0];
   return HELP_COMMANDS.includes(first);
+}
+
+/** Is this text a bot command at all (`/me`, `/gift ABC`, …)? */
+function isAnyCommand(text) {
+  return /^\/[a-zA-Z0-9_]{1,32}(?:@[A-Za-z0-9_]+)?(?:\s|$)/.test(String(text || "").trim());
 }
 
 function maskEmailLocal(email) {
@@ -520,8 +542,12 @@ function isTruthyEnv(value) {
 
 /**
  * Start long polling. Idempotent, and skipped during a build.
- * `DISABLE_TELEGRAM_SUPPORT` turns it off; a deployment that also sets a webhook
- * must not start this (Telegram allows only one reader, and getUpdates answers 409).
+ *
+ * Telegram allows exactly one reader of a bot's updates. When the command bot has a
+ * webhook registered (change telegram-bot-commands), that webhook is the reader and
+ * it already routes support messages, so this loop must not start at all —
+ * `getUpdates` would answer 409 forever and nothing would be delivered. Polling is
+ * only for a deployment with no webhook; `DISABLE_TELEGRAM_SUPPORT` turns it off too.
  */
 export function startSupportChat() {
   if (g.running) return false;
@@ -532,6 +558,14 @@ export function startSupportChat() {
   const loop = async () => {
     while (g.running) {
       try {
+        // Re-read settings each cycle: an operator can register a webhook while this
+        // runs, and from then on the webhook is the only reader.
+        const settings = await getSettings().catch(() => ({}));
+        if (String(settings?.telegramWebhookSecret || "").trim()) {
+          g.lastError = "webhook";
+          g.running = false;
+          return;
+        }
         const controller = new AbortController();
         g.abort = controller;
         const result = await pollSupportUpdatesOnce({ timeoutSec: LONG_POLL_SEC, signal: controller.signal });
@@ -539,8 +573,12 @@ export function startSupportChat() {
         // No bot configured, or the token is wrong: nothing works until an operator
         // saves settings, and a tight loop would only spin and spam Telegram.
         if (result.reason === "not_configured" || result.reason === "invalid_token") await sleep(60_000);
-        // 409 means a webhook or another instance owns the stream: stop hammering.
-        else if (result.reason === "conflict") await sleep(120_000);
+        // 409 means a webhook or another instance owns the stream: stop, do not retry
+        // forever (the settings check above catches the configured case next boot).
+        else if (result.reason === "conflict") {
+          g.running = false;
+          return;
+        }
         else if (!result.ok) await sleep(5_000);
       } catch (error) {
         g.lastError = error?.message || String(error);

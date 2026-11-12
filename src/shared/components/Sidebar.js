@@ -29,6 +29,8 @@ const navItems = [
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers" },
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
+  // Token statistics by time, model, provider and customer (change usage-analytics).
+  { href: "/dashboard/stats", label: "Thống kê", icon: "query_stats" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
@@ -41,7 +43,8 @@ const navItems = [
   // reason this item exists in the sidebar rather than buried in settings.
   { href: "/dashboard/payments", label: "Thanh toán", icon: "account_balance", badge: "needsReview" },
   { href: "/dashboard/content", label: "Nội dung", icon: "article" },
-  { href: "/dashboard/telegram", label: "Thông báo Telegram", icon: "campaign" },
+  { href: "/dashboard/announcements", label: "Thông báo", icon: "notifications" },
+  { href: "/dashboard/telegram", label: "Telegram", icon: "campaign" },
 ];
 
 const debugItems = [

@@ -19,6 +19,7 @@ import { insertAuditSync } from "../billing/audit.js";
 import { nano } from "../billing/ledger.js";
 import { stringifyJson, parseJson } from "../db/helpers/jsonCol.js";
 import { extractCandidateCodes } from "./codes.js";
+import { purchaseLimitBlockerSync } from "../db/repos/billingRepo.js";
 
 /** How far before an order's creation a payment may still belong to it. */
 export const CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -136,6 +137,7 @@ export function ingestTransactionSync(db, {
       approvedBy: `payment:${provider.kind}`,
       now: receivedAt,
       paymentTransactionId: transactionId,
+      allowExpired: decision.allowExpired === true,
     });
     if (!approved || approved.alreadyApproved) {
       db.run(
@@ -165,7 +167,7 @@ export function ingestTransactionSync(db, {
  *
  * Extracted so the dry run, the real ingest and the tests all read the same code.
  *
- * @returns {{outcome: "matched"|"needs_review", reason?: string, orderId?: string|null}}
+ * @returns {{outcome: "matched"|"needs_review", reason?: string, orderId?: string|null, allowExpired?: boolean}}
  */
 export function decideSync(db, { provider, tx, prefix, nowIso = null }) {
   const candidates = extractCandidateCodes(tx.content ?? "", prefix);
@@ -193,17 +195,25 @@ export function decideSync(db, { provider, tx, prefix, nowIso = null }) {
     return { outcome: "needs_review", reason: "wrong_provider", orderId };
   }
 
-  if (orderRow.status !== "pending") {
+  const occurredParsed = tx.occurredAt ? Date.parse(tx.occurredAt) : NaN;
+  const occurred = Number.isFinite(occurredParsed) ? occurredParsed : null;
+  const expiresAt = orderRow.expiresAt ? Date.parse(orderRow.expiresAt) : null;
+  const paidInWindow = occurred != null && Number.isFinite(expiresAt) && occurred <= expiresAt;
+
+  // An order the sweep already expired is still payable by money that arrived
+  // inside its window: the sweep runs on our clock, the bank reports when the
+  // customer paid, and a webhook or a poll can land after the sweep. Without
+  // proof of the payment time (no occurredAt) the admin decides.
+  const revivesExpired = orderRow.status === "expired" && paidInWindow;
+
+  if (orderRow.status !== "pending" && !revivesExpired) {
     // Paid, cancelled, refunded AND expired-beyond-revival all land here; the
-    // expiry case is reported separately below so the admin sees the real cause.
+    // expiry case is reported separately so the admin sees the real cause.
     if (orderRow.status === "expired") {
       return { outcome: "needs_review", reason: "order_expired", orderId };
     }
     return { outcome: "needs_review", reason: "order_not_pending", orderId };
   }
-
-  const occurred = tx.occurredAt ? Date.parse(tx.occurredAt) : null;
-  const expiresAt = orderRow.expiresAt ? Date.parse(orderRow.expiresAt) : null;
 
   if (occurred != null && Number.isFinite(expiresAt) && occurred > expiresAt) {
     return { outcome: "needs_review", reason: "order_expired", orderId };
@@ -240,7 +250,30 @@ export function decideSync(db, { provider, tx, prefix, nowIso = null }) {
     return { outcome: "needs_review", reason: "underpaid", orderId };
   }
 
-  return { outcome: "matched", orderId };
+  if (revivesExpired && !revivalStillValidSync(db, orderRow)) {
+    return { outcome: "needs_review", reason: "order_expired", orderId };
+  }
+
+  return revivesExpired ? { outcome: "matched", orderId, allowExpired: true } : { outcome: "matched", orderId };
+}
+
+/**
+ * Expiry released what the order held: its voucher could go to another order and
+ * its monthly purchase slot was given back. Reviving it automatically is only
+ * safe when neither was taken in the meantime; otherwise the admin decides.
+ */
+function revivalStillValidSync(db, orderRow) {
+  if (orderRow.voucherId) {
+    const voucher = db.get(`SELECT status, heldByOrderId FROM affiliateVouchers WHERE id = ?`, [orderRow.voucherId]);
+    if (!voucher || voucher.status !== "active") return false;
+    if (voucher.heldByOrderId && voucher.heldByOrderId !== orderRow.id) return false;
+  }
+  const plan = orderRow.planId ? db.get(`SELECT id, purchaseLimitPerMonth FROM plans WHERE id = ?`, [orderRow.planId]) : null;
+  if (plan) {
+    const at = orderRow.createdAt ? new Date(orderRow.createdAt) : new Date();
+    if (purchaseLimitBlockerSync(db, plan, orderRow.userId, at)) return false;
+  }
+  return true;
 }
 
 /**

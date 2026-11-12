@@ -1,5 +1,5 @@
-// The popup inside /account is only for new accounts (spec promo-popup
-// "Where the popup shows"): no purchase yet and the popup's code not redeemed.
+// The popup is only for new accounts (spec promo-popup "Promotional
+// popup"): never had a plan or credit of any source, never redeemed a code.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -38,12 +38,12 @@ after(() => {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-test("a fresh account sees it; a buyer or someone who redeemed the popup code does not", () => {
+test("only an account that never had a plan or a gift code sees it", () => {
   assert.equal(isNewAccountForPromoSync(db, "fresh", "welcome-2026"), true);
   assert.equal(isNewAccountForPromoSync(db, "buyer", "WELCOME2026"), false, "bought a plan");
-  assert.equal(isNewAccountForPromoSync(db, "gifted", "WELCOME2026"), true, "a gift is not a purchase");
+  assert.equal(isNewAccountForPromoSync(db, "gifted", "WELCOME2026"), false, "a gifted or admin-granted plan counts too");
   assert.equal(isNewAccountForPromoSync(db, "redeemed", "WELCOME2026"), false, "already took this code");
-  assert.equal(isNewAccountForPromoSync(db, "redeemed", ""), true, "a popup without a code only checks purchases");
+  assert.equal(isNewAccountForPromoSync(db, "redeemed", ""), false, "any redeemed code counts, popup code or not");
+  assert.equal(isNewAccountForPromoSync(db, "dashed", "OTHER"), false, "a different code still counts");
   assert.equal(isNewAccountForPromoSync(db, "", "WELCOME2026"), false);
-  assert.equal(isNewAccountForPromoSync(db, "dashed", "WELCOME"), false, "a code stored with dashes still matches");
 });

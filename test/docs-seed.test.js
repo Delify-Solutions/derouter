@@ -131,6 +131,8 @@ const EXPECTED_SLUGS = [
   "gioi-thieu",
   // Two-way support chat over the bot (spec telegram-support).
   "support",
+  // Telegram bot commands (change telegram-bot-commands, bot-orders).
+  "telegram-bot",
 ];
 
 test("every shipped docs page parses, has a valid slug and seeds", () => {

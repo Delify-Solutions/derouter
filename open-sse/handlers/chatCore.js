@@ -43,7 +43,19 @@ import { makeCacheCtx, promptTextForCache } from "../utils/cacheEstimator.js";
  * @param {AbortSignal} [options.requestSignal] - Client abort signal. Combined with the
  *   internal stream controller signal so a client disconnect cancels the upstream
  *   fetch/body read instead of only being noticed after the next chunk arrives.
+ *
+ * One upstream attempt. The client's
+ * abort listener of a failed attempt is removed at once: an account or combo
+ * fallback makes many attempts on one request signal. A successful attempt keeps
+ * it while its stream runs (at most one per request).
  */
+export async function handleChatCore(options) {
+  const detachers = [];
+  const result = await handleChatCoreAttempt({ ...options, detachers });
+  if (!result?.success) for (const detach of detachers) detach();
+  return result;
+}
+
 /**
  * Remove translator-internal continuity fields from the outbound upstream
  * body. The Responses→Chat request translator stashes reasoning
@@ -64,7 +76,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false, cacheEstimation = false }) {
+async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false, cacheEstimation = false }) {
   const { provider, model } = modelInfo;
   // Strict transparency (spec proxy-transparency) applies to CUSTOM NODES only: the operator
   // pointed those at an arbitrary upstream and the router knows none of its quirks. A built-in
@@ -368,6 +380,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
+  // Exactly one decrement per increment: a client abort ends the attempt through
+  // the stream controller AND through the failed fetch.
+  let pendingOpen = true;
+  const endPending = (isError = false) => {
+    if (!pendingOpen) return;
+    pendingOpen = false;
+    trackPendingRequest(model, provider, connectionId, false, isError);
+  };
   appendRequestLog({ model, provider, connectionId, status: "PENDING" }).catch(() => { });
 
   const msgCount = translatedBody.messages?.length || translatedBody.input?.length || translatedBody.contents?.length || translatedBody.request?.contents?.length || 0;
@@ -377,11 +397,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const errorTrace = getTrace();
   const streamController = createStreamController({
     onDisconnect: (reason) => {
-      trackPendingRequest(model, provider, connectionId, false);
+      endPending(false);
       if (onDisconnect) onDisconnect(reason);
     },
     onError: (err) => {
-      trackPendingRequest(model, provider, connectionId, false);
+      endPending(false);
       // A stream that dies after its headers went out is invisible to the status code.
       reportStreamError(errorTrace, {
         message: err?.message || String(err), provider, model, connectionId,
@@ -400,7 +420,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (requestSignal) {
     const onClientAbort = () => streamController.handleDisconnect("client_aborted");
     if (requestSignal.aborted) onClientAbort();
-    else requestSignal.addEventListener("abort", onClientAbort, { once: true });
+    else {
+      requestSignal.addEventListener("abort", onClientAbort, { once: true });
+      detachers.push(() => requestSignal.removeEventListener("abort", onClientAbort));
+    }
   }
   const requestAbortSignal = requestSignal
     ? AbortSignal.any([streamController.signal, requestSignal])
@@ -458,9 +481,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     bodyTimeoutMs = result.bodyTimeoutMs;
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
   } catch (error) {
-    if (error.name !== "AbortError") noteUpstreamBody(translatedBody); // an abort is not logged: skip the serialisation
-    trackPendingRequest(model, provider, connectionId, false, true);
-    appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
+    // The client's signal aborts with the server's own reason (not always an
+    // AbortError), so an aborted signal is what says "the client left".
+    const aborted = error?.name === "AbortError" || requestAbortSignal.aborted === true;
+    if (!aborted) noteUpstreamBody(translatedBody); // an abort is not logged: skip the serialisation
+    endPending(true);
+    appendRequestLog({ model, provider, connectionId, status: `FAILED ${aborted ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
       // requestedModel: the combo the client called, so an error row names it
       // like a success row does (spec model-privacy).
@@ -469,7 +495,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       tokens: { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),
       providerRequest: translatedBody || null,
-      response: { error: error.message || String(error), status: error.name === "AbortError" ? 499 : 502, thinking: null },
+      response: { error: error.message || String(error), status: aborted ? 499 : 502, thinking: null },
       pxpipe: pxpipeSummary,
       status: "error",
       errorSource: "platform"
@@ -480,12 +506,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     saveUsageError({
       provider, model, connectionId, apiKey, requestedModel,
       clientIp: clientRawRequest?.clientIp,
-      status: error.name === "AbortError" ? 499 : 502,
+      status: aborted ? 499 : 502,
       errorSource: "platform",
       latencyMs: Date.now() - requestStartTime
     }).catch(() => { });
 
-    if (error.name === "AbortError") {
+    if (aborted) {
       streamController.handleError(error);
       return createErrorResult(499, "Request aborted");
     }
@@ -536,11 +562,28 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
   }
 
+  // The client left while a resend or a token refresh was in progress: whatever
+  // the upstream answered last, nobody reads it, and it says nothing about the account.
+  if (!providerResponse.ok && requestAbortSignal.aborted) {
+    providerResponse.body?.cancel?.().catch?.(() => { });
+    endPending(true);
+    appendRequestLog({ model, provider, connectionId, status: "FAILED 499" }).catch(() => { });
+    saveUsageError({
+      provider, model, connectionId, apiKey, requestedModel,
+      clientIp: clientRawRequest?.clientIp,
+      status: 499,
+      errorSource: "platform",
+      latencyMs: Date.now() - requestStartTime
+    }).catch(() => { });
+    streamController.handleError(Object.assign(new Error("Request aborted"), { name: "AbortError" }));
+    return createErrorResult(499, "Request aborted");
+  }
+
   // Provider returned error
   if (!providerResponse.ok) {
     // markAccountUnavailable() attaches this to the failed attempt for the error log.
     noteUpstreamBody(finalBody ?? translatedBody);
-    trackPendingRequest(model, provider, connectionId, false, true);
+    endPending(true);
     const { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
@@ -583,19 +626,33 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   });
   const sharedCtx = { cacheCtx, compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
-  const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
+  const trackDone = () => endPending(false);
+  // A client that left while the body was being read gets the same 499 history
+  // row as one that left before the headers: it used the customer's rate.
+  const noteBodyAbort = (result) => {
+    if (result && !result.success && result.status === 499) {
+      saveUsageError({
+        provider, model, connectionId, apiKey, requestedModel,
+        clientIp: clientRawRequest?.clientIp,
+        status: 499,
+        errorSource: "platform",
+        latencyMs: Date.now() - requestStartTime
+      }).catch(() => { });
+    }
+    return result;
+  };
 
   // Provider forced streaming but client wants JSON
   if (!clientRequestedStreaming && providerRequiresStreaming) {
     const result = await handleForcedSSEToJson({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, customToolNames, trackDone, appendLog, bodySignal });
-    if (result) { streamController.handleComplete(); return result; }
+    if (result) { streamController.handleComplete(); return noteBodyAbort(result); }
   }
 
   // True non-streaming response
   if (!stream) {
     const result = await handleNonStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, bodySignal });
     streamController.handleComplete();
-    return result;
+    return noteBodyAbort(result);
   }
 
   // Streaming response. The body deadline is deliberately NOT applied to a live

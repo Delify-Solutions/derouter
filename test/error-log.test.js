@@ -495,3 +495,18 @@ test("a request too large to keep as text is described by its size only", async 
   assert.equal(row.requestedModel, "m");
   assert.equal(row.data.request, null);
 });
+
+test("wrapper: a request whose client hung up is not logged, whatever status the engine settled on", async () => {
+  const before = rows().length;
+  for (const status of [499, 503]) {
+    const controller = new AbortController();
+    const request = new Request("http://x/v1/chat/completions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "m" }), signal: controller.signal,
+    });
+    controller.abort();
+    const res = await withLog(async () => jsonRes(status, { error: { message: "gone" } }))(request);
+    assert.equal(res.status, status);
+  }
+  await settle();
+  assert.equal(rows().length, before);
+});

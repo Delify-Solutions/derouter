@@ -21,7 +21,9 @@ export async function POST(request) {
   try {
     const body = await request.json();
 
-    const maxRedemptions = Number(body.maxRedemptions ?? 1);
+    // No total cap (change gift-unlimited): the max is then not checked.
+    const unlimitedRedemptions = body.unlimitedRedemptions === true;
+    const maxRedemptions = unlimitedRedemptions ? 1 : Number(body.maxRedemptions ?? 1);
     if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {
       return NextResponse.json({ error: "maxRedemptions must be at least 1" }, { status: 400 });
     }
@@ -72,9 +74,13 @@ export async function POST(request) {
         : null,
       durationDays,
       maxRedemptions,
+      unlimitedRedemptions,
       perUserLimit,
       // Welcome code (spec gift-codes "New-user codes"); the repo pins perUserLimit to 1.
       newUserOnly: body.newUserOnly === true,
+      // Channel-join code and "listed on the customer gift page" (change channel-gift).
+      channelJoinOnly: body.channelJoinOnly === true,
+      listed: body.listed === true,
       // RPM/TPM for the purchases the code grants; empty = the plan's own.
       rpm: body.rpm,
       tpm: body.tpm,

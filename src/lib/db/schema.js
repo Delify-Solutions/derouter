@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 37;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -163,6 +163,9 @@ export const TABLES = {
       // Owning apiKeys.id for rows written from this release on. Nullable: legacy
       // rows have none until migration 005 backfills what it can.
       apiKeyId: "TEXT",
+      // Owning account at request time (change usage-analytics): durable, unlike
+      // the 24 h deleted-key tombstone. NULL for admin keys and older rows.
+      userId: "TEXT",
       endpoint: "TEXT",
       promptTokens: "INTEGER DEFAULT 0",
       completionTokens: "INTEGER DEFAULT 0",
@@ -193,6 +196,7 @@ export const TABLES = {
       // dual-path reads until the next release can drop `apiKey`.
       "CREATE INDEX IF NOT EXISTS idx_uh_apikeyid_ts ON usageHistory(apiKeyId, timestamp DESC)",
       "CREATE INDEX IF NOT EXISTS idx_uh_ts_nano ON usageHistory(timestamp DESC, costNanoUsd)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_user_ts ON usageHistory(userId, timestamp DESC)",
     ],
   },
   usageDaily: {
@@ -304,6 +308,10 @@ export const TABLES = {
       // become an affiliate itself. NULL = not referred.
       referredByUserId: "TEXT",
       referredAt: "TEXT",
+      // Last time the customer opened /account/notifications (change
+      // models-notifications D5); announcements and own notifications after it
+      // count as unread. NULL = the account's creation time.
+      notificationsSeenAt: "TEXT",
     },
     indexes: [
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
@@ -355,6 +363,9 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       tokenHash: "TEXT UNIQUE NOT NULL",
       purpose: "TEXT NOT NULL",
+      // Purpose 'change_email': the address the account moves to once the link
+      // mailed there is opened (change account-settings). NULL otherwise.
+      newEmail: "TEXT",
       expiresAt: "TEXT NOT NULL",
       consumedAt: "TEXT",
       createdAt: "TEXT",
@@ -696,6 +707,10 @@ export const TABLES = {
       // rebuildWindowsSync and the per-plan ledger filter both walk one plan's
       // rows in time order.
       "CREATE INDEX IF NOT EXISTS idx_cl_userplan_ts ON creditLedger(userPlanId, createdAt)",
+      // Admin statistics (change usage-analytics): charges over a time range.
+      "CREATE INDEX IF NOT EXISTS idx_cl_kind_ts ON creditLedger(kind, createdAt)",
+      // The request a charge paid for: owner of older usage rows (usage-analytics).
+      "CREATE INDEX IF NOT EXISTS idx_cl_usage ON creditLedger(usageId)",
     ],
   },
   giftCodes: {
@@ -712,6 +727,9 @@ export const TABLES = {
       amountVnd: "INTEGER",
       durationDays: "INTEGER",
       maxRedemptions: "INTEGER DEFAULT 1",
+      // 1 = no total cap (change gift-unlimited): maxRedemptions is ignored. An
+      // explicit flag, not a NULL max, so no older row changes meaning.
+      unlimitedRedemptions: "INTEGER DEFAULT 0",
       redeemedCount: "INTEGER DEFAULT 0",
       perUserLimit: "INTEGER DEFAULT 1",
       startsAt: "TEXT",
@@ -721,6 +739,14 @@ export const TABLES = {
       // no purchase and a linked Telegram user, one per Telegram user across
       // every new-user code. perUserLimit is pinned to 1.
       newUserOnly: "INTEGER DEFAULT 0",
+      // 1 = channel-join code (change channel-gift): needs a linked Telegram user
+      // who is a member of the admin's Telegram channel; one per Telegram user
+      // per code (giftRedemptions.telegramUserId snapshot). Any account, new or
+      // not. perUserLimit is pinned to 1; never combined with newUserOnly.
+      channelJoinOnly: "INTEGER DEFAULT 0",
+      // 1 = listed under "Mã có thể sử dụng" on the customer gift page, so the
+      // customer can take it without being told the code.
+      listed: "INTEGER DEFAULT 0",
       // RPM/TPM written onto each purchase this code grants (userPlans.rpm/tpm).
       // NULL = the plan's own (a credit gift then has none); 0 = no limit.
       rpm: "INTEGER",
@@ -849,6 +875,37 @@ export const TABLES = {
       skipped: "INTEGER DEFAULT 0",
       finishedAt: "TEXT",
     },
+  },
+  // Announcements the admin publishes to every customer on /account/notifications
+  // (change models-notifications D3). Plain text, never HTML.
+  announcements: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      title: "TEXT NOT NULL",
+      body: "TEXT NOT NULL",
+      important: "INTEGER DEFAULT 0",
+      createdBy: "TEXT",
+      // telegramBroadcasts.id when it was also sent through Telegram.
+      telegramBroadcastId: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_ann_created ON announcements(createdAt)"],
+  },
+  // The web copy of every personal message notifyCustomer sends (billing, expiry,
+  // security), stored whether or not Telegram is linked (D4). Broadcasts are not
+  // stored here: they are announcements.
+  customerNotifications: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      userId: "TEXT NOT NULL",
+      // notifyCustomer group: 'billing' | 'expiry' | 'security'
+      kind: "TEXT NOT NULL",
+      title: "TEXT NOT NULL",
+      body: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_cn_user_ts ON customerNotifications(userId, createdAt)"],
   },
   // Owner of a customer key that has been deleted. A request admitted before the
   // delete is saved (and charged) only when it finishes, so the charge still has

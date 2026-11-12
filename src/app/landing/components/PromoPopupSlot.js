@@ -48,9 +48,10 @@ async function visitorReferral(cookieStore) {
  * Server component: reads the saved popup, renders nothing when it is off.
  *
  * - `accountUserId`: inside /account — shown only while the account is new.
- * - otherwise (landing, /register, /docs): shown to everyone; `signedIn` is
- *   worked out from the customer cookie when not given, so the button leads a
- *   signed-in customer straight to the gift page.
+ * - otherwise (landing, /register, /docs): shown to visitors, and to a
+ *   signed-in customer only while the account is new; `signedIn` is worked out
+ *   from the customer cookie when not given, so the button leads a signed-in
+ *   customer straight to the gift page.
  */
 export default async function PromoPopupSlot({ accountUserId = null, signedIn = null, hideOn = [], copy: loadedCopy = null, withReferral = true }) {
   let copy = loadedCopy;
@@ -77,12 +78,22 @@ export default async function PromoPopupSlot({ accountUserId = null, signedIn = 
   } else {
     let cookieStore = null;
     try { cookieStore = await cookies(); } catch { cookieStore = null; }
-    if (customer === null) {
+    let claims = null;
+    try {
+      const token = cookieStore?.get(USER_COOKIE)?.value;
+      claims = token ? await verifyUserToken(token) : null;
+    } catch {
+      claims = null;
+    }
+    if (customer === null) customer = Boolean(claims);
+    // A signed-in customer on a public page (landing, docs, register) sees the
+    // promo only while the account is new: the same rule as inside /account.
+    if (customer && claims?.userId && promoLive) {
       try {
-        const token = cookieStore?.get(USER_COOKIE)?.value;
-        customer = Boolean(token && (await verifyUserToken(token)));
+        const db = await getAdapter();
+        if (!isNewAccountForPromoSync(db, claims.userId, copy.popupCode)) return null;
       } catch {
-        customer = false;
+        return null;
       }
     }
     // A referral only means something before sign-up: an existing account is

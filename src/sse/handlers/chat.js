@@ -108,7 +108,7 @@ async function handleChatRequestInner(request, clientRawRequest, ctx) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request), signal: request?.signal ?? null });
     if (denied) return denied;
   }
 
@@ -252,6 +252,11 @@ async function handleChatRequest(request, clientRawRequest = null) {
   return masking ? maskResponse(response, masking) : response;
 }
 
+// 499 (nginx's "client closed request"): nobody reads it, it only ends the handler.
+function clientClosedResponse() {
+  return new Response(null, { status: 499 });
+}
+
 // Every failed chat request is kept in the error log (spec error-log).
 export const handleChat = withErrorLog(handleChatRequest);
 
@@ -349,6 +354,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
+    // The client hung up (SDK timeout, Esc, closed tab): no further account or
+    // combo member is tried for an answer nobody will read.
+    if (request?.signal?.aborted) return clientClosedResponse();
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
     // All accounts unavailable
@@ -419,6 +427,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       cacheEstimation: opts.cacheEstimation === true,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
+      // Client disconnect cancels the upstream call, so an abandoned non-streaming
+      // request (or a stream still waiting for its first byte) is not run and billed.
+      requestSignal: request?.signal ?? null,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           ...newCreds,
@@ -434,6 +445,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     });
 
     if (result.success) return result.response;
+    // An abort is the client's doing, not the account's: never mark it unavailable.
+    if (request?.signal?.aborted) return result.response;
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;

@@ -70,8 +70,37 @@ export async function removeComboDiscounts(comboName) {
  * Discounts in force right now for a set of models, for the price tables.
  * `userId` resolves that customer's group and paying plan; otherwise pass
  * `groupId` / `planId` (null = none). Returns Map<model, { totalBp, rawBp,
- * capped, endsAt, ruleIds }> holding only models that ARE discounted.
+ * capped, endsAt, ruleIds, reasons }> holding only models that ARE discounted.
+ * `reasons` = the distinct labels of the applied rules (the "Lý do giảm giá"
+ * customers see), in rule order.
  */
+/** Distinct non-empty labels of `rules`, in order. */
+export function discountReasons(rules = []) {
+  const out = [];
+  for (const rule of rules) {
+    const label = typeof rule?.label === "string" ? rule.label.trim() : "";
+    if (label && !out.includes(label)) out.push(label);
+  }
+  return out;
+}
+
+/**
+ * Current reasons of the rules a past request was discounted by (usage history).
+ * A deleted rule has no reason. Returns Map<ruleId, label>.
+ */
+export async function getDiscountLabels(ruleIds = []) {
+  const ids = [...new Set((ruleIds || []).filter((id) => typeof id === "string" && id))];
+  const out = new Map();
+  if (ids.length === 0) return out;
+  const db = await getAdapter();
+  const marks = ids.map(() => "?").join(", ");
+  for (const row of db.all(`SELECT id, label FROM modelDiscounts WHERE id IN (${marks})`, ids)) {
+    const label = typeof row.label === "string" ? row.label.trim() : "";
+    if (label) out.set(row.id, label);
+  }
+  return out;
+}
+
 export async function getActiveDiscountsForModels(models, { userId = null, groupId, planId, at = null } = {}) {
   const db = await getAdapter();
   const out = new Map();
@@ -84,6 +113,7 @@ export async function getActiveDiscountsForModels(models, { userId = null, group
         capped: found.capped,
         endsAt: found.endsAt,
         ruleIds: found.ruleIds,
+        reasons: discountReasons(found.rules),
       });
     }
   }

@@ -373,6 +373,52 @@ test("an aborted stream records the usage the upstream had already reported", as
   assert.equal(cap.calls, 1, "idempotent");
 });
 
+test("a cut Anthropic stream bills the streamed output, not message_start's placeholder", async () => {
+  const text = "x".repeat(16_000); // 4000 tokens at 4 ASCII characters per token
+  const chunks = [
+    event("message_start", { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "m", content: [], usage: { input_tokens: 1200, output_tokens: 1 } } }),
+    event("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }),
+  ];
+  for (const make of [
+    (cap) => createPassthroughStreamWithLogger("anthropic-compatible-x", null, "m", "c1", REQ, cap.onStreamComplete, "k", { clientFormat: FORMATS.CLAUDE }),
+    (cap) => createSSETransformStreamWithLogger(FORMATS.CLAUDE, FORMATS.OPENAI, "anthropic-compatible-x", null, null, "m", "c1", REQ, cap.onStreamComplete, "k"),
+  ]) {
+    const cap = capture();
+    const ts = make(cap);
+    await partial(ts, chunks);
+    ts.abortFinalize();
+    const canon = canonicalizeUsage(cap.usage);
+    assert.equal(canon.prompt_tokens, 1200, "the reported input stays");
+    assert.equal(canon.completion_tokens, 4000, "output estimated from the streamed text");
+    assert.equal(cap.usage.estimated, true, "the row says the output is an estimate");
+  }
+});
+
+test("a cut after message_delta keeps the upstream's closing count", async () => {
+  const text = "ế".repeat(400); // dense text: the estimate would be higher than the real count
+  const chunks = [
+    event("message_start", { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "m", content: [], usage: { input_tokens: 50, output_tokens: 1 } } }),
+    event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }),
+    event("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 150 } }),
+  ];
+  const cap = capture();
+  const ts = createPassthroughStreamWithLogger("anthropic-compatible-x", null, "m", "c1", REQ, cap.onStreamComplete, "k", { clientFormat: FORMATS.CLAUDE });
+  await partial(ts, chunks);
+  ts.abortFinalize(); // cancelled before message_stop
+  assert.equal(canonicalizeUsage(cap.usage).completion_tokens, 150);
+  assert.equal(cap.usage.estimated, undefined);
+});
+
+test("a complete Anthropic stream keeps the upstream's own output count", async () => {
+  const cap = capture();
+  const ts = createPassthroughStreamWithLogger("anthropic-compatible-x", null, "m", "c1", REQ, cap.onStreamComplete, "k", { clientFormat: FORMATS.CLAUDE });
+  await drive(ts, CLAUDE_STREAM);
+  ts.abortFinalize(); // a late cancel after the end changes nothing
+  assert.equal(canonicalizeUsage(cap.usage).completion_tokens, 7);
+  assert.equal(cap.usage.estimated, undefined);
+});
+
 test("an aborted stream with no usage but delivered output records a flagged estimate", async () => {
   const cap = capture();
   const { ts } = passthrough({ clientFormat: FORMATS.OPENAI }, cap);

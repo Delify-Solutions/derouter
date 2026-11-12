@@ -6,6 +6,7 @@ import { verifyUserToken } from "@/lib/auth/userSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 import { safeEqual } from "@/lib/auth/internalHeaders";
 import { keyLookupLimited, recordKeyLookupMiss } from "@/lib/auth/keyLookupLimiter";
+import { isObfuscatedPath } from "@/lib/auth/obfuscatedPath";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const CLI_TOKEN_SALT = "dr-cli-auth";
@@ -55,7 +56,7 @@ const PUBLIC_API_PATHS = [
 // signature, checked by POST /api/public/telegram/link.
 // `/r/<CODE>` is the affiliate referral link (spec affiliate-program "Referral
 // link redirect"): a visitor clicking it has neither a session nor an account.
-const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email", "/docs", "/telegram/link", "/r"];
+const PUBLIC_PAGE_PATHS = ["/login", "/register", "/verify-email", "/confirm-email", "/docs", "/telegram/link", "/r"];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.
@@ -259,6 +260,11 @@ export const __test__ = {
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
+
+  // Before any rule reads `pathname`: see src/lib/auth/obfuscatedPath.js.
+  if (isObfuscatedPath(pathname)) {
+    return NextResponse.json({ error: "Bad request path" }, { status: 400 });
+  }
 
   // Local-only gate for spawn-capable / host-secret routes.
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {

@@ -1,0 +1,19 @@
+## Decisions
+
+### D1. Discount reasons travel with the discount
+`getActiveDiscountsForModels` adds `reasons`: the distinct non-empty labels of the applied rules, in rule order. Every shape built from it (`discount` on catalog and receipts entries) carries `reasons`. The account usage history reads `meta.discountRuleIds` of each request and looks up the current labels of those rules in one query; a deleted rule simply has no reason. Labels stay at most 80 characters; the admin form calls the field "Lý do giảm giá (khách thấy)".
+
+### D2. One price list builder
+`buildModelPriceList({ allowedModels, discountContext })` returns `{ name, kind, input, output, cached, reasoning, cacheCreation, discount?, discounted? }` per combo, using the same pricing resolution as the usage receipts route (combo price override, else the first resolvable member price). The receipts route (public usage page) and `/account/models` use it: the account page passes the customer's group allow-list and `userId` for discounts, so it shows the same prices as the usage page. The public `/models` page instead reuses the landing catalog (`buildModelListForGroup`: default group, no plan, the landing's own rate resolution), so it always matches the landing pricing table a visitor just saw. Both builders carry `discount.reasons`. With "hide upstream models" on, only combo names are listed (combos are all this builder lists).
+
+### D3. Announcements
+Table `announcements(id, title ≤120, body ≤2000, important 0/1, createdBy, telegramBroadcastId, createdAt, updatedAt)`. Plain text, rendered with `whitespace-pre-line`; no HTML. Admin CRUD at `/api/announcements` and `/api/announcements/[id]`. "Gửi kèm Telegram" calls `startBroadcast` with "title\n\nbody"; a refused broadcast (another one sending, no recipients, bot not configured) does not undo the announcement — the response says why the Telegram part did not go out.
+
+### D4. Personal inbox
+`notifyCustomer(userId, group, build, { inbox })` first stores the message (`recordInboxSync`) when `group !== "announcements"` and `inbox` is not false, before any Telegram check, so customers without Telegram get it too. Routine sign-in alerts, the Telegram test message and the "linked" confirmation pass `inbox: false`: sign-ins are already in the account history, and storing each one would raise the badge on every login. Plan reminders store their own web copy: the job selects every active account, writes the copy once (tracked in `telegramNotices` as `inbox_<kind>`), and sends Telegram separately for linked accounts (`<kind>`), so a missing bot or a retried send never repeats or blocks the web copy. Title = first line of the built text, body = the rest, both with tags stripped and entities decoded. Storage failures are logged and never block the send. Rows older than 180 days are not shown (no cleanup job).
+
+### D5. Unread
+`users.notificationsSeenAt`. Unread = announcements plus own notifications created after it (a NULL means the account creation time, so a new account does not inherit old announcements as unread). `GET /api/account/notifications` returns both lists and the unread count; `POST /api/account/notifications/seen { upTo }` sets it to the `asOf` instant of the list the page showed (never later than now, never backwards), so an item created after the page loaded stays unread. The page calls it on open; the layout computes the badge.
+
+### D6. Channel link
+`telegramChannelUrl` in the settings blob; `https://t.me/<path>`, `http://`, `t.me/`, `telegram.me/` and `@name` are accepted and normalised to `https://t.me/<path>`, ≤200 characters, or empty; anything else is refused, and the stored value is re-checked on every read. Exposed to the landing through the existing settings read; links open in a new tab with `rel="noopener noreferrer"`.

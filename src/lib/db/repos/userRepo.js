@@ -362,6 +362,7 @@ export async function deleteUser(id, { actor = "system", reason = null } = {}) {
     db.run(`DELETE FROM affiliateLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM affiliates WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userAuditLog WHERE userId = ?`, [id]);
+    db.run(`DELETE FROM customerNotifications WHERE userId = ?`, [id]);
     db.run(`DELETE FROM users WHERE id = ?`, [id]);
 
     insertAuditSync(db, {

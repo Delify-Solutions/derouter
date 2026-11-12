@@ -72,7 +72,7 @@ export async function POST(request) {
   });
   // Confirms in the chat that notifications reach this Telegram; a refusal marks
   // the account so the web card can ask the customer to open the bot.
-  fireAndForget(notifyCustomer(result.userId, "security", messages.linked(), { force: true }));
+  fireAndForget(notifyCustomer(result.userId, "security", messages.linked(), { force: true, inbox: false }));
   return NextResponse.json(
     { ok: true, email: maskEmail(result.email), telegramUsername: verified.user.username },
     { headers: NO_STORE }

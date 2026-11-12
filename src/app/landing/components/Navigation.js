@@ -4,12 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 
+// Absolute anchors ("/#plans") so the same menu works on /models too.
 const PRODUCT_LINKS = [
-  { href: "#plans", label: "Gói" },
-  { href: "#models", label: "Model" },
-  { href: "#pricing", label: "Bảng giá" },
-  { href: "#get-started", label: "Bắt đầu" },
-  { href: "#faq", label: "Hỏi đáp" },
+  { href: "/#plans", label: "Gói" },
+  { href: "/models", label: "Model" },
+  { href: "/#pricing", label: "Bảng giá" },
+  { href: "/#get-started", label: "Bắt đầu" },
+  { href: "/#faq", label: "Hỏi đáp" },
 ];
 
 const DOCS_URL = "/docs";
@@ -22,8 +23,11 @@ const SIGNUP_URL = "/register?next=/account/plans";
  *
  *   null          → Đăng nhập + Mua gói
  *   "customer"    → Tài khoản của tôi
+ *
+ * `channelUrl` = the admin's Telegram channel link; "Kênh Telegram" shows only
+ * when it is set (change models-notifications).
  */
-export default function Navigation({ session = null }) {
+export default function Navigation({ session = null, channelUrl = "" }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -49,6 +53,17 @@ export default function Navigation({ session = null }) {
           >
             Tài liệu
           </a>
+          {channelUrl ? (
+            <a
+              href={channelUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-medium text-text-muted transition-colors duration-150 hover:text-text-main"
+            >
+              Kênh Telegram
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">open_in_new</span>
+            </a>
+          ) : null}
         </nav>
 
         <div className="flex items-center gap-2">
@@ -110,6 +125,18 @@ export default function Navigation({ session = null }) {
             >
               Tài liệu
             </a>
+            {channelUrl ? (
+              <a
+                href={channelUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex h-11 items-center gap-1 text-sm font-medium text-text-muted hover:text-text-main"
+              >
+                Kênh Telegram
+                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">open_in_new</span>
+              </a>
+            ) : null}
             <div className="mb-3 mt-2 flex flex-col gap-2">
               {session === "customer" ? (
                 <Link

@@ -298,7 +298,7 @@ export function validateDiscountSync(db, input = {}) {
   let label = null;
   if (input.label !== undefined && input.label !== null && String(input.label).trim() !== "") {
     label = String(input.label).trim();
-    if (label.length > LABEL_MAX) fail("label", `Nhãn tối đa ${LABEL_MAX} ký tự`);
+    if (label.length > LABEL_MAX) fail("label", `Lý do giảm giá tối đa ${LABEL_MAX} ký tự`);
   }
 
   if (errors.length > 0) return { ok: false, errors };

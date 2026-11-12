@@ -12,6 +12,7 @@ import { getAdapter } from "../db/driver.js";
 import { getSettings } from "../db/repos/settingsRepo.js";
 import { fmtCreditNano } from "../../shared/utils/money.js";
 import { escapeHtml, sendTelegramMessage } from "./telegramApi.js";
+import { recordInboxSync } from "./inbox.js";
 
 export const NOTIFY_GROUPS = ["billing", "expiry", "announcements"];
 export const SECURITY = "security";
@@ -83,6 +84,11 @@ export function mergeNotifyPrefs(currentText, update) {
   return prefs;
 }
 
+/** The site name messages are headed with (for callers that store a copy). */
+export async function loadSiteName() {
+  return (await loadBot()).siteName;
+}
+
 async function loadBot() {
   try {
     const settings = (await getSettings()) || {};
@@ -110,10 +116,24 @@ export function setTelegramTransportForTests(fn) {
  * @param {{ force?: boolean }} [options] force: try even when marked blocked (test message, fresh link)
  * @returns {Promise<{ ok: boolean, reason?: string, retryAfterSec?: number }>}
  */
-export async function notifyCustomer(userId, group, buildText, { force = false } = {}) {
+export async function notifyCustomer(userId, group, buildText, { force = false, inbox = true } = {}) {
   try {
     if (!userId) return { ok: false, reason: "no_user" };
     const { token, siteName } = await loadBot();
+    // The web copy first (change models-notifications D4): a customer without
+    // Telegram, or who muted the group there, still finds it on the site.
+    // Broadcasts ("announcements") live in the announcements list instead, and
+    // `inbox: false` callers (routine sign-in alerts, the test message, the plan
+    // reminders that store their own copy once) skip it.
+    if (inbox && group !== "announcements") {
+      try {
+        const db = await getAdapter();
+        const text = typeof buildText === "function" ? buildText(siteName) : String(buildText || "");
+        recordInboxSync(db, userId, group, text, { siteName });
+      } catch (error) {
+        console.error(`[notify] inbox write skipped: ${error?.message || "unknown error"}`);
+      }
+    }
     if (!token) return { ok: false, reason: "not_configured" };
     const db = await getAdapter();
     const row = db.get(
@@ -213,6 +233,20 @@ export const messages = {
       `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
       "Các phiên đăng nhập khác đã bị đăng xuất. Không phải bạn? Liên hệ hỗ trợ ngay.",
     ].join("\n"),
+  emailChangeRequested: ({ newEmail }) => (site) =>
+    [
+      header(site, "Yêu cầu đổi email đăng nhập"),
+      `Email mới: <code>${escapeHtml(newEmail)}</code>`,
+      `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
+      "Email chỉ đổi khi liên kết gửi tới địa chỉ mới được mở. Không phải bạn? Đổi mật khẩu ngay.",
+    ].join("\n"),
+  emailChanged: ({ newEmail }) => (site) =>
+    [
+      header(site, "Email đăng nhập đã thay đổi"),
+      `Email mới: <code>${escapeHtml(newEmail)}</code>`,
+      `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
+      "Không phải bạn? Liên hệ hỗ trợ ngay.",
+    ].join("\n"),
   apiKeyCreated: ({ name }) => (site) =>
     [
       header(site, "API key mới được tạo"),
@@ -220,6 +254,12 @@ export const messages = {
       `Lúc: ${escapeHtml(formatDate(new Date().toISOString()))}`,
       "Không phải bạn? Xoá key và đổi mật khẩu ngay.",
     ].filter(Boolean).join("\n"),
+  telegramUnlinkedByAdmin: () => (site) =>
+    [
+      header(site, "Đã gỡ liên kết Telegram"),
+      "Quản trị viên đã gỡ liên kết giữa tài khoản Telegram này và tài khoản của bạn. Bạn sẽ không nhận thông báo ở đây nữa.",
+      "Có thể liên kết lại trong trang Tài khoản. Cần hỗ trợ? Liên hệ quản trị viên.",
+    ].join("\n"),
   accountSuspended: () => (site) =>
     [header(site, "Tài khoản bị tạm khoá"), "Liên hệ hỗ trợ nếu bạn cần biết thêm."].join("\n"),
   accountReactivated: () => (site) =>

@@ -40,3 +40,9 @@ export function dateTimeLabel(iso) {
   const get = (type) => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
 }
+
+/** The discount reasons customers see, joined: "Black Friday · Khách VIP"; "" when none. */
+export function reasonsLabel(reasons) {
+  if (!Array.isArray(reasons)) return "";
+  return reasons.filter((r) => typeof r === "string" && r.trim()).map((r) => r.trim()).join(" · ");
+}

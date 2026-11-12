@@ -313,7 +313,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
       if (err?.name === "TimeoutError") {
         return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream stream read timed out after ${readDeadlineMs}ms`);
       }
-      if (err?.name === "AbortError") return createErrorResult(499, "Request aborted");
+      if (err?.name === "AbortError" || requestSignal?.aborted === true) return createErrorResult(499, "Request aborted");
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");
     }
   }
@@ -389,7 +389,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
     if (err?.name === "TimeoutError") {
       return createErrorResult(HTTP_STATUS.GATEWAY_TIMEOUT, `Upstream stream read timed out after ${readDeadlineMs}ms`);
     }
-    if (err?.name === "AbortError") return createErrorResult(499, "Request aborted");
+    if (err?.name === "AbortError" || requestSignal?.aborted === true) return createErrorResult(499, "Request aborted");
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");
   }
 }

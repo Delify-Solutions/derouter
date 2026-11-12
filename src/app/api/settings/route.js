@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings, getKeyGroupById, activateUnverifiedUsers, getGiftCodeById, getPlanById } from "@/lib/localDb";
 import { validateAffiliateSettings } from "@/lib/affiliate/settings.js";
+import { normalizeChannelUrl } from "@/lib/telegram/channel.js";
+import { normalizeChannelChatId } from "@/lib/telegram/channelMember.js";
+import { normalizeAdminIds } from "@/lib/telegram/bot/config.js";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { hasValidCliToken, isLocalRequest } from "@/dashboardGuard";
@@ -22,12 +25,13 @@ const SETTINGS_RESPONSE_HEADERS = {
 
 // Secrets must never be mass-assigned from request body (CWE-915)
 // The session cut-off is only ever moved by a password change below.
-const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted", SESSIONS_VALID_AFTER_KEY];
+// The bot webhook secret is set only by POST /api/telegram-bot (change telegram-bot-commands).
+const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted", SESSIONS_VALID_AFTER_KEY, "telegramWebhookSecret"];
 
 export async function GET() {
   try {
     const settings = await getSettings();
-    const { password, oidcClientSecret, ...safeSettings } = settings;
+    const { password, oidcClientSecret, telegramWebhookSecret: _webhookSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
     
     const enableRequestLogs = process.env.ENABLE_REQUEST_LOGS === "true";
@@ -163,6 +167,31 @@ export async function PATCH(request) {
       }
     }
 
+    // Public Telegram channel link (change models-notifications D6).
+    if (Object.prototype.hasOwnProperty.call(body, "telegramChannelUrl")) {
+      const channel = normalizeChannelUrl(body.telegramChannelUrl);
+      if (channel.error) {
+        return NextResponse.json({ error: channel.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
+      }
+      body.telegramChannelUrl = channel.value;
+    }
+    // Telegram ids allowed to use the bot's admin commands (change telegram-bot-commands).
+    if (Object.prototype.hasOwnProperty.call(body, "telegramAdminIds")) {
+      const ids = normalizeAdminIds(body.telegramAdminIds);
+      if (ids.error) {
+        return NextResponse.json({ error: ids.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
+      }
+      body.telegramAdminIds = ids.value;
+    }
+    // The chat the bot checks for channel-join gift codes (change channel-gift).
+    if (Object.prototype.hasOwnProperty.call(body, "telegramChannelChatId")) {
+      const chat = normalizeChannelChatId(body.telegramChannelChatId);
+      if (chat.error) {
+        return NextResponse.json({ error: chat.error }, { status: 400, headers: SETTINGS_RESPONSE_HEADERS });
+      }
+      body.telegramChannelChatId = chat.value;
+    }
+
     // Affiliate program settings (spec affiliate-program "Program settings").
     // Validated here rather than only in the page: an out-of-range rate would
     // otherwise be stored and applied to every future commission.
@@ -242,7 +271,7 @@ export async function PATCH(request) {
         .catch((error) => console.warn("[AutoPing] settings update failed:", error.message));
     }
 
-    const { password, oidcClientSecret, ...safeSettings } = settings;
+    const { password, oidcClientSecret, telegramWebhookSecret: _webhookSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
     return NextResponse.json(safeSettings, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {

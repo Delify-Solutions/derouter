@@ -6,10 +6,9 @@ import {
   getUsageHistory,
   getCombos,
   getComboPricing,
-  getPricingForModel,
 } from "@/lib/db/index.js";
-import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.js";
-import { applyBpToPricing } from "@/lib/billing/discounts.js";
+import { getDiscountLabels } from "@/lib/db/repos/modelDiscountsRepo.js";
+import { buildModelPriceList } from "@/lib/models/priceList.js";
 import { nanoToUsd } from "@/shared/utils/money";
 import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
@@ -170,6 +169,8 @@ export async function GET(request) {
           cost: r.cost,
           listCost: meta?.discountBp > 0 && meta?.listCostNanoUsd != null ? nanoToUsd(meta.listCostNanoUsd) : null,
           discountBp: meta?.discountBp > 0 ? meta.discountBp : 0,
+          // Rule ids are resolved to their reasons for the shown page only, below.
+          _discountRuleIds: meta?.discountBp > 0 && Array.isArray(meta?.discountRuleIds) ? meta.discountRuleIds : null,
           input,
           output,
           tok,
@@ -188,69 +189,27 @@ export async function GET(request) {
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
     const safePage = Math.min(page, totalPages);
     const startIdx = (safePage - 1) * pageSize;
-    const history = allHistory.slice(startIdx, startIdx + pageSize);
+    const pageRows = allHistory.slice(startIdx, startIdx + pageSize);
+    let labels = new Map();
+    try {
+      labels = await getDiscountLabels(pageRows.flatMap((row) => row._discountRuleIds || []));
+    } catch {
+      labels = new Map();
+    }
+    const history = pageRows.map(({ _discountRuleIds, ...row }) => {
+      const reasons = [...new Set((_discountRuleIds || []).map((id) => labels.get(id)).filter(Boolean))];
+      return reasons.length ? { ...row, discountReasons: reasons } : row;
+    });
     const pagination = { page: safePage, pageSize, totalItems, totalPages };
 
-    // Build the available-models table (combos + their per-1M-token pricing).
-    // Pricing values are $/1M tokens (mirrors the admin pricing page). Resolution:
-    //   1. Explicit combo-level override (comboPricing[comboName]) — set on the
-    //      dashboard /combos page when the admin commits a custom price.
-    //   2. Otherwise fall back to the first model's pool/default pricing
-    //      (getPricingForModel: user per-pool override → built-in MODEL_PRICING →
-    //      pattern pricing). Combo model entries are `provider/model` shaped, so we
-    //      split on "/" and resolve by (provider, model). A combo with no resolvable
-    //      model price shows 0 (same as before) rather than misleading the key owner.
-    const resolveComboPricing = async (combo) => {
-      const p = comboPricing?.[combo.name];
-      if (p) return p;
-      const models = Array.isArray(combo.models) ? combo.models : [];
-      for (const m of models) {
-        const slash = m.indexOf("/");
-        const provider = slash >= 0 ? m.slice(0, slash) : null;
-        const model = slash >= 0 ? m.slice(slash + 1) : m;
-        const resolved = await getPricingForModel(provider, model);
-        if (resolved) return resolved;
-      }
-      return null;
-    };
-
-    // Time-limited discounts in force right now, for THIS key's owner (their group
-    // and the plan that pays first). input/output/... stay the LIST price; a
-    // discounted model also carries `discount` and the lowered `discounted` rates.
-    let discounts = new Map();
-    try {
-      discounts = await getActiveDiscountsForModels(visibleCombos.map((c) => c.name), { userId: auth.owner?.id ?? null });
-    } catch {
-      discounts = new Map();
-    }
-
-    const availableModels = [];
-    for (const c of visibleCombos) {
-      const p = (await resolveComboPricing(c)) || {};
-      const entry = {
-        name: c.name,
-        kind: c.kind || "llm",
-        modelsCount: Array.isArray(c.models) ? c.models.length : 0,
-        input: p.input ?? 0,
-        output: p.output ?? 0,
-        cached: p.cached ?? 0,
-        reasoning: p.reasoning ?? 0,
-        cacheCreation: p.cache_creation ?? 0,
-      };
-      const found = discounts.get(c.name);
-      if (found) {
-        const low = applyBpToPricing(p, found.totalBp);
-        entry.discount = { percentBp: found.totalBp, capped: found.capped, endsAt: found.endsAt };
-        entry.discounted = {
-          input: low.input ?? 0,
-          output: low.output ?? 0,
-          cached: low.cached ?? 0,
-          reasoning: low.reasoning ?? 0,
-          cacheCreation: low.cache_creation ?? 0,
-        };
-      }
-      availableModels.push(entry);
-    }
+    // The available-models table: the key's combos with their per-1M-token
+    // prices, the discounts in force for THIS key's owner (their group and the
+    // plan that pays first) and the reasons (src/lib/models/priceList.js).
+    const availableModels = await buildModelPriceList({
+      combos: visibleCombos,
+      comboPricing,
+      discountContext: { userId: auth.owner?.id ?? null },
+    });
 
     // Scope the per-model usage summary to the same allow-list, so the By-Model
     // table on /usage only lists combos the key can consume. `summary.items` is

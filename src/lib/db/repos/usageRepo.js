@@ -499,10 +499,12 @@ export async function saveRequestUsage(entry) {
       // still needs its raw value to stay attributable. Tenant keys store their
       // apiKeyId and leave the secret out of the database entirely.
       const insertedUsage = db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, userId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
+          // The owner, kept on the row so statistics survive the key's deletion.
+          owner?.userId ?? null,
           entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.costNanoUsd || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({ requestedModel: entry.requestedModel || null, latencyMs: entry.latencyMs ?? null, ...(Number.isFinite(entry.ttftMs) ? { ttftMs: entry.ttftMs } : {}), ...(entry.estimated === true ? { estimated: true } : {}), ...(entry.cacheEstimated === true ? { cacheEstimated: true } : {}), ...discountMeta }),
@@ -1478,6 +1480,16 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
 
 // All read from usageHistory with the idx_uh_apikey_ts index.
 
+// Rows that use a customer's RPM/TPM allowance: requests that were served, and
+// requests the client abandoned (499) — the upstream was already working on
+// them, and a client that connects and hangs up in a loop must still be held to
+// its rate. Failed upstream attempts (one row per account or combo member tried)
+// and platform denials are recorded for history but do not count, so a provider
+// outage or a client retrying its own 429s cannot lock the customer out.
+// Served rows are written as 'ok' (chat) or 'success' (embeddings, images, the
+// Gemini-native route); failures carry the HTTP status ("429", "502").
+const RATE_COUNTED_SQL = "COALESCE(status, 'ok') IN ('ok', 'success', '499')";
+
 // Count requests and sum tokens for an apiKey in the last `windowMs` ms.
 // Returns { requests, tokens }.
 export async function getKeyRateUsage(apiKey, windowMs = 60000) {
@@ -1487,7 +1499,7 @@ export async function getKeyRateUsage(apiKey, windowMs = 60000) {
   const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
     `SELECT COUNT(*) as requests, COALESCE(SUM(COALESCE(promptTokens,0) + COALESCE(completionTokens,0)),0) as tokens
-     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ? AND ${RATE_COUNTED_SQL}`,
     [...keyFilter.params, since],
   );
   return {
@@ -1551,7 +1563,7 @@ export async function getUserRateUsage(userId, windowMs = 60000, planId = null) 
             COALESCE(SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)), 0) AS tokens
        FROM usageHistory
       WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
-        AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
+        AND timestamp >= ? AND ${RATE_COUNTED_SQL}${planId ? " AND ratePlanId = ?" : ""}`,
     planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return { requests: row?.requests ?? 0, tokens: row?.tokens ?? 0 };
@@ -1569,7 +1581,7 @@ export async function getUserOldestTokenAt(userId, windowMs = 60000, planId = nu
     `SELECT MIN(timestamp) AS oldest
        FROM usageHistory
       WHERE apiKeyId IN (${USER_KEY_IDS_SQL})
-        AND timestamp >= ?${planId ? " AND ratePlanId = ?" : ""}`,
+        AND timestamp >= ? AND ${RATE_COUNTED_SQL}${planId ? " AND ratePlanId = ?" : ""}`,
     planId ? [userId, userId, since, planId] : [userId, userId, since]
   );
   return row?.oldest ?? null;
@@ -1586,7 +1598,7 @@ export async function getKeyOldestTokenAt(apiKey, windowMs = 60000) {
   const keyFilter = usageKeyCond(db, apiKey);
   const row = db.get(
     `SELECT MIN(timestamp) as oldest
-     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ?`,
+     FROM usageHistory WHERE ${keyFilter.cond} AND timestamp >= ? AND ${RATE_COUNTED_SQL}`,
     [...keyFilter.params, since],
   );
   return row?.oldest ?? null;

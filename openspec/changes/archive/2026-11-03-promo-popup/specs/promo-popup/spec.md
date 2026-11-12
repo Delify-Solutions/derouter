@@ -9,7 +9,9 @@ It SHALL be shown on:
 - the landing page;
 - `/register`;
 - `/docs` and every docs page;
-- every `/account` page except `/account/gift`, only for a new account: one that never bought a plan and has not redeemed the popup's code. The account is re-checked each time the popup is about to open, so redeeming the code or buying a plan stops it without a reload.
+- every `/account` page except `/account/gift`.
+
+A visitor who is not signed in SHALL see it on the public pages. A signed-in customer SHALL see it, on any of these pages, only while the account is new: it never received any plan or credit (bought, granted by an admin, from a gift code, affiliate credit or a referral bonus) and never redeemed a gift code (owner decision). In the account area the account is re-checked each time the popup is about to open, so redeeming a code or buying a plan stops it without a reload.
 
 Editing the title, body, code or button text SHALL show it again to visitors who closed the previous version. Close button, Esc and a click outside SHALL close it; following its button or sign-in link SHALL count as closing it. The page behind SHALL not scroll while it is open, and its button SHALL meet WCAG AA contrast in light and dark themes.
 
@@ -26,8 +28,12 @@ Editing the title, body, code or button text SHALL show it again to visitors who
 - **THEN** it opens again
 
 #### Scenario: New account in the account area
-- **WHEN** a customer who never bought a plan opens `/account/keys`
-- **THEN** the popup opens; after they buy a plan or redeem its code it no longer opens there
+- **WHEN** a customer who never had any plan or credit and never redeemed a code opens `/account/keys`
+- **THEN** the popup opens; after they buy a plan or redeem any code it no longer opens there
+
+#### Scenario: Old account with a granted plan
+- **WHEN** a signed-in customer who only ever had an admin-granted plan opens `/docs` or `/account/keys`
+- **THEN** the popup does not open
 
 #### Scenario: Content changed
 - **WHEN** the admin changes the code after the visitor closed the popup

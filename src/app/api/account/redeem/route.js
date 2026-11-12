@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { redeemGiftCode, listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
+import { listUserRedemptions, GIFT_REASON_TEXT } from "@/lib/db/repos/giftRepo.js";
+import { getSettings } from "@/lib/localDb";
+import { redeemForAccount } from "@/lib/gift/redeemFlow.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
 import { recordActivity } from "@/lib/db/repos/activityRepo.js";
 import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
@@ -20,6 +22,18 @@ const FAILURE = {
   not_new_user: { status: 409, error: GIFT_REASON_TEXT.not_new_user },
   telegram_required: { status: 403, error: GIFT_REASON_TEXT.telegram_required, code: "telegram_required" },
   telegram_used: { status: 409, error: GIFT_REASON_TEXT.telegram_used },
+  // Channel-join codes (change channel-gift).
+  channel_required: { status: 403, error: GIFT_REASON_TEXT.channel_required, code: "channel_required" },
+  telegram_channel_used: { status: 409, error: GIFT_REASON_TEXT.telegram_channel_used },
+};
+
+const CHANNEL_TELEGRAM_REQUIRED = "Cần liên kết Telegram rồi tham gia kênh để nhận mã này.";
+const CHANNEL_UNAVAILABLE = "Chưa kiểm tra được kênh Telegram lúc này. Vui lòng thử lại sau ít phút.";
+const CHANNEL_TOO_SOON = "Vui lòng đợi vài giây rồi thử lại.";
+// The channel check itself failed (redeemFlow): not a refusal of the code.
+const CHECK_FAILURE = {
+  too_soon: { status: 429, error: CHANNEL_TOO_SOON, code: "too_soon" },
+  channel_unavailable: { status: 503, error: CHANNEL_UNAVAILABLE, code: "channel_unavailable" },
 };
 
 async function requireSession(request) {
@@ -60,33 +74,40 @@ export async function POST(request) {
     }
 
     const db = await getAdapter();
-    // One transaction: the redemption row, the counter bump and the grant commit together.
-    const result = db.transaction(() =>
-      redeemGiftCode(db, { userId: session.userId, code: body.code })
-    );
+    const settings = (await getSettings().catch(() => null)) || {};
+    const flow = await redeemForAccount(db, { userId: session.userId, code: body.code, settings });
+    if (!flow.ok && CHECK_FAILURE[flow.reason]) {
+      const failure = CHECK_FAILURE[flow.reason];
+      return NextResponse.json({ error: failure.error, code: failure.code }, { status: failure.status });
+    }
 
     const giftCode = String(body.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
-    if (!result?.ok) {
+    if (!flow.ok) {
       // Refusals are kept too: repeated guessing or welcome-code farming shows up here.
       await recordActivity(request, {
         userId: session.userId,
         action: "gift_refused",
-        details: { code: giftCode, reason: result?.reason || "not_found" },
+        details: { code: giftCode, reason: flow.reason },
       });
-      const mapped = FAILURE[result?.reason] || FAILURE.not_found;
+      const mapped = FAILURE[flow.reason] || FAILURE.not_found;
+      const channelCode = flow.requirement?.channelJoinOnly === true;
+      const error = channelCode && flow.reason === "telegram_required" ? CHANNEL_TELEGRAM_REQUIRED : mapped.error;
       return NextResponse.json(
-        { error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) },
+        { error, ...(mapped.code ? { code: mapped.code } : {}), ...(flow.channelUrl ? { channelUrl: flow.channelUrl } : {}) },
         { status: mapped.status }
       );
     }
 
+    const { result, channelOffer } = flow;
     await recordActivity(request, {
       userId: session.userId,
       action: "gift_redeem",
       details: { code: giftCode, userPlanId: result.userPlan?.id ?? null },
     });
     if (result.userPlan?.id) fireAndForget(notifyPlanReceived(result.userPlan.id, "gift"));
+
     return NextResponse.json({
+      channelOffer,
       ok: true,
       creditAppliedNanoUsd: result.userPlan?.creditTotalNanoUsd ?? 0,
       unlimitedCredit: result.userPlan?.unlimitedCredit === 1,

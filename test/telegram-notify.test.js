@@ -35,7 +35,7 @@ after(() => {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 beforeEach(() => {
-  for (const table of ["users", "userPlans", "plans", "telegramNotices", "telegramBroadcasts", "activityLog", "telegramLinkTokens"]) {
+  for (const table of ["users", "userPlans", "plans", "telegramNotices", "telegramBroadcasts", "activityLog", "telegramLinkTokens", "customerNotifications"]) {
     db.run(`DELETE FROM ${table}`);
   }
   sent = [];
@@ -216,7 +216,27 @@ test("expiry reminders: 3 days, then 24 hours, never with a plan running past it
   plan("c2", "u3", { startsIn: 2 * DAY, endsIn: 32 * DAY }); // queued renewal
   plan("d", "u4", { endsIn: DAY });
   const due = reminders.findDueRemindersSync(db).filter((r) => r.kind.startsWith("expire"));
-  assert.deepEqual(due.map((r) => [r.refId.split(":")[0], r.kind]).sort(), [["a", "expire_3d"], ["b", "expire_1d"]]);
+  assert.deepEqual(
+    due.map((r) => [r.refId.split(":")[0], r.kind, r.telegram]).sort(),
+    [["a", "expire_3d", true], ["b", "expire_1d", true], ["d", "expire_1d", false]],
+    "an unlinked account is due for the web copy only"
+  );
+});
+
+test("reminders reach the web inbox of every account, once, whatever Telegram does", async () => {
+  user("u1", { telegram: "1" });
+  user("u4"); // not linked
+  plan("a", "u1", { endsIn: 0.5 * DAY });
+  plan("d", "u4", { endsIn: 0.5 * DAY });
+  reply = () => ({ ok: false, reason: "network_error" });
+  await reminders.runReminderTick();
+  await reminders.runReminderTick();
+  const rows = db.all(`SELECT userId, kind, title FROM customerNotifications ORDER BY userId`);
+  assert.deepEqual(rows.map((r) => [r.userId, r.kind]), [["u1", "expiry"], ["u4", "expiry"]], "one copy each despite the retry");
+  assert.match(rows[1].title, /hết hạn/);
+  reply = () => ({ ok: true });
+  assert.equal(await reminders.runReminderTick(), 1, "Telegram is still retried for the linked account");
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM customerNotifications`).n, 2);
 });
 
 test("no expiry reminder for a plan no longer than the window, or for a suspended account", () => {

@@ -14,7 +14,7 @@ import { effectiveRate } from "../../billing/planQueue.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 // The redeemability window, shared with the affiliate welcome-gift check so an
 // advertised code is always one redeemGiftCode would accept (design D7).
-import { inWindow } from "../../gift/window.js";
+import { inWindow, giftExhausted } from "../../gift/window.js";
 import { topupCreditForAmount } from "../../billing/topup.js";
 import { insertAuditSync } from "../../billing/audit.js";
 
@@ -84,6 +84,8 @@ function isUniqueViolation(error) {
   return /UNIQUE constraint failed/i.test(message) || error?.code === "SQLITE_CONSTRAINT_UNIQUE";
 }
 
+const KIND_CLASH_TEXT = "Một mã chỉ chọn một loại: mã người mới hoặc mã tham gia kênh Telegram";
+
 class GiftError extends Error {
   constructor(reason) {
     super(reason);
@@ -111,12 +113,17 @@ function rowToGiftCode(row) {
     }, row.amountVnd),
     durationDays: row.durationDays ?? null,
     maxRedemptions: row.maxRedemptions ?? 1,
+    // No total cap (change gift-unlimited); maxRedemptions is then ignored.
+    unlimitedRedemptions: Number(row.unlimitedRedemptions) === 1,
     redeemedCount: row.redeemedCount ?? 0,
     perUserLimit: row.perUserLimit ?? 1,
     startsAt: row.startsAt ?? null,
     expiresAt: row.expiresAt ?? null,
     isActive: row.isActive === 1 || row.isActive === true,
     newUserOnly: Number(row.newUserOnly) === 1,
+    // Channel-join code (change channel-gift) and "listed on the gift page".
+    channelJoinOnly: Number(row.channelJoinOnly) === 1,
+    listed: Number(row.listed) === 1,
     // RPM/TPM written onto each purchase this code grants. null = the plan's own
     // (none for a credit gift); 0 = no limit.
     rpm: row.rpm == null ? null : Number(row.rpm),
@@ -312,10 +319,14 @@ function unboundedGiftError(plan, { rpm, tpm }) {
 export async function createGiftCode(input) {
   const db = await getAdapter();
   const grant = validateGrantInput(input || {});
-  const maxRedemptions = Number(input?.maxRedemptions ?? 1);
+  const unlimitedRedemptions = input?.unlimitedRedemptions === true;
+  // An unlimited code keeps a stored max of 1: it is never read while the flag is on.
+  const maxRedemptions = unlimitedRedemptions ? 1 : Number(input?.maxRedemptions ?? 1);
   const newUserOnly = input?.newUserOnly === true;
-  // A new-user code is one per account by definition (design D5).
-  const perUserLimit = newUserOnly ? 1 : validatePerUserLimit(input?.perUserLimit);
+  const channelJoinOnly = input?.channelJoinOnly === true;
+  if (newUserOnly && channelJoinOnly) throw new Error(KIND_CLASH_TEXT);
+  // A new-user or channel-join code is one per account by definition (design D5).
+  const perUserLimit = newUserOnly || channelJoinOnly ? 1 : validatePerUserLimit(input?.perUserLimit);
   if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) {
     throw new Error("maxRedemptions must be at least 1");
   }
@@ -356,12 +367,15 @@ export async function createGiftCode(input) {
     amountVnd: grant.amountVnd,
     durationDays: grant.durationDays,
     maxRedemptions,
+    unlimitedRedemptions: unlimitedRedemptions ? 1 : 0,
     redeemedCount: 0,
     perUserLimit,
     startsAt: input?.startsAt || null,
     expiresAt: input?.expiresAt || null,
     isActive: input?.isActive === false ? 0 : 1,
     newUserOnly: newUserOnly ? 1 : 0,
+    channelJoinOnly: channelJoinOnly ? 1 : 0,
+    listed: input?.listed === true ? 1 : 0,
     rpm,
     tpm,
     note: input?.note || null,
@@ -371,12 +385,13 @@ export async function createGiftCode(input) {
   };
 
   db.run(
-    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, rpm, tpm, note, createdBy, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO giftCodes(id, code, grantKind, planId, creditNanoUsd, amountVnd, durationDays, maxRedemptions, unlimitedRedemptions, redeemedCount, perUserLimit, startsAt, expiresAt, isActive, newUserOnly, channelJoinOnly, listed, rpm, tpm, note, createdBy, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       gift.id, gift.code, gift.grantKind, gift.planId, gift.creditNanoUsd, gift.amountVnd, gift.durationDays,
-      gift.maxRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
-      gift.isActive, gift.newUserOnly, gift.rpm, gift.tpm, gift.note, gift.createdBy, gift.createdAt, gift.updatedAt,
+      gift.maxRedemptions, gift.unlimitedRedemptions, gift.redeemedCount, gift.perUserLimit, gift.startsAt, gift.expiresAt,
+      gift.isActive, gift.newUserOnly, gift.channelJoinOnly, gift.listed, gift.rpm, gift.tpm, gift.note,
+      gift.createdBy, gift.createdAt, gift.updatedAt,
     ]
   );
 
@@ -453,11 +468,18 @@ export async function updateGiftCode(id, patch = {}) {
         ? (patch.durationDays === null || patch.durationDays === "" ? null : Number(patch.durationDays))
         : row.durationDays,
       maxRedemptions: patch.maxRedemptions !== undefined ? Number(patch.maxRedemptions) : row.maxRedemptions,
+      unlimitedRedemptions: patch.unlimitedRedemptions !== undefined
+        ? (patch.unlimitedRedemptions === true ? 1 : 0)
+        : (Number(row.unlimitedRedemptions) === 1 ? 1 : 0),
       perUserLimit: patch.perUserLimit !== undefined ? Number(patch.perUserLimit) : row.perUserLimit,
       startsAt: patch.startsAt !== undefined ? (patch.startsAt || null) : row.startsAt,
       expiresAt: patch.expiresAt !== undefined ? (patch.expiresAt || null) : row.expiresAt,
       isActive: patch.isActive !== undefined ? (patch.isActive ? 1 : 0) : row.isActive,
       newUserOnly: patch.newUserOnly !== undefined ? (patch.newUserOnly === true ? 1 : 0) : (Number(row.newUserOnly) === 1 ? 1 : 0),
+      channelJoinOnly: patch.channelJoinOnly !== undefined
+        ? (patch.channelJoinOnly === true ? 1 : 0)
+        : (Number(row.channelJoinOnly) === 1 ? 1 : 0),
+      listed: patch.listed !== undefined ? (patch.listed === true ? 1 : 0) : (Number(row.listed) === 1 ? 1 : 0),
       rpm: patch.rpm !== undefined ? parseGiftRate(patch.rpm, "RPM") : (row.rpm ?? null),
       tpm: patch.tpm !== undefined ? parseGiftRate(patch.tpm, "TPM") : (row.tpm ?? null),
       note: patch.note !== undefined ? (patch.note || null) : row.note,
@@ -476,14 +498,21 @@ export async function updateGiftCode(id, patch = {}) {
       next.code = key;
     }
 
-    // A new-user code is one per account by definition (design D5).
-    if (next.newUserOnly === 1) next.perUserLimit = 1;
-    if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
-      throw new Error("maxRedemptions must be at least 1");
-    }
-    const redeemed = Number(row.redeemedCount) || 0;
-    if (next.maxRedemptions < redeemed) {
-      throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
+    if (next.newUserOnly === 1 && next.channelJoinOnly === 1) throw new Error(KIND_CLASH_TEXT);
+    // A new-user or channel-join code is one per account by definition (design D5).
+    if (next.newUserOnly === 1 || next.channelJoinOnly === 1) next.perUserLimit = 1;
+    // An unlimited code ignores its max; a capped one may not drop below the
+    // redemptions made (also when it goes back from unlimited to capped).
+    if (next.unlimitedRedemptions === 1) {
+      if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) next.maxRedemptions = 1;
+    } else {
+      if (!Number.isInteger(next.maxRedemptions) || next.maxRedemptions < 1) {
+        throw new Error("maxRedemptions must be at least 1");
+      }
+      const redeemed = Number(row.redeemedCount) || 0;
+      if (next.maxRedemptions < redeemed) {
+        throw new Error(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed})`);
+      }
     }
     if (!Number.isInteger(next.perUserLimit) || next.perUserLimit < 1) {
       throw new Error("perUserLimit must be at least 1");
@@ -526,13 +555,13 @@ export async function updateGiftCode(id, patch = {}) {
     db.run(
       `UPDATE giftCodes
           SET code = ?, grantKind = ?, planId = ?, creditNanoUsd = ?, amountVnd = ?, durationDays = ?,
-              maxRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
-              newUserOnly = ?, rpm = ?, tpm = ?, note = ?, updatedAt = ?
+              maxRedemptions = ?, unlimitedRedemptions = ?, perUserLimit = ?, startsAt = ?, expiresAt = ?, isActive = ?,
+              newUserOnly = ?, channelJoinOnly = ?, listed = ?, rpm = ?, tpm = ?, note = ?, updatedAt = ?
         WHERE id = ?`,
       [
         next.code, grantKind, next.planId, next.creditNanoUsd, next.amountVnd, next.durationDays, next.maxRedemptions,
-        next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.rpm, next.tpm,
-        next.note, nowIso(), id,
+        next.unlimitedRedemptions, next.perUserLimit, next.startsAt, next.expiresAt, next.isActive, next.newUserOnly, next.channelJoinOnly,
+        next.listed, next.rpm, next.tpm, next.note, nowIso(), id,
       ]
     );
     // The promo popup names its code by string: a rename carries it along so
@@ -701,15 +730,77 @@ export function newUserRefusalSync(db, userId, telegramUserId) {
 }
 
 /**
+ * Why `userId` may not take channel-join code `giftId`, or null when it may
+ * (change channel-gift). Membership is checked by the caller BEFORE the
+ * transaction (Telegram is async); `verifiedTelegramUserId` is the Telegram user
+ * that check found in the channel, and it must still be the account's link.
+ */
+export function channelRefusalSync(db, giftId, telegramUserId, verifiedTelegramUserId = null) {
+  if (!telegramUserId) return "telegram_required";
+  if (channelClaimedSync(db, giftId, telegramUserId)) return "telegram_channel_used";
+  if (!verifiedTelegramUserId || String(verifiedTelegramUserId) !== String(telegramUserId)) return "channel_required";
+  return null;
+}
+
+/** Has this Telegram user already taken this channel-join code (on any account)? */
+export function channelClaimedSync(db, giftId, telegramUserId) {
+  if (!telegramUserId) return false;
+  return Boolean(db.get(
+    `SELECT 1 AS x FROM giftRedemptions WHERE giftId = ? AND telegramUserId = ? LIMIT 1`,
+    [giftId, String(telegramUserId)]
+  ));
+}
+
+/**
+ * What the redeem route must know before its transaction: whether the typed
+ * code is a channel-join code, the account's Telegram user, and whether asking
+ * Telegram is worth it (`checkChannel`). null = no such code (the transaction
+ * then refuses it as usual).
+ *
+ * `checkChannel` is false whenever the transaction would refuse anyway: the code
+ * is off, outside its window or used up, the account took it already, there is
+ * no Telegram link, or this Telegram user claimed it. A dead code then answers
+ * "not valid" instead of a Telegram error, and costs no Bot API call.
+ */
+export function giftRequirementSync(db, { userId, code, now = Date.now() }) {
+  const row = findGiftRowByCode(db, code);
+  if (!row || row.deletedAt) return null;
+  const telegramUserId = db.get(`SELECT telegramUserId FROM users WHERE id = ?`, [userId])?.telegramUserId ?? null;
+  const channelJoinOnly = Number(row.channelJoinOnly) === 1;
+  let checkChannel = false;
+  if (channelJoinOnly && telegramUserId) {
+    const live = (row.isActive === 1 || row.isActive === true)
+      && inWindow(row, now)
+      && !giftExhausted(row);
+    const mine = Number(db.get(
+      `SELECT COUNT(*) AS c FROM giftRedemptions WHERE giftId = ? AND userId = ?`,
+      [row.id, userId]
+    )?.c ?? 0);
+    checkChannel = live && mine < Math.max(1, Number(row.perUserLimit) || 1) && !channelClaimedSync(db, row.id, telegramUserId);
+  }
+  return {
+    giftId: row.id,
+    channelJoinOnly,
+    newUserOnly: Number(row.newUserOnly) === 1,
+    telegramUserId: telegramUserId ? String(telegramUserId) : null,
+    checkChannel,
+  };
+}
+
+/**
  * Redeem a code for a user. Fully synchronous: call it inside the caller's
  * `db.transaction(...)` so the redemption row, the counter bump and the billing
  * grant commit (or roll back) together.
  *
  * @returns {{ok: true, userPlan: object, appliedToOverdraftNanoUsd: number}
  *          | {ok: false, reason: "not_found"|"not_active"|"exhausted"|"already_redeemed"|"invalid_plan"
- *                       |"not_new_user"|"telegram_required"|"telegram_used"}}
+ *                       |"not_new_user"|"telegram_required"|"telegram_used"
+ *                       |"channel_required"|"telegram_channel_used"}}
+ *
+ * `channelMemberTelegramUserId`: the Telegram user the caller just found in the
+ * channel (channel-join codes only; see channelRefusalSync).
  */
-export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
+export function redeemGiftCode(db, { userId, code, assignedBy = null, channelMemberTelegramUserId = null } = {}) {
   if (!db) throw new Error("redeemGiftCode requires a db adapter");
   if (!userId) return { ok: false, reason: "not_found" };
 
@@ -717,7 +808,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
   if (!row) return { ok: false, reason: "not_found" };
   if (row.deletedAt || (row.isActive !== 1 && row.isActive !== true)) return { ok: false, reason: "not_found" };
   if (!inWindow(row, Date.now())) return { ok: false, reason: "not_active" };
-  if ((row.redeemedCount ?? 0) >= (row.maxRedemptions ?? 1)) return { ok: false, reason: "exhausted" };
+  if (giftExhausted(row)) return { ok: false, reason: "exhausted" };
 
   let grant;
   if (row.grantKind === "plan") {
@@ -790,6 +881,12 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
         const refusal = newUserRefusalSync(db, userId, telegramUserId);
         if (refusal) return { ok: false, reason: refusal };
       }
+      // Channel-join codes (change channel-gift): same savepoint, so one
+      // Telegram user cannot take the code twice through two accounts.
+      if (Number(row.channelJoinOnly) === 1 && !assignedBy) {
+        const refusal = channelRefusalSync(db, row.id, telegramUserId, channelMemberTelegramUserId);
+        if (refusal) return { ok: false, reason: refusal };
+      }
 
       db.run(
         `INSERT INTO giftRedemptions(id, giftId, userId, userPlanId, redeemedAt, assignedBy, telegramUserId) VALUES(?, ?, ?, NULL, ?, ?, ?)`,
@@ -799,7 +896,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
       // counter read above was stale.
       const res = db.run(
         `UPDATE giftCodes SET redeemedCount = redeemedCount + 1, updatedAt = ?
-          WHERE id = ? AND (maxRedemptions IS NULL OR redeemedCount < maxRedemptions)`,
+          WHERE id = ? AND (unlimitedRedemptions = 1 OR maxRedemptions IS NULL OR redeemedCount < maxRedemptions)`,
         [now, row.id]
       );
       if ((res?.changes ?? 0) === 0) throw new GiftError("exhausted");
@@ -851,6 +948,101 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null } = {}) {
   }
 }
 
+/**
+ * What a live code grants, for the customer's "Mã có thể sử dụng" list. Mirrors
+ * the grant in redeemGiftCode; null when it could not be redeemed now.
+ */
+function grantPreviewSync(db, row) {
+  if (row.grantKind === "plan") {
+    const plan = planRow(db, row.planId);
+    if (!plan || (plan.isActive !== 1 && plan.isActive !== true)) return null;
+    if (unboundedGiftError(plan, { rpm: row.rpm ?? null, tpm: row.tpm ?? null })) return null;
+    const amountCredit = row.amountVnd != null ? topupCreditForAmount(plan, row.amountVnd) : null;
+    if (amountCredit === 0) return null;
+    return {
+      kind: "plan",
+      planName: plan.name ?? null,
+      creditNanoUsd: amountCredit ?? (Number(plan.creditNanoUsd) || 0),
+      unlimitedCredit: Number(plan.unlimitedCredit) === 1 && amountCredit == null,
+      durationDays: Number(plan.durationDays) || 30,
+    };
+  }
+  const credit = Number(row.creditNanoUsd) || 0;
+  if (credit <= 0) return null;
+  return { kind: "credit", planName: null, creditNanoUsd: credit, unlimitedCredit: false, durationDays: Number(row.durationDays) || 30 };
+}
+
+/**
+ * Codes this account can still take, for the customer gift page (change
+ * channel-gift). Only active, in-window, not exhausted codes whose grant is still
+ * valid; a code this account (or, for a new-user / channel-join code, its
+ * Telegram user) can no longer take is left out. A code that only lacks a
+ * Telegram link stays, flagged `needsTelegram`.
+ *
+ * `listedOnly` false also returns unlisted codes (the welcome-code offer looks
+ * for any channel-join code). Listed codes come first, then newest.
+ */
+export function listAvailableGiftsSync(db, userId, {
+  now = Date.now(), listedOnly = true, channelOnly = false, includeChannel = true,
+} = {}) {
+  if (!userId) return [];
+  const where = [
+    "g.deletedAt IS NULL", "g.isActive = 1",
+    "(g.unlimitedRedemptions = 1 OR g.redeemedCount < g.maxRedemptions)",
+  ];
+  if (listedOnly) where.push("g.listed = 1");
+  if (channelOnly) where.push("g.channelJoinOnly = 1");
+  // Channel-join codes are left out when the channel check is not set up: they
+  // could only ever fail.
+  if (!includeChannel) where.push("COALESCE(g.channelJoinOnly, 0) = 0");
+  // No SQL LIMIT: the window and per-account filters run below, and a cap before
+  // them could push live codes out behind expired ones. The table is small and
+  // admin-managed; the result is capped after filtering.
+  const rows = db.all(
+    `SELECT g.* FROM giftCodes g WHERE ${where.join(" AND ")} ORDER BY g.listed DESC, g.createdAt DESC, g.rowid DESC`
+  );
+  const telegramUserId = db.get(`SELECT telegramUserId FROM users WHERE id = ?`, [userId])?.telegramUserId ?? null;
+  const out = [];
+  for (const row of rows) {
+    if (!inWindow(row, now)) continue;
+    const mine = Number(db.get(
+      `SELECT COUNT(*) AS c FROM giftRedemptions WHERE giftId = ? AND userId = ?`,
+      [row.id, userId]
+    )?.c ?? 0);
+    if (mine >= Math.max(1, Number(row.perUserLimit) || 1)) continue;
+    const newUserOnly = Number(row.newUserOnly) === 1;
+    const channelJoinOnly = Number(row.channelJoinOnly) === 1;
+    let needsTelegram = false;
+    if (newUserOnly) {
+      const refusal = newUserRefusalSync(db, userId, telegramUserId);
+      if (refusal && refusal !== "telegram_required") continue;
+      needsTelegram = refusal === "telegram_required";
+    }
+    if (channelJoinOnly) {
+      if (channelClaimedSync(db, row.id, telegramUserId)) continue;
+      needsTelegram = !telegramUserId;
+    }
+    const grant = grantPreviewSync(db, row);
+    if (!grant) continue;
+    out.push({
+      id: row.id,
+      code: formatGiftCode(row.code),
+      kind: channelJoinOnly ? "channel" : newUserOnly ? "new_user" : "normal",
+      grant,
+      expiresAt: row.expiresAt ?? null,
+      // null = no total cap.
+      remaining: Number(row.unlimitedRedemptions) === 1
+        ? null
+        : Math.max(0, Number(row.maxRedemptions) - Number(row.redeemedCount || 0)),
+      needsTelegram,
+    });
+    if (out.length >= AVAILABLE_MAX) break;
+  }
+  return out;
+}
+
+const AVAILABLE_MAX = 50;
+
 /** Vietnamese text for a refused redemption, shown to the admin per account. */
 export const GIFT_REASON_TEXT = {
   not_found: "Mã không tồn tại hoặc đã tắt",
@@ -861,6 +1053,8 @@ export const GIFT_REASON_TEXT = {
   not_new_user: "Mã này chỉ dành cho tài khoản mới.",
   telegram_required: "Mã dành cho tài khoản mới, cần liên kết Telegram để nhận.",
   telegram_used: "Tài khoản Telegram này đã nhận ưu đãi người mới.",
+  channel_required: "Bạn cần tham gia kênh Telegram để nhận mã này.",
+  telegram_channel_used: "Tài khoản Telegram này đã nhận mã này rồi.",
   user_not_found: "Không tìm thấy tài khoản",
 };
 

@@ -91,6 +91,10 @@ function update({ updateId = 1, messageId = 501, fromId, chatId = null, text, re
 }
 
 const handle = (u) => support.handleSupportUpdate(db, u, { send: fakeSend, typing: fakeTyping });
+// The command bot's webhook passes `answerHelp: false`: it owns every /command, so
+// this module must take only free text and admin replies.
+const handleViaWebhook = (u) =>
+  support.handleSupportUpdate(db, u, { send: fakeSend, typing: fakeTyping, answerHelp: false });
 const stored = () => db.all(`SELECT * FROM supportMessages ORDER BY createdAt`);
 
 // ── Inbound ──────────────────────────────────────────────────────────────────
@@ -180,6 +184,43 @@ test("/start help is a command, not a support message", async () => {
   const result = await handle(update({ fromId: 555, text: "/start help" }));
   assert.equal(result.handled, "command");
   assert.ok(!sent.some((m) => m.chatId === ADMIN_CHAT));
+});
+
+test("wired into the command bot, /help is left to it so one message gets one answer", async () => {
+  user("u1", { telegram: "555" });
+  const result = await handleViaWebhook(update({ fromId: 555, text: "/help" }));
+  assert.equal(result.handled, "ignored");
+  assert.equal(sent.length, 0, "this module sends nothing the command bot will also answer");
+});
+
+test("wired into the command bot, other commands are left to it too", async () => {
+  user("u1", { telegram: "555" });
+  for (const text of ["/me", "/plans", "/gift ABC123"]) {
+    const result = await handleViaWebhook(update({ fromId: 555, text }));
+    assert.equal(result.handled, "ignored", text);
+  }
+  assert.equal(sent.length, 0);
+});
+
+test("wired into the command bot, free text is still relayed", async () => {
+  user("u1", { telegram: "555", displayName: "Khanh" });
+  const result = await handleViaWebhook(update({ fromId: 555, text: "Gói của em hết hạn ngày nào?" }));
+  assert.equal(result.handled, "customer");
+  assert.ok(sent.some((m) => m.chatId === ADMIN_CHAT), "relayed to the admin chat");
+  assert.equal(stored().length, 1);
+});
+
+test("wired into the command bot, an admin reply still reaches the customer", async () => {
+  user("u1", { telegram: "555" });
+  await handleViaWebhook(update({ fromId: 555, messageId: 700, text: "cần hỗ trợ" }));
+  const relayId = nextMessageId - 1;
+
+  sent = [];
+  const result = await handleViaWebhook(
+    update({ fromId: Number(ADMIN_CHAT), chatId: ADMIN_CHAT, messageId: 777, chatType: "group", text: "đã xử lý", replyTo: relayId })
+  );
+  assert.equal(result.handled, "admin_reply");
+  assert.ok(sent.some((m) => m.chatId === "555" && /đã xử lý/.test(m.text)));
 });
 
 test("a re-delivered update is stored and relayed once", async () => {

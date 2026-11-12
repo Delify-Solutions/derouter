@@ -53,8 +53,17 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
   const [durationDays, setDurationDays] = useState(String(gift?.grantKind === "credit" ? gift.durationDays ?? 30 : 30));
   const [amountVnd, setAmountVnd] = useState(gift?.amountVnd != null ? String(gift.amountVnd) : "");
   const [maxRedemptions, setMaxRedemptions] = useState(String(gift?.maxRedemptions ?? 1));
+  // No total cap (change gift-unlimited).
+  const [unlimited, setUnlimited] = useState(Boolean(gift?.unlimitedRedemptions));
   const [perUserLimit, setPerUserLimit] = useState(String(gift?.perUserLimit ?? 1));
-  const [newUserOnly, setNewUserOnly] = useState(Boolean(gift?.newUserOnly));
+  const [newUserOnly, setNewUserOnlyState] = useState(Boolean(gift?.newUserOnly));
+  // Channel-join code and "listed on the customer gift page" (change channel-gift).
+  // A code is a new-user code or a channel-join code, never both.
+  const [channelJoinOnly, setChannelJoinOnlyState] = useState(Boolean(gift?.channelJoinOnly));
+  const [listed, setListed] = useState(Boolean(gift?.listed));
+  const setNewUserOnly = (on) => { setNewUserOnlyState(on); if (on) setChannelJoinOnlyState(false); };
+  const setChannelJoinOnly = (on) => { setChannelJoinOnlyState(on); if (on) setNewUserOnlyState(false); };
+  const oncePerAccount = newUserOnly || channelJoinOnly;
   const [startsOn, setStartsOn] = useState(isoToDateInput(gift?.startsAt));
   const [expiresOn, setExpiresOn] = useState(isoToDateInput(gift?.expiresAt));
   const [note, setNote] = useState(gift?.note || "");
@@ -76,14 +85,15 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
   // Picking accounts raises the total so every one of them can receive the code.
   const pickAssignees = (next) => {
     setAssignees(next);
-    if (next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
+    if (!unlimited && next.length > (Number(maxRedemptions) || 0)) setMaxRedemptions(String(next.length));
   };
 
   const submit = async () => {
     setError("");
 
-    const max = Number(maxRedemptions);
-    if (!/^\d+$/.test(maxRedemptions.trim()) || !Number.isInteger(max) || max < 1) {
+    // Unlimited: the typed total is not checked (nor sent).
+    const max = unlimited ? Infinity : Number(maxRedemptions);
+    if (!unlimited && (!/^\d+$/.test(maxRedemptions.trim()) || !Number.isInteger(max) || max < 1)) {
       setError("Tổng lượt dùng phải là số nguyên từ 1 trở lên.");
       return;
     }
@@ -91,8 +101,8 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
       setError(`Tổng lượt dùng không được nhỏ hơn số lượt đã dùng (${redeemed}).`);
       return;
     }
-    // A new-user code is one per account; the server pins it too.
-    const perUser = newUserOnly ? 1 : Number(perUserLimit);
+    // A new-user or channel-join code is one per account; the server pins it too.
+    const perUser = oncePerAccount ? 1 : Number(perUserLimit);
     if (!Number.isInteger(perUser) || perUser < 1) {
       setError("Lượt mỗi người phải là số nguyên từ 1 trở lên.");
       return;
@@ -139,9 +149,12 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
     }
 
     const body = {
-      maxRedemptions: max,
+      unlimitedRedemptions: unlimited,
+      ...(unlimited ? {} : { maxRedemptions: max }),
       perUserLimit: perUser,
       newUserOnly,
+      channelJoinOnly,
+      listed,
       rpm: rpm.trim(),
       tpm: tpm.trim(),
       note: note.trim() || (editing ? "" : null),
@@ -363,20 +376,39 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Tổng lượt dùng"
-            inputMode="numeric"
-            value={maxRedemptions}
-            onChange={(e) => setMaxRedemptions(e.target.value)}
-            hint={editing ? `Tối thiểu ${Math.max(1, redeemed)}.` : "Tổng số lần mã được dùng."}
-          />
+          <div className="flex flex-col gap-2">
+            <Input
+              label="Tổng lượt dùng"
+              inputMode="numeric"
+              value={unlimited ? "" : maxRedemptions}
+              placeholder={unlimited ? "Không giới hạn" : undefined}
+              onChange={(e) => setMaxRedemptions(e.target.value)}
+              disabled={unlimited}
+              hint={unlimited
+                ? "Mã không bao giờ hết lượt; vẫn giới hạn theo lượt mỗi người."
+                : editing ? `Tối thiểu ${Math.max(1, redeemed)}.` : "Tổng số lần mã được dùng."}
+            />
+            <Toggle
+              checked={unlimited}
+              onChange={(on) => {
+                setUnlimited(on);
+                // Back to a cap: start from a total the server accepts.
+                if (!on && (Number(maxRedemptions) || 0) < redeemed) setMaxRedemptions(String(Math.max(1, redeemed)));
+              }}
+              label="Không giới hạn tổng lượt"
+            />
+          </div>
           <Input
             label="Lượt mỗi người"
             inputMode="numeric"
-            value={newUserOnly ? "1" : perUserLimit}
+            value={oncePerAccount ? "1" : perUserLimit}
             onChange={(e) => setPerUserLimit(e.target.value)}
-            disabled={newUserOnly}
-            hint={newUserOnly ? "Mã người mới: mỗi tài khoản 1 lần." : "Mỗi tài khoản dùng được tối đa chừng này lần."}
+            disabled={oncePerAccount}
+            hint={
+              newUserOnly ? "Mã người mới: mỗi tài khoản 1 lần."
+                : channelJoinOnly ? "Mã tham gia kênh: mỗi tài khoản 1 lần."
+                  : "Mỗi tài khoản dùng được tối đa chừng này lần."
+            }
           />
         </div>
 
@@ -389,6 +421,31 @@ export default function GiftCodeFormModal({ plans, gift = null, onClose, onSaved
           <p className="text-xs text-text-muted">
             Chỉ tài khoản chưa từng mua gói và đã liên kết Telegram mới nhập được. Mỗi Telegram chỉ nhận một mã
             người mới, tính chung mọi mã người mới. Gắn trực tiếp cho tài khoản thì bỏ qua các điều kiện này.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1 border border-border p-3">
+          <Toggle
+            checked={channelJoinOnly}
+            onChange={setChannelJoinOnly}
+            label="Mã tham gia kênh Telegram"
+          />
+          <p className="text-xs text-text-muted">
+            Tài khoản nào cũng nhập được (không cần tài khoản mới), miễn đã liên kết Telegram và đang ở trong kênh
+            Telegram của bạn. Mỗi Telegram chỉ nhận mã này một lần. Bot phải là quản trị viên của kênh (kiểm tra ở
+            trang Telegram). Mã người mới vừa nhập xong sẽ được mời nhận thêm mã này.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1 border border-border p-3">
+          <Toggle
+            checked={listed}
+            onChange={setListed}
+            label="Hiện trong mục “Mã có thể sử dụng”"
+          />
+          <p className="text-xs text-text-muted">
+            Khách thấy mã này ngay trên trang Mã quà tặng và bấm nhận, không cần ai gửi mã. Chỉ hiện với tài khoản
+            còn dùng được mã.
           </p>
         </div>
 

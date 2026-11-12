@@ -1,9 +1,25 @@
 import TelegramBroadcastClient from "./TelegramBroadcastClient";
+import TelegramChannelCard from "./TelegramChannelCard";
+import TelegramBotCommandsCard from "./TelegramBotCommandsCard";
+import TelegramLinksClient from "./TelegramLinksClient";
 
 export const metadata = {
-  title: "Thông báo Telegram - derouter",
+  title: "Telegram - derouter",
 };
 
+/**
+ * `/dashboard/telegram`: broadcasts, the command bot, the public channel link,
+ * and the accounts linked to Telegram (with unlink).
+ */
 export default function TelegramBroadcastPage() {
-  return <TelegramBroadcastClient />;
+  return (
+    <div className="flex flex-col gap-12">
+      <TelegramBroadcastClient />
+      <TelegramBotCommandsCard />
+      <TelegramChannelCard />
+      <div className="border-t border-border pt-10">
+        <TelegramLinksClient />
+      </div>
+    </div>
+  );
 }

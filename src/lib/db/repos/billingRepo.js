@@ -841,6 +841,47 @@ export async function getOrderById(id) {
  * later plan edit cannot rewrite what a customer already agreed to pay.
  */
 /**
+ * The per-month purchase limit of `plan` for `userId` in the calendar month of
+ * `now`, or null when another purchase is allowed. Synchronous so a write
+ * transaction (payment reconciliation reviving an expired order) can ask it.
+ */
+export function purchaseLimitBlockerSync(db, plan, userId, now = new Date()) {
+  const limit = nano(plan?.purchaseLimitPerMonth ?? 0);
+  if (limit > 0 && userId) {
+    // Calendar month in UTC. A rolling 30-day window would be kinder but makes
+    // the limit unpredictable ("why did it reset on the 3rd?"); calendar month
+    // is what the admin wrote and what a customer can reason about.
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    const row = db.get(
+      // A cancelled or expired order never paid, so it must not consume the
+      // month's slot (spec payment-checkout "Cancel and expiry").
+      `SELECT COUNT(*) AS n FROM orders
+        WHERE userId = ? AND planId = ? AND createdAt >= ? AND status NOT IN ('cancelled', 'expired')`,
+      [userId, plan.id, start]
+    );
+    // Grants without an order. A purchase's own rows carry its orderId and are
+    // already counted above; a gift the admin later revoked gives its slot back.
+    const given = db.get(
+      `SELECT COUNT(*) AS n FROM userPlans
+        WHERE userId = ? AND planId = ? AND orderId IS NULL AND createdAt >= ?
+          AND source IN ('gift', 'admin') AND status NOT IN ('revoked', 'refunded')`,
+      [userId, plan.id, start]
+    );
+    const used = Number(row?.n ?? 0) + Number(given?.n ?? 0);
+    if (used >= limit) {
+      return {
+        code: "purchase_limit",
+        reason: `Gói này chỉ mua được ${limit} lần mỗi tháng (đã dùng ${used}/${limit})`,
+        used,
+        limit,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Why this user may NOT buy this plan right now, or null when the purchase is
  * allowed.
  *
@@ -868,37 +909,8 @@ export async function planPurchaseBlocker(db, plan, user, now = new Date()) {
     }
   }
 
-  const limit = nano(plan.purchaseLimitPerMonth ?? 0);
-  if (limit > 0 && user?.id) {
-    // Calendar month in UTC. A rolling 30-day window would be kinder but makes
-    // the limit unpredictable ("why did it reset on the 3rd?"); calendar month
-    // is what the admin wrote and what a customer can reason about.
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-    const row = db.get(
-      // A cancelled or expired order never paid, so it must not consume the
-      // month's slot (spec payment-checkout "Cancel and expiry").
-      `SELECT COUNT(*) AS n FROM orders
-        WHERE userId = ? AND planId = ? AND createdAt >= ? AND status NOT IN ('cancelled', 'expired')`,
-      [user.id, plan.id, start]
-    );
-    // Grants without an order. A purchase's own rows carry its orderId and are
-    // already counted above; a gift the admin later revoked gives its slot back.
-    const given = db.get(
-      `SELECT COUNT(*) AS n FROM userPlans
-        WHERE userId = ? AND planId = ? AND orderId IS NULL AND createdAt >= ?
-          AND source IN ('gift', 'admin') AND status NOT IN ('revoked', 'refunded')`,
-      [user.id, plan.id, start]
-    );
-    const used = Number(row?.n ?? 0) + Number(given?.n ?? 0);
-    if (used >= limit) {
-      return {
-        code: "purchase_limit",
-        reason: `Gói này chỉ mua được ${limit} lần mỗi tháng (đã dùng ${used}/${limit})`,
-        used,
-        limit,
-      };
-    }
-  }
+  const limited = purchaseLimitBlockerSync(db, plan, user?.id ?? null, now);
+  if (limited) return limited;
 
   return null;
 }
@@ -1041,7 +1053,10 @@ export async function cancelOrder(id, userId) {
   if (!row) return { ok: false, reason: "not_found" };
   if (row.userId !== userId) return { ok: false, reason: "forbidden" };
   if (row.status !== "pending") return { ok: false, reason: "not_pending" };
-  db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [id]);
+  // Guarded on the status: a payment the gateway matched between the read above
+  // and this write must win, never be turned into a cancelled order.
+  const res = db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'`, [id]);
+  if (Number(res?.changes ?? 0) === 0) return { ok: false, reason: "not_pending" };
   return { ok: true, order: await getOrderById(id) };
 }
 

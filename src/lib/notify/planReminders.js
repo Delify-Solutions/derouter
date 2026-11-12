@@ -2,11 +2,16 @@
 // (3 days, then 24 hours before) and credit running low (under 10% left).
 //
 // One row in telegramNotices per reminder sent, so a reminder goes out once.
+// Two channels, tracked apart (change models-notifications D4): the web inbox
+// copy (kind "inbox_<kind>", written once for EVERY active account) and the
+// Telegram message (kind "<kind>", linked and reachable accounts only). A
+// Telegram failure or a missing bot never repeats or blocks the web copy.
 // Same scheduler shape as src/lib/billing/expiry.js: unref'd interval, re-entry
 // guard, fail-open. Relative imports only: tests import this module directly.
 
 import { getAdapter } from "../db/driver.js";
-import { messages, notifyCustomer } from "./customerTelegram.js";
+import { messages, notifyCustomer, loadSiteName } from "./customerTelegram.js";
+import { recordInboxSync } from "./inbox.js";
 
 export const REMINDER_INTERVAL_MS = 10 * 60 * 1000;
 export const REMINDER_INITIAL_DELAY_MS = 60 * 1000;
@@ -20,8 +25,10 @@ export const LOW_CREDIT_FRACTION = 0.1;
 const SETTLED = new Set(["opted_out", "blocked", "not_linked", "inactive", "telegram_error"]);
 
 /**
- * Reminders due at `nowMs`, not yet sent. Only linked, reachable accounts.
- * @returns {Array<{ kind: string, refId: string, userId: string, build: Function }>}
+ * Reminders due at `nowMs` on at least one channel. Every active account gets
+ * the web copy; `telegram` is true only for a linked, reachable account whose
+ * Telegram message is not sent yet, `inbox` when the web copy is not stored yet.
+ * @returns {Array<{ kind: string, refId: string, userId: string, build: Function, inbox: boolean, telegram: boolean }>}
  */
 export function findDueRemindersSync(db, nowMs = Date.now()) {
   const now = new Date(nowMs).toISOString();
@@ -35,7 +42,7 @@ export function findDueRemindersSync(db, nowMs = Date.now()) {
        FROM userPlans up
        JOIN users u ON u.id = up.userId
        LEFT JOIN plans p ON p.id = up.planId
-      WHERE u.telegramUserId IS NOT NULL AND u.telegramDmBlockedAt IS NULL AND u.status = 'active'
+      WHERE u.status = 'active'
         AND up.status = 'active' AND up.startsAt <= ? AND up.expiresAt > ? AND up.expiresAt <= ?
         AND NOT EXISTS (
           SELECT 1 FROM userPlans other
@@ -72,7 +79,7 @@ export function findDueRemindersSync(db, nowMs = Date.now()) {
        FROM userPlans up
        JOIN users u ON u.id = up.userId
        LEFT JOIN plans p ON p.id = up.planId
-      WHERE u.telegramUserId IS NOT NULL AND u.telegramDmBlockedAt IS NULL AND u.status = 'active'
+      WHERE u.status = 'active'
         AND up.status IN ('active', 'exhausted') AND up.startsAt <= ? AND up.expiresAt > ?
       ORDER BY up.userId, up.startsAt`,
     [now, now]
@@ -106,21 +113,29 @@ export function findDueRemindersSync(db, nowMs = Date.now()) {
   }
 
   if (!due.length) return due;
-  return due.filter(
-    (item) => !db.get(`SELECT 1 AS x FROM telegramNotices WHERE kind = ? AND refId = ?`, [item.kind, item.refId])
+  const done = (kind, refId) => Boolean(db.get(`SELECT 1 AS x FROM telegramNotices WHERE kind = ? AND refId = ?`, [kind, refId]));
+  const reachable = new Set(
+    db.all(`SELECT id FROM users WHERE telegramUserId IS NOT NULL AND telegramDmBlockedAt IS NULL AND status = 'active'`).map((r) => r.id)
   );
+  return due
+    .map((item) => ({
+      ...item,
+      inbox: !done(`inbox_${item.kind}`, item.refId),
+      telegram: reachable.has(item.userId) && !done(item.kind, item.refId),
+    }))
+    .filter((item) => item.inbox || item.telegram);
 }
 
-function recordNoticeSync(db, item, nowIso) {
+function recordNoticeSync(db, item, nowIso, prefix = "") {
   db.run(
     `INSERT OR IGNORE INTO telegramNotices(userId, kind, refId, createdAt) VALUES(?, ?, ?, ?)`,
-    [item.userId, item.kind, item.refId, nowIso]
+    [item.userId, `${prefix}${item.kind}`, item.refId, nowIso]
   );
   // The 1-day reminder supersedes the 3-day one: never send it afterwards.
   if (item.kind === "expire_1d") {
     db.run(
-      `INSERT OR IGNORE INTO telegramNotices(userId, kind, refId, createdAt) VALUES(?, 'expire_3d', ?, ?)`,
-      [item.userId, item.refId, nowIso]
+      `INSERT OR IGNORE INTO telegramNotices(userId, kind, refId, createdAt) VALUES(?, ?, ?, ?)`,
+      [item.userId, `${prefix}expire_3d`, item.refId, nowIso]
     );
   }
 }
@@ -134,19 +149,30 @@ const g = (globalThis.__telegramReminders ??= {
   lastError: null,
 });
 
-/** One pass. Never throws. Returns how many reminders were sent. */
+/** One pass. Never throws. Returns how many Telegram reminders were sent. */
 export async function runReminderTick(nowMs = Date.now()) {
   if (g.tickRunning) return null;
   g.tickRunning = true;
   let sent = 0;
   try {
     const db = await getAdapter();
+    const siteName = await loadSiteName();
+    // Telegram stops for the rest of the tick on a missing bot or a flood
+    // limit; the web copies of every due reminder are still written.
+    let telegramOff = false;
     for (const item of findDueRemindersSync(db, nowMs)) {
-      const result = await notifyCustomer(item.userId, "expiry", item.build);
+      if (item.inbox) {
+        const at = new Date().toISOString();
+        db.transaction(() => {
+          recordInboxSync(db, item.userId, "expiry", item.build(siteName), { now: at, siteName });
+          recordNoticeSync(db, item, at, "inbox_");
+        });
+      }
+      if (!item.telegram || telegramOff) continue;
+      const result = await notifyCustomer(item.userId, "expiry", item.build, { inbox: false });
       if (result.ok) sent += 1;
       if (result.ok || SETTLED.has(result.reason)) recordNoticeSync(db, item, new Date().toISOString());
-      if (result.reason === "not_configured") break;
-      if (result.reason === "rate_limited") break; // resume next tick
+      if (result.reason === "not_configured" || result.reason === "rate_limited") telegramOff = true; // resume next tick
     }
     g.lastRunAt = new Date(nowMs).toISOString();
     g.lastError = null;

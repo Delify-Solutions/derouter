@@ -356,7 +356,7 @@ export default function DiscountsModal({ isOpen, onClose, scopeType, scopeId, sc
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="disc-label" className={label}>Nhãn (tùy chọn)</label>
+              <label htmlFor="disc-label" className={label}>Lý do giảm giá (khách thấy, tùy chọn)</label>
               <input
                 id="disc-label"
                 type="text"
@@ -365,7 +365,11 @@ export default function DiscountsModal({ isOpen, onClose, scopeType, scopeId, sc
                 onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
                 placeholder="Ví dụ Khuyến mãi Black Friday"
                 className={field}
+                aria-describedby="disc-label-hint"
               />
+              <p id="disc-label-hint" className="text-xs text-text-muted">
+                Hiện cạnh &quot;Giảm X%&quot; ở bảng giá, trang Model và lịch sử dùng của khách.
+              </p>
               {errText("label")}
             </div>
 
