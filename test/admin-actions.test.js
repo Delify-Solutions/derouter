@@ -203,51 +203,104 @@ test("grantCredit rejects an out-of-range amount and a missing reason", () => {
 
 // ── Extend ─────────────────────────────────────────────────────────────────
 
-test("extend adds days to a live purchase", () => {
+test("expiry moves later by days", () => {
   user();
   plan();
   purchase("up1", { hours: 24 });
 
   const before = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
   const result = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { days: 10, reason: REASON, actor: ACTOR, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 10, reason: REASON, actor: ACTOR, now: at(T0) })
   );
   assert.equal(result.ok, true);
+  assert.equal(result.direction, "extended");
 
   const after = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
   assert.ok(new Date(after) > new Date(before));
-  assert.equal(auditRows("plan_extended").length, 1);
+  assert.equal(auditRows("plan_expiry_set").length, 1);
 });
 
-test("extend accepts an explicit later date and refuses an earlier one", () => {
+test("expiry moves earlier by negative days, keeping the purchase running", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const before = db.get(`SELECT expiresAt, status FROM userPlans WHERE id = 'up1'`);
+  assert.equal(before.status, "active");
+
+  const result = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: -20, reason: REASON, now: at(T0) })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.direction, "shortened");
+  const after = db.get(`SELECT expiresAt, status, creditRemainingNanoUsd FROM userPlans WHERE id = 'up1'`);
+  // 720 hours = 30 days; 30 − 20 = 10 days from now.
+  assert.equal(new Date(after.expiresAt).getTime(), T0 + 10 * DAY);
+  assert.equal(after.status, "active", "the plan still runs, just for less time");
+  assert.ok(after.creditRemainingNanoUsd > 0, "shortening does not forfeit credit");
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM creditLedger WHERE kind = 'expire'`).n, 0);
+});
+
+test("expiry accepts an explicit date in either direction", () => {
   user();
   plan();
   purchase("up1", { hours: 720 });
 
-  const target = at(T0 + 60 * DAY);
+  const later = at(T0 + 60 * DAY);
   const ok = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { expiresAt: target, reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: later, reason: REASON, now: at(T0) })
   );
   assert.equal(ok.ok, true);
-  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, target);
+  assert.equal(ok.direction, "extended");
+  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, later);
+
+  // Shorter than the previous expiry but still in the future: allowed.
+  const sooner = at(T0 + 5 * DAY);
+  const shorter = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: sooner, reason: REASON, now: at(T0) })
+  );
+  assert.equal(shorter.ok, true);
+  assert.equal(shorter.direction, "shortened");
+  assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, sooner);
+});
+
+test("expiry refuses a date that is not in the future", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const target = db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt;
 
   const past = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { expiresAt: at(T0 - DAY), reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { expiresAt: at(T0 - DAY), reason: REASON, now: at(T0) })
   );
   assert.equal(past.status, 400);
-  // Unchanged by the refusal.
+  // Ending a plan is revoke's job, so an over-shortened day count is refused too.
+  const tooFar = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: -400, reason: REASON, now: at(T0) })
+  );
+  assert.equal(tooFar.status, 400);
   assert.equal(db.get(`SELECT expiresAt FROM userPlans WHERE id = 'up1'`).expiresAt, target);
 });
 
-test("extend refuses a revoked purchase", () => {
+test("expiry refuses a zero-day change", () => {
+  user();
+  plan();
+  purchase("up1", { hours: 720 });
+  const result = db.transaction(() =>
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 0, reason: REASON, now: at(T0) })
+  );
+  assert.equal(result.status, 400);
+});
+
+test("expiry refuses a revoked purchase", () => {
   user();
   plan();
   purchase("up1", { status: "revoked" });
   const result = db.transaction(() =>
-    actions.extendPlanSync(db, "u1", "up1", { days: 5, reason: REASON, now: at(T0) })
+    actions.setPlanExpirySync(db, "u1", "up1", { days: 5, reason: REASON, now: at(T0) })
   );
   assert.equal(result.status, 409);
-  assert.equal(auditRows("plan_extended").length, 0);
+  assert.equal(auditRows("plan_expiry_set").length, 0);
 });
 
 // ── Adjust credit ──────────────────────────────────────────────────────────
@@ -274,6 +327,28 @@ test("adjust adds and removes credit with one ledger row and one audit row", () 
   assert.equal(ledger[0].deltaNanoUsd, USD(10));
   assert.equal(ledger[1].deltaNanoUsd, -USD(5));
   assert.equal(auditRows("credit_adjusted").length, 2);
+});
+
+test("adjust refuses an image purchase so the two balances never blend", () => {
+  user();
+  plan("pimg", { code: "img", creditUsd: 0 });
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, startsAt, expiresAt, status, priority, limits, createdAt)
+     VALUES('upimg', 'u1', 'pimg', NULL, 'admin', 'image', 0, 0, 10, 10, ?, ?, 'active', NULL, NULL, ?)`,
+    [at(T0), at(T0 + 720 * 3_600_000), at(T0)]
+  );
+
+  const res = db.transaction(() =>
+    actions.adjustCreditSync(db, "u1", "upimg", { deltaNanoUsd: USD(10), reason: REASON, actor: ACTOR, now: at(T0) })
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 409);
+
+  const row = db.get(`SELECT creditRemainingNanoUsd AS credit, imageRemaining AS images FROM userPlans WHERE id = 'upimg'`);
+  assert.equal(row.credit, 0, "no credit written onto an image purchase");
+  assert.equal(row.images, 10, "the image balance is untouched");
+  assert.equal(db.all(`SELECT * FROM creditLedger WHERE kind = 'adjust'`).length, 0);
+  assert.equal(auditRows("credit_adjusted").length, 0);
 });
 
 test("adjust below zero is refused and nothing changes", () => {

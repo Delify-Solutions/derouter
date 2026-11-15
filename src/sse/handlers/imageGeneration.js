@@ -19,6 +19,7 @@ import { saveRequestUsage } from "@/lib/usageDb.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { resolveApiKeyOwner } from "@/lib/db/repos/billingRepo.js";
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
+import { admitSync } from "@/lib/billing/planQueue.js";
 import { costFromImagesNano } from "@/shared/utils/money";
 import { withErrorLog } from "../utils/withErrorLog.js";
 import { getRequestIp } from "@/lib/auth/clientIp.js";
@@ -31,17 +32,31 @@ const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
 const IMAGE_ENDPOINT = "/v1/images/generations";
 
 /**
- * Customer keys pay per image, so a model with no per-image price must not be
- * served: the request would be recorded at $0 and cost the customer nothing.
+ * A customer key must not get a free image. Two ways to pay exist, so the model is
+ * served when EITHER applies:
+ *
+ *   * it has a per-image price (credit is charged at that price), or
+ *   * the customer holds an image purchase that admission would pick — an image
+ *     plan sells images, not dollars, so its price is irrelevant.
+ *
  * Admin and local keys (no owning customer) are not billed and are never refused.
  * Returns an error Response, or null when the call may proceed.
  */
 async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) {
   if (!apiKey) return null;
   const db = await getAdapter();
-  if (!resolveApiKeyOwner(db, apiKey)) return null;
+  const owner = resolveApiKeyOwner(db, apiKey);
+  if (!owner) return null;
   const { pricing } = await resolvePrice({ provider, model, requestedModel });
   if (costFromImagesNano(1, pricing) > 0) return null;
+  // An image purchase pays in images, so no per-image price is needed for it. A
+  // key pinned to a plan is scoped to that plan, exactly like admission — so the
+  // pin is read from the key row (a deleted key keeps it in its tombstone).
+  const pinnedPlanId = owner.deleted
+    ? owner.planId ?? null
+    : db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])?.planId ?? null;
+  const admitted = admitSync(db, owner.userId, null, { planId: pinnedPlanId, requestKind: "image" });
+  if (admitted.ok && admitted.kind === "image") return null;
   // A router decision, not an upstream error: platform-marked so a customer
   // reads it as written (spec model-privacy).
   return markPlatform(errorResponse(
@@ -94,9 +109,14 @@ async function handleImageGenerationRequestInner(request, ctx) {
     if (!valid) return markPlatform(errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key"));
   }
 
-  // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
+  // Advanced key limits: RPM/TPM/expiry/budget + model allow-list. `requestKind`
+  // tells admission this request is billed in images, so an image purchase may pay
+  // for it (and is preferred over credit).
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, modelStr, {
+      clientIp: getRequestIp(request),
+      requestKind: "image",
+    });
     if (denied) return denied;
   }
 

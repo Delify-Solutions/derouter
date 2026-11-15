@@ -58,19 +58,24 @@ export default function PricingSection({ plans, models, copy }) {
 
   // Every plan spends its credit on any model the buyer's group allows, so the
   // table lists the whole catalogue rather than a per-plan subset.
+  // Token-priced models only: an image combo has no input/output rate, so it is
+  // listed in its own per-image table below instead of as a row of "—".
+  const tokenModels = useMemo(() => models.filter((model) => model.kind !== "image"), [models]);
+  const imageModels = useMemo(() => models.filter((model) => model.kind === "image"), [models]);
+
   const matches = useMemo(() => {
     if (!plan) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(q));
-  }, [plan, models, query]);
+    if (!q) return tokenModels;
+    return tokenModels.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(q));
+  }, [plan, tokenModels, query]);
   const rows = matches.slice(0, shown);
 
   // The worked example comes from a real catalog row: the spec requires one
   // computed from a listed model's prices (20,000 input + 2,000 output tokens).
   // Falls back to null when the catalogue is empty, so the sentence is omitted
   // rather than printed with a made-up price.
-  const exampleModel = models.find((model) => Number(model.input) > 0) ?? models[0] ?? null;
+  const exampleModel = tokenModels.find((model) => Number(model.input) > 0) ?? tokenModels[0] ?? null;
   // A time-limited discount lowers the rates the credit is actually charged at,
   // so the example uses the effective (discounted) rates of the selected plan.
   const exampleRates = exampleModel ? effectiveRates(exampleModel, plan?.id) : null;
@@ -142,7 +147,7 @@ export default function PricingSection({ plans, models, copy }) {
               type="search"
               value={query}
               onChange={(event) => { setQuery(event.target.value); setShown(PAGE); }}
-              placeholder={`Tìm trong ${models.length} model`}
+              placeholder={`Tìm trong ${tokenModels.length} model`}
               className={`${field} w-full sm:w-72`}
             />
           </div>
@@ -243,6 +248,47 @@ export default function PricingSection({ plans, models, copy }) {
             </button>
           ) : null}
         </div>
+
+        {imageModels.length > 0 && (
+          <div className="mt-10">
+            <h3 className="text-base font-semibold text-text-main">Model tạo ảnh</h3>
+            <p className="mt-1 text-sm text-text-muted">
+              Ảnh tính giá theo từng ảnh, không theo token. Gói credit trừ đúng giá này; gói ảnh trừ 1
+              ảnh mỗi lần tạo.
+            </p>
+            <div className="mt-4 overflow-x-auto border border-border bg-surface">
+              <table className="w-full min-w-[420px] border-collapse text-left">
+                <caption className="sr-only">Giá mỗi ảnh của từng model tạo ảnh</caption>
+                <thead>
+                  <tr className="bg-surface-2">
+                    {["Model", "Giá / ảnh"].map((heading) => (
+                      <th
+                        key={heading}
+                        scope="col"
+                        className="border-b border-border px-5 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted"
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {imageModels.map((model) => (
+                    <tr key={model.id} className="border-b border-border last:border-b-0">
+                      <th scope="row" className="px-5 py-3 font-normal">
+                        <span className="block text-sm font-semibold text-text-main">{model.name}</span>
+                        <span className="mt-0.5 block font-mono text-xs text-text-subtle">{model.id}</span>
+                      </th>
+                      <td className="px-5 py-3 font-mono text-sm text-text-main">
+                        {model.image > 0 ? fmtUsd(model.image) : "Chưa đặt giá"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {example && (
           <p className="mt-6 max-w-3xl text-sm text-text-subtle">

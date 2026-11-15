@@ -56,6 +56,11 @@ export async function GET(request) {
     return NextResponse.json(
       {
         availableNanoUsd,
+        // Images left across the live image purchases. Kept beside the dollar
+        // figure (never added to it): an image plan sells counts, not credit.
+        availableImages: queue
+          .filter((entry) => entry.kind === "image" && entry.statusLabel !== "scheduled")
+          .reduce((sum, entry) => sum + (entry.imageRemaining || 0), 0),
         debtNanoUsd: getDebtNanoSync(db, session.userId),
         // An unlimited plan adds no credit to the sum above, so the page needs to
         // know one is live to say "Không giới hạn" instead of a misleading "$0".

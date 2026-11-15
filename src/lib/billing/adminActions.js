@@ -22,6 +22,7 @@ import {
   serializeLimits,
   normalizeLimits,
 } from "./limits.js";
+import { imageCount, isImagePlan } from "./planKind.js";
 
 const REASON_MIN = 3;
 const REASON_MAX = 500;
@@ -89,6 +90,9 @@ export function grantPlanSync(db, userId, { planId, reason, actor = "admin", now
     planId: plan.id,
     orderId: null,
     source: "admin",
+    // An admin grant of an image plan hands out images, exactly like a purchase.
+    kind: plan.kind,
+    imageCount: plan.imageCount,
     creditNanoUsd: nano(plan.creditNanoUsd),
     unlimitedCredit: Number(plan.unlimitedCredit) === 1,
     durationDays: nano(plan.durationDays),
@@ -106,7 +110,9 @@ export function grantPlanSync(db, userId, { planId, reason, actor = "admin", now
       userPlanId: granted.userPlan.id,
       planId: plan.id,
       planCode: plan.code,
+      kind: granted.userPlan.kind,
       creditNanoUsd: granted.userPlan.creditTotalNanoUsd,
+      imageTotal: granted.userPlan.imageTotal,
       unlimitedCredit: granted.userPlan.unlimitedCredit === 1,
       durationDays: nano(plan.durationDays),
       appliedToOverdraftNanoUsd: granted.appliedToOverdraftNanoUsd,
@@ -202,56 +208,85 @@ export function clearDebtSync(db, userId, { reason, expectNanoUsd = null, actor 
 }
 
 // ── Extend ─────────────────────────────────────────────────────────────────
+// ── Expiry ─────────────────────────────────────────────────────────────────
 
 /**
- * Move a purchase's expiry later, by `days` or to an explicit `expiresAt`.
+ * Set a purchase's expiry, earlier or later, by `days` or to an explicit
+ * `expiresAt`.
  *
- * An explicit date must be later than BOTH now and the purchase's start — a plan
- * that expires before it begins can never pay for anything.
+ * Shortening is a real operation, not a mistake to reject: an operator moving a
+ * customer off a plan, correcting a mistyped grant or ending a trial early needs it,
+ * and the alternative (revoke) throws away the whole purchase instead of just the
+ * remaining time.
+ *
+ * An explicit date must be later than the purchase's start (a plan that expires
+ * before it begins can never pay for anything) and later than now. `days` is
+ * signed: positive moves later, negative moves earlier.
+ *
+ * Setting a PAST date is refused on purpose. Ending a purchase now and keeping its
+ * history is what revoke does (it forfeits the balance and writes the ledger row);
+ * two actions that both end a plan would mean two different outcomes for the same
+ * intent. Everything this function accepts leaves the purchase running, just with a
+ * different deadline — so the status does not change and no balance is forfeited.
  */
-export function extendPlanSync(db, userId, userPlanId, { days, expiresAt, reason, actor = "admin", now = null } = {}) {
+export function setPlanExpirySync(db, userId, userPlanId, { days, expiresAt, reason, actor = "admin", now = null } = {}) {
   const cleanReason = validateReason(reason);
   if (!cleanReason) return fail(400, "Lý do phải có từ 3 đến 500 ký tự");
 
   const purchase = loadPurchase(db, userId, userPlanId);
   if (!purchase) return fail(404, "Không tìm thấy gói của người dùng này");
-  if (!isEditable(purchase)) return fail(409, "Chỉ gia hạn được gói đang chạy hoặc đã hết credit");
+  if (!isEditable(purchase)) return fail(409, "Chỉ sửa hạn được của gói đang chạy hoặc đã hết credit");
 
   const at = now || nowIso();
   const nowMs = new Date(at).getTime();
+  const startsMs = new Date(purchase.startsAt).getTime();
   let nextExpiry = null;
 
   if (expiresAt != null) {
     const ms = new Date(expiresAt).getTime();
-    if (!Number.isFinite(ms)) return fail(400, "Ngày hết hạn mới không hợp lệ");
-    const startsMs = new Date(purchase.startsAt).getTime();
-    if (ms <= nowMs) return fail(400, "Ngày hết hạn mới phải sau hiện tại");
-    if (ms <= startsMs) return fail(400, "Ngày hết hạn mới phải sau ngày bắt đầu gói");
+    if (!Number.isFinite(ms)) return fail(400, "Hạn sử dụng mới không hợp lệ");
+    if (ms <= nowMs) return fail(400, "Hạn sử dụng mới phải sau hiện tại");
+    if (ms <= startsMs) return fail(400, "Hạn sử dụng mới phải sau ngày bắt đầu gói");
     nextExpiry = new Date(ms).toISOString();
   } else {
+    // Signed: a negative count moves the expiry earlier.
     const add = nano(days);
-    if (!Number.isInteger(add) || add < 1 || add > DAYS_MAX) {
-      return fail(400, "Số ngày gia hạn phải từ 1 đến 3650");
+    if (!Number.isInteger(add) || add === 0 || Math.abs(add) > DAYS_MAX) {
+      return fail(400, "Số ngày phải là số nguyên khác 0, tối đa 3650");
     }
-    // Extend from the current expiry when it is still in the future (so the
-    // customer keeps the time they paid for), otherwise from now.
+    // Shift from the current expiry when it is still in the future (so a customer
+    // keeps the time they paid for), otherwise from now.
     const currentMs = new Date(purchase.expiresAt).getTime();
     const baseMs = Number.isFinite(currentMs) && currentMs > nowMs ? currentMs : nowMs;
-    nextExpiry = isoPlusDays(add, baseMs);
+    const targetMs = baseMs + add * 86_400_000;
+    if (targetMs <= nowMs) return fail(400, "Hạn mới rơi vào quá khứ; dùng Thu hồi nếu muốn kết thúc gói");
+    if (targetMs <= startsMs) return fail(400, "Hạn sử dụng mới phải sau ngày bắt đầu gói");
+    nextExpiry = new Date(targetMs).toISOString();
   }
+
+  // Which way it moved, for the audit trail and the confirmation the operator sees.
+  const direction =
+    new Date(nextExpiry).getTime() < new Date(purchase.expiresAt).getTime() ? "shortened" : "extended";
 
   db.run(`UPDATE userPlans SET expiresAt = ? WHERE id = ?`, [nextExpiry, userPlanId]);
 
   insertAuditSync(db, {
     userId,
     actor,
-    action: "plan_extended",
+    // One action name for both directions: it is the same field being set, and the
+    // details carry which way it moved.
+    action: "plan_expiry_set",
     reason: cleanReason,
-    details: { userPlanId, before: { expiresAt: purchase.expiresAt }, after: { expiresAt: nextExpiry } },
+    details: {
+      userPlanId,
+      before: { expiresAt: purchase.expiresAt },
+      after: { expiresAt: nextExpiry },
+      direction,
+    },
     now: at,
   });
 
-  return { ok: true, expiresAt: nextExpiry };
+  return { ok: true, expiresAt: nextExpiry, direction, status: purchase.status };
 }
 
 // ── Adjust credit ──────────────────────────────────────────────────────────
@@ -275,6 +310,12 @@ export function adjustCreditSync(db, userId, userPlanId, { deltaNanoUsd, reason,
   // finite one with a made-up balance, so it is refused instead of interpreted.
   if (Number(purchase.unlimitedCredit) === 1) {
     return fail(409, "Gói không giới hạn credit nên không có credit để điều chỉnh");
+  }
+  // An image purchase's balance is a count. Writing dollars onto it would leave a
+  // purchase that holds two balances and pays for two kinds of request, which the
+  // queue, the ledger and every card are written to assume cannot happen.
+  if (isImagePlan(purchase.kind)) {
+    return fail(409, "Gói ảnh không có credit để điều chỉnh; hãy cấp thêm gói ảnh nếu cần");
   }
 
   const delta = nano(deltaNanoUsd);
@@ -355,9 +396,14 @@ export function setPurchaseLimitsSync(db, userId, userPlanId, { limits, reason, 
     1,
     Math.ceil((new Date(purchase.expiresAt).getTime() - Date.now()) / 86_400_000)
   );
+  // Validated against THIS purchase's own unit and balance: an image purchase's
+  // limits are counts, and its credit total is 0 by design.
   const invalid = validateLimits(normalized, {
+    kind: purchase.kind,
+    imageTotal: purchase.imageTotal ?? 0,
     creditNanoUsd: nano(purchase.creditTotalNanoUsd),
     durationDays: remainingDays,
+    unlimited: Number(purchase.unlimitedCredit) === 1,
   });
   if (invalid) return fail(400, invalid);
 
@@ -475,8 +521,14 @@ export function revokePlanSync(db, userId, userPlanId, { reason, actor = "admin"
 
   const at = now || nowIso();
   const remaining = nano(purchase.creditRemainingNanoUsd);
+  // An image purchase forfeits images; the two balances are separate columns, so
+  // both are zeroed and each movement is recorded in its own unit.
+  const remainingImages = imageCount(purchase.imageRemaining);
 
-  db.run(`UPDATE userPlans SET status = 'revoked', creditRemainingNanoUsd = 0 WHERE id = ?`, [userPlanId]);
+  db.run(
+    `UPDATE userPlans SET status = 'revoked', creditRemainingNanoUsd = 0, imageRemaining = 0 WHERE id = ?`,
+    [userPlanId]
+  );
   db.run(`DELETE FROM userPlanWindows WHERE userPlanId = ?`, [userPlanId]);
 
   if (remaining > 0) {
@@ -489,6 +541,17 @@ export function revokePlanSync(db, userId, userPlanId, { reason, actor = "admin"
       createdAt: at,
     });
   }
+  if (remainingImages > 0) {
+    insertLedgerSync(db, {
+      userId,
+      userPlanId,
+      deltaNanoUsd: 0,
+      deltaImages: -remainingImages,
+      kind: "revoke",
+      meta: { adminActor: actor, reason: cleanReason, forfeitedImages: remainingImages },
+      createdAt: at,
+    });
+  }
 
   insertAuditSync(db, {
     userId,
@@ -497,14 +560,15 @@ export function revokePlanSync(db, userId, userPlanId, { reason, actor = "admin"
     reason: cleanReason,
     details: {
       userPlanId,
-      before: { status: purchase.status, creditRemainingNanoUsd: remaining },
-      after: { status: "revoked", creditRemainingNanoUsd: 0 },
+      before: { status: purchase.status, creditRemainingNanoUsd: remaining, imageRemaining: remainingImages },
+      after: { status: "revoked", creditRemainingNanoUsd: 0, imageRemaining: 0 },
       revokedNanoUsd: remaining,
+      revokedImages: remainingImages,
     },
     now: at,
   });
 
-  return { ok: true, revokedNanoUsd: remaining };
+  return { ok: true, revokedNanoUsd: remaining, revokedImages: remainingImages };
 }
 
 // ── Apply to active purchases ──────────────────────────────────────────────
@@ -530,11 +594,19 @@ export function applyLimitsToActiveSync(db, planId, limits, { actor, planCode = 
     return { ok: false, status: 400, error: error.message, affectedCount: 0 };
   }
 
-  const plan = db.get(`SELECT code, creditNanoUsd, unlimitedCredit, durationDays, rpm, tpm FROM plans WHERE id = ?`, [planId]);
+  const plan = db.get(
+    `SELECT code, kind, imageCount, creditNanoUsd, unlimitedCredit, durationDays, rpm, tpm FROM plans WHERE id = ?`,
+    [planId]
+  );
   const code = planCode ?? plan?.code ?? planId;
+  // The new limits are validated in the plan's own unit: for an image plan the
+  // maxima are counts compared with imageCount, not dollars with credit.
   const invalid = validateLimits(normalized, {
+    kind: plan?.kind,
+    imageTotal: plan?.imageCount ?? 0,
     creditNanoUsd: plan?.creditNanoUsd ?? 0,
     durationDays: plan?.durationDays ?? 0,
+    unlimited: Number(plan?.unlimitedCredit) === 1,
   });
   if (invalid) return { ok: false, status: 400, error: invalid, affectedCount: 0 };
 

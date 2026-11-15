@@ -28,6 +28,7 @@
     "@next/third-parties": "^16.2.9",
     "@node-saml/node-saml": "^5.1.0",
     "@xyflow/react": "^12.10.1",
+    "ajv": "^8.17.1",
     "bcryptjs": "^3.0.3",
     "chalk": "^5.6.2",
     "confbox": "^0.2.4",
@@ -44,7 +45,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.7.0",
-    "undici": "^7.19.2",
+    "undici": "^7.30.2",
     "uuid": "^13.0.0",
     "zustand": "^5.0.10"
   },

@@ -138,6 +138,14 @@ async function runHeavyStartup() {
   import("@/lib/notify/planReminders.js")
     .then(({ startTelegramReminders }) => startTelegramReminders())
     .catch((e) => console.error("[TelegramReminders] start failed:", e.message));
+
+  // Support chat: the same bot reads customer messages, relays them to the admin
+  // chat and returns the admin's reply. Idempotent, skipped during a build;
+  // DISABLE_TELEGRAM_SUPPORT turns it off. It is the bot's ONLY reader of updates,
+  // so a deployment that sets a webhook must keep this off.
+  import("@/lib/notify/supportChat.js")
+    .then(({ startSupportChat }) => startSupportChat())
+    .catch((e) => console.error("[SupportChat] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

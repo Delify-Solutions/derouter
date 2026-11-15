@@ -4,14 +4,18 @@
 Lets the admin define the plans that are sold — price, total credit usable on any model, duration and per-window spending limits — and see how each plan performs, without silently rewriting what existing buyers already hold.
 ## Requirements
 ### Requirement: Plan definition
-A plan SHALL have: `code` (2–32 characters of a–z, 0–9, `_` or `-`, starting with a letter or digit, unique), `name` (required), `description`, `price` (integer nano-USD ≥ 0), `credit` (integer nano-USD > 0, usable on every model the buyer's group allows — or `unlimitedCredit`, which stores 0 and removes the ceiling, see plan-queue-billing "Unlimited-credit plans"), `durationDays` (integer ≥ 1), `limits` (0 to 5 entries), an optional custom-amount top-up (`allowCustomAmount` with `customMinVnd` / `customMaxVnd`, see payment-checkout "Custom-amount top-up"), and the existing `isActive`, `isPurchasable`, `allowedGroupIds`, `purchaseLimitPerMonth` (gifts included, see plan-terms "Gifts count toward the monthly purchase limit"), `termOptions` (see plan-terms), `isFeatured` and `sortOrder` with their current meaning. `POST /api/plans` and `PATCH /api/plans/[id]` SHALL accept and return `limits`.
+A plan SHALL have: `code` (2–32 characters of a–z, 0–9, `_` or `-`, starting with a letter or digit, unique), `name` (required), `description`, `price` (integer nano-USD ≥ 0), `kind` (`llm`, the default, or `image`), `durationDays` (integer ≥ 1), `limits` (0 to 5 entries), an optional custom-amount top-up (`allowCustomAmount` with `customMinVnd` / `customMaxVnd`, see payment-checkout "Custom-amount top-up"; `llm` plans only), and the existing `isActive`, `isPurchasable`, `allowedGroupIds`, `purchaseLimitPerMonth` (gifts included, see plan-terms "Gifts count toward the monthly purchase limit"), `termOptions` (see plan-terms) and `highlighted`. A `kind = 'llm'` plan SHALL carry `credit` (integer nano-USD > 0, usable on every model the buyer's group allows — or `unlimitedCredit`, which stores 0 and removes the ceiling, see plan-queue-billing "Unlimited-credit plans"). A `kind = 'image'` plan SHALL instead carry `imageCount` (integer > 0, see image-plans "An image plan is a fixed count for a fixed term") and SHALL store `creditNanoUsd = 0`, `unlimitedCredit = false` and `allowCustomAmount = false`. A plan SHALL have exactly one kind and one balance.
 
 #### Scenario: Go plan
 - **WHEN** an admin creates code `go`, price $10, credit $250, 30 days, limits `[{hours: 5, max: $20}, {hours: 168, max: $80}]`
-- **THEN** the plan is stored and `GET /api/plans` returns it with those values
+- **THEN** the plan is stored and `GET /api/plans` returns it with those values and `kind = "llm"`
+
+#### Scenario: Image plan
+- **WHEN** an admin creates code `img100`, `kind = "image"`, price 250.000đ, `imageCount = 100`, 30 days, limits `[{hours: 5, maxImages: 20}]`
+- **THEN** the plan is stored with `kind = "image"`, `imageCount = 100` and `creditNanoUsd = 0`
 
 ### Requirement: Limit validation
-Each limit SHALL have an integer `hours` between 1 and `durationDays × 24` and a maximum greater than zero and strictly less than the plan's credit (an unlimited-credit plan has no credit to compare with, so only the other rules apply). Two limits SHALL NOT share the same `hours`. For any two limits with `hours` a < b, the maximum of a SHALL NOT exceed the maximum of b. A plan SHALL have at most 5 limits. A violation SHALL be rejected with HTTP 400 and a Vietnamese message naming the offending limit; nothing is saved.
+Each limit SHALL have an integer `hours` between 1 and `durationDays × 24` and a maximum greater than zero and strictly less than the plan's balance in the plan's own unit — the plan's credit for an `llm` plan, `maxImages` and the plan's `imageCount` for an `image` plan (an unlimited-credit plan has no credit to compare with, so only the other rules apply). Two limits SHALL NOT share the same `hours`. For any two limits with `hours` a < b, the maximum of a SHALL NOT exceed the maximum of b. A plan SHALL have at most 5 limits. A violation SHALL be rejected with HTTP 400 and a Vietnamese message naming the offending limit; nothing is saved.
 
 #### Scenario: Shorter window with a larger maximum
 - **WHEN** an admin saves limits `[{5h, $50}, {168h, $40}]`
@@ -21,12 +25,20 @@ Each limit SHALL have an integer `hours` between 1 and `durationDays × 24` and 
 - **WHEN** a plan with $250 credit gets a limit `{24h, $250}`
 - **THEN** the response is HTTP 400
 
+#### Scenario: Image limit counted in images
+- **WHEN** an image plan with 100 images gets a limit `{5h, maxImages: 100}`
+- **THEN** the response is HTTP 400, because a ceiling that never binds is not a limit
+
 ### Requirement: Orders snapshot limits
-Creating an order SHALL store the plan's price, credit, duration and limits at that moment, and approving it SHALL grant exactly that snapshot. An order created before this change (no stored limits) SHALL be granted with the plan's limits at approval time.
+Creating an order SHALL store the plan's price, `kind`, `imageCount`, credit, duration and limits at that moment, and approving it SHALL grant exactly that snapshot. An order created before this change (no stored limits) SHALL be granted with the plan's limits at approval time.
 
 #### Scenario: Limits changed while an order is pending
 - **WHEN** a customer orders "Go" with `{5h, $20}`, the admin then changes it to `{5h, $10}` and approves the order
 - **THEN** the granted plan carries `{5h, $20}`
+
+#### Scenario: Kind changed while an image order is pending
+- **WHEN** a customer orders 100 images, the admin then switches that plan to a credit plan and approves the order
+- **THEN** the granted purchase still holds 100 images and no credit
 
 ### Requirement: Applying new limits to active purchases is explicit
 Editing a plan SHALL affect only later orders and grants. When `PATCH /api/plans/[id]` changes `limits` and includes `applyToActive: true`, every purchased plan of that plan with status `active` SHALL receive the new limits (credit and expiry unchanged), window state for removed window lengths SHALL be deleted while state for kept lengths SHALL keep its spent amount, each affected user SHALL get an audit entry `plan_limits_changed` with actor = the admin and reason "Áp dụng hạn mức mới của gói <code>", and the response SHALL include `affectedCount`.
@@ -57,7 +69,11 @@ The system SHALL NOT store or enforce per-model monthly ceilings. `/api/plans/[i
 - **THEN** the browser is redirected to `/account/plans`
 
 ### Requirement: Plan rates
-A plan SHALL carry an optional `rpm` (requests per minute) and `tpm` (tokens per minute), each empty/0 (stored NULL, unlimited) or a positive integer; a negative or fractional value SHALL be rejected with a Vietnamese message naming RPM or TPM. They SHALL NOT be snapshotted into orders or purchases: they are read from the plan on every request, so a changed value applies to every holder at once. The admin plan form SHALL offer both fields, the plan card SHALL show them, and the customer catalogue SHALL list them as "N request mỗi phút" / "N token mỗi phút" when set.
+A plan SHALL carry an optional `rpm` (requests per minute) and `tpm` (tokens per minute). Each is either empty/0 (stored NULL, unlimited) or a positive integer. A negative or fractional value SHALL be rejected with a Vietnamese message naming RPM or TPM.
+
+They SHALL NOT be snapshotted into orders or purchases. They are read from the plan on every request, so a changed value applies at once to every holder whose purchase has no override of its own (see "Per-purchase rate override").
+
+The admin plan form SHALL offer both fields, and the plan card SHALL show them. The customer catalogue SHALL list them as "N request mỗi phút" / "N token mỗi phút" when set.
 
 #### Scenario: Setting rates
 - **WHEN** an admin saves a plan with RPM 60 and TPM 200000
@@ -66,3 +82,29 @@ A plan SHALL carry an optional `rpm` (requests per minute) and `tpm` (tokens per
 #### Scenario: Clearing rates
 - **WHEN** an admin saves a plan with RPM and TPM left empty or 0
 - **THEN** both are stored as unlimited and no rate line is shown
+
+### Requirement: Per-purchase rate override
+A purchase (`userPlans`) SHALL carry its own optional `rpm` and `tpm`, each meaning:
+- NULL = follow the plan's live value;
+- 0 = no limit;
+- a positive integer = that rate.
+
+The rate applied while the purchase pays SHALL be its override when set, else its plan's. The same value SHALL be used everywhere:
+- request enforcement and the concurrency cap;
+- the account page;
+- `/usage`;
+- the admin queue.
+
+The allowance SHALL be counted per (user, plan) for a purchase with a plan, override or not. A purchase without a plan that has an override SHALL have its own allowance. A purchase without a plan and without an override SHALL have no rate limit. Usage SHALL be recorded under the same allowance it is checked against.
+
+#### Scenario: Higher rate for one customer
+- **WHEN** a plan has RPM 60 and an admin sets RPM 600 on one customer's purchase of it
+- **THEN** that customer may make 600 requests a minute while the purchase pays, and every other holder of the plan stays at 60
+
+#### Scenario: Back to the plan
+- **WHEN** the admin clears the override (empty field)
+- **THEN** the purchase follows the plan's RPM again, including later changes to the plan
+
+#### Scenario: Rate on a credit gift
+- **WHEN** a purchase granted by a credit gift has an RPM override of 20
+- **THEN** its requests are limited to 20 a minute, counted on that purchase alone

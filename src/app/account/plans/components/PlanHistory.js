@@ -36,7 +36,7 @@ export default function PlanHistory({ history = [], loading = false }) {
       <Empty
         icon="inventory_2"
         title="Chưa có gói nào ngừng hoạt động"
-        body="Gói hết credit, hết hạn, bị hủy hoặc đã hoàn tiền sẽ chuyển sang đây."
+        body="Gói hết credit (hoặc hết ảnh), hết hạn, bị hủy hoặc đã hoàn tiền sẽ chuyển sang đây."
       />
     );
   }
@@ -45,20 +45,36 @@ export default function PlanHistory({ history = [], loading = false }) {
     <ul className="flex flex-col gap-2">
       {history.map((row) => {
         const view = STATUS_VIEW[row.status] || { label: row.status, tone: "neutral" };
+        // An image purchase runs out of IMAGES, so "Hết credit" would name the wrong
+        // balance. Only the reason it left the queue changes; the tone is identical.
+        const label = row.kind === "image" && row.status === "exhausted" ? "Hết ảnh" : view.label;
         return (
           <li key={row.id} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border border-border bg-surface-2 px-5 py-4">
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-sm text-text-main">{row.planName || row.planCode || "Gói"}</span>
-                <Tag tone={view.tone} icon={view.icon}>{view.label}</Tag>
+                <Tag tone={view.tone} icon={view.icon}>{label}</Tag>
               </div>
               <p className="text-sm text-text-muted">
                 {SOURCE_LABEL[row.source] || row.source || "—"} · {dateOf(row.startsAt)} → {dateOf(row.expiresAt)}
               </p>
             </div>
             <div className="text-right">
-              <p className="font-mono text-sm text-text-main">{row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(row.creditTotalNanoUsd)}</p>
-              <p className="text-xs text-text-subtle">{row.unlimitedCredit ? "credit" : "credit đã nhận"}</p>
+              {row.kind === "image" ? (
+                <>
+                  <p className="font-mono text-sm text-text-main">
+                    {Number(row.imageTotal || 0).toLocaleString("vi-VN")} ảnh
+                  </p>
+                  <p className="text-xs text-text-subtle">
+                    {Number(row.imageRemaining || 0).toLocaleString("vi-VN")} ảnh còn lại
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-mono text-sm text-text-main">{row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : fmtUsdNano(row.creditTotalNanoUsd)}</p>
+                  <p className="text-xs text-text-subtle">{row.unlimitedCredit ? "credit" : "credit đã nhận"}</p>
+                </>
+              )}
             </div>
           </li>
         );

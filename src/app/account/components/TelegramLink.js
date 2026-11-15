@@ -299,6 +299,10 @@ export function TelegramLinkPrompt({ onLinked }) {
 /** Telegram row on the account overview: state, link and unlink. Hidden until configured. */
 export function TelegramLinkCard({ className = "" }) {
   const { status, setStatus, pending, busy, error, start, cancel, unlink } = useTelegramLink();
+  // The support chat is the bot chat itself; `start=help` opens it with the
+  // command the bot already understands, so the customer's first message is not
+  // "how do I even start".
+  const supportUrl = status?.botUsername ? `https://t.me/${status.botUsername}?start=help` : null;
   if (!status || !status.configured) return null;
   return (
     <div className={`flex flex-col gap-4 p-6 ${className}`}>
@@ -329,6 +333,29 @@ export function TelegramLinkCard({ className = "" }) {
       </div>
       {pending && !status.linked && <PendingBlock pending={pending} cancel={cancel} />}
       <ErrorLine message={error} />
+      {status.linked && (
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <p className="text-sm font-medium text-text-main">Liên hệ admin</p>
+          <p className="text-sm text-text-muted">
+            Nhắn thẳng trong bot Telegram. Admin nhận được ngay và trả lời lại trong cùng khung chat đó.
+          </p>
+          {supportUrl ? (
+            <div>
+              <a
+                href={supportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center gap-2 border border-border bg-surface px-3 py-2 font-mono text-sm text-text-main transition-colors hover:bg-surface-2"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">support_agent</span>
+                Nhắn admin trên Telegram
+              </a>
+            </div>
+          ) : (
+            <p className="text-xs text-text-muted">Chưa đặt bot username nên chưa mở được chat hỗ trợ.</p>
+          )}
+        </div>
+      )}
       {status.linked && <NotifySettings status={status} setStatus={setStatus} />}
     </div>
   );

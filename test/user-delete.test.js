@@ -200,3 +200,43 @@ test("deleting a user that does not exist reports deleted: false", async () => {
   assert.equal(result.email, null);
   assert.equal(db.get(`SELECT COUNT(*) AS n FROM userAuditLog`)?.n, 0);
 });
+
+// ── Bulk delete (spec admin-user-management "Bulk delete") ──────────────────
+
+test("deleting a batch removes every selected account and reports the email", async () => {
+  const { deleteUser } = await import("../src/lib/db/repos/userRepo.js");
+  seedUser("bulk1", "b1@test.local");
+  seedUser("bulk2", "b2@test.local");
+
+  const results = [];
+  for (const id of ["bulk1", "bulk2"]) results.push(await deleteUser(id, { actor: "admin:me", reason: "dọn test" }));
+
+  assert.deepEqual(results.map((r) => r.deleted), [true, true]);
+  assert.deepEqual(results.map((r) => r.email), ["b1@test.local", "b2@test.local"]);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM users WHERE id IN ('bulk1','bulk2')`).n, 0);
+});
+
+test("the deletion reason survives the audit wipe", async () => {
+  const { deleteUser } = await import("../src/lib/db/repos/userRepo.js");
+  seedUser("bulk3", "b3@test.local");
+
+  await deleteUser("bulk3", { actor: "admin:me", reason: "trùng email khách báo" });
+
+  const row = db.get(`SELECT actor, action, reason, details FROM userAuditLog WHERE userId = 'bulk3'`);
+  assert.equal(row.action, "user_deleted");
+  assert.equal(row.actor, "admin:me");
+  // The account's own history is wiped, so this row is the only record of why.
+  assert.equal(row.reason, "trùng email khách báo");
+  assert.match(row.details, /b3@test\.local/);
+});
+
+test("a missing account reports deleted: false instead of throwing", async () => {
+  const { deleteUser } = await import("../src/lib/db/repos/userRepo.js");
+  const result = await deleteUser("nope", { actor: "admin:me" });
+  assert.equal(result.deleted, false);
+});
+
+test("an empty id is a no-op", async () => {
+  const { deleteUser } = await import("../src/lib/db/repos/userRepo.js");
+  assert.equal((await deleteUser("")).deleted, false);
+});

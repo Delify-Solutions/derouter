@@ -517,12 +517,16 @@ export async function actOnCommission(commissionId, action, { actor = "admin", r
  * Admin list of referred accounts (spec "Admin referral list"): every user with a
  * referrer, the referrer, signup date, paid orders and commission per status.
  * Filterable by referrer and by an email/code search over either side.
+ *
+ * `now` pins the clock of the release sweep, exactly like `walletsSync`: a caller
+ * reading a past state (tests, backfills) must not have today's date silently
+ * release a hold that was still running at the time it is asking about.
  */
-export async function listReferrals({ q = "", affiliateUserId = "", limit = 50, offset = 0 } = {}) {
+export async function listReferrals({ q = "", affiliateUserId = "", limit = 50, offset = 0, now = null } = {}) {
   const db = await getAdapter();
   const take = Math.min(Math.max(1, Math.floor(Number(limit) || 50)), 100);
   const skip = Math.max(0, Math.floor(Number(offset) || 0));
-  db.transaction(() => releaseAllDueSync(db));
+  db.transaction(() => releaseAllDueSync(db, now));
 
   const where = [`u.referredByUserId IS NOT NULL`];
   const params = [];

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getKeyGroups, getKeyGroupById } from "@/lib/db/repos/keyGroupsRepo.js";
-import { createUser, normalizeEmail, getUserByEmail } from "@/lib/db/repos/userRepo.js";
+import { createUser, deleteUser, normalizeEmail, getUserByEmail } from "@/lib/db/repos/userRepo.js";
+import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { listUsersAdmin } from "@/lib/db/repos/adminUsersRepo.js";
 import { validatePassword } from "@/lib/users/register";
 import bcrypt from "bcryptjs";
@@ -120,4 +121,75 @@ export async function POST(request) {
       { status: 400, headers: NO_STORE }
     );
   }
+}
+
+// ── Bulk delete ─────────────────────────────────────────────────────────────
+
+/** One request may delete at most this many accounts. */
+export const BULK_DELETE_MAX = 50;
+
+/**
+ * DELETE /api/users — delete several accounts at once
+ * (spec admin-user-management "Bulk delete").
+ *
+ * Body `{ userIds: string[], confirmEmails?: Record<id, email>, reason }`.
+ *
+ * The single-account route asks for the account's email as confirmation. Repeating
+ * that for 50 rows is unusable, and dropping it entirely would make a mis-click
+ * irreversible, so the bulk form asks for `reason` instead (also required by every
+ * other audited action) and reports exactly which accounts were removed. Each
+ * deletion goes through `deleteUser`, so the cascade and the audit row are the same
+ * as the single-row path — there is no second delete implementation.
+ *
+ * The loop is not one transaction on purpose: `deleteUser` opens its own, and a
+ * failure on row 7 must leave rows 1–6 deleted (the report says which succeeded)
+ * rather than pretend nothing happened.
+ */
+export async function DELETE(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Dữ liệu không hợp lệ" }, { status: 400, headers: NO_STORE });
+  }
+
+  const reason = String(body?.reason ?? "").trim();
+  if (reason.length < 3 || reason.length > 500) {
+    return NextResponse.json({ error: "Lý do phải có từ 3 đến 500 ký tự" }, { status: 400, headers: NO_STORE });
+  }
+
+  const raw = Array.isArray(body?.userIds) ? body.userIds : [];
+  // De-duplicated: the same id twice must not produce two audit entries or a second
+  // "already gone" error.
+  const userIds = [...new Set(raw.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (!userIds.length) {
+    return NextResponse.json({ error: "Chưa chọn tài khoản nào" }, { status: 400, headers: NO_STORE });
+  }
+  if (userIds.length > BULK_DELETE_MAX) {
+    return NextResponse.json(
+      { error: `Mỗi lần xoá tối đa ${BULK_DELETE_MAX} tài khoản` },
+      { status: 400, headers: NO_STORE }
+    );
+  }
+
+  const actor = await getAdminActor(request);
+  const deleted = [];
+  const missing = [];
+  const failed = [];
+
+  for (const id of userIds) {
+    try {
+      const result = await deleteUser(id, { actor, reason });
+      if (result?.deleted) deleted.push({ id, email: result.email });
+      else missing.push(id);
+    } catch (error) {
+      // Keep going: one bad row must not strand the rest of the selection.
+      failed.push({ id, error: error?.message || "Không xoá được" });
+    }
+  }
+
+  return NextResponse.json(
+    { deleted, missing, failed, reason },
+    { headers: NO_STORE }
+  );
 }

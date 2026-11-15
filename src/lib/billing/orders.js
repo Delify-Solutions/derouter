@@ -13,6 +13,7 @@
 // Relative imports only. Never import ../db/driver.js or any repo that does.
 import { grantUserPlan } from "./grants.js";
 import { nano } from "./ledger.js";
+import { imageCount, normalizePlanKind } from "./planKind.js";
 import { parseLimits, serializeLimits } from "./limits.js";
 import { parseJson } from "../db/helpers/jsonCol.js";
 // Commission accrual (design D2). Synchronous and driver-free, so it can run
@@ -62,8 +63,12 @@ export function rowToOrder(row) {
     id: row.id,
     userId: row.userId,
     planId: row.planId,
+    // What this order buys: "llm" credit or "image" images. An image order's
+    // creditNanoUsd is 0 and imageCount is what approval grants.
+    kind: normalizePlanKind(row.kind),
     amountNanoUsd: nano(row.amountNanoUsd),
     creditNanoUsd: nano(row.creditNanoUsd),
+    imageCount: imageCount(row.imageCount),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
     // Back-to-back periods bought (spec plan-terms); credit/duration are per period.
@@ -109,8 +114,10 @@ export function toCustomerOrder(order) {
     planId: order.planId ?? null,
     planCode: order.planCode ?? null,
     planName: order.planName ?? null,
+    kind: normalizePlanKind(order.kind),
     amountNanoUsd: order.amountNanoUsd,
     creditNanoUsd: order.creditNanoUsd,
+    imageCount: imageCount(order.imageCount),
     unlimitedCredit: order.unlimitedCredit === true,
     durationDays: order.durationDays,
     periods: order.periods ?? 1,
@@ -207,7 +214,11 @@ export function approveOrderSync(db, orderId, {
     planId: row.planId,
     orderId,
     source: "purchase",
+    // The kind was snapshotted at order time, so a plan turned into an image plan
+    // after the sale cannot change what this buyer is owed.
+    kind: row.kind,
     creditNanoUsd: nano(row.creditNanoUsd),
+    imageCount: imageCount(row.imageCount),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     durationDays: nano(row.durationDays),
     // N periods = N back-to-back purchases (spec plan-terms).

@@ -84,6 +84,7 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
         {plans.map((plan) => {
           const highlighted = highlightCode && String(plan.code).toLowerCase() === highlightCode;
           const limits = Array.isArray(plan.limitsText) ? plan.limitsText : [];
+          const imagePlan = plan.kind === "image";
           const methods = Array.isArray(plan.offeredMethods) ? plan.offeredMethods : [];
           const terms = planTerms(plan);
           const term = terms.find((entry) => entry.periods === chosen[plan.id]) ?? terms[0];
@@ -98,7 +99,8 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
           // when the plan has one, otherwise USD. The other sits underneath.
           // A top-up plan prices whatever amount is typed, so its headline, credit
           // line and buttons all follow the quote (the same maths the server runs).
-          const topup = topupEnabled(plan);
+          // An image plan sells a fixed count, never a typed amount.
+          const topup = !imagePlan && topupEnabled(plan);
           const bounds = topup ? topupBounds(plan) : null;
           // Prefill with the plan's price, pulled inside the bounds: an admin may set
           // a minimum above the price (or a maximum below it), and the card must not
@@ -162,14 +164,18 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
                 )}
                 {secondary && <p className="mt-1 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>}
                 <p className="mt-3 text-sm font-medium text-text-main">
-                  {plan.unlimitedCredit
+                  {imagePlan
+                    ? `${Number(plan.imageCount || 0).toLocaleString("vi-VN")} ảnh`
+                    : plan.unlimitedCredit
                     ? "Credit không giới hạn"
                     : topup
                       ? (quote?.ok ? `Nhận ${fmtUsdNano(quote.creditNanoUsd)} credit` : "Nhập số tiền để xem credit nhận được")
                       : term.periods > 1
                         ? `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit mỗi ${termLabel(plan.durationDays, 1)} × ${term.periods}`
                         : `Nhận ${fmtUsdNano(plan.creditNanoUsd)} credit`}
-                  <span className="font-normal text-text-muted"> · dùng chung mọi model</span>
+                  <span className="font-normal text-text-muted">
+                    {imagePlan ? " · mỗi ảnh trừ 1, dùng cho tạo ảnh" : " · dùng chung mọi model"}
+                  </span>
                 </p>
                 {term.periods > 1 && (
                   <p className="mt-1 text-xs text-text-muted">

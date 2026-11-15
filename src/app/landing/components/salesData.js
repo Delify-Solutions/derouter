@@ -7,10 +7,13 @@
 // có vài hạn mức theo khung giờ (5 giờ / 1 ngày / 1 tuần / tuỳ chỉnh).
 // Không còn khái niệm hạn mức riêng từng model.
 //
-// File này KHÔNG import gì để dùng được ở cả server lẫn client component.
+// Chỉ import module thuần (money, planKind, limits) để file dùng được ở cả server
+// lẫn client component.
 
 // Provider mà danh mục model của trang lấy từ registry của router. Giữ ở đây vì
 // modelCatalog đọc hằng này và cả hai file là dữ liệu của trang bán hàng.
+import { describeLimit } from "@/lib/billing/limits.js";
+
 export const PROVIDER_ID = "opencode-go";
 
 // Nhãn cho wire format. Giữ trong code vì đây là tên giao thức, không phải câu
@@ -91,19 +94,16 @@ export const DEFAULT_PERKS = [
   "Gói đầu hàng đợi chạm hạn mức thì request chuyển sang gói kế tiếp",
 ];
 
-const WINDOW_LABELS = { 5: "5 giờ", 24: "1 ngày", 168: "1 tuần" };
-
-/** Nhãn khung giờ: 5 → "5 giờ", 24 → "1 ngày", 168 → "1 tuần", còn lại "<N> giờ". */
-export function windowLabel(hours) {
-  const n = Number(hours);
-  return WINDOW_LABELS[n] ?? `${Number.isFinite(n) ? Math.round(n) : 0} giờ`;
-}
-
-/** "Tối đa $20 mỗi 5 giờ" */
-export function describeLimit(limit) {
-  if (!limit) return "";
-  return `Tối đa ${fmtUsd((Number(limit.maxNanoUsd) || 0) / 1e9)} mỗi ${windowLabel(limit.hours)}`;
-}
+// A gói ảnh sells counts, so three of the lines above would be false on its card:
+// there is no credit to share, credit is not what "còn lại", and a text request can
+// never be paid by it. Kept in the same shape (plain strings) so the card renders
+// both kinds through one list.
+export const IMAGE_PERKS = [
+  "Mỗi lần tạo ảnh trừ 1 ảnh, không trừ credit",
+  "Mua thêm gói thì số ảnh còn lại vẫn giữ nguyên",
+  "Dùng POST /v1/images/generations, tương thích client OpenAI",
+  "Gói đầu hàng đợi chạm hạn mức thì request chuyển sang gói kế tiếp",
+];
 
 /**
  * Turn a plans row (already mapped by billingRepo.rowToPlan) into the shape the
@@ -119,6 +119,10 @@ export function describeLimit(limit) {
 export function toSalesPlan(plan, offeredMethods = []) {
   const priceUsd = (Number(plan.priceNanoUsd) || 0) / 1e9;
   const creditUsd = (Number(plan.creditNanoUsd) || 0) / 1e9;
+  // An image plan sells a count of images instead of credit, so the card prints the
+  // count where the credit line would go.
+  const imagePlan = plan.kind === "image";
+  const imageCount = imagePlan ? Math.max(0, Math.floor(Number(plan.imageCount) || 0)) : 0;
   // Integer đồng, NULL when the plan is not sold by bank transfer. Shown next to
   // the USD price rather than instead of it (spec plan-dual-pricing "Prices on
   // public and customer pages").
@@ -143,6 +147,9 @@ export function toSalesPlan(plan, offeredMethods = []) {
     offeredMethods: methods,
     soldOut: methods.length === 0,
     creditUsd,
+    kind: imagePlan ? "image" : "llm",
+    imageCount,
+    imageText: imagePlan ? `${imageCount.toLocaleString("vi-VN")} ảnh` : null,
     // No credit ceiling: the card says so instead of showing "$0".
     unlimitedCredit: plan.unlimitedCredit === true,
     durationDays: Number(plan.durationDays) || 0,

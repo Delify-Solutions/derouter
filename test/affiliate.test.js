@@ -1359,7 +1359,7 @@ test("admin referral list shows each referred account with its referrer and comm
   // order is approved now: its 7-day hold is still running.
   approve("o1", Date.now());
 
-  const all = await affiliateRepo.listReferrals({});
+  const all = await affiliateRepo.listReferrals({ now: at(T0 + 5 * MIN) });
   assert.equal(all.total, 2, "only accounts with a referrer are listed");
   const buyer = all.rows.find((r) => r.userId === "buyer");
   assert.equal(buyer.affiliateUserId, "aff");
@@ -1371,9 +1371,9 @@ test("admin referral list shows each referred account with its referrer and comm
   );
   assert.deepEqual(all.rows.find((r) => r.userId === "lurker").commissions, []);
 
-  const filtered = await affiliateRepo.listReferrals({ affiliateUserId: "aff2" });
+  const filtered = await affiliateRepo.listReferrals({ affiliateUserId: "aff2", now: at(T0 + 5 * MIN) });
   assert.deepEqual(filtered.rows.map((r) => r.userId), ["lurker"]);
-  const searched = await affiliateRepo.listReferrals({ q: "afftwo" });
+  const searched = await affiliateRepo.listReferrals({ q: "afftwo", now: at(T0 + 5 * MIN) });
   assert.deepEqual(searched.rows.map((r) => r.userId), ["lurker"], "search matches the referrer's code");
 });
 
@@ -1412,11 +1412,11 @@ test("referral list counts only the current referrer's commission and escapes LI
   approve("o1", T0);
   await affiliateRepo.setUserReferrer("buyer", "aff2", { actor: "admin", reason: "moved" });
 
-  const row = (await affiliateRepo.listReferrals({ affiliateUserId: "aff2" })).rows[0];
+  const row = (await affiliateRepo.listReferrals({ affiliateUserId: "aff2", now: at(T0 + DAY) })).rows[0];
   assert.equal(row.userId, "buyer");
   assert.deepEqual(row.commissions, [], "aff's commission is not shown under aff2");
 
-  const hit = await affiliateRepo.listReferrals({ q: "buyer_1" });
+  const hit = await affiliateRepo.listReferrals({ q: "buyer_1", now: at(T0 + DAY) });
   assert.deepEqual(hit.rows.map((r) => r.userId), ["buyer"], "_ is a literal character, not a wildcard");
 });
 

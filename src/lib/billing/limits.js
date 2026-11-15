@@ -16,6 +16,7 @@
 // This module is PURE (design D8): no driver, no repo, no I/O. It may import the
 // money helpers only.
 import { fmtUsdNano } from "../../shared/utils/money.js";
+import { imageCount, isImagePlan } from "./planKind.js";
 
 export const MAX_LIMITS = 5;
 
@@ -47,10 +48,24 @@ export function fmtLimitAmount(nanoUsd) {
   return fmtUsdNano(nanoUsd).replace(/\.00$/, "");
 }
 
-/** `Tối đa $20 mỗi 5 giờ` */
+/**
+ * `Tối đa $20 mỗi 5 giờ` for a credit limit, `Tối đa 20 ảnh mỗi 5 giờ` for an
+ * image limit. A limit whose unit is unknown defaults to dollars, which is what
+ * every row written before image plans existed carries.
+ */
 export function describeLimit(limit) {
   if (!limit) return "";
+  if (imageCount(limit.maxImages) > 0) {
+    return `Tối đa ${imageCount(limit.maxImages).toLocaleString("vi-VN")} ảnh mỗi ${windowLabel(limit.hours)}`;
+  }
   return `Tối đa ${fmtLimitAmount(limit.maxNanoUsd)} mỗi ${windowLabel(limit.hours)}`;
+}
+
+/** The ceiling of one limit in its own unit: `{ images: true, max }` or dollars. */
+export function limitCeiling(limit) {
+  const images = imageCount(limit?.maxImages);
+  if (images > 0) return { images: true, max: images };
+  return { images: false, max: nano(limit?.maxNanoUsd) };
 }
 
 /** Integer nano-USD from anything numeric. Never NaN, never a float. */
@@ -60,14 +75,20 @@ function nano(value) {
 }
 
 /**
- * Normalise a raw limits value into `[{ hours, maxNanoUsd }]`, sorted by hours.
+ * Normalise a raw limits value into `[{ hours, maxNanoUsd, maxImages }]`, sorted by
+ * hours.
+ *
+ * A limit is measured in the unit the plan sells: `maxNanoUsd` for a credit plan,
+ * `maxImages` for an image plan. `maxImages` appears ONLY when the limit is counted
+ * in images, so a credit plan's stored JSON stays exactly what earlier versions
+ * wrote (and an old row that only carries `maxNanoUsd` keeps working unchanged).
  *
  * Accepts an already-parsed array or a JSON string. `null`/`undefined`/`[]` → `[]`
  * (no limits). A non-array value throws `TypeError`: silently treating garbage as
  * "no limits" would turn a corrupt row into unlimited spending.
  *
  * @param {string|Array|null|undefined} raw
- * @returns {Array<{hours:number, maxNanoUsd:number}>}
+ * @returns {Array<{hours:number, maxNanoUsd:number, maxImages:number}>}
  */
 export function normalizeLimits(raw) {
   if (raw == null) return [];
@@ -87,9 +108,15 @@ export function normalizeLimits(raw) {
       throw new TypeError("Mỗi hạn mức phải là một object { hours, maxNanoUsd }");
     }
     // `max` is accepted as an alias so an API caller can send the natural field
-    // name; the stored/normalised form is always `maxNanoUsd`.
-    const maxSource = entry.maxNanoUsd ?? entry.max;
-    return { hours: nano(entry.hours), maxNanoUsd: nano(maxSource) };
+    // name; the stored/normalised form is always `maxNanoUsd`. An image limit uses
+    // the same alias for its count so a hand-rolled body can say `max: 50`.
+    const maxSource = entry.maxNanoUsd ?? (entry.maxImages == null ? entry.max : undefined);
+    const limit = { hours: nano(entry.hours), maxNanoUsd: nano(maxSource) };
+    // Present only when the limit is measured in images, so a credit plan's stored
+    // JSON is byte-identical to what every earlier version wrote.
+    const images = imageCount(entry.maxImages);
+    if (images > 0) limit.maxImages = images;
+    return limit;
   });
 
   return out.sort((a, b) => a.hours - b.hours);
@@ -98,11 +125,23 @@ export function normalizeLimits(raw) {
 /**
  * Validate a limits list against the plan it belongs to.
  *
+ * An image plan's limits are counted in images (`maxImages`), a credit plan's in
+ * dollars (`maxNanoUsd`); the unit follows `kind`, so a window maximum can never
+ * be compared with the wrong balance. An unlimited plan has no balance to compare
+ * against and only the structural rules apply.
+ *
  * @param {Array|string|null} raw
- * @param {{ creditNanoUsd?: number, durationDays?: number }} plan
+ * @param {{ creditNanoUsd?: number, durationDays?: number, kind?: string,
+ *           imageTotal?: number, unlimited?: boolean }} plan
  * @returns {string|null} Vietnamese error message, or null when valid
  */
-export function validateLimits(raw, { creditNanoUsd = 0, durationDays = 0 } = {}) {
+export function validateLimits(raw, {
+  creditNanoUsd = 0,
+  durationDays = 0,
+  kind = "llm",
+  imageTotal = 0,
+  unlimited = false,
+} = {}) {
   // Parse the raw value first: normalizeLimits rounds for storage, which would hide
   // a fractional window length (2.5h → 3h) instead of rejecting it.
   let rawList;
@@ -126,7 +165,8 @@ export function validateLimits(raw, { creditNanoUsd = 0, durationDays = 0 } = {}
     return error.message;
   }
 
-  const credit = nano(creditNanoUsd);
+  const images = isImagePlan(kind);
+  const balance = images ? imageCount(imageTotal) : nano(creditNanoUsd);
   const days = nano(durationDays);
   const maxHours = days > 0 ? days * 24 : 0;
 
@@ -146,14 +186,24 @@ export function validateLimits(raw, { creditNanoUsd = 0, durationDays = 0 } = {}
       return `Hạn mức ${label} dài hơn thời hạn gói (${days} ngày)`;
     }
 
-    // 2. The maximum is a positive amount below the plan's own credit: equal to or
-    //    above it would be a ceiling the credit always hits first, i.e. no limit
-    //    at all dressed up as one.
-    if (!Number.isInteger(limit.maxNanoUsd) || limit.maxNanoUsd <= 0) {
-      return `Hạn mức ${label}: mức tối đa phải lớn hơn $0`;
-    }
-    if (credit > 0 && limit.maxNanoUsd >= credit) {
-      return `Hạn mức ${label}: mức tối đa phải nhỏ hơn credit của gói (${fmtLimitAmount(credit)})`;
+    // 2. The maximum is a positive amount in the plan's own unit and below what
+    //    the plan sells: equal to or above it would be a ceiling the balance
+    //    always hits first, i.e. no limit at all dressed up as one. An unlimited
+    //    plan has no balance, so only the "greater than zero" half applies.
+    if (images) {
+      if (!Number.isInteger(limit.maxImages) || limit.maxImages <= 0) {
+        return `Hạn mức ${label}: số ảnh tối đa phải là số nguyên lớn hơn 0`;
+      }
+      if (!unlimited && balance > 0 && limit.maxImages >= balance) {
+        return `Hạn mức ${label}: số ảnh tối đa phải nhỏ hơn số ảnh của gói (${balance.toLocaleString("vi-VN")})`;
+      }
+    } else {
+      if (!Number.isInteger(limit.maxNanoUsd) || limit.maxNanoUsd <= 0) {
+        return `Hạn mức ${label}: mức tối đa phải lớn hơn $0`;
+      }
+      if (!unlimited && balance > 0 && limit.maxNanoUsd >= balance) {
+        return `Hạn mức ${label}: mức tối đa phải nhỏ hơn credit của gói (${fmtLimitAmount(balance)})`;
+      }
     }
 
     // 3. One limit per window length.
@@ -168,8 +218,8 @@ export function validateLimits(raw, { creditNanoUsd = 0, durationDays = 0 } = {}
   for (let i = 1; i < limits.length; i += 1) {
     const prev = limits[i - 1];
     const next = limits[i];
-    if (next.maxNanoUsd < prev.maxNanoUsd) {
-      return `Hạn mức ${windowLabel(prev.hours)} (${fmtLimitAmount(prev.maxNanoUsd)}) không được lớn hơn hạn mức ${windowLabel(next.hours)} (${fmtLimitAmount(next.maxNanoUsd)})`;
+    if (limitCeiling(next).max < limitCeiling(prev).max) {
+      return `Hạn mức ${describeLimit(prev)} không được lớn hơn hạn mức ${describeLimit(next)}`;
     }
   }
 

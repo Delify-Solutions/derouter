@@ -1,10 +1,9 @@
 // Zed provider — RSA keypair callback auth (NOT standard OAuth).
 const zedProvider = {
   id: "zed",
-  priority: 10,
+  priority: 999,
   alias: "zd",
   uiAlias: "zd",
-  hidden: true,
   display: {
     name: "Zed",
     icon: "code",

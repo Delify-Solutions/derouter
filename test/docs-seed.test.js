@@ -129,6 +129,8 @@ const EXPECTED_SLUGS = [
   "cc-switch", "sdk", "models", "plans", "troubleshooting",
   // Affiliate program (spec affiliate-program "Customer affiliate page").
   "gioi-thieu",
+  // Two-way support chat over the bot (spec telegram-support).
+  "support",
   // Telegram bot commands (change telegram-bot-commands, bot-orders).
   "telegram-bot",
 ];

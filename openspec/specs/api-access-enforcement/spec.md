@@ -4,7 +4,7 @@
 Defines how the router authorizes an LLM API request made with an API key: which models and request rates apply, which accounts may call at all, how admin keys and customer keys differ, and the exact shape of every denial the router produces itself.
 ## Requirements
 ### Requirement: Customer keys take their model access from the owner's current group
-A key owned by a user account ("customer key") SHALL take its model allow-list exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored, and so SHALL any RPM, TPM, budget or reset-window stored on the group: a group decides only which models its members may call (and which plans they may buy). Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") are limited by their own values only — RPM, TPM, budget, reset-window, expiry and model list — and SHALL NOT belong to a group: a group value stored on an admin key SHALL be ignored, and creating or updating an admin key SHALL store no group.
+A key owned by a user account ("customer key") SHALL take its model allow-list exclusively from the group currently assigned to the owning user, read on every request. Group, RPM, TPM, budget, reset-window and allowed-model values stored on the customer key itself SHALL be ignored, and so SHALL any RPM, TPM, budget or reset-window stored on the group: a group decides only which models its members may call (and which plans they may buy). The allow-list SHALL apply to image combos exactly as it does to text combos, so an image model outside the group's list is refused on `/v1/images/generations` with the same 403 before any upstream call. Only the key's own `isActive` flag and `expiresAt` SHALL still apply to a customer key. Keys without an owner ("admin keys") are limited by their own values only — RPM, TPM, budget, reset-window, expiry and model list — and SHALL NOT belong to a group: a group value stored on an admin key SHALL be ignored, and creating or updating an admin key SHALL store no group.
 
 #### Scenario: Group change applies to the next request
 - **WHEN** an admin moves a user from group A (allows `model-x`) to group B (does not allow `model-x`) and the user's key then requests `model-x`
@@ -21,6 +21,10 @@ A key owned by a user account ("customer key") SHALL take its model allow-list e
 #### Scenario: Legacy group rates are ignored
 - **WHEN** a group row still carries `rpm = 1` or `tpm = 1` from before rates moved to plans
 - **THEN** no rate limit is applied to its members because of it
+
+#### Scenario: Image model outside the group
+- **WHEN** the owner's group allow-list holds no image combo and the key calls `/v1/images/generations`
+- **THEN** the request is rejected with HTTP 403 `model_not_allowed` before any upstream call
 
 ### Requirement: One default admin key is kept by the server
 The dashboard SHALL NOT offer screens to create, edit or delete admin keys. The server SHALL guarantee that at least one admin key (named `Default Key`, no group, no limits) exists, creating it at start-up and whenever the admin key list is read and none exists, so that CLI configuration, usage examples and the dashboard's model test always have a key to use. Creating it SHALL be idempotent, including under concurrent calls. On upgrade, an admin key that inherited its model list from a group SHALL receive that list as its own before the group is removed, so no key gains access it did not have.
@@ -40,24 +44,54 @@ Group and key `budgetUsd`/`resetWindow` SHALL NOT be enforced for customer keys;
 - **WHEN** the owner's group has `budgetUsd = 1` and the customer has already spent $5 through plans this window
 - **THEN** the request is not rejected for budget reasons
 
-### Requirement: Customer request rates come from the paying plan and are counted per user
-For customer keys, the RPM and TPM limits SHALL be those of the plan (`plans.rpm` / `plans.tpm`, empty = unlimited) that the purchase at the head of the user's queue was bought from, read live on every request. A purchase with no plan (admin credit, gift credit) and a user with no purchase able to pay SHALL have no rate limit applied; the latter is then answered by plan admission (402 or 429). RPM SHALL be the number of recorded requests across all keys of the same user in the trailing 60 seconds, and TPM the sum of prompt and completion tokens across all keys of that user in the trailing 60 seconds. When TPM is exceeded the request SHALL wait for room up to `TPM_MAX_WAIT_MS` (default 30000) with waiting serialized per user, then fail with 429 `rate_limit` if still over. Admin keys keep per-key counting.
+### Requirement: Customer request rates come from the paying plan and are counted per user and plan
+For customer keys, the RPM and TPM limits SHALL be those of the purchase that pays for the request — the key's pinned plan, else the purchase at the head of the user's queue — read live on every request. That is the purchase's own override when set, else the limits of the plan it was bought from (`plans.rpm` / `plans.tpm`, empty = unlimited); see plan-templates "Per-purchase rate override".
+
+The following SHALL have no rate limit applied:
+- a purchase with no plan (admin credit, gift credit) and no override;
+- a user with no purchase able to pay. That case is then answered by plan admission (402 or 429).
+
+The allowance SHALL be counted per user and per plan: every purchase of one plan shares its plan id, so the allowance never doubles by buying the same plan twice or by minting more keys. A planless purchase with an override SHALL have its own allowance.
+
+Within an allowance, the limits SHALL be counted across all keys of the same user in the trailing 60 seconds:
+- RPM SHALL be the number of recorded requests;
+- TPM SHALL be the sum of prompt and completion tokens.
+
+When TPM is exceeded, the request SHALL wait for room up to `TPM_MAX_WAIT_MS` (default 30000), with waiting serialized per user. It SHALL then fail with 429 `rate_limit` if still over.
+
+Admin keys keep per-key counting.
 
 #### Scenario: Two keys share one RPM allowance
 - **WHEN** the paying plan allows 10 RPM and the user has made 6 requests with key K1 and 4 with key K2 in the last 60 seconds
 - **THEN** the next request with either key is rejected with HTTP 429, error code `rate_limit` and header `Retry-After: 60`
+
+#### Scenario: Another plan has its own allowance
+- **WHEN** a user holds plans A and B (1 RPM each), key KA is pinned to A and KB to B, and KA has made 1 request in the last minute
+- **THEN** the next request with KA is rejected with 429 `rate_limit` and the next request with KB is accepted
+
+#### Scenario: Buying a plan twice does not double its rate
+- **WHEN** a user holds two purchases of a 2 RPM plan and has made 2 requests in the last minute
+- **THEN** the next request is rejected with 429 `rate_limit`
 
 #### Scenario: The head of the queue sets the rate
 - **WHEN** a user holds plan A (1 RPM) ahead of plan B (100 RPM) in the queue and has made 1 request in the last minute
 - **THEN** the next request is rejected with 429 `rate_limit`, and after the user moves plan B to the head it is accepted
 
 #### Scenario: Editing a plan applies at once
-- **WHEN** an admin raises a plan's RPM while customers hold purchases of it
+- **WHEN** an admin raises a plan's RPM while customers hold purchases of it without an override
 - **THEN** the new value applies to those customers' next request
 
 #### Scenario: Credit without a plan
-- **WHEN** a user pays from an admin or gift credit that has no plan and has made 20 requests in the last minute
+- **WHEN** a user pays from an admin or gift credit that has no plan and no override, and has made 20 requests in the last minute
 - **THEN** the request is not rejected for RPM
+
+#### Scenario: Credit with its own rate
+- **WHEN** a user pays from a gift credit whose purchase has RPM 2 and has made 2 requests in the last minute
+- **THEN** the next request is rejected with 429 `rate_limit`
+
+#### Scenario: Another user's usage does not count
+- **WHEN** two users hold the same 1 RPM plan and one of them has made a request in the last minute
+- **THEN** the other user's next request is accepted
 
 #### Scenario: Admin keys unaffected
 - **WHEN** two admin keys each made 6 requests in the last minute and each key has RPM 10
@@ -117,3 +151,21 @@ Every such denial SHALL also be recorded in request history as today (request de
 - **WHEN** a customer request is rejected with `plan_limit`
 - **THEN** the customer's request history shows that request with status 429
 
+### Requirement: Customer keys may be pinned to one plan
+A customer key SHALL carry an optional plan (`apiKeys.planId`, a `plans.id`). A key without one ("all plans") SHALL be admitted and charged by the whole queue as before. A pinned key SHALL be admitted and charged only by purchases of that plan, in their normal queue order, and SHALL NOT fall back to another plan: when no purchase of that plan can pay, the request SHALL be rejected with 402 `insufficient_quota` and a message naming the plan, or with 429 `plan_limit` when every purchase of the plan with credit is window-blocked. A charge for a pinned key that the plan cannot cover in full SHALL become debt, not be taken from another plan. The pin applies from the key's next request. Admin keys cannot be pinned.
+
+#### Scenario: Pinned key uses its own plan
+- **WHEN** a user holds plan A ahead of plan B in the queue and sends a request with a key pinned to B
+- **THEN** the request is paid from B
+
+#### Scenario: Pinned key does not fall back
+- **WHEN** a user holds only plan A and sends a request with a key pinned to plan B
+- **THEN** the response is HTTP 402 with code `insufficient_quota` and a message naming plan B, while an unpinned key of the same user is still served by A
+
+#### Scenario: Shortfall does not spill
+- **WHEN** a request on a key pinned to B costs $3 and B has $1 left while A has $100
+- **THEN** B pays $1, $2 becomes debt, and A's credit is unchanged
+
+#### Scenario: Lapsed plan
+- **WHEN** the only purchase of a key's pinned plan has expired
+- **THEN** the key answers 402 `insufficient_quota` until the plan is renewed or the key is moved to another plan

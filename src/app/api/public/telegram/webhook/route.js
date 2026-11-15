@@ -61,6 +61,23 @@ export async function POST(request) {
   }
 
   const db = await getAdapter();
+
+  // Support chat first (spec telegram-support), on the SAME update stream: Telegram
+  // allows exactly one reader, and this webhook is it once it is registered. It takes
+  // only what the command bot does not own — free text from a customer and the
+  // admin's reply in the notification chat — and leaves every `/command` alone
+  // (`answerHelp: false`), so one message still gets exactly one answer.
+  try {
+    const { handleSupportUpdate } = await import("@/lib/notify/supportChat.js");
+    const support = await handleSupportUpdate(db, update, { answerHelp: false });
+    // A relayed message or an answered admin reply is finished: the command bot has
+    // nothing to add and would only answer a second time.
+    if (support.handled === "customer" || support.handled === "admin_reply") return OK();
+  } catch (error) {
+    // The message only: the update can hold what the customer typed.
+    console.warn("[telegram-support] update skipped:", String(error?.message || error).slice(0, 200));
+  }
+
   await handleUpdate(update, {
     db,
     settings,

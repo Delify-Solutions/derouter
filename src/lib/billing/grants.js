@@ -9,6 +9,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { serializeLimits } from "./limits.js";
+import { imageCount, isImagePlan, normalizePlanKind } from "./planKind.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -64,8 +65,14 @@ export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = n
   if (!plan || plan.status !== "active") return 0;
   const at = now || nowIso();
   const remaining = nano(plan.creditRemainingNanoUsd);
+  // An image purchase forfeits images, not dollars; one ledger row records exactly
+  // what was taken back so the balance can never be read from the wrong column.
+  const remainingImages = imageCount(plan.imageRemaining);
 
-  db.run(`UPDATE userPlans SET status = ?, creditRemainingNanoUsd = 0 WHERE id = ?`, [status, plan.id]);
+  db.run(
+    `UPDATE userPlans SET status = ?, creditRemainingNanoUsd = 0, imageRemaining = 0 WHERE id = ?`,
+    [status, plan.id]
+  );
   db.run(`DELETE FROM userPlanWindows WHERE userPlanId = ?`, [plan.id]);
 
   if (remaining > 0) {
@@ -75,6 +82,17 @@ export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = n
       deltaNanoUsd: -remaining,
       kind: "revoke",
       meta: { reason, ...meta },
+      createdAt: at,
+    });
+  }
+  if (remainingImages > 0) {
+    insertLedgerSync(db, {
+      userId: plan.userId,
+      userPlanId: plan.id,
+      deltaNanoUsd: 0,
+      deltaImages: -remainingImages,
+      kind: "revoke",
+      meta: { reason, forfeitedImages: remainingImages, ...meta },
       createdAt: at,
     });
   }
@@ -134,7 +152,10 @@ export function grantUserPlan(db, {
   planId = null,
   orderId = null,
   source,
+  // What the purchase sells: "llm" (credit) or "image" (imageCount images).
+  kind = "llm",
   creditNanoUsd,
+  imageCount: grantedImages = 0,
   unlimitedCredit = false,
   durationDays,
   periods = 1,
@@ -169,8 +190,13 @@ export function grantUserPlan(db, {
   for (let index = 0; index < count; index += 1) {
     const granted = insertPeriodSync(db, {
       userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
+      kind: normalizePlanKind(kind),
+      // An image purchase has no dollar credit at all: its balance is the image
+      // count, so credit stays 0 and every grant of images is counted, never priced.
+      credit: isImagePlan(kind) || unlimited ? 0 : Math.max(0, nano(creditNanoUsd)),
+      images: isImagePlan(kind) ? imageCount(grantedImages) : 0,
+      // Per-purchase override: null follows the plan, 0 disables the limit.
       rpm: rateOverride(rpm), tpm: rateOverride(tpm),
-      credit: unlimited ? 0 : Math.max(0, nano(creditNanoUsd)),
       // Keep the caller's own timestamp string when the period starts right away.
       startsAt: startMs === atMs ? at : new Date(startMs).toISOString(),
       durationDays,
@@ -196,7 +222,7 @@ function rateOverride(value) {
 
 function insertPeriodSync(db, {
   userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
-  rpm = null, tpm = null, credit, startsAt, durationDays, at, period,
+  kind, credit, images = 0, rpm = null, tpm = null, startsAt, durationDays, at, period,
 }) {
   const planId = planIdValue;
   const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
@@ -216,16 +242,22 @@ function insertPeriodSync(db, {
     });
   }
 
-  // 2. The remainder becomes the plan's credit.
+  // 2. The remainder becomes the plan's credit (an image purchase sells images
+  //    instead, so it keeps both credit columns at 0 and counts imageRemaining).
   const planCredit = credit - paydown;
+  const planImages = imageCount(images);
+  const isImage = normalizePlanKind(kind) === "image";
   const userPlan = {
     id: uuidv4(),
     userId,
     planId: planIdValue,
     orderId,
     source,
+    kind: isImage ? "image" : "llm",
     creditTotalNanoUsd: planCredit,
     creditRemainingNanoUsd: planCredit,
+    imageTotal: isImage ? planImages : 0,
+    imageRemaining: isImage ? planImages : 0,
     unlimitedCredit: unlimited ? 1 : 0,
     startsAt,
     expiresAt,
@@ -238,11 +270,12 @@ function insertPeriodSync(db, {
   };
 
   db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, unlimitedCredit, startsAt, expiresAt, status, priority, limits, rpm, tpm, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, unlimitedCredit, startsAt, expiresAt, status, priority, limits, rpm, tpm, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source,
-      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd, userPlan.unlimitedCredit,
+      userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source, userPlan.kind,
+      userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
+      userPlan.imageTotal, userPlan.imageRemaining, userPlan.unlimitedCredit,
       userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.priority,
       userPlan.limits, userPlan.rpm, userPlan.tpm, userPlan.createdAt,
     ]
@@ -261,11 +294,15 @@ function insertPeriodSync(db, {
     ...(unlimited ? { unlimited: true } : {}),
     ...(period ? { period: period.index, periods: period.of } : {}),
     ...(startsAt !== at ? { startsAt } : {}),
+    ...(isImage ? { images: planImages } : {}),
   };
   insertLedgerSync(db, {
     userId,
     userPlanId: userPlan.id,
-    deltaNanoUsd: planCredit,
+    // An image grant moves the image balance, not the dollar one; the ledger row
+    // records exactly the movement and snapshots the image balance after it.
+    deltaNanoUsd: isImage ? 0 : planCredit,
+    deltaImages: isImage ? planImages : 0,
     kind: ledgerKind,
     meta: meta && typeof meta === "object"
       ? { ...meta, source, orderId, planId, appliedToOverdraftNanoUsd: paydown, ...extra }

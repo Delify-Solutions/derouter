@@ -15,15 +15,19 @@ import { admitSync, effectiveRate, rateKeyOf } from "./planQueue.js";
  * `rateKey` (see getUserRateUsage and ratePlanIdSync): the plan id, or the purchase
  * for a planless purchase with an override. null rateKey = nothing to count.
  *
+ * `requestKind` ("llm" by default) is what admission uses to decide which purchase
+ * pays — a text request never picks an image plan, so the rate it applies must be
+ * the one of the purchase that will actually be charged.
+ *
  * @returns {{ userPlanId: string|null, planId: string|null, planName: string|null,
  *             rateKey: string|null, rpm: number|null, tpm: number|null }}
  *          null rpm/tpm = no limit (no paying plan, or none set)
  */
-export function payingRatesSync(db, userId, nowIso = null, { planId = null } = {}) {
+export function payingRatesSync(db, userId, nowIso = null, { planId = null, requestKind = "llm" } = {}) {
   const none = { userPlanId: null, planId: null, planName: null, rateKey: null, rpm: null, tpm: null };
   if (!db || !userId) return none;
   // `planId` = the plan a pinned key is paid by; omitted = the head of the queue.
-  const admitted = admitSync(db, userId, nowIso, { planId });
+  const admitted = admitSync(db, userId, nowIso, { planId, requestKind });
   if (!admitted.ok) return none;
   const row = db.get(
     `SELECT up.id AS id, up.planId AS planId, up.rpm AS rpm, up.tpm AS tpm,

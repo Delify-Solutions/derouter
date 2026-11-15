@@ -4,7 +4,7 @@
 Defines the signed-in customer's self-service area: creating and revoking API keys, seeing and reordering purchased plans with live window status, buying plans, and auditing every charge — entirely in Vietnamese and usable by keyboard.
 ## Requirements
 ### Requirement: API key page
-`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status, and the time of the key's last request recorded in usage history as "dùng lần cuối HH:MM DD/MM/YYYY" in the browser's local time, or "chưa dùng" when no request is on record within the usage retention period) and SHALL let the customer create a key with a name of 1–80 characters and delete a key after confirmation. After creation the full secret SHALL be shown with a copy control and the advice "Sao chép key ngay để dán vào ứng dụng. Sau này bạn vẫn xem lại được ở danh sách key." Each row SHALL offer, as buttons with accessible names: show/hide the full key ("Hiện key"/"Ẩn key"), copy the full key ("Sao chép key", confirmed as "Đã sao chép"), and "Usage", which opens the public `/usage` page already loaded with that key. The list response SHALL NOT contain secrets; a key's secret SHALL be sent only by `POST /api/account/keys/{id}/secret`, only to the signed-in owner of that key (any other key, or another customer's key, answers 404), with `Cache-Control: no-store`, at most 60 times a minute per customer (then HTTP 429), and only when the customer presses one of those buttons. A revealed secret SHALL live only in the page's memory (a reload hides it). "Usage" SHALL hand the key to `/usage` through the browser storage slot `/usage` reads on load, never through the URL, and signing out of the account SHALL clear that slot. The page SHALL show the API base URL (`<public base URL>/v1`, the public base URL being the `publicBaseUrl` setting or the request origin) with a copy control. With no keys it SHALL show "Bạn chưa có API key" and a "Tạo key" action.
+`/account/keys` SHALL list the customer's keys (name, first 8 characters followed by `…`, creation date, status, the plan the key is pinned to or "Tất cả gói", and the time of the key's last request recorded in usage history as "dùng lần cuối HH:MM DD/MM/YYYY" in the browser's local time, or "chưa dùng" when no request is on record within the usage retention period) and SHALL let the customer create a key with a name of 1–80 characters and an "Áp dụng cho" choice (all plans, or one plan the customer currently holds, showing its RPM/TPM), change that choice afterwards ("Đổi gói"), and delete a key after confirmation. The form SHALL explain that RPM/TPM follow the plan and are shared by every key of that plan. A key whose pinned plan has no live purchase SHALL show a "Gói hết hạn" status. The API SHALL refuse (400) a plan the customer does not currently hold and SHALL treat another customer's key as not found.
 
 #### Scenario: List carries no secret
 - **WHEN** a customer creates a key and reloads the page
@@ -18,10 +18,24 @@ Defines the signed-in customer's self-service area: creating and revoking API ke
 - **WHEN** a customer's key made its last request at 20:53 on 01/11/2026 and the customer opens `/account/keys`
 - **THEN** the row shows "dùng lần cuối 20:53 01/11/2026", and pressing "Usage" opens `/usage` showing that key's usage with no key in the address bar
 
-### Requirement: Plan queue page
-`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), remaining and total credit with a progress bar (an unlimited-credit plan shows "Không giới hạn" instead of a bar), expiry date and days left, every limit as "<window label>: $<spent> / $<max> · reset <HH:MM>" or "<window label>: chưa dùng" when no window is open, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. Times SHALL be shown in the browser's local time.
+#### Scenario: Creating a key for one plan
+- **WHEN** a customer holding plans A and B creates a key choosing plan B
+- **THEN** the key is listed with plan B and its requests are paid from B only
 
-The plans SHALL be split into two tabs, `Đang hoạt động` (the queue above) and `Không hoạt động`, each showing its count. The inactive tab SHALL list every purchase that is not `active`, newest first, with its plan name, source, start and expiry, total credit received and a status label: `Hết credit` (exhausted), `Hết hạn` (expired), `Đã hủy` (revoked) or `Đã hoàn tiền` (refunded). A plan SHALL appear on exactly one tab. The tabs SHALL follow the WAI-ARIA tabs pattern (arrow keys move between them).
+#### Scenario: Plan not held
+- **WHEN** a customer submits a plan id they do not currently hold, or one that belongs to another customer
+- **THEN** the response is HTTP 400 and the key is not created or changed
+
+#### Scenario: Moving a key
+- **WHEN** a customer changes a key from plan B to "Tất cả gói"
+- **THEN** the key's next request may be paid by the head of the queue
+
+### Requirement: Plan queue page
+`/account/plans` ("Gói của tôi") SHALL show, in queue order, each queued plan with: name, source label (`Mua`, `Tặng`, `Admin`, `Hoàn tiền`), its balance with a progress bar, expiry date and days left, every limit in the plan's own unit, and one status label: `Đang trả` (the plan admission would pick now), `Chờ`, or `Tạm khóa đến <HH:MM>`. The balance SHALL be remaining and total credit for a credit plan (an unlimited-credit plan showing "Không giới hạn" instead of a bar), and remaining and total images, labelled "ảnh", for an image plan. Each limit SHALL read "<window label>: $<spent> / $<max> · reset <HH:MM>" for a credit plan and "<window label>: <spent> / <max> ảnh · reset <HH:MM>" for an image plan, or "<window label>: chưa dùng" when no window is open. Times SHALL be shown in the browser's local time.
+
+Above the queue the page SHALL show available credit and, when the customer holds at least one live image purchase, available images as a separate figure — the two SHALL never be added together.
+
+The plans SHALL be split into two tabs, `Đang hoạt động` (the queue above) and `Không hoạt động`, each showing its count. The inactive tab SHALL list every purchase that is not `active`, newest first, with its plan name, source, start and expiry, the balance received in the plan's own unit and a status label: `Hết credit` (exhausted), `Hết hạn` (expired), `Đã hủy` (revoked) or `Đã hoàn tiền` (refunded). A plan SHALL appear on exactly one tab. The tabs SHALL follow the WAI-ARIA tabs pattern (arrow keys move between them).
 
 #### Scenario: Refunded plan leaves the queue
 - **WHEN** an admin refunds an order whose plan was in the queue
@@ -31,6 +45,10 @@ The plans SHALL be split into two tabs, `Đang hoạt động` (the queue above)
 - **WHEN** plan 1 is window-blocked until 15:30 and plan 2 is eligible
 - **THEN** plan 1 shows "Tạm khóa đến 15:30" and plan 2 shows "Đang trả"
 
+#### Scenario: Image plan card
+- **WHEN** a customer holds an image purchase with 40 of 100 images left and a 5-hour limit of 20 images with 12 spent
+- **THEN** its card shows "40 / 100 ảnh" with a progress bar and "5 giờ: 12 / 20 ảnh · reset 15:00"
+
 ### Requirement: Reordering from the page
 The customer SHALL be able to move plans with a drag handle or with "↑"/"↓" buttons. Any unsaved change SHALL reveal "Lưu thứ tự" and "Hủy". Saving SHALL submit the full order; on success a one-line confirmation SHALL appear; on HTTP 409 the page SHALL show "Danh sách gói đã thay đổi — đã tải lại" and reload the queue; "Hủy" SHALL restore the saved order.
 
@@ -39,11 +57,15 @@ The customer SHALL be able to move plans with a drag handle or with "↑"/"↓" 
 - **THEN** the next API request is charged to plan 2
 
 ### Requirement: Buying from the page
-The page SHALL show a card per active plan with price, "Nhận $<credit> dùng chung mọi model", "Dùng <N> ngày", each limit, and whether it can be bought (with the existing blocking reason when not). Buying SHALL create a pending order through the existing manual flow and show "Đơn đã tạo — chuyển khoản theo hướng dẫn, admin duyệt xong gói sẽ vào hàng đợi". With `?plan=<code>` in the URL, that plan's card SHALL be highlighted and scrolled into view. The page SHALL also list the customer's orders and, collapsed by default, past plans (exhausted, expired, revoked).
+The page SHALL show a card per active plan with price, the plan's balance line, "Dùng <N> ngày", each limit, and whether it can be bought (with the existing blocking reason when not). The balance line SHALL be "Nhận $<credit> dùng chung mọi model" for a credit plan and "Nhận <N> ảnh" for an image plan, and an image plan SHALL NOT offer a custom-amount top-up. Buying SHALL create a pending order through the existing manual flow and show "Đơn đã tạo — chuyển khoản theo hướng dẫn, admin duyệt xong gói sẽ vào hàng đợi". With `?plan=<code>` in the URL, that plan's card SHALL be highlighted and scrolled into view. The page SHALL also list the customer's orders and, collapsed by default, past plans (exhausted, expired, revoked).
 
 #### Scenario: Deep link to a plan
 - **WHEN** the customer opens `/account/plans?plan=go`
 - **THEN** the "Go" card is highlighted and in view
+
+#### Scenario: Image plan buy card
+- **WHEN** an active image plan sells 100 images for 30 days
+- **THEN** its card shows "Nhận 100 ảnh", "Dùng 30 ngày" and no amount field
 
 ### Requirement: Ledger page
 `/account/ledger` SHALL list the customer's ledger newest first, 25 rows per page: time, kind label (`Trừ credit`, `Được cấp`, `Hết hạn`, `Điều chỉnh`, `Hoàn credit`, `Thu hồi`), plan name, model and input/output tokens for charges, signed amount, and balance after. It SHALL filter by plan and by kind.

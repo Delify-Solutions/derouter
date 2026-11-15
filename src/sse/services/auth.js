@@ -380,12 +380,12 @@ export async function isValidApiKey(apiKey) {
  * enforceKeyLimits so the order — status, group, expiry, RPM, TPM, model, quota —
  * is decided in ONE place and is testable without a Next.js runtime.
  */
-export async function enforceKeyAccess(apiKey, model, { clientIp = null, signal = null } = {}) {
+export async function enforceKeyAccess(apiKey, model, { clientIp = null, signal = null, requestKind = "llm" } = {}) {
   if (!apiKey) return null;
   const { enforceKeyLimits } = await import("@/lib/auth/keyEnforcement.js");
   const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
 
-  const limit = await enforceKeyLimits(apiKey, model, { signal });
+  const limit = await enforceKeyLimits(apiKey, model, { signal, requestKind });
   if (!limit.ok && limit.clientGone) {
     // Nobody is listening: no denial row, no rate-limit answer.
     return new Response(null, { status: 499 });

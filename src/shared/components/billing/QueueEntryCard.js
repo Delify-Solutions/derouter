@@ -2,7 +2,7 @@
 
 import PropTypes from "prop-types";
 import CreditBar from "./CreditBar";
-import { UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
+import { UNLIMITED_CREDIT_LABEL, fmtUsdNano } from "@/shared/utils/money";
 import LimitMeter from "./LimitMeter";
 import StatusTag, { dateTimeOf, spanText } from "./StatusTag";
 
@@ -87,7 +87,11 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
         </div>
       </dl>
 
-      {entry.unlimitedCredit ? (
+      {entry.kind === "image" ? (
+        // An image purchase sells counts, not credit: the headline is the number of
+        // images left, and there is no dollar figure to draw a bar against.
+        <ImageBalance total={entry.imageTotal} remaining={entry.imageRemaining} />
+      ) : entry.unlimitedCredit ? (
         // No ceiling to draw a bar against: the limits below are what bound it.
         <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
           <span className="text-sm text-text-muted">Credit</span>
@@ -113,6 +117,10 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
         <ul className="flex flex-col gap-1 border-t border-border pt-4 text-sm text-text-muted">
           {entry.limits.map((limit) => (
             <li key={limit.hours}>
+              {limit.maxImages > 0
+                ? `Tối đa ${Number(limit.maxImages).toLocaleString("vi-VN")} ảnh`
+                : `Tối đa ${fmtUsdNano(limit.maxNanoUsd)}`}
+              {" mỗi "}
               {limit.hours === 5 ? "5 giờ" : limit.hours === 24 ? "1 ngày" : limit.hours === 168 ? "1 tuần" : `${limit.hours} giờ`}: chưa dùng
             </li>
           ))}
@@ -121,6 +129,42 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
 
       {renderActions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">{renderActions(entry)}</div>}
     </article>
+  );
+}
+
+/**
+ * Images left on one purchase, drawn like CreditBar but counted. A separate
+ * component (not a prop on CreditBar) because the two units must never be
+ * formatted by the same code: "40 / 100" is not "$40 / $100".
+ */
+function ImageBalance({ total = 0, remaining = 0 }) {
+  const max = Math.max(0, Number(total) || 0);
+  const left = Math.max(0, Math.min(Number(remaining) || 0, max));
+  const pct = max > 0 ? Math.round((left / max) * 100) : 0;
+  const low = max > 0 && pct <= 10;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+        <span className="whitespace-nowrap text-sm text-text-muted">Ảnh còn lại</span>
+        <span className="flex max-w-full flex-wrap items-baseline justify-end gap-x-1.5 text-text-main">
+          <span className="max-w-full text-2xl font-semibold leading-none tracking-tight tabular-nums break-words">
+            {left.toLocaleString("vi-VN")}
+          </span>
+          <span className="whitespace-nowrap font-mono text-xs text-text-subtle">/ {max.toLocaleString("vi-VN")} ảnh</span>
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={`Ảnh còn lại: ${left} trên ${max}`}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={left}
+        aria-valuetext={`${left} trên ${max} ảnh`}
+        className="h-1.5 w-full bg-surface-2"
+      >
+        <div className={`h-1.5 ${low ? "bg-amber-500" : "bg-text-main"}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 }
 

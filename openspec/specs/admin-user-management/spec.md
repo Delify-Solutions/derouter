@@ -33,9 +33,10 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 |---|---|---|---|---|
 | Grant plan | plan id | any plan, including inactive ones | new purchase with source `admin`, limits snapshotted | `grant` |
 | Grant credit | $0.01–$10,000, 1–3650 days | always | new purchase without limits | `grant` |
-| Extend | +1–3650 days, or a new expiry later than now and than the start | purchase `active` or `exhausted` | expiry changed | — |
-| Adjust credit | non-zero signed amount, absolute value ≤ $10,000 | purchase `active` or `exhausted`, result ≥ 0 | result 0 → `exhausted`; from 0 to > 0 with expiry in the future → `active` | `adjust` |
+| Set expiry | an exact `expiresAt`, or signed `days` (non-zero, absolute value 1–3650) | purchase `active` or `exhausted`; the resulting expiry later than now and later than the purchase's `startsAt` | `expiresAt` replaced, earlier or later; balance, windows and status unchanged | — |
+| Adjust credit | non-zero signed amount, absolute value ≤ $10,000 | purchase `active` or `exhausted`, `kind = llm`, result ≥ 0 | result 0 → `exhausted`; from 0 to > 0 with expiry in the future → `active`; an image purchase is refused (409) | `adjust` |
 | Edit limits | limits valid per `plan-templates` against this purchase's credit and duration | purchase `active` or `exhausted` | window state of removed lengths deleted; spent kept for kept lengths | — |
+| Edit RPM/TPM | per purchase: empty (follow the plan), 0 (no limit) or an integer up to 1,000,000,000 | purchase `active` or `exhausted`; an unlimited-credit purchase must keep a window limit or a rate | the purchase's override is saved and applies on the next request (spec plan-templates "Per-purchase rate override"); audit `plan_rates_changed` | — |
 | Revoke | — | purchase `active` or `exhausted` | status `revoked`, remaining credit set to 0 | `revoke` (negative remaining) |
 | Reorder queue | full ordered id list (reason not required) | as in `plan-queue-billing` | priorities 1..n | — |
 | Disable / enable / delete key | key id; delete needs confirmation | key belongs to the user | effective on the next request | — |
@@ -45,6 +46,10 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 | Change status | `active`, `suspended`, `unverified` | always | `suspended`/`unverified` also revokes all sessions and blocks the API | — |
 | Edit note (reason not required) | text ≤ 2000 characters | always | `adminNote` saved | — |
 | Reset password | password per `account-registration` | always | all sessions revoked; the password is never logged | — |
+
+#### Scenario: No credit on an image purchase
+- **WHEN** an admin adds $10 of credit to a purchase that sells images
+- **THEN** the response is HTTP 409, the purchase keeps $0 credit and its image count, no ledger row and no audit row are written, and the admin screen does not offer the action
 
 #### Scenario: Adjust below zero refused
 - **WHEN** the admin subtracts $30 from a purchase with $20 remaining
@@ -62,8 +67,20 @@ Each action below SHALL require a reason of 3–500 characters after trimming, e
 - **WHEN** the admin submits "Grant credit" with an empty reason
 - **THEN** the response is HTTP 400 and no purchase is created
 
+#### Scenario: Shortening keeps what the customer holds
+- **WHEN** an admin moves a $250 purchase from 12 Dec to 20 Nov with reason "khách xin rút ngắn"
+- **THEN** the expiry becomes 20 Nov, the purchase stays `active` with $250 remaining, no `expire` ledger row is written, and the audit entry `plan_expiry_set` records `direction: "shortened"`
+
+#### Scenario: Extending by days
+- **WHEN** an admin adds 10 days to a purchase expiring tomorrow
+- **THEN** the expiry moves 10 days later than the current expiry and the audit entry records `direction: "extended"`
+
+#### Scenario: A past expiry is revoke's job
+- **WHEN** an admin sets an expiry earlier than now, or subtracts more days than the purchase has left
+- **THEN** the response is HTTP 400 with a message pointing at "Thu hồi", and nothing changes
+
 ### Requirement: Cascade delete
-`DELETE /api/users/[id]` SHALL require a body `{ confirmEmail }` equal to the user's email (case-insensitive) and otherwise answer HTTP 400. On success it SHALL, in one transaction, delete the user's keys, sessions, verification tokens, purchases, window state, ledger rows, gift redemptions and audit entries and the user row; keep the user's orders (which carry the email snapshot); and write one audit entry `user_deleted` holding the user id and email.
+`DELETE /api/users/[id]` SHALL require a body `{ confirmEmail }` equal to the user's email (case-insensitive) and otherwise answer HTTP 400. On success it SHALL, in one transaction, delete the user's keys, sessions, verification tokens, purchases, window state, ledger rows, gift redemptions, support-chat messages and audit entries and the user row; keep the user's orders (which carry the email snapshot); and write one audit entry `user_deleted` holding the user id, email and, when the caller supplied one, the deletion reason.
 
 #### Scenario: Orders survive deletion
 - **WHEN** a user with 2 paid orders is deleted
@@ -91,3 +108,37 @@ Every row of the admin request details (`/dashboard/usage?tab=details`) and its 
 #### Scenario: Key deleted after the request
 - **WHEN** a@x.vn makes a request with key "A old laptop" and then deletes that key
 - **THEN** the row still shows "a@x.vn" with "key đã xóa", and filtering by a@x.vn still lists it
+
+### Requirement: Bulk delete
+`DELETE /api/users` SHALL accept `{ userIds: string[], reason }` and delete up to 50 distinct accounts per request. `reason` SHALL be required (3–500 characters) because the single-account email confirmation is unusable for a batch; `userIds` SHALL be de-duplicated and empty ids dropped. A request with no ids, or more than 50, SHALL be answered with HTTP 400 and delete nothing. Each account SHALL be deleted through the same cascade as `DELETE /api/users/[id]`, and each SHALL receive its own `user_deleted` audit entry carrying the reason. A failure on one account SHALL NOT abort the rest; the response SHALL report `deleted`, `missing` and `failed` separately.
+
+The users list SHALL offer a checkbox per row, a select-all for the current page, the number selected, and a confirmation that lists the exact emails, requires the reason, and is disabled until the reason is long enough. Changing page, filter or sort SHALL clear the selection, so no account is deleted while off screen.
+
+#### Scenario: Deleting a batch
+- **WHEN** an admin selects 2 accounts, gives the reason "dọn tài khoản test" and confirms
+- **THEN** both are deleted, the response reports 2 deleted with their emails, and each has a `user_deleted` audit row carrying that reason
+
+#### Scenario: The reason survives the audit wipe
+- **WHEN** an account is deleted with a reason
+- **THEN** the reason is readable on the surviving `user_deleted` audit row, even though the account's other audit entries were deleted by the cascade
+
+#### Scenario: Too many
+- **WHEN** a request carries 51 account ids
+- **THEN** the response is HTTP 400 and no account is deleted
+
+#### Scenario: Changing the page clears the selection
+- **WHEN** an admin selects rows and then changes the page or a filter
+- **THEN** nothing remains selected and the bulk action disappears
+
+### Requirement: Lock and delete from the user page
+The user detail header SHALL offer:
+- **"Khóa tài khoản"**, or **"Mở khóa"** when the account is suspended. It SHALL perform the audited status change to `suspended` or `active`, with a required reason.
+- **"Xóa tài khoản"**. It SHALL perform the cascade delete. The confirm button SHALL be enabled only once the account's email is typed back, and the dialog SHALL list what is removed and what is kept. After deletion the admin SHALL return to the users list.
+
+#### Scenario: Lock from the header
+- **WHEN** the admin clicks "Khóa tài khoản" and confirms with a reason
+- **THEN** the account becomes `suspended`, its sessions are revoked, its API keys are refused, and the header offers "Mở khóa"
+
+#### Scenario: Delete needs the email
+- **WHEN** the admin opens "Xóa tài khoản" and types a different email
+- **THEN** the delete button stays disabled

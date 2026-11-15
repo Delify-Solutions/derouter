@@ -212,12 +212,15 @@ async function enforceRate(scope, resolved, { signal = null } = {}) {
  *
  * @param {string} apiKey - the raw API key
  * @param {string} [model] - the requested model id (combo name or pool model)
+ * @param {{ requestKind?: "llm"|"image" }} [options] - what the endpoint sells
+ *        (`image` for /v1/images/generations), which decides which purchases may
+ *        pay and whose rate applies. Defaults to `llm`.
  * @returns {Promise<
  *   { ok: true, auth: object|null } |
  *   { ok: false, status: number, code: string, message: string, retryAfterSec?: number, resetAt?: string }
  * >}
  */
-export async function enforceKeyLimits(apiKey, model, { signal = null } = {}) {
+export async function enforceKeyLimits(apiKey, model, { signal = null, requestKind = "llm" } = {}) {
   if (!apiKey) return { ok: true, auth: null }; // no key (requireApiKey false) → no limits
 
   const auth = await getApiKeyForAuth(apiKey);
@@ -256,7 +259,7 @@ export async function enforceKeyLimits(apiKey, model, { signal = null } = {}) {
     //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
     const pinnedPlanId = key.planId ?? null;
-    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
     const rate = rates.rateKey
       ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.rateKey }, rates, { signal })
       : { ok: true };
@@ -277,7 +280,7 @@ export async function enforceKeyLimits(apiKey, model, { signal = null } = {}) {
     //    queued plan has credit left.
     //    Re-read after the rate step: a TPM wait can last seconds, and the queue may
     //    have moved on in that time.
-    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId });
+    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
     if (!admitted.ok) {
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {
@@ -301,7 +304,7 @@ export async function enforceKeyLimits(apiKey, model, { signal = null } = {}) {
     //    slot is released when the response body ends (src/lib/billing/inflight.js).
     //    Re-read the paying plan: like admission, it may have moved on during a
     //    TPM wait, and the cap must be the plan that will actually pay.
-    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
     const capFromRpm = Number(payer.rpm) > 0;
     const slot = acquireSlot(slotKey(key.userId, payer.rateKey), { max: concurrencyCapFor(payer.rpm) });
     if (!slot.ok) {

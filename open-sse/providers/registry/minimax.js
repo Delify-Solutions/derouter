@@ -22,6 +22,7 @@ const minimaxProvider = {
     headers: { ...CLAUDE_API_HEADERS },
     quirks: {
       dropOutputConfig: true,
+      requireClaudeToolType: true,
     },
     reasoningInject: {
       scope: "all",

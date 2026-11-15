@@ -10,6 +10,7 @@ import { applyCheckoutDiscountsSync, recordCheckoutDiscountsSync } from "../affi
 import { nano } from "../billing/ledger.js";
 import { quoteTopup } from "../billing/topup.js";
 import { findTerm, termPrice } from "../billing/terms.js";
+import { imageCount, isImagePlan } from "../billing/planKind.js";
 
 export const METHOD_LABELS = {
   vietqr: "Chuyển khoản VietQR",
@@ -276,15 +277,21 @@ export function createGatewayOrderSync(db, {
   if (!priced.ok) return priced;
   const payAmount = priced.payAmount;
 
+  const imagePlan = isImagePlan(plan.kind);
   const order = {
     id: uuidv4(),
     userId,
     planId: plan.id,
+    // Snapshotted like the limits: a plan edited after this order must not change
+    // what the buyer is owed on approval.
+    kind: imagePlan ? "image" : "llm",
+    imageCount: imagePlan ? imageCount(plan.imageCount) : null,
     // `amountNanoUsd` keeps its existing meaning (the USD price of this order: the
     // plan's price, or for a custom-amount top-up the quoted price of the typed
     // amount) so every finance/statistics query built on it keeps working unchanged.
     amountNanoUsd: priced.amountNanoUsd,
-    creditNanoUsd: quote ? quote.creditNanoUsd : nano(plan.creditNanoUsd),
+    // An image plan sells images, not credit: the order carries no dollar figure.
+    creditNanoUsd: imagePlan ? 0 : quote ? quote.creditNanoUsd : nano(plan.creditNanoUsd),
     unlimitedCredit: plan.unlimitedCredit ? 1 : 0,
     durationDays: nano(plan.durationDays),
     periods: term.periods,
@@ -303,12 +310,13 @@ export function createGatewayOrderSync(db, {
 
   db.run(
     `INSERT INTO orders(
-       id, userId, planId, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent,
+       id, userId, planId, kind, imageCount, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent,
        status, method, paymentCode, payCurrency, payAmount, paymentProviderId, expiresAt,
        emailSnapshot, limits, createdAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      order.id, order.userId, order.planId, order.amountNanoUsd, order.creditNanoUsd,
+      order.id, order.userId, order.planId, order.kind, order.imageCount,
+      order.amountNanoUsd, order.creditNanoUsd,
       order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.paymentCode, order.payCurrency,
       order.payAmount, order.paymentProviderId, order.expiresAt, order.emailSnapshot,
       order.limits, order.createdAt,

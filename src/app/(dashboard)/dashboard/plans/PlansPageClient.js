@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
-import { windowLabel } from "@/lib/billing/limits.js";
+import { describeLimit } from "@/lib/billing/limits.js";
 import { topupBounds } from "@/lib/billing/topup.js";
 import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
 import TermsEditor, { termsToDraft, draftToTerms, draftTermsError } from "./components/TermsEditor";
 import { termLabel } from "@/lib/billing/terms.js";
+import { planKindLabel } from "@/lib/billing/planKind.js";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 
@@ -16,11 +17,16 @@ const EMPTY_FORM = {
   code: "",
   name: "",
   description: "",
+  // "llm" (credit) or "image" (a count of generated images). Switching this
+  // rewrites what the plan sells, so the credit/image fields below follow it.
+  kind: "llm",
   priceUsd: "",
   // VietQR price in integer đồng. Empty or 0 = not sold by bank transfer
   // (spec plan-dual-pricing "Two prices per plan").
   priceVnd: "",
   creditUsd: "",
+  // Images per period for an image plan. "" for a credit plan.
+  imageCount: "",
   // On = no credit ceiling; the credit field is hidden and the plan is bounded only
   // by its limits, RPM and TPM (at least one of them is then required).
   unlimitedCredit: false,
@@ -74,7 +80,13 @@ function validateDraft(draft) {
       errors.priceVnd = "Giá VND phải là số nguyên không âm";
     }
   }
-  if (!draft.unlimitedCredit) {
+  const imagePlan = draft.kind === "image";
+  if (imagePlan) {
+    const images = Number(draft.imageCount);
+    if (!Number.isInteger(images) || images <= 0) {
+      errors.imageCount = "Số ảnh phải là số nguyên lớn hơn 0";
+    }
+  } else if (!draft.unlimitedCredit) {
     const credit = Number(draft.creditUsd);
     if (!Number.isFinite(credit) || credit <= 0) errors.creditUsd = "Credit must be greater than 0";
   }
@@ -97,6 +109,8 @@ function validateDraft(draft) {
   // against this draft's own credit and duration so the message names the limit.
   const limitsError = draftLimitsError(draft.limits, {
     creditUsd: draft.unlimitedCredit ? 0 : draft.creditUsd,
+    imageCount: imagePlan ? draft.imageCount : 0,
+    kind: draft.kind,
     durationDays: draft.durationDays,
   });
   if (limitsError) errors.limits = limitsError;
@@ -127,7 +141,7 @@ function validateDraft(draft) {
   }
 
   // An unlimited plan must keep some other bound on spend.
-  if (draft.unlimitedCredit && !limitsError) {
+  if (!imagePlan && draft.unlimitedCredit && !limitsError) {
     const hasWindow = (draftToLimits(draft.limits) ?? []).length > 0;
     const hasRate = Number(draft.rpm) > 0 || Number(draft.tpm) > 0;
     if (!hasWindow && !hasRate) {
@@ -145,6 +159,8 @@ function planToDraft(plan) {
     description: plan.description || "",
     priceUsd: String(plan.priceNanoUsd / 1e9),
     priceVnd: plan.priceVnd == null ? "" : String(plan.priceVnd),
+    kind: plan.kind === "image" ? "image" : "llm",
+    imageCount: plan.kind === "image" ? String(plan.imageCount ?? "") : "",
     creditUsd: plan.unlimitedCredit ? "" : String(plan.creditNanoUsd / 1e9),
     unlimitedCredit: plan.unlimitedCredit === true,
     allowCustomAmount: plan.allowCustomAmount === true,
@@ -166,8 +182,8 @@ function planToDraft(plan) {
 }
 
 /** Whether the two limit lists differ — decides whether to offer apply-to-active. */
-function limitsChanged(draftRows, originalLimits) {
-  const next = JSON.stringify(draftToLimits(draftRows) ?? []);
+function limitsChanged(draftRows, originalLimits, kind = "llm") {
+  const next = JSON.stringify(draftToLimits(draftRows, kind) ?? []);
   const before = JSON.stringify(Array.isArray(originalLimits) ? originalLimits : []);
   return next !== before;
 }
@@ -248,9 +264,13 @@ export default function PlansPageClient() {
       priceNanoUsd: usdToNano(Number(draft.priceUsd)),
       // 0 and "" both mean "not sold by VietQR"; the server normalises both to NULL.
       priceVnd: String(draft.priceVnd ?? "").trim() === "" ? null : Number(draft.priceVnd),
-      creditNanoUsd: draft.unlimitedCredit ? 0 : usdToNano(Number(draft.creditUsd)),
-      unlimitedCredit: draft.unlimitedCredit,
-      allowCustomAmount: draft.allowCustomAmount && !draft.unlimitedCredit,
+      // An image plan sells a count of images and stores no credit; the server
+      // normalises the balance columns from `kind`.
+      kind: draft.kind === "image" ? "image" : "llm",
+      imageCount: draft.kind === "image" ? Number(draft.imageCount) : null,
+      creditNanoUsd: draft.kind === "image" || draft.unlimitedCredit ? 0 : usdToNano(Number(draft.creditUsd)),
+      unlimitedCredit: draft.kind === "image" ? false : draft.unlimitedCredit,
+      allowCustomAmount: draft.kind === "image" ? false : draft.allowCustomAmount && !draft.unlimitedCredit,
       customMinVnd: String(draft.customMinVnd ?? "").trim() === "" ? null : Number(draft.customMinVnd),
       customMaxVnd: String(draft.customMaxVnd ?? "").trim() === "" ? null : Number(draft.customMaxVnd),
       durationDays: Number(draft.durationDays),
@@ -264,7 +284,7 @@ export default function PlansPageClient() {
       sortOrder: draft.sortOrder === "" ? null : Number(draft.sortOrder),
       rpm: String(draft.rpm).trim() === "" ? null : Number(draft.rpm),
       tpm: String(draft.tpm).trim() === "" ? null : Number(draft.tpm),
-      limits: draftToLimits(draft.limits) ?? [],
+      limits: draftToLimits(draft.limits, draft.kind) ?? [],
       // Only sent when the admin ticked the box; the API ignores it otherwise.
       ...(editing && draft.applyToActive ? { applyToActive: true } : {}),
     };
@@ -379,8 +399,13 @@ export default function PlansPageClient() {
             >
               <div className="flex items-start justify-between gap-3 px-6 pt-6">
                 <div className="flex flex-col gap-1 min-w-0">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle truncate" title={plan.code}>
-                    {plan.code}
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle truncate" title={plan.code}>
+                      {plan.code}
+                    </span>
+                    <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                      {planKindLabel(plan.kind)}
+                    </span>
                   </span>
                   <h2 className="text-base font-semibold text-text-main truncate" title={plan.name}>{plan.name}</h2>
                 </div>
@@ -411,8 +436,12 @@ export default function PlansPageClient() {
                   </dd>
                 </div>
                 <div className="min-w-0 bg-surface px-4 py-3">
-                  <dt className="meta text-text-subtle">Credit</dt>
-                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}</dd>
+                  <dt className="meta text-text-subtle">{plan.kind === "image" ? "Số ảnh" : "Credit"}</dt>
+                  <dd className="font-mono text-sm text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
+                    {plan.kind === "image"
+                      ? `${Number(plan.imageCount || 0).toLocaleString("vi-VN")} ảnh`
+                      : fmtCreditNano(plan.creditNanoUsd, plan.unlimitedCredit)}
+                  </dd>
                 </div>
                 <div className="min-w-0 bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Duration</dt>
@@ -448,7 +477,7 @@ export default function PlansPageClient() {
                 </div>
               </dl>
 
-              {plan.allowCustomAmount && (
+              {plan.allowCustomAmount && plan.kind !== "image" && (
                 <div className="px-6 pb-4">
                   <p className="meta text-text-subtle mb-1">Nạp tùy ý</p>
                   <p className="font-mono text-[12px] text-text-muted [overflow-wrap:anywhere]">
@@ -471,7 +500,7 @@ export default function PlansPageClient() {
                   <ul className="flex flex-col gap-0.5">
                     {plan.limits.map((limit) => (
                       <li key={limit.hours} className="font-mono text-[12px] text-text-muted">
-                        {fmtUsdNano(limit.maxNanoUsd)} mỗi {windowLabel(limit.hours)}
+                        {describeLimit(limit)}
                       </li>
                     ))}
                   </ul>
@@ -504,8 +533,12 @@ export default function PlansPageClient() {
                   </dd>
                 </div>
                 <div className="min-w-0 bg-surface px-3 py-2">
-                  <dt className="meta text-text-subtle">Đã dùng</dt>
-                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">{fmtUsdNano(plan.stats?.consumedNanoUsd ?? 0)}</dd>
+                  <dt className="meta text-text-subtle">{plan.kind === "image" ? "Ảnh đã tạo" : "Đã dùng"}</dt>
+                  <dd className="font-mono text-[12px] text-text-main mt-1 tabular-nums [overflow-wrap:anywhere]">
+                    {plan.kind === "image"
+                      ? Number(plan.stats?.consumedImages ?? 0).toLocaleString("vi-VN")
+                      : fmtUsdNano(plan.stats?.consumedNanoUsd ?? 0)}
+                  </dd>
                 </div>
               </dl>
 
@@ -608,6 +641,40 @@ export default function PlansPageClient() {
             placeholder="Credit for heavy months, expires after 30 days."
           />
 
+          {/* What the plan sells. The two kinds are separate pools: credit is spent
+              at the token price, an image plan hands out a count of images and can
+              only be spent on /v1/images/generations. */}
+          <div className="flex flex-col gap-2">
+            <span className="meta text-text-subtle">Loại gói</span>
+            <div role="radiogroup" aria-label="Loại gói" className="grid grid-cols-1 gap-px border border-border bg-border sm:grid-cols-2">
+              {[
+                { value: "llm", label: "Gói credit", hint: "Trừ theo giá token của model, dùng cho mọi model trong nhóm." },
+                { value: "image", label: "Gói ảnh", hint: "Cấp số ảnh, mỗi ảnh trừ 1 — chỉ dùng cho tạo ảnh." },
+              ].map((option) => {
+                const active = (draft.kind === "image" ? "image" : "llm") === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex cursor-pointer items-start gap-2 bg-surface px-4 py-3 ${active ? "outline outline-1 -outline-offset-1 outline-text-main" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="plan-kind"
+                      value={option.value}
+                      checked={active}
+                      onChange={() => setField("kind", option.value)}
+                      className="mt-1 size-4"
+                    />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-medium text-text-main">{option.label}</span>
+                      <span className="text-xs text-text-muted">{option.hint}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Two independent prices, no exchange rate between them: the admin
               decides what 250.000đ and what $10 buy (spec plan-dual-pricing). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -636,6 +703,21 @@ export default function PlansPageClient() {
             />
           </div>
 
+          {draft.kind === "image" ? (
+            <Input
+              label="Số ảnh mỗi kỳ"
+              type="number"
+              step="1"
+              min="1"
+              value={draft.imageCount}
+              onChange={(e) => setField("imageCount", e.target.value)}
+              placeholder="100"
+              hint="Mỗi lần tạo ảnh trừ 1 ảnh. Hết số ảnh thì gói dừng, không phát sinh nợ."
+              error={touched ? errors.imageCount : ""}
+              required
+            />
+          ) : (
+          <>
           <div className="flex items-center justify-between border border-border bg-surface px-4 py-3">
             <div className="flex flex-col">
               <span className="meta text-text-subtle">Credit không giới hạn</span>
@@ -716,6 +798,8 @@ export default function PlansPageClient() {
               <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
               {errors.unlimited}
             </p>
+          )}
+          </>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -868,7 +952,9 @@ export default function PlansPageClient() {
               rows={draft.limits}
               onChange={(rows) => setField("limits", rows)}
               creditUsd={draft.creditUsd}
-              unlimitedCredit={draft.unlimitedCredit}
+              imageCount={draft.imageCount}
+              kind={draft.kind}
+              unlimitedCredit={draft.unlimitedCredit && draft.kind !== "image"}
               durationDays={draft.durationDays}
               error={touched ? errors.limits : null}
             />
@@ -876,17 +962,22 @@ export default function PlansPageClient() {
             {/* The price half of the spec's preview sentence: the editor renders
                 the credit/limits half, this line completes it. */}
             <p className="text-xs text-text-muted">
-              Xem trước: Khách trả ${draft.priceUsd || "—"} → {draft.unlimitedCredit ? "credit không giới hạn" : draft.creditUsd ? `$${draft.creditUsd}` : "—"} dùng
-              chung mọi model trong {draft.durationDays || "—"} ngày
-              {draftToLimits(draft.limits)?.length
-                ? `; ${draftToLimits(draft.limits)
-                    .map((limit) => `tối đa $${limit.maxNanoUsd / 1e9} mỗi ${limit.hours === 5 ? "5 giờ" : limit.hours === 24 ? "1 ngày" : limit.hours === 168 ? "1 tuần" : `${limit.hours} giờ`}`)
-                    .join(", ")}`
+              Xem trước: Khách trả ${draft.priceUsd || "—"} →{" "}
+              {draft.kind === "image"
+                ? (draft.imageCount ? `${draft.imageCount} ảnh` : "—")
+                : draft.unlimitedCredit
+                  ? "credit không giới hạn"
+                  : draft.creditUsd ? `$${draft.creditUsd}` : "—"}{" "}
+              trong {draft.durationDays || "—"} ngày
+              {draftToLimits(draft.limits, draft.kind)?.length
+                // One formatter for every limit sentence on the page: it already
+                // knows images from dollars, so the preview cannot disagree with a card.
+                ? `; ${draftToLimits(draft.limits, draft.kind).map(describeLimit).join(", ")}`
                 : ""}
               .
             </p>
 
-            {editing && limitsChanged(draft.limits, editing.limits) && (
+            {editing && limitsChanged(draft.limits, editing.limits, draft.kind) && (
               <label className="flex items-start gap-2 text-sm text-text-main">
                 <input
                   type="checkbox"

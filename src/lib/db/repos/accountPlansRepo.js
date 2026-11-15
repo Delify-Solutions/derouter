@@ -12,6 +12,7 @@ import { parseJson } from "../helpers/jsonCol.js";
 import { nano } from "../../billing/ledger.js";
 import { parseLimits, describeLimit, windowLabel } from "../../billing/limits.js";
 import { queueViewSync } from "../../billing/planQueue.js";
+import { imageCount, normalizePlanKind } from "../../billing/planKind.js";
 import { UNLIMITED_CREDIT_LABEL } from "../../../shared/utils/money.js";
 
 function nowIso() {
@@ -60,8 +61,13 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     rpmOverride: entry.rpmOverride ?? null,
     tpmOverride: entry.tpmOverride ?? null,
     source: entry.source,
+    // "llm" credit or "image" images. An image purchase's credit columns are 0 and
+    // its balance is imageRemaining, so the card renders a count instead of money.
+    kind: entry.kind,
     creditTotalNanoUsd: entry.creditTotalNanoUsd,
     creditRemainingNanoUsd: entry.creditRemainingNanoUsd,
+    imageTotal: entry.imageTotal ?? 0,
+    imageRemaining: entry.imageRemaining ?? 0,
     unlimitedCredit: entry.unlimitedCredit === true,
     startsAt: entry.startsAt,
     expiresAt: entry.expiresAt,
@@ -75,6 +81,9 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
       label: windowLabel(window.hours),
       maxNanoUsd: window.maxNanoUsd,
       spentNanoUsd: window.spentNanoUsd,
+      // An image limit's ceiling and spend are counts; the money half above is 0.
+      maxImages: window.maxImages ?? 0,
+      spentImages: window.spentImages ?? 0,
       startedAt: window.startedAt,
       resetAt: window.resetAt,
       open: window.open,
@@ -105,8 +114,11 @@ export function getPlanHistorySync(db, userId, { limit = 50 } = {}) {
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
     source: row.source ?? null,
+    kind: normalizePlanKind(row.kind),
     creditTotalNanoUsd: nano(row.creditTotalNanoUsd),
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
+    imageTotal: imageCount(row.imageTotal),
+    imageRemaining: imageCount(row.imageRemaining),
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
     expiresAt: row.expiresAt,
@@ -197,6 +209,10 @@ export function getAccountLedgerSync(db, userId, { page = 1, pageSize = 25, plan
         deltaUsd: usd(row.deltaNanoUsd),
         balanceAfterNanoUsd: row.balanceAfterNanoUsd == null ? null : nano(row.balanceAfterNanoUsd),
         balanceAfterUsd: row.balanceAfterNanoUsd == null ? null : usd(row.balanceAfterNanoUsd),
+        // Signed images moved by an image-plan row. 0 for every credit row, which is
+        // how the table knows to render money instead of a count.
+        deltaImages: Math.round(Number(row.deltaImages) || 0),
+        balanceAfterImages: row.balanceAfterImages == null ? null : Math.round(Number(row.balanceAfterImages)),
       };
     }),
     total,
@@ -229,12 +245,18 @@ export function getLedgerPlanOptionsSync(db, userId) {
  */
 export function toCatalogPlan(plan, blocker, methods = []) {
   const limits = Array.isArray(plan.limits) ? plan.limits : parseLimits(plan.limits);
+  const imagePlan = normalizePlanKind(plan.kind) === "image";
+  const imageTotal = imagePlan ? imageCount(plan.imageCount) : 0;
   return {
     ...plan,
+    kind: imagePlan ? "image" : "llm",
     priceUsd: usd(plan.priceNanoUsd),
     priceVnd: plan.priceVnd == null ? null : nano(plan.priceVnd),
     priceVndText: plan.priceVnd ? formatVnd(nano(plan.priceVnd)) : null,
     creditUsd: plan.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : usd(plan.creditNanoUsd),
+    // What the card leads with: an image plan sells a count, not credit.
+    imageCount: imageTotal,
+    imageText: imagePlan ? `${imageTotal.toLocaleString("vi-VN")} ảnh` : null,
     limits,
     limitsText: [...limits.map(describeLimit), ...describeRates(plan)],
     offeredMethods: methods,
@@ -270,7 +292,7 @@ function formatVnd(value) {
 export function listBindablePlansSync(db, userId, nowIsoArg = null) {
   if (!userId) return [];
   const rows = db.all(
-    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name
+    `SELECT DISTINCT p.id AS id, p.code AS code, p.name AS name, p.kind AS kind
        FROM userPlans up
        JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?

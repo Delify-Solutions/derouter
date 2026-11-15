@@ -32,21 +32,31 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, requestError?: boolean }}
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, requestError?: boolean, requestScoped?: boolean }}
+ *
+ * `shouldFallback` answers "is the CREDENTIAL at fault?" (account rotation).
+ * `requestError` / `requestScoped` (always set together) answer "is the REQUEST itself
+ * what this member rejected?" (combo rotation): the credential is healthy but this member
+ * cannot serve this request, so combo rotation must still try the next member.
  */
-export function checkFallbackError(status, errorText, backoffLevel = 0) {
+export function checkFallbackError(status, errorText, backoffLevel = 0, provider = null) {
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
 
   for (const rule of ERROR_RULES) {
+    if (rule.provider && rule.provider !== provider) continue;
     // Text-based rule: match substring in error message
     if (rule.text && lowerError && lowerError.includes(rule.text)) {
       if (rule.backoff) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
         return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
       }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+      return {
+        shouldFallback: true,
+        cooldownMs: rule.cooldownMs,
+        modelScoped: Boolean(rule.modelScoped),
+      };
     }
 
     // Status-based rule: match HTTP status code
@@ -63,7 +73,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
   // loop to hand the upstream answer to the client instead of trying another account.
   // A combo still moves on (shouldFallback) because another model may take the request.
   if (isRequestError(status, lowerError)) {
-    return { shouldFallback: true, cooldownMs: 0, requestError: true };
+    return { shouldFallback: true, cooldownMs: 0, requestError: true, requestScoped: true };
   }
 
   // Default: transient cooldown for any unmatched error

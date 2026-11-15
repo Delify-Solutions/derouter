@@ -40,6 +40,20 @@ export function bookBalanceNanoSync(db, userId) {
   return nano(row?.credit) - nano(row?.overdraft);
 }
 
+/**
+ * Images on book: the sum of every active image purchase. Independent of the
+ * dollar balance — an image plan sells counts, not credit — and the figure an
+ * image ledger row snapshots as `balanceAfterImages`.
+ */
+export function bookBalanceImagesSync(db, userId) {
+  const row = db.get(
+    `SELECT COALESCE(SUM(imageRemaining), 0) AS images FROM userPlans
+      WHERE userId = ? AND status = 'active' AND kind = 'image'`,
+    [userId]
+  );
+  return Math.max(0, Math.round(Number(row?.images) || 0));
+}
+
 /** Current debt (users.overdraftNanoUsd), floored at 0. */
 export function getDebtNanoSync(db, userId) {
   const row = db.get(`SELECT COALESCE(overdraftNanoUsd, 0) AS o FROM users WHERE id = ?`, [userId]);
@@ -83,12 +97,20 @@ export function writeOffDebtSync(db, userId, { userPlanId = null, meta = {}, cre
  */
 export function insertLedgerSync(db, entry) {
   const createdAt = entry.createdAt || nowIso();
+  const deltaImages = Math.round(Number(entry.deltaImages) || 0);
   const balance = entry.balanceAfterNanoUsd != null
     ? nano(entry.balanceAfterNanoUsd)
     : bookBalanceNanoSync(db, entry.userId);
+  // An image row's snapshot is the IMAGE balance; a credit row leaves it NULL, so
+  // the ledger page never shows an image figure on a dollar entry.
+  const balanceImages = deltaImages !== 0 || entry.balanceAfterImages != null
+    ? (entry.balanceAfterImages != null
+        ? Math.max(0, Math.round(Number(entry.balanceAfterImages) || 0))
+        : bookBalanceImagesSync(db, entry.userId))
+    : null;
   db.run(
-    `INSERT INTO creditLedger(userId, userPlanId, apiKeyId, usageId, requestKey, deltaNanoUsd, balanceAfterNanoUsd, kind, meta, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO creditLedger(userId, userPlanId, apiKeyId, usageId, requestKey, deltaNanoUsd, deltaImages, balanceAfterNanoUsd, balanceAfterImages, kind, meta, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       entry.userId,
       entry.userPlanId ?? null,
@@ -96,7 +118,9 @@ export function insertLedgerSync(db, entry) {
       entry.usageId == null ? null : Math.round(Number(entry.usageId)) || null,
       entry.requestKey ?? null,
       nano(entry.deltaNanoUsd),
+      deltaImages,
       balance,
+      balanceImages,
       entry.kind,
       entry.meta == null ? null : stringifyJson(entry.meta),
       createdAt,

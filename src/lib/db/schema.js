@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -386,6 +386,15 @@ export const TABLES = {
       // admin can price 250.000đ independently of $10.
       priceVnd: "INTEGER",
       creditNanoUsd: "INTEGER NOT NULL",
+      // What this plan sells: 'llm' (credit spent by token price, the default) or
+      // 'image' (a number of generated images). An image plan stores credit 0 and
+      // is bounded by imageCount instead; the two pools never mix, so an image
+      // purchase can only pay for image requests.
+      kind: "TEXT DEFAULT 'llm'",
+      // Images per period for kind='image' (NULL/0 for an llm plan). Counted, not
+      // priced: how much one image costs upstream is the combo's per-image price,
+      // while this column is what the customer bought.
+      imageCount: "INTEGER",
       // 1 = the plan has no credit ceiling: requests are never refused for lack of
       // credit and only the per-window limits / RPM / TPM bound the spend.
       // creditNanoUsd is 0 for such a plan. A flag rather than a huge credit
@@ -491,6 +500,11 @@ export const TABLES = {
       limits: "TEXT",
       amountNanoUsd: "INTEGER",
       creditNanoUsd: "INTEGER",
+      // Snapshot of plans.kind / plans.imageCount: an image order grants images,
+      // not credit, and approval must honour what was sold even if the template
+      // changed in between.
+      kind: "TEXT DEFAULT 'llm'",
+      imageCount: "INTEGER",
       // Snapshot of plans.unlimitedCredit at order creation, like the limits above.
       unlimitedCredit: "INTEGER DEFAULT 0",
       durationDays: "INTEGER",
@@ -616,6 +630,14 @@ export const TABLES = {
       source: "TEXT NOT NULL",
       creditTotalNanoUsd: "INTEGER NOT NULL",
       creditRemainingNanoUsd: "INTEGER NOT NULL",
+      // What this purchase pays for: 'llm' (credit) or 'image' (images). Stored
+      // per purchase, like the limits snapshot, because the plan template may be
+      // edited after the sale.
+      kind: "TEXT DEFAULT 'llm'",
+      // Images granted / left for kind='image'; both 0 for an llm purchase. An
+      // image purchase has no dollar credit, so this pair is its only balance.
+      imageTotal: "INTEGER DEFAULT 0",
+      imageRemaining: "INTEGER DEFAULT 0",
       // 1 = no credit ceiling (both credit columns stay 0 and are never spent
       // down); charges are still ledgered and still counted by the windows.
       unlimitedCredit: "INTEGER DEFAULT 0",
@@ -649,6 +671,9 @@ export const TABLES = {
       hours: "INTEGER NOT NULL",
       startedAt: "TEXT NOT NULL",
       spentNanoUsd: "INTEGER NOT NULL DEFAULT 0",
+      // Images generated inside this window by an image plan. A dollar plan leaves
+      // this at 0 and uses spentNanoUsd; the two never both move for one request.
+      spentImages: "INTEGER DEFAULT 0",
       updatedAt: "TEXT",
     },
     primaryKey: "PRIMARY KEY (userPlanId, hours)",
@@ -666,6 +691,12 @@ export const TABLES = {
       // Idempotency key: one ledger row per request/charge.
       requestKey: "TEXT UNIQUE",
       deltaNanoUsd: "INTEGER NOT NULL",
+      // Signed change to an image plan's image balance. 0 for every row of a
+      // credit plan: an image charge moves this instead of deltaNanoUsd.
+      deltaImages: "INTEGER DEFAULT 0",
+      // Images left on the account after the entry (sum over active image
+      // purchases). NULL on a credit-plan row, where it has no meaning.
+      balanceAfterImages: "INTEGER",
       balanceAfterNanoUsd: "INTEGER",
       kind: "TEXT NOT NULL",
       meta: "TEXT",
@@ -798,6 +829,35 @@ export const TABLES = {
       createdAt: "TEXT NOT NULL",
     },
     indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_tn_kind_ref ON telegramNotices(kind, refId)"],
+  },
+  // Two-way support chat over the bot (spec telegram-support). One row per message,
+  // inbound (customer → admin) or outbound (admin → customer). The customer's side
+  // of the conversation IS the bot chat, so no thread table is needed: a thread is
+  // every row of one userId.
+  supportMessages: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      direction: "TEXT NOT NULL", // in | out
+      body: "TEXT NOT NULL",
+      // Telegram id of the message. Only inbound rows need it (a re-delivered update
+      // must not store twice), but outbound rows keep the admin-chat id so the origin
+      // of an answer is traceable. Ids are per chat, so this is only unique together
+      // with `direction`: a customer message 50 and an admin message 50 are different
+      // messages.
+      telegramMessageId: "INTEGER",
+      // For an admin reply: the admin identity that wrote it. NULL on inbound.
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      readAt: "TEXT",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_support_user ON supportMessages(userId, createdAt)",
+      // Telegram update idempotency: one row per (account, direction, telegram id).
+      // `direction` is part of the key because the two sides are different chats and
+      // their message ids are independent series.
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tg ON supportMessages(userId, direction, telegramMessageId)",
+    ],
   },
   // Admin announcements sent to every linked customer who keeps them on.
   telegramBroadcasts: {
