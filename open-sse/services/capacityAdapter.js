@@ -12,6 +12,8 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 
 const CAPABILITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 const HARD_CAPS = new Set(CAPABILITY_KEYS);
+// derouter keeps oc/mimo-v2.5-free (upstream 9router switched its default to oc/mimo-v2.6-flash-free).
+// The admin UI default (combos page) must stay equal to this value.
 const DEFAULT_FALLBACK_MODEL = "oc/mimo-v2.5-free";
 
 // Normalize a capability entry to { enabled, roundRobin, models, scope, targets }.
