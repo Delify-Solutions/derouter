@@ -4,6 +4,7 @@ import { resetComboRotation } from "open-sse/services/combo.js";
 import { updateComboPricing, resetComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
 import { renameComboDiscounts, removeComboDiscounts } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { CACHE_ESTIMATION_ERROR, isValidCacheEstimationInput, withCacheEstimation } from "@/lib/combos/cacheEstimation.js";
+import { MAINTENANCE_ERROR, isValidMaintenanceInput, withMaintenance } from "@/lib/combos/maintenance.js";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -29,11 +30,15 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { pricing, capabilities, cacheEstimation } = body;
+    const { pricing, capabilities, cacheEstimation, maintenance } = body;
 
     // Estimated cache option: boolean only (also when sent inside a raw `meta`).
     if (!isValidCacheEstimationInput(cacheEstimation) || !isValidCacheEstimationInput(body.meta?.cacheEstimation)) {
       return NextResponse.json({ error: CACHE_ESTIMATION_ERROR }, { status: 400 });
+    }
+    // Maintenance switch: boolean only (also when sent inside a raw `meta`).
+    if (!isValidMaintenanceInput(maintenance) || !isValidMaintenanceInput(body.meta?.maintenance)) {
+      return NextResponse.json({ error: MAINTENANCE_ERROR }, { status: 400 });
     }
 
     // Validate name format if provided
@@ -56,12 +61,14 @@ export async function PUT(request, { params }) {
     // explicitly clears stored capabilities (so /v1/models falls back to the
     // first-model auto-resolve); omitting the key leaves the existing value.
     let metaPatch = undefined;
-    if (capabilities !== undefined || cacheEstimation !== undefined) {
+    if (capabilities !== undefined || cacheEstimation !== undefined || maintenance !== undefined) {
       const curMeta = prev?.meta && typeof prev.meta === "object" ? prev.meta : {};
       metaPatch = { ...curMeta };
       if (capabilities !== undefined) metaPatch.capabilities = capabilities || null;
       // off removes the key, so a combo that never had the option stays byte-identical
       if (cacheEstimation !== undefined) metaPatch = withCacheEstimation(metaPatch, cacheEstimation);
+      // off removes the key too
+      if (maintenance !== undefined) metaPatch = withMaintenance(metaPatch, maintenance);
     }
     const combo = await updateCombo(id, metaPatch ? { ...body, meta: metaPatch } : body);
 

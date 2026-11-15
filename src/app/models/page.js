@@ -37,6 +37,7 @@ export default async function ModelsPage() {
   }
   const rows = models.map((m) => ({
     name: m.id,
+    maintenance: Boolean(m.maintenance),
     input: m.input,
     output: m.output,
     cached: m.cached,

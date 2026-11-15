@@ -870,6 +870,11 @@ export default function UsageClient({ hasUserSession = false }) {
                         <tr key={m.name} className={`border-b border-border/40 hover:bg-surface-2/40 ${allowed ? "" : "opacity-50"}`}>
                           <td className="px-3 py-2 font-mono">
                             {m.name}
+                            {m.maintenance && (
+                              <div className="mt-0.5 font-sans text-[10px]" data-testid="model-maintenance">
+                                <span className="px-1 py-0.5 border border-border font-mono font-semibold uppercase text-text-muted">Bảo trì</span>
+                              </div>
+                            )}
                             {m.discount && (
                               <div className="mt-0.5 font-sans text-[10px] text-text-muted" data-testid="model-discount">
                                 <span className="px-1 py-0.5 border border-primary/30 bg-primary/10 font-mono font-semibold uppercase">

@@ -3,6 +3,7 @@ import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
 import { comboHasCacheEstimation } from "@/lib/combos/cacheEstimation.js";
+import { comboIsInMaintenance } from "@/lib/combos/maintenance.js";
 
 // Local provider alias overrides (HMR-friendly, applied on top of open-sse map)
 const LOCAL_PROVIDER_ALIASES = {
@@ -84,7 +85,7 @@ export async function getModelInfo(modelStr) {
 
 /**
  * One lookup for a combo: its models and its options.
- * @returns {Promise<{ models: string[], cacheEstimation: boolean }|null>} null if not a combo
+ * @returns {Promise<{ models: string[], cacheEstimation: boolean, maintenance: boolean }|null>} null if not a combo
  */
 export async function getComboInfo(modelStr) {
   // Only check if it's not in provider/model format
@@ -95,6 +96,9 @@ export async function getComboInfo(modelStr) {
     return {
       models: combo.models,
       cacheEstimation: comboHasCacheEstimation(combo),
+      // Under maintenance (spec api-access-enforcement): a direct call is refused by key enforcement;
+      // a combo reached as a member of another combo is skipped by the caller.
+      maintenance: comboIsInMaintenance(combo),
       // Capabilities the admin declared for the combo (the values /v1/models
       // advertises); the capacity adapter respects them.
       capabilities: combo.meta?.capabilities ?? null,

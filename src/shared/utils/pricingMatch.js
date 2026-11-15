@@ -128,3 +128,54 @@ export function closestPoolModel(poolPricing, provider, model) {
 
   return best;
 }
+
+// ── Quick price multipliers (spec combo-pricing-admin) ───────────────────────
+
+/** Factors offered on the combo price form. 1 restores the base. */
+export const PRICE_FACTORS = [0.5, 1, 2, 3];
+
+const MICRO = 1_000_000n;
+
+// "3.25" / 3.25 -> 3250000n. Anything that is not a finite non-negative number -> null.
+function toMicro(value) {
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return BigInt(n.toFixed(6).replace(".", ""));
+}
+
+function fromMicro(micro) {
+  const whole = micro / MICRO;
+  const frac = String(micro % MICRO).padStart(6, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : String(whole);
+}
+
+/**
+ * One price field times `factor`, in integer micro-units so 0.1 x 3 is exactly 0.3.
+ * An empty or invalid value stays as it is. Rounded half up to 6 decimal places.
+ */
+export function scalePrice(value, factor) {
+  const base = toMicro(value);
+  const mult = toMicro(factor);
+  if (base === null || mult === null) return value;
+  return fromMicro((base * mult + MICRO / 2n) / MICRO);
+}
+
+/** A price draft (string fields) with every field multiplied by `factor`. */
+export function scalePricingDraft(base, factor) {
+  const out = { ...EMPTY_PRICING };
+  for (const f of VALID_FIELDS) out[f] = scalePrice(base?.[f] ?? "", factor);
+  return out;
+}
+
+/**
+ * The base a multiplier button scales (spec combo-pricing-admin): the base captured at an earlier
+ * press, else the pool price while the form still shows that auto-filled suggestion, else the
+ * values in the form. An image combo, a combo with a saved price and a price the admin typed
+ * (`touched`) are never re-based on a pool price, so a saved price cannot be overwritten.
+ */
+export function pickPriceBase({ captured = null, pool = null, current, isImage = false, touched = false }) {
+  if (captured) return captured;
+  if (!isImage && !touched && pool) return pool;
+  return current;
+}
