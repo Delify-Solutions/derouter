@@ -58,6 +58,11 @@ export default function PlanHistory({ history = [], loading = false }) {
               <p className="text-sm text-text-muted">
                 {SOURCE_LABEL[row.source] || row.source || "—"} · {dateOf(row.startsAt)} → {dateOf(row.expiresAt)}
               </p>
+              {Array.isArray(row.allowedModels) && row.allowedModels.length > 0 && (
+                <p className="break-words text-xs text-text-subtle">
+                  Chỉ dùng được: {row.allowedModels.join(", ")}
+                </p>
+              )}
             </div>
             <div className="text-right">
               {row.kind === "image" ? (

@@ -9,7 +9,9 @@
 import { v4 as uuidv4 } from "uuid";
 import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { serializeLimits } from "./limits.js";
+import { stringifyJson } from "../db/helpers/jsonCol.js";
 import { imageCount, isImagePlan, normalizePlanKind } from "./planKind.js";
+import { normalizePlanModels } from "./planModels.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -164,6 +166,9 @@ export function grantUserPlan(db, {
   // 0 = no limit, > 0 = this rate. A gift code passes its own.
   rpm = null,
   tpm = null,
+  // Which models this purchase may pay for (spec plan-model-access). null = any
+  // model its kind can pay for, which is what every pre-change grant means.
+  allowedModels = null,
   meta = null,
   now = null,
   // Ledger kind for the credit entry. A refund is still a grant of credit, but it
@@ -191,6 +196,7 @@ export function grantUserPlan(db, {
     const granted = insertPeriodSync(db, {
       userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
       kind: normalizePlanKind(kind),
+      allowedModels: normalizePlanModels(allowedModels),
       // An image purchase has no dollar credit at all: its balance is the image
       // count, so credit stays 0 and every grant of images is counted, never priced.
       credit: isImagePlan(kind) || unlimited ? 0 : Math.max(0, nano(creditNanoUsd)),
@@ -222,7 +228,7 @@ function rateOverride(value) {
 
 function insertPeriodSync(db, {
   userId, planIdValue, orderId, source, unlimited, limits, meta, ledgerKind,
-  kind, credit, images = 0, rpm = null, tpm = null, startsAt, durationDays, at, period,
+  kind, allowedModels = null, credit, images = 0, rpm = null, tpm = null, startsAt, durationDays, at, period,
 }) {
   const planId = planIdValue;
   const expiresAt = isoPlusDays(durationDays, new Date(startsAt).getTime());
@@ -264,20 +270,25 @@ function insertPeriodSync(db, {
     status: "active",
     priority: null,
     limits: serializeLimits(limits),
+    // Snapshot, like limits: an admin editing the plan later cannot strip access
+    // from someone who already paid (spec plan-model-access D5).
+    allowedModels: normalizePlanModels(allowedModels),
     rpm,
     tpm,
     createdAt: at,
   };
 
   db.run(
-    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, unlimitedCredit, startsAt, expiresAt, status, priority, limits, rpm, tpm, createdAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, kind, creditTotalNanoUsd, creditRemainingNanoUsd, imageTotal, imageRemaining, unlimitedCredit, startsAt, expiresAt, status, priority, limits, allowedModels, rpm, tpm, createdAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userPlan.id, userPlan.userId, userPlan.planId, userPlan.orderId, userPlan.source, userPlan.kind,
       userPlan.creditTotalNanoUsd, userPlan.creditRemainingNanoUsd,
       userPlan.imageTotal, userPlan.imageRemaining, userPlan.unlimitedCredit,
       userPlan.startsAt, userPlan.expiresAt, userPlan.status, userPlan.priority,
-      userPlan.limits, userPlan.rpm, userPlan.tpm, userPlan.createdAt,
+      userPlan.limits,
+      userPlan.allowedModels ? stringifyJson(userPlan.allowedModels) : null,
+      userPlan.rpm, userPlan.tpm, userPlan.createdAt,
     ]
   );
 

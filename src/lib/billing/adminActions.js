@@ -23,6 +23,8 @@ import {
   normalizeLimits,
 } from "./limits.js";
 import { imageCount, isImagePlan } from "./planKind.js";
+import { normalizePlanModels } from "./planModels.js";
+import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
 
 const REASON_MIN = 3;
 const REASON_MAX = 500;
@@ -97,6 +99,9 @@ export function grantPlanSync(db, userId, { planId, reason, actor = "admin", now
     unlimitedCredit: Number(plan.unlimitedCredit) === 1,
     durationDays: nano(plan.durationDays),
     limits: parseLimits(plan.limits),
+    // The plan's current model list applies to a hand-made grant: there is no order
+    // to carry a snapshot, and the admin is granting this plan as it stands today.
+    allowedModels: plan.allowedModels,
     meta: { adminActor: actor },
     now: at,
   });
@@ -650,6 +655,78 @@ export function applyLimitsToActiveSync(db, planId, limits, { actor, planCode = 
   }
 
   return { ok: true, affectedCount: rows.length };
+}
+
+/**
+ * Push a plan's new model list onto the purchases already sold from it (spec
+ * plan-model-access "Applying new limits to active purchases is explicit").
+ *
+ * Same shape and same place as `applyLimitsToActiveSync`: called from
+ * PATCH /api/plans/[id] inside the plan update's transaction, only when the admin
+ * ticked "áp dụng cho gói đang chạy". Without it, editing a plan reaches only future
+ * orders — which is what makes the snapshot worth having.
+ *
+ * Removing a model therefore disconnects customers mid-period, on their next request.
+ * That is allowed, but it is never silent: one audit row per purchase records the
+ * before/after, and the route returns `affectedCount` so the admin sees how many.
+ *
+ * @returns {{ ok: true, affectedCount: number } | { ok: false, status, error, affectedCount: 0 }}
+ */
+export function applyModelsToActiveSync(db, planId, allowedModels, { actor, planCode = null, now = null } = {}) {
+  if (!db) throw new Error("applyModelsToActiveSync requires the db adapter");
+  if (!planId) throw new Error("applyModelsToActiveSync requires a planId");
+
+  let normalized;
+  try {
+    normalized = normalizePlanModels(allowedModels);
+    if (Array.isArray(allowedModels) && allowedModels.length > 0 && !normalized) {
+      return { ok: false, status: 400, error: "allowedModels rỗng", affectedCount: 0 };
+    }
+  } catch (error) {
+    return { ok: false, status: 400, error: error.message, affectedCount: 0 };
+  }
+
+  const plan = db.get(`SELECT code FROM plans WHERE id = ?`, [planId]);
+  const code = planCode ?? plan?.code ?? planId;
+
+  const rows = db.all(
+    `SELECT id, userId, allowedModels FROM userPlans WHERE planId = ? AND status = 'active'`,
+    [planId]
+  );
+  if (rows.length === 0) return { ok: true, affectedCount: 0 };
+
+  const serialized = normalized ? stringifyJson(normalized) : null;
+  const at = now || nowIso();
+  const reason = `Áp dụng danh sách model mới của gói ${code}`;
+  let changed = 0;
+
+  for (const row of rows) {
+    const before = normalizePlanModels(parseJson(row.allowedModels, null));
+    // A purchase that already carries this list is left alone, so the count the
+    // admin sees is how many customers actually moved.
+    if (sameModels(before, normalized)) continue;
+    db.run(`UPDATE userPlans SET allowedModels = ? WHERE id = ?`, [serialized, row.id]);
+    insertAuditSync(db, {
+      userId: row.userId,
+      actor: actor || "admin",
+      action: "plan_models_changed",
+      reason,
+      details: { before, after: normalized, planId, planCode: code, source: "plan_apply_to_active" },
+      now: at,
+    });
+    changed += 1;
+  }
+
+  return { ok: true, affectedCount: changed };
+}
+
+/** Same list, ignoring order and case? Used to skip no-op audit rows. */
+function sameModels(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  const left = new Set(a.map((m) => m.toLowerCase()));
+  return b.every((m) => left.has(m.toLowerCase()));
 }
 
 // ── Account-level actions ──────────────────────────────────────────────────

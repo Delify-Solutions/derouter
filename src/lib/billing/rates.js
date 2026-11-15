@@ -23,11 +23,13 @@ import { admitSync, effectiveRate, rateKeyOf } from "./planQueue.js";
  *             rateKey: string|null, rpm: number|null, tpm: number|null }}
  *          null rpm/tpm = no limit (no paying plan, or none set)
  */
-export function payingRatesSync(db, userId, nowIso = null, { planId = null, requestKind = "llm" } = {}) {
+export function payingRatesSync(db, userId, nowIso = null, { planId = null, requestKind = "llm", model = null } = {}) {
   const none = { userPlanId: null, planId: null, planName: null, rateKey: null, rpm: null, tpm: null };
   if (!db || !userId) return none;
   // `planId` = the plan a pinned key is paid by; omitted = the head of the queue.
-  const admitted = admitSync(db, userId, nowIso, { planId, requestKind });
+  // `model` narrows which purchase is eligible, so the rate shown is the rate of the
+  // purchase that will actually pay for THIS model (spec plan-model-access).
+  const admitted = admitSync(db, userId, nowIso, { planId, requestKind, model });
   if (!admitted.ok) return none;
   const row = db.get(
     `SELECT up.id AS id, up.planId AS planId, up.rpm AS rpm, up.tpm AS tpm,

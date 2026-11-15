@@ -11,6 +11,8 @@ import { nano } from "../billing/ledger.js";
 import { quoteTopup } from "../billing/topup.js";
 import { findTerm, termPrice } from "../billing/terms.js";
 import { imageCount, isImagePlan } from "../billing/planKind.js";
+import { normalizePlanModels } from "../billing/planModels.js";
+import { stringifyJson } from "../db/helpers/jsonCol.js";
 
 export const METHOD_LABELS = {
   vietqr: "Chuyển khoản VietQR",
@@ -305,6 +307,9 @@ export function createGatewayOrderSync(db, {
     expiresAt,
     emailSnapshot: user.email ?? null,
     limits: snapshotLimitsOf(plan),
+    // Frozen like the limits (spec plan-model-access "Models frozen at order time"): a plan
+    // edited after this order must not change which models the buyer gets on approval.
+    allowedModels: normalizePlanModels(plan.allowedModels),
     createdAt: at,
   };
 
@@ -312,14 +317,14 @@ export function createGatewayOrderSync(db, {
     `INSERT INTO orders(
        id, userId, planId, kind, imageCount, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent,
        status, method, paymentCode, payCurrency, payAmount, paymentProviderId, expiresAt,
-       emailSnapshot, limits, createdAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       emailSnapshot, limits, allowedModels, createdAt
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id, order.userId, order.planId, order.kind, order.imageCount,
       order.amountNanoUsd, order.creditNanoUsd,
       order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.paymentCode, order.payCurrency,
       order.payAmount, order.paymentProviderId, order.expiresAt, order.emailSnapshot,
-      order.limits, order.createdAt,
+      order.limits, order.allowedModels ? stringifyJson(order.allowedModels) : null, order.createdAt,
     ]
   );
   recordCheckoutDiscountsSync(db, order.id, priced);

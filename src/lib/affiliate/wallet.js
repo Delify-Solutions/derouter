@@ -15,7 +15,7 @@
 import { insertAuditSync } from "../billing/audit.js";
 import { grantUserPlan } from "../billing/grants.js";
 import { parseLimits } from "../billing/limits.js";
-import { stringifyJson } from "../db/helpers/jsonCol.js";
+import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
 import { readAffiliateSettingsSync, toWholeNumber } from "./settings.js";
 import { getAffiliateSync } from "./core.js";
 import { releaseAllDueSync, releaseDueSync } from "./commission.js";
@@ -237,6 +237,9 @@ export function grantTemplateCreditSync(db, { userId, creditNanoUsd, source, set
     unlimitedCredit: false,
     durationDays: days,
     limits: parseLimits(plan.limits),
+    // The template plan also decides which models this credit can pay for: it is a
+    // real purchase of that plan, just funded by commission (spec plan-model-access).
+    allowedModels: parseJson(plan.allowedModels, null),
     meta,
     now,
   });

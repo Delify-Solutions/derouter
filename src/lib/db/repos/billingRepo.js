@@ -50,6 +50,7 @@ import { applyCheckoutDiscountsSync, recordCheckoutDiscountsSync } from "../../a
 import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
 import { imageCount, isImagePlan, normalizePlanKind } from "../../billing/planKind.js";
+import { normalizePlanModels } from "../../billing/planModels.js";
 import { quoteTopup, topupBounds } from "../../billing/topup.js";
 
 // Ceiling for an admin-set top-up bound: 1 billion đồng, far above any real top-up.
@@ -371,6 +372,9 @@ function rowToPlan(row) {
     isActive: row.isActive === 1 || row.isActive === true,
     isPurchasable: row.isPurchasable == null ? true : row.isPurchasable === 1 || row.isPurchasable === true,
     allowedGroupIds,
+    // Which models this plan includes (spec plan-model-access): null = whatever the
+    // buyer's group allows.
+    allowedModels: normalizePlanModels(parseJson(row.allowedModels, null)),
     purchaseLimitPerMonth: row.purchaseLimitPerMonth == null ? null : nano(row.purchaseLimitPerMonth),
     // Longer terms besides the single period (spec plan-terms); [] = one period only.
     termOptions: parseTermOptions(row.termOptions),
@@ -404,6 +408,23 @@ function customAmountColumns(input) {
 function normalizeRate(value) {
   if (value == null || value === "" || Number(value) === 0) return null;
   return nano(value);
+}
+
+/**
+ * The first entry of `allowedModels` that names no existing combo, or null.
+ *
+ * A typo would otherwise save a plan that grants nothing at all while looking
+ * perfectly normal on the landing page (spec plan-model-access "Plan definition").
+ * Separate from validatePlanInput because it needs the database.
+ */
+export function unknownPlanModelSync(db, allowedModels) {
+  const list = normalizePlanModels(allowedModels);
+  if (!list || !db) return null;
+  for (const name of list) {
+    const row = db.get(`SELECT id FROM combos WHERE name = ?`, [name]);
+    if (!row) return name;
+  }
+  return null;
 }
 
 /**
@@ -477,6 +498,20 @@ export function validatePlanInput(input = {}) {
     }
     if (!input.allowedGroupIds.every((g) => typeof g === "string" && g.trim())) {
       return "allowedGroupIds must contain non-empty group ids";
+    }
+  }
+
+  // allowedModels (spec plan-model-access): null = no restriction, otherwise a
+  // non-empty array of combo names. An empty array is refused rather than coerced,
+  // for the same reason allowedGroupIds is: "includes no model" is never what an
+  // admin means and would look like a plan that silently grants nothing.
+  if (input.allowedModels !== undefined && input.allowedModels !== null) {
+    if (!Array.isArray(input.allowedModels)) return "allowedModels must be an array or null";
+    if (input.allowedModels.length === 0) {
+      return "allowedModels rỗng — để null nếu gói không giới hạn model";
+    }
+    if (!input.allowedModels.every((m) => typeof m === "string" && m.trim())) {
+      return "allowedModels phải là tên model không rỗng";
     }
   }
 
@@ -672,6 +707,8 @@ export async function createPlan(input = {}) {
   const error = validatePlanInput(input);
   if (error) throw new Error(error);
   const db = await getAdapter();
+  const unknown = unknownPlanModelSync(db, input.allowedModels);
+  if (unknown) throw new Error(`Model không tồn tại: ${unknown}`);
   const exists = db.get(`SELECT id FROM plans WHERE code = ?`, [String(input.code).trim().toLowerCase()]);
   if (exists) throw new Error("A plan with this code already exists");
 
@@ -699,6 +736,7 @@ export async function createPlan(input = {}) {
     allowedGroupIds: Array.isArray(input.allowedGroupIds) && input.allowedGroupIds.length > 0
       ? input.allowedGroupIds.map((g) => String(g).trim())
       : null,
+    allowedModels: normalizePlanModels(input.allowedModels),
     purchaseLimitPerMonth: input.purchaseLimitPerMonth == null || Number(input.purchaseLimitPerMonth) === 0
       ? null
       : nano(input.purchaseLimitPerMonth),
@@ -712,14 +750,15 @@ export async function createPlan(input = {}) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, kind, imageCount, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, kind, imageCount, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, allowedModels, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd,
       plan.kind, plan.imageCount, plan.creditNanoUsd,
       plan.unlimitedCredit ? 1 : 0, plan.allowCustomAmount ? 1 : 0, plan.customMinVnd, plan.customMaxVnd,
       plan.durationDays, plan.isActive ? 1 : 0, plan.isPurchasable ? 1 : 0,
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
+      plan.allowedModels ? stringifyJson(plan.allowedModels) : null,
       plan.purchaseLimitPerMonth, plan.termOptions, plan.isFeatured ? 1 : 0,
       plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
     ]
@@ -745,6 +784,8 @@ export function updatePlanSync(db, id, patch = {}) {
   const merged = { ...current, ...patch, updatedAt: nowIso() };
   const error = validatePlanInput(merged);
   if (error) throw new Error(error);
+  const unknown = unknownPlanModelSync(db, merged.allowedModels);
+  if (unknown) throw new Error(`Model không tồn tại: ${unknown}`);
 
   const code = String(merged.code).trim().toLowerCase();
   const topupColumns = customAmountColumns(merged);
@@ -759,7 +800,7 @@ export function updatePlanSync(db, id, patch = {}) {
   const unlimitedCredit = imagePlan ? false : isUnlimitedInput(merged.unlimitedCredit);
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, kind = ?, imageCount = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, kind = ?, imageCount = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, allowedModels = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
@@ -776,6 +817,9 @@ export function updatePlanSync(db, id, patch = {}) {
       Array.isArray(merged.allowedGroupIds) && merged.allowedGroupIds.length > 0
         ? stringifyJson(merged.allowedGroupIds.map((g) => String(g).trim()))
         : null,
+      // Clamped to null when empty, so toggling the picker off restores "no
+      // restriction" rather than storing an unreadable "grants nothing".
+      merged.allowedModels ? stringifyJson(normalizePlanModels(merged.allowedModels)) : null,
       merged.purchaseLimitPerMonth == null || Number(merged.purchaseLimitPerMonth) === 0
         ? null
         : nano(merged.purchaseLimitPerMonth),
@@ -952,6 +996,9 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     // Snapshotted like the limits: what the buyer paid for cannot change under them.
     kind: plan.kind,
     imageCount: isImagePlan(plan.kind) ? imageCount(plan.imageCount) : null,
+    // What the buyer paid for cannot change under them (spec plan-model-access):
+    // the model list is snapshotted like the limits.
+    allowedModels: normalizePlanModels(plan.allowedModels),
     amountNanoUsd: priceNanoUsd,
     // An image plan sells no credit: its order carries the count instead.
     creditNanoUsd: isImagePlan(plan.kind) ? 0 : creditNanoUsd,
@@ -985,13 +1032,15 @@ export async function createOrder({ userId, planId, payerNote = null, method = "
     if (!priced.ok) throw new Error(priced.error);
     order.amountNanoUsd = priced.amountNanoUsd;
     db.run(
-      `INSERT INTO orders(id, userId, planId, kind, imageCount, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, createdAt, payCurrency, payAmount)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?)`,
+      `INSERT INTO orders(id, userId, planId, kind, imageCount, amountNanoUsd, creditNanoUsd, unlimitedCredit, durationDays, periods, discountPercent, status, method, payerNote, emailSnapshot, limits, allowedModels, createdAt, payCurrency, payAmount)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?)`,
       [
         order.id, order.userId, order.planId, order.kind, order.imageCount,
         order.amountNanoUsd, order.creditNanoUsd,
         order.unlimitedCredit, order.durationDays, order.periods, order.discountPercent, order.status, order.method, order.payerNote, order.emailSnapshot,
-        order.limits, order.createdAt, priced.payAmount,
+        order.limits,
+        order.allowedModels ? stringifyJson(order.allowedModels) : null,
+        order.createdAt, priced.payAmount,
       ]
     );
     recordCheckoutDiscountsSync(db, order.id, priced);

@@ -837,6 +837,8 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null, channelMem
       // A plan gift snapshots the plan's limits at grant time (spec
       // plan-queue-billing "Each grant creates an independent purchased plan").
       limits: parseLimits(plan.limits),
+      // ...and its model list, for the same reason: the code was sold as this plan.
+      allowedModels: parseJson(plan.allowedModels, null),
     };
   } else {
     const credit = Number(row.creditNanoUsd) || 0;
@@ -912,6 +914,7 @@ export function redeemGiftCode(db, { userId, code, assignedBy = null, channelMem
         unlimitedCredit: grant.unlimitedCredit === true,
         durationDays: grant.durationDays,
         limits: grant.limits ?? [],
+        allowedModels: grant.allowedModels ?? null,
         // The code's own RPM/TPM, if set, rides on the purchase it grants.
         rpm: row.rpm ?? null,
         tpm: row.tpm ?? null,

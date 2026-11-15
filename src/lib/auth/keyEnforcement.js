@@ -36,6 +36,8 @@ import {
   getUserOldestTokenAt,
 } from "../db/repos/usageRepo.js";
 import { admitSync } from "../billing/planQueue.js";
+import { livePurchaseModelsSync } from "../billing/customerModels.js";
+import { effectiveModels, effectiveAllows } from "../billing/planModels.js";
 import { payingRatesSync } from "../billing/rates.js";
 import { usdToNano } from "../../shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
@@ -43,6 +45,7 @@ import { acquireSlot, concurrencyCapFor, concurrencyLimitMessage, slotKey } from
 import {
   PLATFORM_MESSAGES,
   modelNotAllowedMessage,
+  planModelNotAllowedMessage,
   modelMaintenanceMessage,
   planLimitMessage,
   pinnedPlanUnavailableMessage,
@@ -273,18 +276,35 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
     //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
     const pinnedPlanId = key.planId ?? null;
-    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
+    // The plan that pays decides the rate, so the model matters here too: a request
+    // for a model only one purchase includes must be rated by that purchase.
+    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind, model });
     const rate = rates.rateKey
       ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.rateKey }, rates, { signal })
       : { ok: true };
     if (!rate.ok) return rate;
 
-    // 6. Model allow-list from the owner's group. Skipped when no model was given
-    //    (a non-chat endpoint); an empty allow-list means unrestricted.
+    // 6. Effective model set: the owner's group allow-list NARROWED by the live
+    //    purchases' own lists (spec plan-model-access "Customer keys take their model
+    //    access from the owner's current group"). The group is the outer bound and is
+    //    never widened by a plan; a plan may only cut it down. With no live purchase
+    //    at all the group's list stands, and the 402 below explains the real problem.
+    //    Skipped when no model was given (a non-chat endpoint).
+    //    Two denials, deliberately separate, because the customer's next step is
+    //    different:
+    //      * the group refuses the model        → 403: this account may never call it.
+    //      * no live purchase includes the model → 403: buy the plan that does.
+    //    A purchase that includes the model but has no credit left is NOT a 403 — the
+    //    admission step below answers 402/429, and telling the customer to buy a plan
+    //    they already own would be wrong.
     if (model) {
-      const allowed = resolved.allowedModels;
-      if (Array.isArray(allowed) && allowed.length > 0 && !matchesAllowed(model, allowed)) {
-        return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+      const { union } = livePurchaseModelsSync(db, key.userId);
+      const groupRefuses = !effectiveAllows(effectiveModels(resolved.allowedModels, null), model);
+      const noPurchaseIncludes =
+        !groupRefuses && union != null && !matchesAllowed(model, union);
+      if (groupRefuses) return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+      if (noPurchaseIncludes) {
+        return deny(403, "model_not_allowed", planModelNotAllowedMessage(model));
       }
     }
 
@@ -298,7 +318,7 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
     //    queued plan has credit left.
     //    Re-read after the rate step: a TPM wait can last seconds, and the queue may
     //    have moved on in that time.
-    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
+    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId, requestKind, model });
     if (!admitted.ok) {
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {
@@ -322,7 +342,7 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
     //    slot is released when the response body ends (src/lib/billing/inflight.js).
     //    Re-read the paying plan: like admission, it may have moved on during a
     //    TPM wait, and the cap must be the plan that will actually pay.
-    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind });
+    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, requestKind, model });
     const capFromRpm = Number(payer.rpm) > 0;
     const slot = acquireSlot(slotKey(key.userId, payer.rateKey), { max: concurrencyCapFor(payer.rpm) });
     if (!slot.ok) {

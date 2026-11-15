@@ -59,6 +59,15 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
               <span className="truncate">{entry.planName || entry.planCode || "Gói"}</span>
             </h3>
             <p className="mt-1 text-sm text-text-muted">{SOURCE_LABEL[entry.source] || entry.source || "—"}</p>
+            {/* A purchase that restricts models says so here: the customer must be
+                able to tell two plans apart without trying a request (spec
+                plan-model-access). An unrestricted purchase says nothing — that is
+                the common case and the card stays as short as it was. */}
+            {Array.isArray(entry.allowedModels) && entry.allowedModels.length > 0 && (
+              <p className="mt-0.5 break-words text-xs text-text-muted">
+                Chỉ dùng được: {entry.allowedModels.join(", ")}
+              </p>
+            )}
           </div>
         </div>
         <StatusTag status={entry.statusLabel} reopenAt={entry.reopenAt} className="shrink-0" />
