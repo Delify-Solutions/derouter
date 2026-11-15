@@ -19,6 +19,7 @@ import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { matchesAllowed } from "@/lib/auth/modelMatching.js";
+import { comboIsInMaintenance } from "@/lib/combos/maintenance.js";
 import { extractApiKey, isValidApiKey } from "@/sse/services/auth.js";
 import { getApiKeyForAuth } from "@/lib/db/repos/apiKeysRepo.js";
 import { getSettings } from "@/lib/localDb";
@@ -321,6 +322,8 @@ export async function buildModelsList(kindFilter, options = {}) {
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
     }
+    // Still listed while under maintenance (spec api-access-enforcement), but flagged.
+    if (comboIsInMaintenance(combo)) entry.maintenance = true;
 
     // Capabilities: prefer the combo's stored override (meta.capabilities);
     // otherwise resolve from the combo's first model via the same pattern table

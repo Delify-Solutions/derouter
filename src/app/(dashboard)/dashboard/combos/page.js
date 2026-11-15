@@ -10,7 +10,7 @@ import PreviewThumb from "@/shared/components/PreviewThumb";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
-import { PRICING_FIELDS, EMPTY_PRICING, pricingToDraft, parsePricingDraft, closestPoolModel } from "@/shared/utils/pricingMatch";
+import { PRICING_FIELDS, EMPTY_PRICING, PRICE_FACTORS, pricingToDraft, parsePricingDraft, closestPoolModel, scalePricingDraft, pickPriceBase } from "@/shared/utils/pricingMatch";
 import { DEFAULT_CAPABILITIES, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
@@ -153,6 +153,26 @@ export default function CombosPage() {
       }
     } catch (error) {
       console.error("Error updating combo:", error);
+    }
+  };
+
+  // Maintenance switch (spec api-access-enforcement): customers calling this combo get a 503.
+  const handleToggleMaintenance = async (combo) => {
+    const next = combo.meta?.maintenance !== true;
+    try {
+      const res = await fetch(`/api/combos/${combo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maintenance: next }),
+      });
+      if (res.ok) {
+        await fetchData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Không đổi được trạng thái bảo trì");
+      }
+    } catch (error) {
+      console.error("Error toggling combo maintenance:", error);
     }
   };
 
@@ -313,6 +333,7 @@ export default function CombosPage() {
               onCopy={copy}
               onEdit={() => setEditingCombo(combo)}
               onDelete={() => handleDelete(combo.id)}
+              onToggleMaintenance={() => handleToggleMaintenance(combo)}
               onTest={() => handleTestCombo(combo)}
               strategy={comboStrategies[combo.name] || {}}
               onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
@@ -482,8 +503,34 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
-function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onTest, strategy = {}, onSetStrategy, imagePrice = 0 }) {
+// Quick multipliers on the combo price form (spec combo-pricing-admin). Text labels, keyboard
+// operable, the active factor is marked with aria-pressed and a bold underline (not colour alone).
+function PriceMultiplier({ activeFactor, onPick }) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Nhân giá nhanh từ giá gốc">
+      <span className="text-[11px] text-text-muted">Nhân giá:</span>
+      {PRICE_FACTORS.map((f) => {
+        const active = activeFactor === f;
+        return (
+          <button
+            key={f}
+            type="button"
+            onClick={() => onPick(f)}
+            aria-pressed={active}
+            className={`min-h-6 border px-2.5 py-1 font-mono text-xs transition-colors ${active ? "border-primary bg-primary/10 font-semibold text-primary underline" : "border-border text-text-muted hover:border-primary hover:text-primary"}`}
+            title={f === 1 ? "Về giá gốc" : `Giá gốc nhân ${f}`}
+          >
+            ×{f}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, onToggleMaintenance, onTest, strategy = {}, onSetStrategy, imagePrice = 0 }) {
   const isImage = combo.kind === "image";
+  const inMaintenance = combo.meta?.maintenance === true;
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const [showDiscounts, setShowDiscounts] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
@@ -499,7 +546,14 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
           </div>
           <div className="min-w-0 flex-1">
-            <code className="block truncate font-mono text-sm font-medium" title={combo.name}>{combo.name}</code>
+            <div className="flex min-w-0 items-center gap-2">
+              <code className="block truncate font-mono text-sm font-medium" title={combo.name}>{combo.name}</code>
+              {inMaintenance && (
+                <span className="shrink-0 border border-amber-700/60 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-amber-800 dark:text-amber-300" data-testid="combo-maintenance-badge">
+                  Đang bảo trì
+                </span>
+              )}
+            </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {combo.models.length === 0 ? (
                 <span className="text-xs text-text-muted italic">No models</span>
@@ -563,7 +617,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             />
           </div>
 
-          <div className="grid grid-cols-4 gap-1 sm:flex">
+          <div className="grid grid-cols-3 gap-1 sm:flex">
             <button
               onClick={(e) => { e.stopPropagation(); onTest?.(combo.name); }}
               
@@ -592,6 +646,16 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             >
               <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
               <span className="text-[10px] leading-tight">Giảm giá</span>
+            </button>
+            <button
+              onClick={onToggleMaintenance}
+              aria-pressed={inMaintenance}
+              className={`flex flex-col items-center rounded px-2 py-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${inMaintenance ? "text-amber-800 dark:text-amber-300" : "text-text-muted hover:text-primary"}`}
+              title={inMaintenance ? "Tắt bảo trì: khách gọi lại được combo này" : "Bật bảo trì: khách gọi combo này sẽ nhận lỗi 503"}
+              aria-label={`Bảo trì combo ${combo.name}`}
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{inMaintenance ? "construction" : "build"}</span>
+              <span className="text-[10px] leading-tight">Bảo trì</span>
             </button>
             <button
               onClick={onEdit}
@@ -983,6 +1047,11 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
   const existingPricing = combo?.name ? comboPricing[combo.name] : null;
   const [pricing, setPricing] = useState(() => existingPricing ? pricingToDraft(existingPricing) : { ...EMPTY_PRICING });
   const [pricingTouched, setPricingTouched] = useState(!!existingPricing);
+  // Quick multipliers (spec combo-pricing-admin): the factor applies to a fixed base, never to the
+  // current fields, so x2 then x3 is 3x. `pricingBase` is captured at the first press when the form
+  // has no pool price to fill from; a manual edit of a field drops both.
+  const [pricingBase, setPricingBase] = useState(null);
+  const [pricingFactor, setPricingFactor] = useState(null);
 
   // Capabilities state (14 OpenRouter-style fields). Auto-filled from the combo's
   // first model via getCapabilitiesForModel when the admin hasn't customized them.
@@ -1072,6 +1141,12 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
     setPricing(match ? pricingToDraft(match) : { ...EMPTY_PRICING });
   }, [models, pricingTouched, poolPricing]);
 
+  // A new model list means a new pool price: drop the captured base so the next press re-bases.
+  useEffect(() => {
+    setPricingBase(null);
+    setPricingFactor(null);
+  }, [models]);
+
   const autofillPricing = () => {
     if (!models.length) return;
     const first = models[0];
@@ -1115,8 +1190,33 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
     setCapsTouched(true);
   };
 
+  // The pool price the form auto-fills from (same match as the auto-fill effect), or null.
+  // Only meaningful while the form still shows that suggestion: an image combo, a combo with a
+  // saved price and a price the admin typed are never auto-filled, so their base is what the
+  // fields hold (spec combo-pricing-admin), never a fuzzy pool match.
+  const poolBaseDraft = () => {
+    if (isImage || pricingTouched) return null;
+    if (!models.length || !poolPricing || Object.keys(poolPricing).length === 0) return null;
+    const last = models[models.length - 1];
+    const slash = last.indexOf("/");
+    const provider = slash > 0 ? last.slice(0, slash) : null;
+    const model = slash > 0 ? last.slice(slash + 1) : last;
+    const match = closestPoolModel(poolPricing, provider, model);
+    return match ? pricingToDraft(match) : null;
+  };
+
+  const applyPriceFactor = (factor) => {
+    const base = pickPriceBase({ captured: pricingBase, pool: poolBaseDraft(), current: pricing, isImage, touched: pricingTouched });
+    setPricingBase(base);
+    setPricingFactor(factor);
+    setPricing(scalePricingDraft(base, factor));
+    setPricingTouched(true);
+  };
+
   const handlePricingFieldChange = (key, value) => {
     setPricing((prev) => ({ ...prev, [key]: value }));
+    setPricingBase(null);
+    setPricingFactor(null);
     setPricingTouched(true);
   };
 
@@ -1243,6 +1343,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
           {isImage ? (
             <div>
               <label className="text-sm font-medium block mb-1.5">Price per image (USD)</label>
+              <PriceMultiplier activeFactor={pricingFactor} onPick={applyPriceFactor} />
               <Input
                 type="number"
                 step="0.001"
@@ -1288,6 +1389,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
                 {models.length ? "Auto-filled from pool model defaults — edit to set a custom price." : "Add a model to auto-fill from pool prices."}
               </p>
             )}
+            <PriceMultiplier activeFactor={pricingFactor} onPick={applyPriceFactor} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {PRICING_FIELDS.filter((f) => f.key !== "image").map((f) => (
                 <Input

@@ -19,6 +19,7 @@ import { resolveDefaultGroupId, getKeyGroupById, getCombos } from "@/lib/localDb
 import { resolvePrice } from "@/lib/db/repos/pricingRepo.js";
 import { getActiveDiscountsForModels, applyBpToPricing } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { PROTOCOLS } from "./salesData";
+import { comboIsInMaintenance } from "@/lib/combos/maintenance.js";
 
 // Bảng giá nội bộ chưa phủ hết mọi id. Model nào không tra được theo provider
 // thì tra tiếp bảng của một provider bán cùng model đó — không có fallback này
@@ -113,6 +114,8 @@ export async function buildModelListForGroup({ planIds = [] } = {}) {
         id,
         name: model.name || id,
         kind: isImage ? "image" : "llm",
+        // Under maintenance: listed with its price, labelled "Bảo trì" (spec customer-portal).
+        maintenance: comboIsInMaintenance(combo),
         formats: PROTOCOLS.map((p) => p.id),
         input: isImage ? null : rate?.input ?? null,
         output: isImage ? null : rate?.output ?? null,
