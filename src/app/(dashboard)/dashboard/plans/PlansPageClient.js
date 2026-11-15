@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal } from "@/shared/components";
+import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal, AllowedModelsPicker } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { describeLimit } from "@/lib/billing/limits.js";
@@ -44,6 +44,9 @@ const EMPTY_FORM = {
   isFeatured: false,
   // Empty array = any group may buy. Stored in the plan row as JSON.
   allowedGroupIds: [],
+  // Which models the plan includes (spec plan-model-access). Empty = whatever the
+  // buyer's group allows, which is the only behaviour the product had before.
+  allowedModels: [],
   // "" = unlimited. Counted per calendar month over orders and gifts of the plan.
   purchaseLimitPerMonth: "",
   // Longer terms besides the single period, as draft rows (spec plan-terms).
@@ -171,6 +174,7 @@ function planToDraft(plan) {
     isPurchasable: plan.isPurchasable !== false,
     isFeatured: plan.isFeatured === true,
     allowedGroupIds: Array.isArray(plan.allowedGroupIds) ? plan.allowedGroupIds : [],
+    allowedModels: Array.isArray(plan.allowedModels) ? plan.allowedModels : [],
     purchaseLimitPerMonth: plan.purchaseLimitPerMonth == null ? "" : String(plan.purchaseLimitPerMonth),
     termOptions: termsToDraft(plan.termOptions),
     sortOrder: plan.sortOrder == null ? "" : String(plan.sortOrder),
@@ -181,11 +185,23 @@ function planToDraft(plan) {
   };
 }
 
+/** Whether the model list changed — the second reason to offer apply-to-active. */
+function modelsChanged(draftModels, originalModels) {
+  const norm = (list) => JSON.stringify([...(Array.isArray(list) ? list : [])].map((m) => String(m).toLowerCase()).sort());
+  return norm(draftModels) !== norm(originalModels);
+}
+
 /** Whether the two limit lists differ — decides whether to offer apply-to-active. */
 function limitsChanged(draftRows, originalLimits, kind = "llm") {
   const next = JSON.stringify(draftToLimits(draftRows, kind) ?? []);
   const before = JSON.stringify(Array.isArray(originalLimits) ? originalLimits : []);
   return next !== before;
+}
+
+/** Models the edit drops from a plan — named in the apply-to-active warning. */
+function modelsRemoved(draftModels, originalModels) {
+  const next = new Set((Array.isArray(draftModels) ? draftModels : []).map((m) => String(m).toLowerCase()));
+  return (Array.isArray(originalModels) ? originalModels : []).filter((m) => !next.has(String(m).toLowerCase()));
 }
 
 export default function PlansPageClient() {
@@ -278,6 +294,9 @@ export default function PlansPageClient() {
       isPurchasable: draft.isPurchasable,
       isFeatured: draft.isFeatured,
       allowedGroupIds: draft.allowedGroupIds.length ? draft.allowedGroupIds : null,
+      // [] means "no restriction", which the server stores as NULL. Sending the
+      // array itself would be refused as "empty list".
+      allowedModels: draft.allowedModels.length ? draft.allowedModels : null,
       purchaseLimitPerMonth: draft.purchaseLimitPerMonth === "" ? null : Number(draft.purchaseLimitPerMonth),
       // A custom-amount plan sells one period only.
       termOptions: draft.allowCustomAmount && !draft.unlimitedCredit ? [] : draftToTerms(draft.termOptions),
@@ -913,6 +932,23 @@ export default function PlansPageClient() {
             </div>
           </div>
 
+          <div className="border-t border-border pt-4 flex flex-col gap-2">
+            <span className="meta text-text-subtle">Model của gói</span>
+            <span className="text-[11px] text-text-muted">
+              Để trống = khách dùng được mọi model mà nhóm của họ cho phép. Chọn model thì gói này
+              chỉ gọi được những model đó — không mở thêm model ngoài nhóm.
+            </span>
+            <AllowedModelsPicker
+              value={draft.allowedModels}
+              onChange={(names) => setField("allowedModels", names)}
+            />
+            {draft.allowedModels.length > 0 && (
+              <p className="text-[11px] text-text-muted">
+                {draft.allowedModels.length} model: {draft.allowedModels.join(", ")}
+              </p>
+            )}
+          </div>
+
           <div className="border-t border-border pt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Input
               label="RPM (request mỗi phút)"
@@ -990,6 +1026,26 @@ export default function PlansPageClient() {
                   <span className="block text-xs text-text-muted">
                     Credit và ngày hết hạn của các gói đã bán không đổi. Bỏ trống thì chỉ gói mua sau
                     mới dùng hạn mức này.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {editing && modelsChanged(draft.allowedModels, editing.allowedModels) && (
+              <label className="flex items-start gap-2 text-sm text-text-main">
+                <input
+                  type="checkbox"
+                  checked={draft.applyToActive}
+                  onChange={(event) => setField("applyToActive", event.target.checked)}
+                  className="mt-1 size-4"
+                />
+                <span>
+                  Áp dụng danh sách model mới cho {editing.stats?.activeCount ?? 0} gói đang chạy
+                  <span className="block text-xs text-text-muted">
+                    {modelsRemoved(draft.allowedModels, editing.allowedModels).length > 0
+                      ? `Bỏ model khỏi gói đã bán sẽ chặn khách đang dùng ngay từ request kế tiếp: ${modelsRemoved(draft.allowedModels, editing.allowedModels).join(", ")}. `
+                      : ""}
+                    Bỏ trống thì khách đã mua giữ nguyên danh sách cũ.
                   </span>
                 </span>
               </label>

@@ -11,6 +11,7 @@ import { getAdapter } from "../driver.js";
 import { parseJson } from "../helpers/jsonCol.js";
 import { nano } from "../../billing/ledger.js";
 import { parseLimits, describeLimit, windowLabel } from "../../billing/limits.js";
+import { normalizePlanModels } from "../../billing/planModels.js";
 import { queueViewSync } from "../../billing/planQueue.js";
 import { imageCount, normalizePlanKind } from "../../billing/planKind.js";
 import { UNLIMITED_CREDIT_LABEL } from "../../../shared/utils/money.js";
@@ -72,6 +73,9 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     startsAt: entry.startsAt,
     expiresAt: entry.expiresAt,
     priority: entry.priority,
+    // Which models this purchase pays for (spec plan-model-access). null = any model
+    // its kind covers, which is what every unrestricted purchase means.
+    allowedModels: normalizePlanModels(entry.allowedModels),
     statusLabel: entry.statusLabel,
     reopenAt: entry.reopenAt,
     // queueViewSync spreads evaluatePlan's result last, so `entry.windows` is the
@@ -125,6 +129,8 @@ export function getPlanHistorySync(db, userId, { limit = 50 } = {}) {
     status: row.status,
     createdAt: row.createdAt ?? null,
     limits: parseLimits(row.limits),
+    // Same restriction, shown on an inactive purchase too.
+    allowedModels: normalizePlanModels(row.allowedModels),
   }));
 }
 

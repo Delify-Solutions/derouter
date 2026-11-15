@@ -55,7 +55,13 @@ async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) 
   const pinnedPlanId = owner.deleted
     ? owner.planId ?? null
     : db.get(`SELECT planId FROM apiKeys WHERE id = ?`, [owner.apiKeyId])?.planId ?? null;
-  const admitted = admitSync(db, owner.userId, null, { planId: pinnedPlanId, requestKind: "image" });
+  // The model matters here as much as on the text path: a purchase that does not
+  // include this image combo cannot pay for it (spec plan-model-access).
+  const admitted = admitSync(db, owner.userId, null, {
+    planId: pinnedPlanId,
+    requestKind: "image",
+    model: requestedModel || model,
+  });
   if (admitted.ok && admitted.kind === "image") return null;
   // A router decision, not an upstream error: platform-marked so a customer
   // reads it as written (spec model-privacy).

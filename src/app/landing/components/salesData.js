@@ -87,6 +87,25 @@ export function interpolate(template, values = {}) {
 // tả đúng cơ chế hệ thống làm (một pool credit dùng chung, hạn mức theo khung giờ,
 // hàng đợi gói, endpoint tương thích OpenAI). Admin thay được bằng cách sửa nội
 // dung ở /dashboard/content.
+// A plan that narrows the models (spec plan-model-access) makes the first line of
+// DEFAULT_PERKS false, so it is replaced rather than reworded: "mọi model trong
+// nhóm" is exactly what such a plan does NOT give.
+const RESTRICTED_FIRST_PERK = "Credit chỉ dùng cho các model ghi trên thẻ này";
+
+/**
+ * The perk list for one card: the plan's own limit sentences plus the standard
+ * promises, with the "every model" line swapped when the plan restricts models.
+ */
+export function perksFor(plan) {
+  const base = plan?.kind === "image" ? IMAGE_PERKS : DEFAULT_PERKS;
+  if (plan?.kind === "image" || !plan?.allowedModels?.length) return [...(plan?.limitsText || []), ...base];
+  return [
+    ...(plan.limitsText || []),
+    RESTRICTED_FIRST_PERK,
+    ...base.slice(1),
+  ];
+}
+
 export const DEFAULT_PERKS = [
   "Credit dùng được cho mọi model trong nhóm của bạn",
   "Mua thêm gói thì credit còn lại vẫn giữ nguyên",
@@ -133,6 +152,10 @@ export function toSalesPlan(plan, offeredMethods = []) {
   if (Number(plan.rpm) > 0) limitsText.push(`${Number(plan.rpm).toLocaleString("vi-VN")} request mỗi phút`);
   if (Number(plan.tpm) > 0) limitsText.push(`${Number(plan.tpm).toLocaleString("vi-VN")} token mỗi phút`);
   const methods = Array.isArray(offeredMethods) ? offeredMethods : [];
+  // Models included, when the plan narrows them (spec plan-model-access). The card
+  // must say so: two plans at the same price differ precisely here, and a customer
+  // who cannot see it will buy the wrong one.
+  const allowedModels = Array.isArray(plan.allowedModels) ? plan.allowedModels : [];
 
   return {
     id: plan.id,
@@ -148,6 +171,8 @@ export function toSalesPlan(plan, offeredMethods = []) {
     soldOut: methods.length === 0,
     creditUsd,
     kind: imagePlan ? "image" : "llm",
+    // [] = whatever the buyer's group allows; the card then says nothing.
+    allowedModels,
     imageCount,
     imageText: imagePlan ? `${imageCount.toLocaleString("vi-VN")} ảnh` : null,
     // No credit ceiling: the card says so instead of showing "$0".

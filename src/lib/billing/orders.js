@@ -14,6 +14,7 @@
 import { grantUserPlan } from "./grants.js";
 import { nano } from "./ledger.js";
 import { imageCount, normalizePlanKind } from "./planKind.js";
+import { normalizePlanModels } from "./planModels.js";
 import { parseLimits, serializeLimits } from "./limits.js";
 import { parseJson } from "../db/helpers/jsonCol.js";
 // Commission accrual (design D2). Synchronous and driver-free, so it can run
@@ -48,6 +49,19 @@ export function orderLimits(db, orderRow) {
   if (snapshot.length > 0) return snapshot;
   const plan = orderRow.planId ? db.get(`SELECT limits FROM plans WHERE id = ?`, [orderRow.planId]) : null;
   return parseLimits(plan?.limits);
+}
+
+/**
+ * The model list an order grants (spec plan-model-access).
+ *
+ * Unlike `orderLimits`, this never falls back to the plan: NULL already means
+ * "unrestricted", and an order written before this column existed was sold by a plan
+ * that could not have had a list — so unrestricted is exactly what its buyer bought.
+ * A fallback would let a later plan edit reach an old order, which is the snapshot's
+ * whole purpose.
+ */
+export function orderAllowedModels(orderRow) {
+  return normalizePlanModels(parseJson(orderRow?.allowedModels, null));
 }
 
 /** Periods an order row bought: NULL (every order before plan-terms) means one. */
@@ -94,6 +108,8 @@ export function rowToOrder(row) {
     planCode: row.planCode ?? null,
     planName: row.planName ?? null,
     limits: parseLimits(row.limits),
+    // Which models the order carries (spec plan-model-access). null = unrestricted.
+    allowedModels: orderAllowedModels(row),
     voucherDiscount: row.voucherDiscount == null ? null : nano(row.voucherDiscount),
     referralDiscountBp: row.referralDiscountBp == null ? null : Number(row.referralDiscountBp),
   };
@@ -227,6 +243,9 @@ export function approveOrderSync(db, orderId, {
     // falls back to the plan's current limits, which is the only thing it could
     // possibly mean.
     limits: orderLimits(db, row),
+    // Model list snapshot: what the buyer paid for, carried into the purchase so a
+    // later plan edit cannot change it.
+    allowedModels: orderAllowedModels(row),
     meta: { orderId, amountNanoUsd: nano(row.amountNanoUsd), paymentTransactionId },
     now: paidAt,
   });

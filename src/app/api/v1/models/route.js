@@ -22,6 +22,8 @@ import { matchesAllowed } from "@/lib/auth/modelMatching.js";
 import { extractApiKey, isValidApiKey } from "@/sse/services/auth.js";
 import { getApiKeyForAuth } from "@/lib/db/repos/apiKeysRepo.js";
 import { getSettings } from "@/lib/localDb";
+import { getAdapter } from "@/lib/db/driver.js";
+import { customerModelScopeSync } from "@/lib/billing/customerModels.js";
 import { isInternalRequest, signInternalRequest } from "@/lib/auth/internalHeaders";
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -252,11 +254,13 @@ export async function buildModelsList(kindFilter, options = {}) {
   // must match an entry via matchesAllowed (provider-stripped, date-stripped,
   // suffix-at-/). This is the same model-matching the chat auth layer uses, so
   // /v1/models advertises exactly the models the calling key can send to.
-  const allowedModels = Array.isArray(options.allowedModels) && options.allowedModels.length > 0
-    ? options.allowedModels
-    : null;
-  const isAllowed = allowedModels
-    ? (id) => matchesAllowed(id, allowedModels)
+  // `[]` is meaningful and differs from null: null = no filter, [] = NOTHING is
+  // callable (every live purchase lies outside the group, spec plan-model-access).
+  // Collapsing [] to null would advertise the whole group to someone who can call
+  // none of it.
+  const allowList = Array.isArray(options.allowedModels) ? options.allowedModels : null;
+  const isAllowed = allowList
+    ? (id) => allowList.length > 0 && matchesAllowed(id, allowList)
     : () => true;
   let connections = [];
   try {
@@ -646,9 +650,9 @@ export async function resolveKeyScopeForModels(request) {
   // Scope the listing to what the key may actually call. For a customer key this
   // is the owner's group (read per request, so a group change shows up in the
   // listing without touching the key); for an admin key it is the key's own
-  // narrowing. A subscription NEVER narrows the listing: plans meter spending, not
-  // model eligibility, and advertising fewer models than the group allows would
-  // make a paying customer believe a model is unavailable.
+  // narrowing. For a customer key the list is then narrowed to the models of the
+  // plans the customer holds (spec plan-model-access): a plan that does not include a
+  // model cannot pay for it, so listing it would only invite a refused request.
   let allowedModels = null;
   if (apiKey) {
     const auth = await getApiKeyForAuth(apiKey);
@@ -681,6 +685,16 @@ export async function resolveKeyScopeForModels(request) {
     if (auth?.resolved?.allowedModels) {
       allowedModels = auth.resolved.allowedModels;
     }
+    // A plan may only NARROW the group's list (spec plan-model-access "Model listing
+    // reflects the owner's group"): the listing is the group's set intersected with
+    // the union over live purchases. A customer with no live purchase keeps the full
+    // group list — hiding it would make a fresh account look broken, and the honest
+    // answer to a request then is 402 (no quota), not 403 (no access).
+    // `[]` here means "nothing callable" (every live purchase lies outside the
+    // group). Kept distinct from null = unrestricted, which buildModelsList reads as
+    // "no filter".
+    const db = await getAdapter();
+    allowedModels = customerModelScopeSync(db, auth.key.userId, allowedModels);
   }
 
   return { allowedModels, skipDynamicFetch: false };

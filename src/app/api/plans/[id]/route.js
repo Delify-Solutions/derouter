@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getPlanById, updatePlanSync, deletePlan, validatePlanInput } from "@/lib/db/repos/billingRepo.js";
-import { applyLimitsToActiveSync } from "@/lib/billing/adminActions.js";
+import { applyLimitsToActiveSync, applyModelsToActiveSync } from "@/lib/billing/adminActions.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { parseLimits } from "@/lib/billing/limits.js";
+import { normalizePlanModels } from "@/lib/billing/planModels.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -25,15 +26,16 @@ export async function GET(request, { params }) {
  * PATCH /api/plans/[id]
  *
  * Accepts `limits` (validated against this plan's credit and duration; 400 with a
- * Vietnamese message naming the offending limit) and, when the limits actually
- * changed, an optional `applyToActive: true` that also rewrites every ACTIVE
- * purchase of the plan.
+ * Vietnamese message naming the offending limit), `allowedModels` (null = no
+ * restriction, or a non-empty list of combos) and, when either actually changed, an
+ * optional `applyToActive: true` that also rewrites every ACTIVE purchase of the plan.
  *
  * The template write and the apply-to-active pass share ONE transaction: a customer
  * must never sit on a plan whose template was saved but whose purchases were left
  * with the old rules because the second write failed.
  *
- * Response: `{ plan, affectedCount }` — `affectedCount` only when the pass ran.
+ * Response: `{ plan, affectedCount }` — `affectedCount` only when at least one pass
+ * ran, and then it is the largest number of purchases either pass touched.
  */
 export async function PATCH(request, { params }) {
   const { id } = await params;
@@ -60,7 +62,13 @@ export async function PATCH(request, { params }) {
 
     const limitsChanged =
       JSON.stringify(parseLimits(merged.limits)) !== JSON.stringify(parseLimits(current.limits));
-    const shouldApply = applyToActive && limitsChanged;
+    // Same rule for the model list: a no-op save must not write audit rows.
+    const modelsChanged =
+      JSON.stringify(normalizePlanModels(merged.allowedModels) ?? null) !==
+      JSON.stringify(normalizePlanModels(current.allowedModels) ?? null);
+    const shouldApplyLimits = applyToActive && limitsChanged;
+    const shouldApplyModels = applyToActive && modelsChanged;
+    const shouldApply = shouldApplyLimits || shouldApplyModels;
     const actor = shouldApply ? await getAdminActor(request) : null;
 
     const db = await getAdapter();
@@ -69,13 +77,21 @@ export async function PATCH(request, { params }) {
       if (!next) return { missing: true };
 
       let affectedCount = null;
-      if (shouldApply) {
+      if (shouldApplyLimits) {
         const applied = applyLimitsToActiveSync(db, id, parseLimits(next.limits), {
           actor,
           planCode: next.code,
         });
         if (applied?.ok === false) return { failed: applied };
         affectedCount = applied.affectedCount;
+      }
+      if (shouldApplyModels) {
+        const applied = applyModelsToActiveSync(db, id, normalizePlanModels(next.allowedModels), {
+          actor,
+          planCode: next.code,
+        });
+        if (applied?.ok === false) return { failed: applied };
+        affectedCount = Math.max(affectedCount ?? 0, applied.affectedCount);
       }
       return { plan: next, affectedCount };
     });

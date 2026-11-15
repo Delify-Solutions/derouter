@@ -23,6 +23,7 @@
 import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, nano } from "./ledger.js";
 import { parseLimits, serializeLimits, limitCeiling } from "./limits.js";
 import { imageCount, isImagePlan, normalizePlanKind } from "./planKind.js";
+import { normalizePlanModels, planAllowsModel } from "./planModels.js";
 import { insertAuditSync } from "./audit.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -158,6 +159,9 @@ function rowToEntry(row, windowsByPlan) {
     creditRemainingNanoUsd: nano(row.creditRemainingNanoUsd),
     imageTotal: imageCount(row.imageTotal),
     imageRemaining: imageCount(row.imageRemaining),
+    // Which models this purchase may pay for (spec plan-model-access). null = any,
+    // which is what every purchase granted before the change carries.
+    allowedModels: normalizePlanModels(row.allowedModels),
     // No credit ceiling: the plan pays for any request its windows allow.
     unlimitedCredit: Number(row.unlimitedCredit) === 1,
     startsAt: row.startsAt,
@@ -313,9 +317,9 @@ export function scopeQueue(queue, planId) {
  * Allowances are per (user, plan) and shared by every key, so minting more keys
  * never opens a second allowance.
  */
-export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null, requestKind = REQUEST_KIND_LLM) {
+export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null, requestKind = REQUEST_KIND_LLM, model = null) {
   if (keyPlanId) return keyPlanId;
-  const paying = admitSync(db, userId, nowIsoArg, { requestKind });
+  const paying = admitSync(db, userId, nowIsoArg, { requestKind, model });
   if (!paying.ok) return null;
   const row = db.get(`SELECT id, planId, rpm, tpm FROM userPlans WHERE id = ?`, [paying.planId]);
   return rateKeyOf(row);
@@ -333,12 +337,26 @@ export function ratePlanIdSync(db, userId, keyPlanId = null, nowIsoArg = null, r
  * only ever uses a credit purchase, an image request prefers an image purchase and
  * falls back to credit (charged the per-image price). Both passes keep queue order,
  * so the customer's own ordering still wins inside a unit.
+ *
+ * `model` is the model (combo name) the client asked for, when known. A purchase
+ * whose `allowedModels` excludes it is not a candidate at all (spec
+ * plan-model-access). Null = no model to filter on, e.g. a non-chat endpoint.
  */
-export function admitSync(db, userId, nowIsoArg = null, { planId = null, requestKind = REQUEST_KIND_LLM } = {}) {
+export function admitSync(
+  db,
+  userId,
+  nowIsoArg = null,
+  { planId = null, requestKind = REQUEST_KIND_LLM, model = null } = {}
+) {
   const at = nowIsoArg || nowIso();
   const nowMs = new Date(at).getTime();
   const queue = scopeQueue(listQueueSync(db, userId, at), planId)
-    .filter((entry) => coversRequest(entry, requestKind));
+    .filter((entry) => coversRequest(entry, requestKind))
+    // A purchase that does not include this model cannot pay for it. Dropped here,
+    // BEFORE the blocked/eligible evaluation below: an ineligible purchase must
+    // never contribute a 429 reopen time, or a customer is told to wait for a
+    // window that would refuse them anyway (spec plan-model-access D4).
+    .filter((entry) => planAllowsModel(entry.allowedModels, model));
 
   // Image purchases first for an image request; one pass otherwise.
   const prefer = preferredKind(requestKind);
@@ -551,6 +569,11 @@ export function chargeSync(db, {
   imageCount: images = 0,
   nowIso: atArg = null,
   planId = null,
+  // The model (combo name) the client asked for, when known. A purchase that does
+  // not include it must not pay for this request (spec plan-model-access D3): the
+  // queue is re-read here, so without this filter a request admitted on the
+  // purchase that allows the model could still be billed to an earlier one.
+  model = null,
 } = {}) {
   if (!db) throw new Error("chargeSync requires the db adapter");
   if (!userId) throw new Error("chargeSync requires a userId");
@@ -574,7 +597,8 @@ export function chargeSync(db, {
   // admission (D4), so concurrent streams are bounded by the plan that can pay.
   // `planId` = the key's pinned plan: only purchases of that plan may pay, so a
   // shortfall becomes debt rather than leaking onto another plan.
-  const queue = scopeQueue(listQueueSync(db, userId, at), planId);
+  const queue = scopeQueue(listQueueSync(db, userId, at), planId)
+    .filter((entry) => planAllowsModel(entry.allowedModels, model));
 
   const parts = [];
   let remaining = cost;

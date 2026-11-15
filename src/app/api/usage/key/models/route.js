@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiKeyForAuth } from "@/lib/localDb";
+import { getAdapter } from "@/lib/db/driver.js";
+import { customerModelScopeSync } from "@/lib/billing/customerModels.js";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +25,11 @@ export async function GET(request) {
 
     // null = every model the key's own settings allow; the same value the /v1
     // handlers enforce, so the list never offers a model the call would refuse.
-    const allowedModels = auth.resolved?.allowedModels ?? null;
+    // A customer key is narrowed by its live purchases too, exactly as on the request
+    // path (spec plan-model-access).
+    const allowedModels = auth.key.userId
+      ? customerModelScopeSync(await getAdapter(), auth.key.userId, auth.resolved?.allowedModels ?? null)
+      : auth.resolved?.allowedModels ?? null;
     const [text, image] = await Promise.all([
       buildModelsList(["llm"], { allowedModels }).catch(() => []),
       buildModelsList(["image"], { allowedModels }).catch(() => []),

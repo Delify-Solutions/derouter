@@ -121,6 +121,16 @@ export function modelNotAllowedMessage(model) {
   return `Model ${model} không nằm trong nhóm của bạn.`;
 }
 
+/**
+ * `Model <model> không nằm trong gói bạn đang dùng.` — the account's group allows the
+ * model but none of the live purchases includes it (spec plan-model-access). A
+ * different sentence from the group refusal on purpose: the fix is to buy the plan
+ * that includes it, not to ask an admin for a different group.
+ */
+export function planModelNotAllowedMessage(model) {
+  return `Model ${model} không nằm trong gói bạn đang dùng — mua gói có model này tại /account/plans.`;
+}
+
 /** A key pinned to a plan whose purchases cannot pay (none held, expired or out of credit). */
 export function pinnedPlanUnavailableMessage(planName) {
   const name = planName ? `"${planName}"` : "đã chọn";

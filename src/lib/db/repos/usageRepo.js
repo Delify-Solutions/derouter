@@ -488,7 +488,10 @@ export async function saveRequestUsage(entry) {
             owner.userId,
             keyPlanId,
             entry.timestamp || null,
-            imageCount > 0 ? "image" : "llm"
+            imageCount > 0 ? "image" : "llm",
+            // The combo the client called: a purchase that does not include it can
+            // neither pay nor own this allowance (spec plan-model-access).
+            entry.requestedModel || null
           );
         } catch (e) {
           console.error("[rates] could not resolve rate plan", e.message);
@@ -535,6 +538,9 @@ export async function saveRequestUsage(entry) {
             imageCount,
             nowIso: entry.timestamp || new Date().toISOString(),
             planId: keyPlanId,
+            // Same filter as admission: a purchase that does not include the model
+            // the client asked for must never be billed for it.
+            model: entry.requestedModel || null,
           });
         } catch (e) {
           console.error("[billing] charge failed", e.message);

@@ -2,7 +2,7 @@ import Link from "next/link";
 import PropTypes from "prop-types";
 import SectionHeader from "./SectionHeader";
 import { fitFigureStyle } from "@/shared/utils/fitFigure";
-import { fmtUsd, interpolate, DEFAULT_PERKS, IMAGE_PERKS } from "./salesData";
+import { fmtUsd, interpolate, perksFor } from "./salesData";
 
 /**
  * Where "Chọn <plan>" goes (spec public-landing "Plan selection entry flow"):
@@ -75,13 +75,25 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                   {secondary ? (
                     <p className="mt-2 font-mono text-xs text-text-muted">hoặc {secondary} (Binance USDT)</p>
                   ) : null}
+                  {/* "mọi model" is only true while the plan does not narrow the
+                      set (spec plan-model-access). A restricted plan says which
+                      models it covers instead of lying about the credit. */}
                   <p className="mt-4 text-sm font-medium text-text-main">
                     {plan.kind === "image"
                       ? `${plan.imageText} — mỗi lần tạo ảnh trừ 1 ảnh`
                       : plan.unlimitedCredit
-                        ? "Credit không giới hạn, dùng cho mọi model"
-                        : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`}
+                        ? (plan.allowedModels?.length
+                            ? `Credit không giới hạn cho ${plan.allowedModels.length} model của gói`
+                            : "Credit không giới hạn, dùng cho mọi model")
+                        : (plan.allowedModels?.length
+                            ? `Nhận ${fmtUsd(plan.creditUsd)} credit cho ${plan.allowedModels.length} model của gói`
+                            : `Nhận ${fmtUsd(plan.creditUsd)} credit dùng chung cho mọi model`)}
                   </p>
+                  {plan.allowedModels?.length > 0 && (
+                    <p className="mt-1 break-words font-mono text-xs text-text-muted" title={plan.allowedModels.join(", ")}>
+                      {plan.allowedModels.join(" · ")}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm text-text-muted">Dùng {plan.durationDays} ngày</p>
                   {plan.terms?.length > 0 ? (
                     // Longer terms (spec plan-terms): the price for each, with its
@@ -104,7 +116,7 @@ export default function PlansSection({ plans, models, copy, signedIn = false }) 
                 </div>
 
                 <ul className="mt-6 flex flex-1 flex-col gap-2.5 border-t border-border px-6 py-5">
-                  {[...(plan.limitsText || []), ...(plan.kind === "image" ? IMAGE_PERKS : DEFAULT_PERKS)].map((line) => (
+                  {perksFor(plan).map((line) => (
                     <li key={line} className="flex items-start gap-2.5 text-sm text-text-muted">
                       <span className="material-symbols-outlined mt-0.5 text-[16px] text-text-subtle" aria-hidden="true">check</span>
                       {line}

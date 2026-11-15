@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -420,6 +420,11 @@ export const TABLES = {
       // Stored as JSON rather than a join table because it is read as a whole
       // unit (is this group allowed?) and never queried per member.
       allowedGroupIds: "TEXT",
+      // Which models this plan includes (spec plan-model-access): NULL = no
+      // restriction, otherwise a JSON array of combo names. A plan may only NARROW
+      // the buyer's group allow-list, never widen it, so this is stored per plan
+      // but always intersected with the group at request time.
+      allowedModels: "TEXT",
       // Purchases allowed per calendar month. NULL or 0 = unlimited. Counted
       // over orders, not userPlans, so a refund re-opens the slot.
       purchaseLimitPerMonth: "INTEGER",
@@ -505,6 +510,9 @@ export const TABLES = {
       // changed in between.
       kind: "TEXT DEFAULT 'llm'",
       imageCount: "INTEGER",
+      // Snapshot of plans.allowedModels: the models the buyer paid for cannot be
+      // changed under them by a later edit of the plan.
+      allowedModels: "TEXT",
       // Snapshot of plans.unlimitedCredit at order creation, like the limits above.
       unlimitedCredit: "INTEGER DEFAULT 0",
       durationDays: "INTEGER",
@@ -638,6 +646,11 @@ export const TABLES = {
       // image purchase has no dollar credit, so this pair is its only balance.
       imageTotal: "INTEGER DEFAULT 0",
       imageRemaining: "INTEGER DEFAULT 0",
+      // Which models this purchase pays for (spec plan-model-access): NULL = any
+      // model its kind can pay for, otherwise a JSON array of combo names. Snapshot
+      // of the plan's list at grant time; an admin can push a newer list down with
+      // an explicit "apply to active purchases".
+      allowedModels: "TEXT",
       // 1 = no credit ceiling (both credit columns stay 0 and are never spent
       // down); charges are still ledgered and still counted by the windows.
       unlimitedCredit: "INTEGER DEFAULT 0",
