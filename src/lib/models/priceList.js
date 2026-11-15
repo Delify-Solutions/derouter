@@ -5,6 +5,7 @@
 import { getCombos, getComboPricing, getPricingForModel } from "@/lib/db/index.js";
 import { getActiveDiscountsForModels } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { applyBpToPricing } from "@/lib/billing/discounts.js";
+import { comboIsInMaintenance } from "@/lib/combos/maintenance.js";
 
 /**
  * Price of one combo: the admin's combo-level price when set, otherwise the first
@@ -29,7 +30,7 @@ async function comboPrice(combo, comboPricing) {
  * @param {object[]} [opts.combos] combos already loaded (else read)
  * @param {object} [opts.comboPricing] combo prices already loaded (else read)
  * @param {{ userId?: string|null, groupId?: string|null, planId?: string|null }} [opts.discountContext]
- * @returns {Promise<object[]>} `{ name, kind, modelsCount, input, output, cached, reasoning, cacheCreation, discount?, discounted? }`
+ * @returns {Promise<object[]>} `{ name, kind, modelsCount, maintenance, input, output, cached, reasoning, cacheCreation, discount?, discounted? }`
  */
 export async function buildModelPriceList({ allowedModels = null, combos = null, comboPricing = null, discountContext = {} } = {}) {
   const [allCombos, pricing] = await Promise.all([
@@ -58,6 +59,8 @@ export async function buildModelPriceList({ allowedModels = null, combos = null,
       cached: p.cached ?? 0,
       reasoning: p.reasoning ?? 0,
       cacheCreation: p.cache_creation ?? 0,
+      // Under maintenance: still listed with its price, labelled "Bảo trì" (spec customer-portal).
+      maintenance: comboIsInMaintenance(c),
     };
     const found = discounts.get(c.name);
     if (found) {

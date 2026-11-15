@@ -26,6 +26,8 @@
 // plain `node --test`, where the `@/` alias does not resolve.
 import { getAdapter } from "../db/driver.js";
 import { getApiKeyForAuth, resetKeyWindow } from "../db/repos/apiKeysRepo.js";
+import { getComboByName } from "../db/repos/combosRepo.js";
+import { comboIsInMaintenance } from "../combos/maintenance.js";
 import {
   getKeyRateUsage,
   getKeyOldestTokenAt,
@@ -44,6 +46,7 @@ import {
   PLATFORM_MESSAGES,
   modelNotAllowedMessage,
   planModelNotAllowedMessage,
+  modelMaintenanceMessage,
   planLimitMessage,
   pinnedPlanUnavailableMessage,
 } from "./platformError.js";
@@ -122,6 +125,17 @@ function windowDurationMs(resetWindow) {
 
 function deny(status, code, message, extra = {}) {
   return { ok: false, status, code, message, ...extra };
+}
+
+/**
+ * 503 for a bare combo name the admin switched to maintenance (spec api-access-enforcement),
+ * or null. Runs after the allow-list (a model the key may not call is still 403) and before
+ * admission, so a refused request reserves no plan credit and calls no upstream.
+ */
+async function maintenanceDenial(model) {
+  if (typeof model !== "string" || !model || model.includes("/")) return null;
+  const combo = await getComboByName(model);
+  return comboIsInMaintenance(combo) ? deny(503, "model_maintenance", modelMaintenanceMessage(model)) : null;
 }
 
 /** 403 for an owner whose status forbids API use, or null when it is `active`. */
@@ -294,6 +308,10 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
       }
     }
 
+    // 6b. Combo under maintenance: refused before admission so no credit is reserved.
+    const inMaintenance = await maintenanceDenial(model);
+    if (inMaintenance) return inMaintenance;
+
     // 7. Admission from the plan queue (spec plan-queue-billing "Admission").
     //    Runs LAST so a request refused for an access reason reports that reason,
     //    not quota. A 429 names the instant the first plan reopens; a 402 means no
@@ -386,6 +404,10 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
       return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
     }
   }
+
+  // Combo under maintenance (admin keys too; a request without a key never gets here).
+  const inMaintenance = await maintenanceDenial(model);
+  if (inMaintenance) return inMaintenance;
 
   return { ok: true, auth };
 }

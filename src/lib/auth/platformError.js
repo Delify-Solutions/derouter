@@ -22,6 +22,7 @@ function typeForStatus(status) {
     case 402: return "insufficient_quota";
     case 403: return "permission_error";
     case 429: return "rate_limit_error";
+    case 503: return "server_error";
     default: return "api_error";
   }
 }
@@ -129,6 +130,11 @@ export function modelNotAllowedMessage(model) {
  */
 export function planModelNotAllowedMessage(model) {
   return `Model ${model} không nằm trong gói bạn đang dùng — mua gói có model này tại /account/plans.`;
+}
+
+/** `Model <model> đang bảo trì.` — a combo the admin switched to maintenance (HTTP 503 model_maintenance). */
+export function modelMaintenanceMessage(model) {
+  return `Model ${model} đang bảo trì. Vui lòng thử lại sau hoặc chọn model khác.`;
 }
 
 /** A key pinned to a plan whose purchases cannot pay (none held, expired or out of credit). */

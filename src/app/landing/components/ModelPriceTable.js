@@ -39,6 +39,7 @@ export default function ModelPriceTable({ rows = [], showKind = false, emptyText
               <tr key={row.name} className="border-b border-border align-top last:border-b-0">
                 <td className="px-4 py-3">
                   <ModelName name={row.name} />
+                  <MaintenanceTag active={row.maintenance} />
                   <DiscountNote discount={row.discount} />
                 </td>
                 {showKind ? <td className="px-4 py-3 text-sm text-text-muted">{kindLabel(row.kind)}</td> : null}
@@ -60,6 +61,7 @@ export default function ModelPriceTable({ rows = [], showKind = false, emptyText
               <ModelName name={row.name} />
               {showKind ? <span className="text-xs text-text-muted">{kindLabel(row.kind)}</span> : null}
             </div>
+            <MaintenanceTag active={row.maintenance} />
             <DiscountNote discount={row.discount} />
             <dl className="grid grid-cols-3 gap-2">
               {[["input", "Input"], ["output", "Output"], ["cached", "Cache"]].map(([field, label]) => (
@@ -105,6 +107,19 @@ function DiscountNote({ discount }) {
       </span>
       {reason ? <span className="text-xs text-text-muted">Lý do: {reason}</span> : null}
     </div>
+  );
+}
+
+// "Bảo trì" is text with a border, never colour alone (ui-dna). Price stays visible.
+function MaintenanceTag({ active }) {
+  if (!active) return null;
+  return (
+    <span
+      className="mt-1 inline-block border border-border px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-text-muted"
+      data-testid="model-maintenance"
+    >
+      Bảo trì
+    </span>
   );
 }
 
