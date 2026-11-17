@@ -296,6 +296,10 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         redirectUri = "http://localhost:1455/auth/callback";
       } else if (provider === "xai") {
         redirectUri = "http://127.0.0.1:56121/callback";
+      } else if (provider === "deepai") {
+        // DeepAI redirects the browser to 127.0.0.1:<port>/auth-callback with a one-time
+        // code. Nothing listens there, so the admin pastes the resulting URL.
+        redirectUri = "http://127.0.0.1:41755/auth-callback";
       } else {
         redirectUri = `http://localhost:${appPort}/callback`;
       }
@@ -378,7 +382,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         if (!popupRef.current) {
           setStep("input");
         }
-      } else if (!isLocalhost || provider === "codex" || provider === "xai") {
+      } else if (!isLocalhost || provider === "codex" || provider === "xai" || provider === "deepai") {
         // Non-localhost or proxy failed: manual input mode
         setStep("input");
         window.open(data.authUrl, "_blank");
@@ -633,6 +637,11 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         throw new Error(url.searchParams.get("error_description") || errorParam);
       }
 
+      // DeepAI: a callback from another sign-in attempt carries a different state.
+      if (provider === "deepai" && authData?.state && state && state !== authData.state) {
+        throw new Error("This callback belongs to a different sign-in attempt; start sign-in again");
+      }
+
       if (!code && !token) {
         throw new Error(
           provider === "xai"
@@ -673,6 +682,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const modalTitle = isXaiProvider ? "Connect Grok Build OAuth" : `Connect ${providerInfo.name}`;
   const manualPlaceholder = isXaiProvider
     ? "http://127.0.0.1:56121/callback?code=... or copied code"
+    : provider === "deepai"
+      ? "http://127.0.0.1:41755/auth-callback?code=...&state=..."
     : isKimchiProvider
       ? `${placeholderUrl.replace("code=...", "token=...")} or copied token`
       : placeholderUrl;
