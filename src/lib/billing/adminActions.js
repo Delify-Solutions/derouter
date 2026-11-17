@@ -535,6 +535,7 @@ export function revokePlanSync(db, userId, userPlanId, { reason, actor = "admin"
     [userPlanId]
   );
   db.run(`DELETE FROM userPlanWindows WHERE userPlanId = ?`, [userPlanId]);
+  db.run(`DELETE FROM userPlanCapSpend WHERE userPlanId = ?`, [userPlanId]);
 
   if (remaining > 0) {
     insertLedgerSync(db, {

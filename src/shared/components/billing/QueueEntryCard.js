@@ -4,6 +4,7 @@ import PropTypes from "prop-types";
 import CreditBar from "./CreditBar";
 import { UNLIMITED_CREDIT_LABEL, fmtUsdNano } from "@/shared/utils/money";
 import LimitMeter from "./LimitMeter";
+import ModelCapMeter from "./ModelCapMeter";
 import StatusTag, { dateTimeOf, spanText } from "./StatusTag";
 
 // Source labels (spec customer-portal "Plan queue page"). A customer asks "where
@@ -118,6 +119,15 @@ export default function QueueEntryCard({ entry, renderActions = null, dragHandle
         <div className="flex flex-col gap-3 border-t border-border pt-4">
           {entry.windows.map((window) => (
             <LimitMeter key={window.hours} window={window} />
+          ))}
+        </div>
+      )}
+
+      {/* A separate bar per model group (e.g. images) inside the same pool. */}
+      {Array.isArray(entry.caps) && entry.caps.length > 0 && (
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          {entry.caps.map((cap) => (
+            <ModelCapMeter key={cap.id} cap={cap} />
           ))}
         </div>
       )}

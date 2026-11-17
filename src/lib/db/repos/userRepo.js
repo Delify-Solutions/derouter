@@ -332,6 +332,12 @@ export async function deleteUser(id, { actor = "system", reason = null } = {}) {
         [id]
       );
     } catch { /* GĐ0 schema has no userPlanWindows yet */ }
+    try {
+      db.run(
+        `DELETE FROM userPlanCapSpend WHERE userPlanId IN (SELECT id FROM userPlans WHERE userId = ?)`,
+        [id]
+      );
+    } catch { /* older schema has no userPlanCapSpend yet */ }
     db.run(`DELETE FROM userPlans WHERE userId = ?`, [id]);
     db.run(`DELETE FROM creditLedger WHERE userId = ?`, [id]);
     db.run(`DELETE FROM giftRedemptions WHERE userId = ?`, [id]);

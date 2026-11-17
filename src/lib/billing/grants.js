@@ -76,6 +76,7 @@ export function closeUserPlanSync(db, plan, { status, reason, meta = {}, now = n
     [status, plan.id]
   );
   db.run(`DELETE FROM userPlanWindows WHERE userPlanId = ?`, [plan.id]);
+  db.run(`DELETE FROM userPlanCapSpend WHERE userPlanId = ?`, [plan.id]);
 
   if (remaining > 0) {
     insertLedgerSync(db, {
