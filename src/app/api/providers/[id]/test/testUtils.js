@@ -410,7 +410,7 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
     const fetchOpts = { method: config.method, headers };
     if (config.body) fetchOpts.body = config.body;
     // DeepAI answers an unidentified lane/machine with a legacy catalog or machine_required.
-    if (connection.provider === "deepai") Object.assign(headers, await deepaiLaneHeaders());
+    if (connection.provider === "deepai") Object.assign(headers, deepaiLaneHeaders(accessToken));
     const res = await fetchWithConnectionProxy(testUrl, fetchOpts, effectiveProxy);
     const bodyText = !res.ok ? await res.text().catch(() => "") : "";
 
