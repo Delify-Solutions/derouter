@@ -7,6 +7,10 @@ import { resolveApiKeyOwner } from "./billingRepo.js";
 import { chargeSync, ratePlanIdSync } from "../../billing/planQueue.js";
 import { applyRequestDiscountSync } from "../../billing/discounts.js";
 import { hashApiKey } from "./apiKeysRepo.js";
+import {
+  scheduleRollup, planRollupRange, forEachRollupSlice, rollupEpoch, readProviderRollup, readKeyRollup, readOwnerPeakRollup,
+  invalidateRollupFromSync, pruneRollupSync, sha256Hex,
+} from "./usageRollup.js";
 
 // Money is stored as integer nanoUSD. `costNanoUsd` is authoritative; the legacy
 // float `cost` column is written alongside for readers we do not control.
@@ -116,6 +120,8 @@ function pruneOldUsage(db) {
   const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 86400000).toISOString();
   db.run(`DELETE FROM usageHistory WHERE timestamp < ?`, [cutoff]);
   db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [cutoff]);
+  // Rolled hours go with the raw rows they summarise.
+  pruneRollupSync(db, cutoff);
 }
 
 // In-memory state shared across Next.js modules
@@ -645,6 +651,8 @@ function loadDaysInRange(adapter, maxDays) {
 // to the event loop between them. The work done is the same, but no single turn of the
 // loop lasts longer than one slice.
 const USAGE_SLICE_MS = 3 * 60 * 60 * 1000;
+// How far back getUsageStats refines a bucket's lastUsed from a date to a timestamp.
+const OVERLAY_PRECISE_MS = 48 * 60 * 60 * 1000;
 const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve));
 
 function parseRangeBound(value) {
@@ -922,8 +930,11 @@ export async function getUsageStats(period = "all") {
       }
     }
 
-    // Overlay precise lastUsed timestamps from history
-    const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
+    // Overlay precise lastUsed timestamps from history. Only the last 48 hours: the page
+    // shows "12m ago" / "3h ago" under a day and just a date beyond it, and the daily
+    // rollup already carries the date, so older rows would only be scanned to be ignored
+    // (this scan was the cold-load cost of the 30d / 60d / all views).
+    const overlayCutoff = Date.now() - OVERLAY_PRECISE_MS;
     // One row per distinct (model, provider, account, key, endpoint) with its newest
     // timestamp, not one row per request: every bucket's lastUsed is the max of its
     // rows, so folding the per-group maxima gives the same answer while the scan runs
@@ -931,8 +942,7 @@ export async function getUsageStats(period = "all") {
     // Per slice, so a long range never holds the event loop for one big scan; a group that
     // recurs in several slices just keeps its newest timestamp.
     await forEachUsageSlice(db, {
-      // No cut-off ('all'): let the scan start at the oldest row instead of 1970.
-      startDate: overlayCutoff > 0 ? new Date(overlayCutoff).toISOString() : undefined,
+      startDate: new Date(overlayCutoff).toISOString(),
       select: "SELECT MAX(timestamp) AS timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory",
       tail: "GROUP BY provider, model, connectionId, apiKey, apiKeyId, endpoint",
     }, (histRows) => {
@@ -1229,11 +1239,11 @@ function emptyUsageTotals() {
  * @param {{startDate?: string, endDate?: string}} [range]
  * @returns {Promise<Array<object>>} owners, highest cost first
  */
-export async function getUsageByOwner({ startDate, endDate, sliceMs } = {}) {
+export async function getUsageByOwner({ startDate, endDate, sliceMs, useRollup = true, rollupSliceHours } = {}) {
   const db = await getAdapter();
   // Reject a bad date up front, before any read (the slices below would also throw).
-  parseRangeBound(startDate);
-  parseRangeBound(endDate);
+  const startMs = parseRangeBound(startDate);
+  const endMs = parseRangeBound(endDate);
 
   const keys = db.all(`SELECT id, key, keyPrefix, name, userId, isActive FROM apiKeys`);
   const users = db.all(`SELECT id, email, displayName, groupId, status FROM users`);
@@ -1243,6 +1253,8 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs } = {}) {
   const userById = new Map(users.map((u) => [u.id, u]));
   const keyById = new Map(keys.map((k) => [k.id, k]));
   const keyByRaw = new Map(keys.filter((k) => k.key).map((k) => [k.key, k]));
+  // The hourly rollup keeps a hash of a raw key, never the key: match legacy rows by hash.
+  const keyByRawHash = new Map(keys.filter((k) => k.key).map((k) => [sha256Hex(k.key), k]));
 
   const owners = new Map();
   const ownerFor = (ownerId) => {
@@ -1295,8 +1307,54 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs } = {}) {
   // Every customer who owns a key is listed, even with no traffic in the range.
   for (const k of keys) keyEntry(ownerFor(ownerIdOfKey(k)), k);
 
+  // Whole hours come from the hourly rollup, the partial edges (and anything not rolled yet)
+  // from the raw rows (see repos/usageRollup.js: the result equals a raw read).
+  if (useRollup) void scheduleRollup(db);
+  const plan = planRollupRange(db, startMs, endMs, { useRollup });
+  const epoch = rollupEpoch();
+  const rollupPeaks = new Map();
+  if (plan.rollup) {
+    await forEachRollupSlice(plan.rollup, (slice) => {
+    for (const g of readKeyRollup(db, slice)) {
+      const k = (g.apiKeyId && keyById.get(g.apiKeyId)) || (g.rawHash && keyByRawHash.get(g.rawHash)) || null;
+      // No key at all: loopback/local traffic, shown under the admin entry.
+      const noKey = !k && !g.apiKeyId && !g.rawHash;
+      const o = ownerFor(k ? ownerIdOfKey(k) : noKey ? "__admin" : "__unknown");
+      const prompt = g.pin || 0;
+      const completion = g.pout || 0;
+      const costNano = Math.round(g.costNano || 0);
+      const m = o.byModel[g.m] || (o.byModel[g.m] = { model: g.m, ...emptyUsageTotals() });
+      for (const acc of [m, o.totals]) {
+        acc.input += prompt;
+        acc.output += completion;
+        acc.cacheRead += g.cr || 0;
+        acc.cacheCreation += g.cc || 0;
+        acc.requests += g.n;
+        if (g.est === 1) acc.cacheEstimated = true;
+        addCostTo(acc, costNano);
+      }
+      const e = keyEntry(o, k, noKey);
+      e.requests += g.n;
+      e.tokens += prompt + completion;
+      addCostTo(e, costNano);
+      const ts = g.lastTs || "";
+      if (ts && (!e.lastUsedAt || ts > e.lastUsedAt)) e.lastUsedAt = ts;
+      if (ts && (!o.lastUsedAt || ts > o.lastUsedAt)) o.lastUsedAt = ts;
+    }
+    for (const p of readOwnerPeakRollup(db, slice)) {
+      const seen = rollupPeaks.get(p.owner);
+      rollupPeaks.set(p.owner, {
+        peakTpm: Math.max(seen?.peakTpm || 0, p.peakTpm || 0),
+        peakRpm: Math.max(seen?.peakRpm || 0, p.peakRpm || 0),
+      });
+    }
+    }, rollupSliceHours);
+    if (rollupEpoch() !== epoch) return getUsageByOwner({ startDate, endDate, sliceMs, useRollup: false });
+  }
+
+  for (const range of plan.raw) {
   await forEachUsageSlice(db, {
-    startDate, endDate, sliceMs,
+    startDate: range.startDate, endDate: range.endDate, sliceMs,
     select: "SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory",
   }, (rows) => {
   for (const r of rows) {
@@ -1338,12 +1396,16 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs } = {}) {
     }
   }
   });
+  }
 
   const out = [];
   for (const o of owners.values()) {
-    let peakTpm = 0;
+    // Rolled hours carry their own per-hour peaks; a minute never straddles an hour, so the
+    // owner's peak is the maximum of those and of the raw edges' per-minute sums.
+    const rolled = rollupPeaks.get(o.ownerId);
+    let peakTpm = rolled?.peakTpm || 0;
     for (const v of Object.values(o.perMinuteTok)) if (v > peakTpm) peakTpm = v;
-    let peakRpm = 0;
+    let peakRpm = rolled?.peakRpm || 0;
     for (const v of Object.values(o.perMinuteReq)) if (v > peakRpm) peakRpm = v;
     const keyList = [...o.keys.values()].sort(
       (a, b) => (b.costNanoUsd - a.costNanoUsd) || (b.requests - a.requests) || String(a.name || "").localeCompare(String(b.name || ""))
@@ -1490,14 +1552,48 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
 // Aggregates usageHistory in [startDate, endDate] grouped by provider, with the
 // same peak RPM/TPM/Tok-s metrics as getKeyUsageSummary but per-provider instead
 // of per-key. Returns items keyed by provider id.
-export async function getProviderUsageSummary({ startDate, endDate, sliceMs } = {}) {
+export async function getProviderUsageSummary({ startDate, endDate, sliceMs, useRollup = true, rollupSliceHours } = {}) {
   const db = await getAdapter();
+  const startMs = parseRangeBound(startDate);
+  const endMs = parseRangeBound(endDate);
 
   const byProvider = {};
   const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0 };
+  const ensure = (provider) => byProvider[provider]
+    || (byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, _minTok: {}, _minReq: {}, _peakTokS: 0, _rollTpm: 0, _rollRpm: 0 });
 
+  // Whole hours come from the hourly rollup, the partial edges (and anything not rolled yet)
+  // from the raw rows (see repos/usageRollup.js: the result equals a raw read).
+  if (useRollup) void scheduleRollup(db);
+  const plan = planRollupRange(db, startMs, endMs, { useRollup });
+  const epoch = rollupEpoch();
+  if (plan.rollup) {
+    await forEachRollupSlice(plan.rollup, (slice) => {
+    for (const r of readProviderRollup(db, slice)) {
+      const p = ensure(r.provider);
+      const costNano = Math.round(r.costNano || 0);
+      p.input += r.input || 0;
+      p.output += r.output || 0;
+      p.requests += r.requests || 0;
+      addCostTo(p, costNano);
+      totals.input += r.input || 0;
+      totals.output += r.output || 0;
+      totals.requests += r.requests || 0;
+      addCostTo(totals, costNano);
+      // A minute lies inside one hour, so a peak over hours is the maximum of the hourly ones.
+      p._rollTpm = Math.max(p._rollTpm, r.peakTpm || 0);
+      p._rollRpm = Math.max(p._rollRpm, r.peakRpm || 0);
+      p._peakTokS = Math.max(p._peakTokS, r.peakTokS || 0);
+    }
+    }, rollupSliceHours);
+    // Someone deleted history while this read yielded between slices: rolled rows it had not
+    // read yet may be gone, so answer from the raw rows instead of undercounting.
+    if (rollupEpoch() !== epoch) return getProviderUsageSummary({ startDate, endDate, sliceMs, useRollup: false });
+  }
+
+  for (const range of plan.raw) {
   await forEachUsageSlice(db, {
-    startDate, endDate, sliceMs,
+    startDate: range.startDate, endDate: range.endDate, sliceMs,
     // "platform" rows are key-holder denials (RPM/TPM/budget) recorded by the proxy —
     // not real upstream provider usage. Exclude them from the provider table.
     conds: ["COALESCE(provider, '') != 'platform'"],
@@ -1511,8 +1607,7 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs } = 
     const tokSum = prompt + completion;
     const provider = r.provider || "unknown";
 
-    if (!byProvider[provider]) byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, _minTok: {}, _minReq: {}, _peakTokS: 0 };
-    const p = byProvider[provider];
+    const p = ensure(provider);
     p.input += prompt;
     p.output += completion;
     p.requests += 1;
@@ -1540,15 +1635,16 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs } = 
     }
   }
   });
+  }
 
   const items = Object.values(byProvider).map((p) => {
-    let peakTpm = 0, peakRpm = 0, peakTokS = 0;
+    let peakTpm = p._rollTpm, peakRpm = p._rollRpm, peakTokS = 0;
     for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
     for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
     peakTokS = Math.round((p._peakTokS || 0) * 10) / 10;
     const { provider, input, output, requests, cost, costNanoUsd } = p;
     return { provider, input, output, requests, cost, costNanoUsd, peakTpm, peakRpm, peakTokS };
-  }).sort((a, b) => (b.requests || 0) - (a.requests || 0));
+  }).sort((a, b) => (b.requests || 0) - (a.requests || 0) || String(a.provider).localeCompare(String(b.provider)));
 
   return { items, totals };
 }
@@ -1779,6 +1875,10 @@ export async function deleteKeyUsageHistory(apiKey) {
   let history = 0;
   let details = 0;
   db.transaction(() => {
+    // The rollup must not keep numbers the raw rows no longer support: forget everything
+    // from the oldest hour this key's rows touched; the next roll recomputes it.
+    const oldest = db.get(`SELECT MIN(timestamp) AS t FROM usageHistory WHERE ${keyFilter.cond}`, keyFilter.params);
+    if (oldest?.t) invalidateRollupFromSync(db, oldest.t);
     const h = db.run(`DELETE FROM usageHistory WHERE ${keyFilter.cond}`, keyFilter.params);
     history = h.changes || 0;
     // By raw key: rows written before requestDetails.apiKeyId existed have only that.
