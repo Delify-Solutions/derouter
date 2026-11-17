@@ -52,7 +52,7 @@ test("normalizeDeepAIModels keeps valid unique ids and drops junk", () => {
   assert.deepEqual(client.normalizeDeepAIModels(null), []);
 });
 
-test("executor sends the api-key and lane headers; nonce only when a check-in is current", async () => {
+test("executor sends only api-key and lane headers; check-in and beacon stay on /theos", async () => {
   const executor = new DeepAIExecutor();
   executor._laneHeaders = await client.deepaiLaneHeaders();
   const headers = executor.buildHeaders({ accessToken: "key-abc" }, true, "u", "glm-5.3-flash", {});
@@ -60,7 +60,8 @@ test("executor sends the api-key and lane headers; nonce only when a check-in is
   assert.equal(headers.Authorization, undefined);
   assert.equal(headers["X-DeepAI-Code-Theos"], client.DEEPAI_LANE_VERSION);
   assert.match(headers[client.DEEPAI_MACHINE_HEADER], /^[0-9a-f]{64}$/);
-  assert.match(headers[client.DEEPAI_BEACON_HEADER], /^v=/);
+  // the desktop app passes checkInHeaders() only for /theos
+  assert.equal(headers[client.DEEPAI_BEACON_HEADER], undefined);
   assert.equal(headers[client.DEEPAI_CHECK_IN_HEADER], undefined);
   assert.equal(headers.Accept, "text/event-stream");
 });

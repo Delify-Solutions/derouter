@@ -1,16 +1,11 @@
 import { DefaultExecutor } from "./default.js";
-import {
-  DEEPAI_CHECK_IN_HEADER,
-  DEEPAI_BEACON_HEADER,
-  currentCheckInNonce,
-  deepaiBeacon,
-  deepaiLaneHeaders,
-  ensureDeepAICheckIn,
-} from "../services/deepaiClient.js";
+import { deepaiLaneHeaders, ensureDeepAICheckIn } from "../services/deepaiClient.js";
 
 // DeepAI Code hosted models (api.deepai.org/deepai_code): OpenAI chat format, `api-key`
-// auth, and a per-account check-in nonce renewed through GET /theos. The registry entry
-// carries the URL and auth header; this executor adds the lane/machine/check-in headers.
+// auth, and a per-account check-in renewed through GET /theos before every request. The
+// registry entry carries the URL and auth header; this executor adds lane+machine. The
+// check-in nonce and the beacon belong to /theos only — the desktop app never sends them
+// on chat, so neither do we.
 export class DeepAIExecutor extends DefaultExecutor {
   constructor() {
     super("deepai");
@@ -28,11 +23,7 @@ export class DeepAIExecutor extends DefaultExecutor {
 
   buildHeaders(credentials, stream = true, url, model, body = null) {
     const headers = super.buildHeaders(credentials, stream, url, model, body);
-    const key = credentials?.apiKey || credentials?.accessToken;
     Object.assign(headers, this._laneHeaders);
-    headers[DEEPAI_BEACON_HEADER] = deepaiBeacon();
-    const nonce = currentCheckInNonce(key);
-    if (nonce) headers[DEEPAI_CHECK_IN_HEADER] = nonce;
     return headers;
   }
 }

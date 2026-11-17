@@ -6,7 +6,11 @@
 //   - chat:      POST /deepai_code/chat/completions (OpenAI format), header `api-key`
 //   - catalog:   GET  /deepai_code/models
 //   - check-in:  GET  /deepai_code/theos → {enabled, balance, check_in:{nonce,seconds}, ...}
-//                the nonce rides every chat request as X-DeepAI-Code-Check-In.
+//                the nonce is presented on the NEXT /theos call, not on chat: every
+//                API call carries lane+machine, but only /theos carries the check-in
+//                nonce and the beacon (app v0.3.40, src/deepai/api.ts: checkInHeaders()
+//                is passed only when path === "/theos"). One /theos fires before each
+//                chat request, so the server sees a live client without a nonce per call.
 //
 // Identity headers are NOT fabricated per account: every account on this
 // deployment reports the same machine digest (this host's own identifier), and
