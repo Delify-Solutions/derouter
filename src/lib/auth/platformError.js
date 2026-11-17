@@ -153,6 +153,20 @@ export function modelNotFoundMessage(model) {
   return `Model ${model} không tồn tại hoặc chưa được mở trên router này. Xem danh sách model tại /v1/models.`;
 }
 
+/**
+ * `Đã dùng hết hạn mức "<label>" của gói ...` — a model cap is full (HTTP 429 model_cap).
+ * Says that OTHER models keep working, because the customer's pool is not empty; a
+ * whole-term cap has no reopen time and the message must not promise one.
+ */
+export function modelCapMessage(label, resetAt) {
+  const name = label ? `"${label}"` : "này";
+  if (!resetAt) {
+    return `Đã dùng hết hạn mức ${name} của gói. Các model khác trong gói vẫn dùng được.`;
+  }
+  const wait = relativeWaitVi(new Date(resetAt).getTime() - Date.now());
+  return `Đã dùng hết hạn mức ${name} của gói, mở lại sau ${wait}. Các model khác trong gói vẫn dùng được.`;
+}
+
 /** `Các gói đang chạm hạn mức, mở lại sau <relativeWaitVi>.` */
 export function planLimitMessage(resetAt) {
   const wait = resetAt ? relativeWaitVi(new Date(resetAt).getTime() - Date.now()) : relativeWaitVi(0);

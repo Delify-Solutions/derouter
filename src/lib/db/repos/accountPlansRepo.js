@@ -78,6 +78,19 @@ export function getQueueSync(db, userId, nowIsoArg = null) {
     allowedModels: normalizePlanModels(entry.allowedModels),
     statusLabel: entry.statusLabel,
     reopenAt: entry.reopenAt,
+    // One bar per model cap of the plan (queueViewSync spreads evaluatePlan's result, so
+    // `entry.caps` is the evaluated list). Model names stay server-side: the customer
+    // sees the cap's label and its numbers.
+    caps: (entry.caps ?? []).map((cap) => ({
+      id: cap.id,
+      label: cap.label,
+      hours: cap.hours,
+      maxNanoUsd: cap.maxNanoUsd,
+      spentNanoUsd: cap.spentNanoUsd,
+      resetAt: cap.resetAt,
+      open: cap.open,
+      full: cap.full,
+    })),
     // queueViewSync spreads evaluatePlan's result last, so `entry.windows` is the
     // evaluated array (hours/max/spent/open/reset), not the raw state map.
     windows: (entry.windows ?? []).map((window) => ({

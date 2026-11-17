@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 39;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -425,6 +425,11 @@ export const TABLES = {
       // the buyer's group allow-list, never widen it, so this is stored per plan
       // but always intersected with the group at request time.
       allowedModels: "TEXT",
+      // Spending caps on groups of models inside the credit pool (spec
+      // plan-queue-billing "A full model cap refuses that model only"): JSON array of
+      // { id, label, models, maxNanoUsd, hours }; NULL = no caps. Read LIVE from the
+      // plan like rpm/tpm (not snapshotted), so editing a cap applies to every holder.
+      modelCaps: "TEXT",
       // Purchases allowed per calendar month. NULL or 0 = unlimited. Counted
       // over orders, not userPlans, so a refund re-opens the slot.
       purchaseLimitPerMonth: "INTEGER",
@@ -670,6 +675,21 @@ export const TABLES = {
       createdAt: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_up_user ON userPlans(userId, status, expiresAt)"],
+  },
+  // Spend per (purchase, model cap) — the counters behind plans.modelCaps. A whole-term
+  // cap keeps one row whose startedAt is the first charge and never closes; a windowed
+  // cap opens at its first charge and resets when the window closes, like userPlanWindows.
+  // Rebuildable from the charge ledger rows (meta.model): see rebuildCapSpendSync.
+  userPlanCapSpend: {
+    columns: {
+      userPlanId: "TEXT NOT NULL",
+      capId: "TEXT NOT NULL",
+      startedAt: "TEXT NOT NULL",
+      spentNanoUsd: "INTEGER NOT NULL DEFAULT 0",
+      updatedAt: "TEXT",
+    },
+    primaryKey: "PRIMARY KEY (userPlanId, capId)",
+    indexes: [],
   },
   // One row per (purchase, window length) holding the current window's start and
   // spend. A window "opens" on the first charge and closes `hours` after it; a

@@ -24,6 +24,7 @@ import { insertLedgerSync, getDebtNanoSync, setDebtNanoSync, writeOffDebtSync, n
 import { parseLimits, serializeLimits, limitCeiling } from "./limits.js";
 import { imageCount, isImagePlan, normalizePlanKind } from "./planKind.js";
 import { normalizePlanModels, planAllowsModel } from "./planModels.js";
+import { parseModelCaps, capsForModel, evaluateCap } from "./modelCaps.js";
 import { insertAuditSync } from "./audit.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -123,7 +124,7 @@ export function rateKeyOf(row) {
   return hasOverride && row.id ? `purchase:${row.id}` : null;
 }
 
-function rowToEntry(row, windowsByPlan) {
+function rowToEntry(row, windowsByPlan, capSpendByPlan = new Map()) {
   const limits = parseLimits(row.limits);
   const stored = windowsByPlan.get(row.id) ?? new Map();
   const windows = {};
@@ -169,6 +170,10 @@ function rowToEntry(row, windowsByPlan) {
     priority: row.priority == null ? null : nano(row.priority),
     limits,
     windows,
+    // Spending caps on groups of models inside the pool, read live from the plan (spec
+    // plan-queue-billing). An image purchase has none: its unit is images.
+    caps: normalizePlanKind(row.kind) === "image" ? [] : parseModelCaps(row.planModelCaps),
+    capSpend: Object.fromEntries(capSpendByPlan.get(row.id) ?? []),
     createdAt: row.createdAt ?? null,
   };
 }
@@ -189,7 +194,8 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
   const at = nowIsoArg || nowIso();
 
   const rows = db.all(
-    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm
+    `SELECT up.*, p.code AS planCode, p.name AS planName, p.rpm AS planRpm, p.tpm AS planTpm,
+            p.modelCaps AS planModelCaps
        FROM userPlans up
        LEFT JOIN plans p ON p.id = up.planId
       WHERE up.userId = ? AND up.status = 'active' AND up.expiresAt > ?
@@ -215,7 +221,18 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
     });
   }
 
-  return rows.map((row) => rowToEntry(row, windowsByPlan));
+  // Cap spend of the same purchases, one query (only plans that define caps have rows).
+  const capRows = db.all(
+    `SELECT userPlanId, capId, startedAt, spentNanoUsd FROM userPlanCapSpend WHERE userPlanId IN (${placeholders})`,
+    ids
+  );
+  const capSpendByPlan = new Map();
+  for (const row of capRows) {
+    if (!capSpendByPlan.has(row.userPlanId)) capSpendByPlan.set(row.userPlanId, new Map());
+    capSpendByPlan.get(row.userPlanId).set(row.capId, { startedAt: row.startedAt, spentNanoUsd: nano(row.spentNanoUsd) });
+  }
+
+  return rows.map((row) => rowToEntry(row, windowsByPlan, capSpendByPlan));
 }
 
 /**
@@ -225,7 +242,7 @@ export function listQueueSync(db, userId, nowIsoArg = null) {
  * @param {object} entry from listQueueSync
  * @param {number} nowMs
  */
-export function evaluatePlan(entry, nowMs) {
+export function evaluatePlan(entry, nowMs, model = null) {
   const now = Number(nowMs) || 0;
   const windows = [];
   let blocked = false;
@@ -285,10 +302,36 @@ export function evaluatePlan(entry, nowMs) {
     if (!Number.isFinite(roomImages)) roomImages = null;
   }
 
+  // Model caps (spec plan-queue-billing "A full model cap refuses that model only"). Every
+  // cap is reported for display; only the caps matching `model` can block THIS request, and
+  // they block the model, not the purchase, so a full cap never counts as `blocked` above
+  // (which would turn a cap into a plan_limit reopen time).
+  const caps = (entry.caps ?? []).map((cap) => evaluateCap(cap, entry.capSpend?.[cap.id] ?? null, now));
+  const applicable = model
+    ? capsForModel(entry.caps ?? [], model).map((cap) => caps.find((c) => c.id === cap.id))
+    : [];
+  const fullCaps = applicable.filter((c) => c.full);
+  const capBlocked = fullCaps.length > 0;
+  // Reopens when the LAST full cap closes; a whole-term cap never does.
+  const capPermanent = fullCaps.some((c) => c.resetAt == null);
+  let capReopenAt = null;
+  if (capBlocked && !capPermanent) {
+    capReopenAt = fullCaps.map((c) => c.resetAt).sort().at(-1);
+  }
+  // Room left in the tightest cap that applies to this model; null = no cap applies.
+  const openRooms = applicable.filter((c) => !c.full).map((c) => c.roomNanoUsd);
+  const capRoomNanoUsd = capBlocked ? 0 : openRooms.length ? Math.min(...openRooms) : null;
+
   const expiresMs = new Date(entry.expiresAt).getTime();
   const started = hasStarted(entry, now);
   return {
-    eligible: started && hasCredit(entry) && Number.isFinite(expiresMs) && expiresMs > now && !blocked,
+    eligible: started && hasCredit(entry) && Number.isFinite(expiresMs) && expiresMs > now && !blocked && !capBlocked,
+    caps,
+    capBlocked,
+    capLabel: capBlocked ? fullCaps[0].label : null,
+    capPermanent,
+    capReopenAt,
+    capRoomNanoUsd,
     // Not started yet: neither paying nor blocked, just waiting for its start.
     scheduled: !started,
     blocked,
@@ -369,18 +412,45 @@ export function admitSync(
 
   let earliestReopenMs = null;
   let anyOnlyBlocked = false;
+  // Purchases that could pay but for a full model cap (a window block takes precedence).
+  let capDenial = null;
 
   for (const entry of ordered) {
-    const state = evaluatePlan(entry, nowMs);
+    const state = evaluatePlan(entry, nowMs, model);
     if (state.eligible) return { ok: true, planId: entry.id, kind: entry.kind };
-    // "Only blocked" = has credit and is unexpired, but a window is full.
-    if (!state.scheduled && hasCredit(entry) && state.blocked) {
+    if (state.scheduled || !hasCredit(entry) || !(state.blocked || state.capBlocked)) continue;
+
+    // This purchase can pay for the model again only when EVERY block on it lifts: the
+    // later of its window reopening and its cap reopening. A whole-term cap never lifts, so
+    // promising a reopen time (the window's) would send the customer to wait for nothing.
+    const windowMs = state.blocked && state.reopenAt ? new Date(state.reopenAt).getTime() : null;
+    const capMs = !state.capBlocked ? null : state.capPermanent ? Infinity : new Date(state.capReopenAt).getTime();
+    const reopenMs = windowMs == null && capMs == null ? null : Math.max(windowMs ?? 0, capMs ?? 0);
+
+    if (state.blocked && reopenMs !== Infinity) {
+      // "Only blocked" = has credit and is unexpired, but a window (or a cap that does reopen) is full.
       anyOnlyBlocked = true;
-      const reopenMs = state.reopenAt ? new Date(state.reopenAt).getTime() : null;
-      if (reopenMs != null && (earliestReopenMs == null || reopenMs < earliestReopenMs)) {
-        earliestReopenMs = reopenMs;
+      if (reopenMs != null && (earliestReopenMs == null || reopenMs < earliestReopenMs)) earliestReopenMs = reopenMs;
+    } else {
+      // Blocked by a model cap alone, or by a window AND a cap that never reopens.
+      const capReopenMs = reopenMs === Infinity ? null : capMs;
+      if (!capDenial) capDenial = { label: state.capLabel, reopenMs: capReopenMs };
+      // The earliest reopening wins; a whole-term cap (null) only stands when nothing else does.
+      else if (capReopenMs != null && (capDenial.reopenMs == null || capReopenMs < capDenial.reopenMs)) {
+        capDenial = { label: state.capLabel, reopenMs: capReopenMs };
       }
     }
+  }
+
+  if (!anyOnlyBlocked && capDenial) {
+    return {
+      ok: false,
+      status: 429,
+      code: "model_cap",
+      capLabel: capDenial.label,
+      resetAt: capDenial.reopenMs == null ? null : isoOf(capDenial.reopenMs),
+      ...(capDenial.reopenMs == null ? {} : { retryAfterSec: Math.max(1, Math.ceil((capDenial.reopenMs - nowMs) / 1000)) }),
+    };
   }
 
   if (anyOnlyBlocked) {
@@ -412,7 +482,7 @@ export function admitSync(
  *
  * @returns {number} the plan's remaining credit AFTER this take
  */
-function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass }) {
+function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass, model = null }) {
   // An unlimited plan has no credit to draw down and can never run dry, so its
   // balance and status stay as they are. The ledger row below is still written:
   // the windows are rebuilt from charge rows and the per-plan spend figure sums
@@ -436,7 +506,8 @@ function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass 
     requestKey,
     deltaNanoUsd: -amount,
     kind: "charge",
-    meta: entry.unlimitedCredit ? { pass, unlimited: true } : { pass },
+    // The model rides on the row so cap spend can be rebuilt from the ledger.
+    meta: { pass, ...(model ? { model } : {}), ...(entry.unlimitedCredit ? { unlimited: true } : {}) },
     createdAt: at,
   });
 
@@ -471,6 +542,36 @@ function applyTake(db, { entry, amount, requestKey, usageId, apiKeyId, at, pass 
       );
       if (!entry.windows) entry.windows = {};
       entry.windows[limit.hours] = { startedAt: at, spentNanoUsd: amount };
+    }
+  }
+
+  // Model caps matching this request: the spend counts in each (a model in several caps
+  // counts in all). A whole-term cap never closes; a windowed one resets like a window.
+  if (model && entry.caps?.length) {
+    if (!entry.capSpend) entry.capSpend = {};
+    for (const cap of capsForModel(entry.caps, model)) {
+      const state = entry.capSpend[cap.id] ?? null;
+      const isOpen = state != null
+        && (cap.hours == null || atMs < new Date(state.startedAt).getTime() + cap.hours * HOUR_MS);
+      if (isOpen) {
+        const spent = nano(state.spentNanoUsd) + amount;
+        db.run(
+          `UPDATE userPlanCapSpend SET spentNanoUsd = ?, updatedAt = ? WHERE userPlanId = ? AND capId = ?`,
+          [spent, at, entry.id, cap.id]
+        );
+        state.spentNanoUsd = spent;
+      } else {
+        db.run(
+          `INSERT INTO userPlanCapSpend(userPlanId, capId, startedAt, spentNanoUsd, updatedAt)
+           VALUES(?, ?, ?, ?, ?)
+           ON CONFLICT(userPlanId, capId) DO UPDATE SET
+             startedAt = excluded.startedAt,
+             spentNanoUsd = excluded.spentNanoUsd,
+             updatedAt = excluded.updatedAt`,
+          [entry.id, cap.id, at, amount, at]
+        );
+        entry.capSpend[cap.id] = { startedAt: at, spentNanoUsd: amount };
+      }
     }
   }
 }
@@ -657,15 +758,18 @@ export function chargeSync(db, {
     // An image purchase pays in images, never in dollars.
     if (entry.kind === "image") continue;
     if (!hasCredit(entry)) continue;
-    const state = evaluatePlan(entry, nowMs);
+    const state = evaluatePlan(entry, nowMs, model);
     if (state.scheduled) continue;
-    const room = state.roomNanoUsd; // null = unlimited
+    // Tightest of the window room and the room left in any model cap that applies to
+    // this request's model (a full cap makes it 0: this purchase cannot take it in pass 1).
+    const rooms = [state.roomNanoUsd, state.capRoomNanoUsd].filter((r) => r != null);
+    const room = rooms.length ? Math.min(...rooms) : null; // null = unlimited
     const capacity = room == null ? remaining : Math.min(remaining, room);
     // Only a finite plan is also bounded by what it has left.
     const take = entry.unlimitedCredit ? capacity : Math.min(capacity, nano(entry.creditRemainingNanoUsd));
     if (take <= 0) continue;
 
-    applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 1 });
+    applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 1, model });
     ledgerRows += 1;
     remaining -= take;
     parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 1 });
@@ -689,7 +793,7 @@ export function chargeSync(db, {
       if (available <= 0) continue;
 
       const take = Math.min(available, remaining);
-      applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 2 });
+      applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 2, model });
       ledgerRows += 1;
       remaining -= take;
       parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 2 });
@@ -902,6 +1006,68 @@ export function rebuildWindowsSync(db, userPlanId, nowIsoArg = null) {
     }
   }
 
+  return out;
+}
+
+/**
+ * Recompute one purchase's model-cap spend from its ledger rows (design D8).
+ *
+ * The counters in `userPlanCapSpend` are what admission reads; this proves they equal what
+ * the ledger says, by replaying the same open/close rule over the charge rows that carry
+ * `meta.model`. Backfill rows never touched the counters and are skipped.
+ *
+ * @returns {Object<string, {startedAt:string|null, spentNanoUsd:number}>} by cap id
+ */
+export function rebuildCapSpendSync(db, userPlanId, nowIsoArg = null) {
+  const at = nowIsoArg || nowIso();
+  const nowMs = new Date(at).getTime();
+
+  const plan = db.get(
+    `SELECT p.modelCaps AS modelCaps FROM userPlans up LEFT JOIN plans p ON p.id = up.planId WHERE up.id = ?`,
+    [userPlanId]
+  );
+  const caps = parseModelCaps(plan?.modelCaps);
+  if (caps.length === 0) return {};
+
+  const rows = db.all(
+    `SELECT deltaNanoUsd, createdAt, meta FROM creditLedger
+      WHERE userPlanId = ? AND kind = 'charge'
+      ORDER BY createdAt ASC, id ASC`,
+    [userPlanId]
+  );
+
+  const out = {};
+  for (const cap of caps) out[cap.id] = { startedAt: null, spentNanoUsd: 0 };
+
+  for (const row of rows) {
+    let meta = null;
+    try { meta = row.meta ? JSON.parse(row.meta) : null; } catch { meta = null; }
+    if (meta?.backfill || !meta?.model) continue;
+    const amount = Math.abs(nano(row.deltaNanoUsd));
+    if (amount === 0) continue;
+    const atMs = new Date(row.createdAt).getTime();
+    if (!Number.isFinite(atMs)) continue;
+
+    for (const cap of capsForModel(caps, meta.model)) {
+      const state = out[cap.id];
+      const isOpen = state.startedAt != null
+        && (cap.hours == null || atMs < new Date(state.startedAt).getTime() + cap.hours * HOUR_MS);
+      if (isOpen) {
+        state.spentNanoUsd += amount;
+      } else {
+        state.startedAt = row.createdAt;
+        state.spentNanoUsd = amount;
+      }
+    }
+  }
+
+  // A windowed cap whose window already closed reads as unopened until the next charge.
+  for (const cap of caps) {
+    const state = out[cap.id];
+    if (cap.hours != null && state.startedAt && nowMs >= new Date(state.startedAt).getTime() + cap.hours * HOUR_MS) {
+      out[cap.id] = { startedAt: null, spentNanoUsd: 0 };
+    }
+  }
   return out;
 }
 

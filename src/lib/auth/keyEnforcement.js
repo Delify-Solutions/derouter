@@ -48,6 +48,7 @@ import {
   planModelNotAllowedMessage,
   modelMaintenanceMessage,
   planLimitMessage,
+  modelCapMessage,
   pinnedPlanUnavailableMessage,
 } from "./platformError.js";
 
@@ -320,6 +321,13 @@ export async function enforceKeyLimits(apiKey, model, { signal = null, requestKi
     //    have moved on in that time.
     const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId, requestKind, model });
     if (!admitted.ok) {
+      // A full model cap refuses this model only; the pool still has credit (spec
+      // plan-queue-billing "A full model cap refuses that model only").
+      if (admitted.code === "model_cap") {
+        return deny(429, "model_cap", modelCapMessage(admitted.capLabel, admitted.resetAt), {
+          ...(admitted.resetAt ? { retryAfterSec: admitted.retryAfterSec, resetAt: admitted.resetAt } : {}),
+        });
+      }
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {
           retryAfterSec: admitted.retryAfterSec,

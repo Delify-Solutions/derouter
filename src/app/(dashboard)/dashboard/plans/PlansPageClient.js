@@ -5,8 +5,10 @@ import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModa
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { describeLimit } from "@/lib/billing/limits.js";
+import { describeModelCap } from "@/lib/billing/modelCaps.js";
 import { topupBounds } from "@/lib/billing/topup.js";
 import LimitsEditor, { limitsToDraft, draftToLimits, draftLimitsError } from "./components/LimitsEditor";
+import ModelCapsEditor, { capsToDraft, draftToCaps, draftCapsError } from "./components/ModelCapsEditor";
 import TermsEditor, { termsToDraft, draftToTerms, draftTermsError } from "./components/TermsEditor";
 import { termLabel } from "@/lib/billing/terms.js";
 import { planKindLabel } from "@/lib/billing/planKind.js";
@@ -57,6 +59,8 @@ const EMPTY_FORM = {
   tpm: "",
   // Per-window limits as draft rows (strings while typing).
   limits: [],
+  // Spending caps on groups of models inside the pool, as draft rows.
+  modelCaps: [],
   // Only meaningful while editing: rewrite the ACTIVE purchases too.
   applyToActive: false,
 };
@@ -117,6 +121,13 @@ function validateDraft(draft) {
     durationDays: draft.durationDays,
   });
   if (limitsError) errors.limits = limitsError;
+  const capsError = draftCapsError(draft.modelCaps, {
+    creditUsd: draft.creditUsd,
+    unlimitedCredit: draft.unlimitedCredit,
+    durationDays: draft.durationDays,
+    kind: draft.kind,
+  });
+  if (capsError) errors.modelCaps = capsError;
 
   const termsError = draftTermsError(draft.termOptions, {
     allowCustomAmount: draft.allowCustomAmount && !draft.unlimitedCredit,
@@ -181,6 +192,7 @@ function planToDraft(plan) {
     rpm: plan.rpm == null ? "" : String(plan.rpm),
     tpm: plan.tpm == null ? "" : String(plan.tpm),
     limits: limitsToDraft(plan.limits),
+    modelCaps: capsToDraft(plan.modelCaps),
     applyToActive: false,
   };
 }
@@ -304,6 +316,8 @@ export default function PlansPageClient() {
       rpm: String(draft.rpm).trim() === "" ? null : Number(draft.rpm),
       tpm: String(draft.tpm).trim() === "" ? null : Number(draft.tpm),
       limits: draftToLimits(draft.limits, draft.kind) ?? [],
+      // An image plan has no model caps (its unit is images); [] clears them.
+      modelCaps: draft.kind === "image" ? [] : draftToCaps(draft.modelCaps),
       // Only sent when the admin ticked the box; the API ignores it otherwise.
       ...(editing && draft.applyToActive ? { applyToActive: true } : {}),
     };
@@ -525,6 +539,15 @@ export default function PlansPageClient() {
                   </ul>
                 ) : (
                   <p className="font-mono text-[12px] text-text-muted">Không giới hạn theo khung giờ</p>
+                )}
+                {Array.isArray(plan.modelCaps) && plan.modelCaps.length > 0 && (
+                  <ul className="mt-1 flex flex-col gap-0.5">
+                    {plan.modelCaps.map((cap) => (
+                      <li key={cap.id} className="font-mono text-[12px] text-text-muted">
+                        {describeModelCap(cap)}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
 
@@ -948,6 +971,19 @@ export default function PlansPageClient() {
               </p>
             )}
           </div>
+
+          {draft.kind !== "image" && (
+            <div className="border-t border-border pt-4">
+              <ModelCapsEditor
+                rows={draft.modelCaps}
+                onChange={(rows) => setField("modelCaps", rows)}
+                creditUsd={draft.creditUsd}
+                unlimitedCredit={draft.unlimitedCredit}
+                durationDays={draft.durationDays}
+                error={touched ? errors.modelCaps : null}
+              />
+            </div>
+          )}
 
           <div className="border-t border-border pt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Input

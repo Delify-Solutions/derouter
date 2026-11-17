@@ -51,6 +51,7 @@ import { chargeSync } from "../../billing/planQueue.js";
 import { normalizeLimits, parseLimits, serializeLimits, validateLimits } from "../../billing/limits.js";
 import { imageCount, isImagePlan, normalizePlanKind } from "../../billing/planKind.js";
 import { normalizePlanModels } from "../../billing/planModels.js";
+import { normalizeModelCaps, parseModelCaps, serializeModelCaps, validateModelCaps } from "../../billing/modelCaps.js";
 import { quoteTopup, topupBounds } from "../../billing/topup.js";
 
 // Ceiling for an admin-set top-up bound: 1 billion đồng, far above any real top-up.
@@ -278,6 +279,10 @@ export function expireStalePlans(db, now = nowIso()) {
     `DELETE FROM userPlanWindows
       WHERE userPlanId IN (SELECT id FROM userPlans WHERE status <> 'active')`
   );
+  db.run(
+    `DELETE FROM userPlanCapSpend
+      WHERE userPlanId IN (SELECT id FROM userPlans WHERE status <> 'active')`
+  );
 
   return { expired: rows.length, forfeitedNanoUsd, forfeitedImages };
 }
@@ -375,6 +380,8 @@ function rowToPlan(row) {
     // Which models this plan includes (spec plan-model-access): null = whatever the
     // buyer's group allows.
     allowedModels: normalizePlanModels(parseJson(row.allowedModels, null)),
+    // Spending caps on groups of models inside the pool (spec plan-queue-billing); [] = none.
+    modelCaps: parseModelCaps(row.modelCaps),
     purchaseLimitPerMonth: row.purchaseLimitPerMonth == null ? null : nano(row.purchaseLimitPerMonth),
     // Longer terms besides the single period (spec plan-terms); [] = one period only.
     termOptions: parseTermOptions(row.termOptions),
@@ -408,6 +415,21 @@ function customAmountColumns(input) {
 function normalizeRate(value) {
   if (value == null || value === "" || Number(value) === 0) return null;
   return nano(value);
+}
+
+/**
+ * The first model named by any cap that is not an existing combo, or null. Same reason as
+ * unknownPlanModelSync: a typo would save a cap that never matches anything.
+ */
+export function unknownCapModelSync(db, modelCaps) {
+  if (!db) return null;
+  let caps;
+  try { caps = normalizeModelCaps(modelCaps); } catch { return null; }
+  for (const cap of caps) {
+    const unknown = unknownPlanModelSync(db, cap.models);
+    if (unknown) return unknown;
+  }
+  return null;
 }
 
 /**
@@ -519,6 +541,15 @@ export function validatePlanInput(input = {}) {
   // plan-templates "Limit validation"). Rejected before anything is written.
   const limitsError = validatePlanLimits(input);
   if (limitsError) return limitsError;
+
+  // modelCaps (spec plan-templates "A plan may cap the spend of a group of models").
+  const capsError = validateModelCaps(input.modelCaps ?? [], {
+    kind: input.kind,
+    creditNanoUsd: nano(input.creditNanoUsd),
+    unlimited: isUnlimitedInput(input.unlimitedCredit),
+    durationDays: nano(input.durationDays),
+  });
+  if (capsError) return capsError;
 
   // rpm / tpm: empty or 0 = unlimited, otherwise a positive integer.
   for (const [field, label] of [["rpm", "RPM"], ["tpm", "TPM"]]) {
@@ -707,7 +738,7 @@ export async function createPlan(input = {}) {
   const error = validatePlanInput(input);
   if (error) throw new Error(error);
   const db = await getAdapter();
-  const unknown = unknownPlanModelSync(db, input.allowedModels);
+  const unknown = unknownPlanModelSync(db, input.allowedModels) || unknownCapModelSync(db, input.modelCaps);
   if (unknown) throw new Error(`Model không tồn tại: ${unknown}`);
   const exists = db.get(`SELECT id FROM plans WHERE code = ?`, [String(input.code).trim().toLowerCase()]);
   if (exists) throw new Error("A plan with this code already exists");
@@ -744,14 +775,15 @@ export async function createPlan(input = {}) {
     isFeatured: input.isFeatured === true,
     sortOrder: input.sortOrder == null ? null : nano(input.sortOrder),
     limits: serializeLimits(input.limits ?? []),
+    modelCaps: serializeModelCaps(input.modelCaps ?? []),
     rpm: normalizeRate(input.rpm),
     tpm: normalizeRate(input.tpm),
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, kind, imageCount, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, allowedModels, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, rpm, tpm, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plans(id, code, name, description, priceNanoUsd, priceVnd, kind, imageCount, creditNanoUsd, unlimitedCredit, allowCustomAmount, customMinVnd, customMaxVnd, durationDays, isActive, isPurchasable, allowedGroupIds, allowedModels, purchaseLimitPerMonth, termOptions, isFeatured, sortOrder, limits, modelCaps, rpm, tpm, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       plan.id, plan.code, plan.name, plan.description, plan.priceNanoUsd, plan.priceVnd,
       plan.kind, plan.imageCount, plan.creditNanoUsd,
@@ -760,7 +792,7 @@ export async function createPlan(input = {}) {
       plan.allowedGroupIds ? stringifyJson(plan.allowedGroupIds) : null,
       plan.allowedModels ? stringifyJson(plan.allowedModels) : null,
       plan.purchaseLimitPerMonth, plan.termOptions, plan.isFeatured ? 1 : 0,
-      plan.sortOrder, plan.limits, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
+      plan.sortOrder, plan.limits, plan.modelCaps, plan.rpm, plan.tpm, plan.createdAt, plan.updatedAt,
     ]
   );
   return rowToPlan(db.get(`SELECT * FROM plans WHERE id = ?`, [plan.id]));
@@ -784,7 +816,7 @@ export function updatePlanSync(db, id, patch = {}) {
   const merged = { ...current, ...patch, updatedAt: nowIso() };
   const error = validatePlanInput(merged);
   if (error) throw new Error(error);
-  const unknown = unknownPlanModelSync(db, merged.allowedModels);
+  const unknown = unknownPlanModelSync(db, merged.allowedModels) || unknownCapModelSync(db, merged.modelCaps);
   if (unknown) throw new Error(`Model không tồn tại: ${unknown}`);
 
   const code = String(merged.code).trim().toLowerCase();
@@ -800,7 +832,7 @@ export function updatePlanSync(db, id, patch = {}) {
   const unlimitedCredit = imagePlan ? false : isUnlimitedInput(merged.unlimitedCredit);
 
   db.run(
-    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, kind = ?, imageCount = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, allowedModels = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE plans SET code = ?, name = ?, description = ?, priceNanoUsd = ?, priceVnd = ?, kind = ?, imageCount = ?, creditNanoUsd = ?, unlimitedCredit = ?, allowCustomAmount = ?, customMinVnd = ?, customMaxVnd = ?, durationDays = ?, isActive = ?, isPurchasable = ?, allowedGroupIds = ?, allowedModels = ?, purchaseLimitPerMonth = ?, termOptions = ?, isFeatured = ?, sortOrder = ?, limits = ?, modelCaps = ?, rpm = ?, tpm = ?, updatedAt = ? WHERE id = ?`,
     [
       code, String(merged.name).trim(),
       merged.description == null ? null : String(merged.description),
@@ -828,6 +860,7 @@ export function updatePlanSync(db, id, patch = {}) {
       merged.isFeatured ? 1 : 0,
       merged.sortOrder == null ? null : nano(merged.sortOrder),
       serializeLimits(merged.limits ?? []),
+      serializeModelCaps(merged.modelCaps ?? []),
       normalizeRate(merged.rpm), normalizeRate(merged.tpm),
       merged.updatedAt, id,
     ]
