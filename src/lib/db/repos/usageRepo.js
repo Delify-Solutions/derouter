@@ -358,7 +358,8 @@ export async function getActiveRequests() {
     .slice(0, 20);
 
   const errorProvider = (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "";
-  return { activeRequests, recentRequests, errorProvider };
+  // `pending` is the in-memory in-flight counter, so a live view needs nothing else.
+  return { activeRequests, recentRequests, errorProvider, pending: pendingRequests };
 }
 
 export async function saveRequestUsage(entry) {
@@ -636,6 +637,58 @@ function loadDaysInRange(adapter, maxDays) {
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
+// ─── Time-sliced scans ──────────────────────────────────────────────────────────
+// better-sqlite3 is synchronous, so one `db.all` over a month of usageHistory (millions
+// of rows on a busy installation) plus a JS loop over it holds the event loop for
+// seconds: the proxy, the dashboard and every other API stall with it. The dashboard
+// summaries therefore read the range in short slices (indexed on timestamp) and yield
+// to the event loop between them. The work done is the same, but no single turn of the
+// loop lasts longer than one slice.
+const USAGE_SLICE_MS = 3 * 60 * 60 * 1000;
+const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+function parseRangeBound(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new RangeError(`Invalid date: ${value}`);
+  return d.getTime();
+}
+
+/**
+ * Run `select` over [startDate, endDate] one slice at a time, oldest first, handing
+ * each slice's rows to `onRows` (synchronous) and yielding between slices. `select`
+ * is the SELECT ... FROM usageHistory part with no WHERE; `conds` are extra
+ * predicates; `tail` is what follows the WHERE (GROUP BY / ORDER BY). A GROUP BY here
+ * is per slice, so the caller must merge groups that recur across slices. An invalid date throws RangeError before anything is read.
+ */
+async function forEachUsageSlice(db, { startDate, endDate, conds = [], select, tail = "", sliceMs = USAGE_SLICE_MS }, onRows) {
+  const requestedStart = parseRangeBound(startDate);
+  const endMs = parseRangeBound(endDate);
+  // The range is clamped to the rows that exist, so an explicit far-away date (a year 2000
+  // start, a year 9999 end) costs a handful of slices instead of one per 3 hours of it.
+  const bounds = db.get(`SELECT MIN(timestamp) AS lo, MAX(timestamp) AS hi FROM usageHistory`);
+  const loMs = bounds?.lo ? new Date(bounds.lo).getTime() : NaN;
+  const hiMs = bounds?.hi ? new Date(bounds.hi).getTime() : NaN;
+  if (!Number.isFinite(loMs) || !Number.isFinite(hiMs)) return;
+  const startMs = Math.max(requestedStart ?? loMs, loMs);
+  const horizonMs = Math.min(endMs ?? Infinity, hiMs);
+  if (startMs > horizonMs) return;
+  for (let from = startMs; ; from += sliceMs) {
+    const to = from + sliceMs;
+    // The last slice has no upper bound when no end date was given, so a row stamped a
+    // little in the future is still counted, exactly as the single query did.
+    const isLast = to > horizonMs;
+    const where = ["timestamp >= ?"];
+    const params = [new Date(from).toISOString()];
+    if (!isLast) { where.push("timestamp < ?"); params.push(new Date(to).toISOString()); }
+    else if (endMs != null) { where.push("timestamp <= ?"); params.push(new Date(endMs).toISOString()); }
+    where.push(...conds);
+    onRows(db.all(`${select} WHERE ${where.join(" AND ")} ${tail}`, params));
+    if (isLast) break;
+    await yieldToLoop();
+  }
+}
+
 export async function getUsageStats(period = "all") {
   const db = await getAdapter();
 
@@ -871,10 +924,18 @@ export async function getUsageStats(period = "all") {
 
     // Overlay precise lastUsed timestamps from history
     const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
-    const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(overlayCutoff).toISOString()]
-    );
+    // One row per distinct (model, provider, account, key, endpoint) with its newest
+    // timestamp, not one row per request: every bucket's lastUsed is the max of its
+    // rows, so folding the per-group maxima gives the same answer while the scan runs
+    // inside SQLite instead of materialising the whole period in JS.
+    // Per slice, so a long range never holds the event loop for one big scan; a group that
+    // recurs in several slices just keeps its newest timestamp.
+    await forEachUsageSlice(db, {
+      // No cut-off ('all'): let the scan start at the oldest row instead of 1970.
+      startDate: overlayCutoff > 0 ? new Date(overlayCutoff).toISOString() : undefined,
+      select: "SELECT MAX(timestamp) AS timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory",
+      tail: "GROUP BY provider, model, connectionId, apiKey, apiKeyId, endpoint",
+    }, (histRows) => {
     for (const e of histRows) {
       const ts = e.timestamp;
       const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
@@ -896,6 +957,7 @@ export async function getUsageStats(period = "all") {
       const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
       if (stats.byEndpoint[endpointKey] && new Date(ts) > new Date(stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
     }
+    });
   } else {
     // 24h / today: live history
     let cutoff;
@@ -906,17 +968,36 @@ export async function getUsageStats(period = "all") {
     } else {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
-    const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, tokens FROM usageHistory WHERE timestamp >= ?`,
-      [cutoff]
-    );
+    // Aggregated per (provider, model, account, key, endpoint) inside SQLite: a busy day
+    // is hundreds of thousands of rows, and parsing each one's `tokens` JSON in JS
+    // blocked the event loop. `n` is the request count of the group, `ts` its newest
+    // timestamp. Token counts follow the old per-row rules (`prompt_tokens || 0`,
+    // `cached_tokens || cache_read_input_tokens || 0`); json_valid guards a malformed
+    // row, which parseJson used to tolerate.
+    const TK = "CASE WHEN json_valid(tokens) THEN tokens END";
+    // Per slice (see forEachUsageSlice): the loop below adds each group's counts, so a
+    // group that appears in two slices simply accumulates.
+    const filtered = [];
+    await forEachUsageSlice(db, {
+      startDate: cutoff,
+      select: `SELECT provider, model, connectionId, apiKey, apiKeyId, endpoint,
+              COUNT(*) AS n,
+              MAX(timestamp) AS ts,
+              SUM(COALESCE(json_extract(${TK}, '$.prompt_tokens'), 0)) AS pt,
+              SUM(COALESCE(json_extract(${TK}, '$.completion_tokens'), 0)) AS ct,
+              SUM(COALESCE(NULLIF(json_extract(${TK}, '$.cached_tokens'), 0),
+                           json_extract(${TK}, '$.cache_read_input_tokens'), 0)) AS cached,
+              SUM(CASE WHEN COALESCE(costNanoUsd, 0) != 0 THEN ROUND(costNanoUsd)
+                       ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano
+         FROM usageHistory`,
+      tail: "GROUP BY provider, model, connectionId, apiKey, apiKeyId, endpoint",
+    }, (rows) => { for (const row of rows) filtered.push(row); });
 
     for (const r of filtered) {
-      const tokens = parseJson(r.tokens, {}) || {};
-      const promptTokens = tokens.prompt_tokens || 0;
-      const completionTokens = tokens.completion_tokens || 0;
-      const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
-      const entryCostNano = rowCostNano(r.costNanoUsd, r.cost);
+      const promptTokens = Math.round(r.pt || 0);
+      const completionTokens = Math.round(r.ct || 0);
+      const cachedTokens = Math.round(r.cached || 0);
+      const entryCostNano = Math.round(r.costNano || 0);
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
 
       stats.totalPromptTokens += promptTokens;
@@ -926,7 +1007,7 @@ export async function getUsageStats(period = "all") {
       stats.totalCost = nanoToUsd(stats.totalCostNanoUsd);
 
       if (!stats.byProvider[r.provider]) stats.byProvider[r.provider] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
-      stats.byProvider[r.provider].requests++;
+      stats.byProvider[r.provider].requests += r.n;
       stats.byProvider[r.provider].promptTokens += promptTokens;
       stats.byProvider[r.provider].completionTokens += completionTokens;
       stats.byProvider[r.provider].cachedTokens += cachedTokens;
@@ -934,27 +1015,27 @@ export async function getUsageStats(period = "all") {
 
       const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
       if (!stats.byModel[modelKey]) {
-        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
+        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, lastUsed: r.ts };
       }
-      stats.byModel[modelKey].requests++;
+      stats.byModel[modelKey].requests += r.n;
       stats.byModel[modelKey].promptTokens += promptTokens;
       stats.byModel[modelKey].completionTokens += completionTokens;
       stats.byModel[modelKey].cachedTokens += cachedTokens;
       addCostTo(stats.byModel[modelKey], entryCostNano);
-      if (new Date(r.timestamp) > new Date(stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = r.timestamp;
+      if (new Date(r.ts) > new Date(stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = r.ts;
 
       if (r.connectionId) {
         const accountName = connectionMap[r.connectionId] || `Account ${r.connectionId.slice(0, 8)}...`;
         const accountKey = `${r.model} (${r.provider} - ${accountName})`;
         if (!stats.byAccount[accountKey]) {
-          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, connectionId: r.connectionId, accountName, lastUsed: r.timestamp };
+          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, connectionId: r.connectionId, accountName, lastUsed: r.ts };
         }
-        stats.byAccount[accountKey].requests++;
+        stats.byAccount[accountKey].requests += r.n;
         stats.byAccount[accountKey].promptTokens += promptTokens;
         stats.byAccount[accountKey].completionTokens += completionTokens;
         stats.byAccount[accountKey].cachedTokens += cachedTokens;
         addCostTo(stats.byAccount[accountKey], entryCostNano);
-        if (new Date(r.timestamp) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = r.timestamp;
+        if (new Date(r.ts) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = r.ts;
       }
 
       const liveKeyIdent = keyIdent(r.apiKeyId, r.apiKey);
@@ -964,31 +1045,31 @@ export async function getUsageStats(period = "all") {
         const keyName = keyInfo?.name || (r.apiKeyId ? "Key " + String(r.apiKeyId).slice(0, 8) + "..." : r.apiKey.slice(0, 8) + "...");
         const akKey = `${liveKeyIdent}|${r.model}|${r.provider || "unknown"}`;
         if (!stats.byApiKey[akKey]) {
-          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: liveKeyIdent, lastUsed: r.timestamp };
+          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: liveKeyIdent, lastUsed: r.ts };
         }
         const ake = stats.byApiKey[akKey];
-        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
+        ake.requests += r.n; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
         addCostTo(ake, entryCostNano);
-        if (new Date(r.timestamp) > new Date(ake.lastUsed)) ake.lastUsed = r.timestamp;
+        if (new Date(r.ts) > new Date(ake.lastUsed)) ake.lastUsed = r.ts;
       } else {
         if (!stats.byApiKey["local-no-key"]) {
-          stats.byApiKey["local-no-key"] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked: null, keyName: "Local (No API Key)", apiKeyKey: "local-no-key", lastUsed: r.timestamp };
+          stats.byApiKey["local-no-key"] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked: null, keyName: "Local (No API Key)", apiKeyKey: "local-no-key", lastUsed: r.ts };
         }
         const ake = stats.byApiKey["local-no-key"];
-        ake.requests++; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
+        ake.requests += r.n; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
         addCostTo(ake, entryCostNano);
-        if (new Date(r.timestamp) > new Date(ake.lastUsed)) ake.lastUsed = r.timestamp;
+        if (new Date(r.ts) > new Date(ake.lastUsed)) ake.lastUsed = r.ts;
       }
 
       const endpoint = r.endpoint || "Unknown";
       const epKey = `${endpoint}|${r.model}|${r.provider || "unknown"}`;
       if (!stats.byEndpoint[epKey]) {
-        stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, endpoint, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
+        stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, endpoint, rawModel: r.model, provider: providerDisplayName, lastUsed: r.ts };
       }
       const epe = stats.byEndpoint[epKey];
-      epe.requests++; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens;
+      epe.requests += r.n; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens;
       addCostTo(epe, entryCostNano);
-      if (new Date(r.timestamp) > new Date(epe.lastUsed)) epe.lastUsed = r.timestamp;
+      if (new Date(r.ts) > new Date(epe.lastUsed)) epe.lastUsed = r.ts;
     }
   }
 
@@ -1148,18 +1229,11 @@ function emptyUsageTotals() {
  * @param {{startDate?: string, endDate?: string}} [range]
  * @returns {Promise<Array<object>>} owners, highest cost first
  */
-export async function getUsageByOwner({ startDate, endDate } = {}) {
+export async function getUsageByOwner({ startDate, endDate, sliceMs } = {}) {
   const db = await getAdapter();
-  const conds = [];
-  const params = [];
-  for (const [value, op] of [[startDate, ">="], [endDate, "<="]]) {
-    if (!value) continue;
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) throw new RangeError(`Invalid date: ${value}`);
-    conds.push(`timestamp ${op} ?`);
-    params.push(d.toISOString());
-  }
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  // Reject a bad date up front, before any read (the slices below would also throw).
+  parseRangeBound(startDate);
+  parseRangeBound(endDate);
 
   const keys = db.all(`SELECT id, key, keyPrefix, name, userId, isActive FROM apiKeys`);
   const users = db.all(`SELECT id, email, displayName, groupId, status FROM users`);
@@ -1221,11 +1295,10 @@ export async function getUsageByOwner({ startDate, endDate } = {}) {
   // Every customer who owns a key is listed, even with no traffic in the range.
   for (const k of keys) keyEntry(ownerFor(ownerIdOfKey(k)), k);
 
-  const rows = db.all(
-    `SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta
-       FROM usageHistory ${where}`,
-    params
-  );
+  await forEachUsageSlice(db, {
+    startDate, endDate, sliceMs,
+    select: "SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory",
+  }, (rows) => {
   for (const r of rows) {
     const k = (r.apiKeyId && keyById.get(r.apiKeyId)) || (r.apiKey && keyByRaw.get(r.apiKey)) || null;
     // No key at all: loopback/local traffic, shown under the admin entry.
@@ -1264,6 +1337,7 @@ export async function getUsageByOwner({ startDate, endDate } = {}) {
       o.perMinuteReq[minute] = (o.perMinuteReq[minute] || 0) + 1;
     }
   }
+  });
 
   const out = [];
   for (const o of owners.values()) {
@@ -1285,7 +1359,7 @@ export async function getUsageByOwner({ startDate, endDate } = {}) {
       keyCount: keyList.filter((k) => !k.deleted && !k.noKey).length,
       activeKeyCount: keyList.filter((k) => !k.deleted && !k.noKey && k.active).length,
       keys: keyList,
-      byModel: Object.values(o.byModel).sort((a, b) => (b.costNanoUsd - a.costNanoUsd) || (b.requests - a.requests)),
+      byModel: Object.values(o.byModel).sort((a, b) => (b.costNanoUsd - a.costNanoUsd) || (b.requests - a.requests) || String(a.model).localeCompare(String(b.model))),
       totals: o.totals,
       peakTpm,
       peakRpm,
@@ -1416,25 +1490,20 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
 // Aggregates usageHistory in [startDate, endDate] grouped by provider, with the
 // same peak RPM/TPM/Tok-s metrics as getKeyUsageSummary but per-provider instead
 // of per-key. Returns items keyed by provider id.
-export async function getProviderUsageSummary({ startDate, endDate } = {}) {
+export async function getProviderUsageSummary({ startDate, endDate, sliceMs } = {}) {
   const db = await getAdapter();
-  const conds = [];
-  const params = [];
-  if (startDate) { conds.push("timestamp >= ?"); params.push(new Date(startDate).toISOString()); }
-  if (endDate) { conds.push("timestamp <= ?"); params.push(new Date(endDate).toISOString()); }
-  // "platform" rows are key-holder denials (RPM/TPM/budget) recorded by the proxy —
-  // not real upstream provider usage. Exclude them from the provider table.
-  conds.push("COALESCE(provider, '') != 'platform'");
-  const where = `WHERE ${conds.join(" AND ")}`;
-
-  const rows = db.all(
-    `SELECT provider, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory ${where} ORDER BY timestamp ASC`,
-    params
-  );
 
   const byProvider = {};
   const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0 };
 
+  await forEachUsageSlice(db, {
+    startDate, endDate, sliceMs,
+    // "platform" rows are key-holder denials (RPM/TPM/budget) recorded by the proxy —
+    // not real upstream provider usage. Exclude them from the provider table.
+    conds: ["COALESCE(provider, '') != 'platform'"],
+    select: "SELECT provider, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory",
+    tail: "",
+  }, (rows) => {
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
     const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
@@ -1470,6 +1539,7 @@ export async function getProviderUsageSummary({ startDate, endDate } = {}) {
       if (tokS > p._peakTokS) p._peakTokS = tokS;
     }
   }
+  });
 
   const items = Object.values(byProvider).map((p) => {
     let peakTpm = 0, peakRpm = 0, peakTokS = 0;
