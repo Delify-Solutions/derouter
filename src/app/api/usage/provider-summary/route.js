@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderUsageSummary, getProviderRateUsage, getProviderNodes } from "@/lib/localDb";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
+import { swr } from "@/lib/cache/swrCache.js";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +32,15 @@ function periodToRange(period) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "30d";
+    const requested = searchParams.get("period");
+    // Unknown values computed the 60d range under their own key; normalise first.
+    const period = ["today", "24h", "7d", "30d", "60d"].includes(requested) ? requested : "30d";
     const { startDate, endDate } = periodToRange(period);
 
+    // The summary scans the whole period; the live per-minute rate below is cheap and
+    // must stay current, so only the scan is cached.
     const [{ items }, liveMap, providerNodes] = await Promise.all([
-      getProviderUsageSummary({ startDate, endDate }),
+      swr(`usage:provider:${period}`, { ttlMs: 45_000 }, () => getProviderUsageSummary({ startDate, endDate })),
       getProviderRateUsage(60_000),
       getProviderNodes(),
     ]);

@@ -84,7 +84,7 @@ export default function UserUsageTable() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams(periodToRange(period));
+      const params = new URLSearchParams({ ...periodToRange(period), period });
       const res = await fetch(`/api/usage/user-summary?${params}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load usage by user");

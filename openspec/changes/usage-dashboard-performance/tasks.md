@@ -1,0 +1,8 @@
+- [x] 1.1 SSE route pushes live state only; `getActiveRequests` also returns `pending`
+- [x] 2.1 Overview: lastUsed overlay and 24 h / today aggregate in SQLite
+- [x] 2.2 `forEachUsageSlice`; Users, Providers, overlay and 24 h path sliced
+- [x] 3.1 `swrCache.js`; cache on stats, chart, user-summary, provider-summary
+- [x] 4.1 `test/swr-cache.test.js`, `test/usage-aggregation.test.js`
+- [x] 4.2 Old-vs-new parity on randomised data; latency/stall measurements (design.md)
+- [ ] 5.1 Deploy and compare on production data
+- [ ] 6.1 (next, separate change) rollup tables so a cold load is independent of row count; same treatment for `getKeyUsageSummary`
