@@ -19,6 +19,7 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { deepaiLaneHeaders } from "open-sse/services/deepaiClient.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -101,6 +102,15 @@ const OAUTH_TEST_CONFIG = {
       Accept: "application/json",
       "User-Agent": "kimchi/0.1.40",
     },
+    refreshable: false,
+  },
+  // DeepAI Code — the model catalog needs the account's api-key and costs no quota.
+  deepai: {
+    url: "https://api.deepai.org/deepai_code/models",
+    method: "GET",
+    authHeader: "api-key",
+    authPrefix: "",
+    extraHeaders: { Accept: "application/json" },
     refreshable: false,
   },
   // Grok CLI / Grok Build — probe /v1/user (no inference quota). Headers mirror official CLI.
@@ -399,6 +409,8 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
       : { [config.authHeader]: `${config.authPrefix}${accessToken}`, ...config.extraHeaders };
     const fetchOpts = { method: config.method, headers };
     if (config.body) fetchOpts.body = config.body;
+    // DeepAI answers an unidentified lane/machine with a legacy catalog or machine_required.
+    if (connection.provider === "deepai") Object.assign(headers, await deepaiLaneHeaders());
     const res = await fetchWithConnectionProxy(testUrl, fetchOpts, effectiveProxy);
     const bodyText = !res.ok ? await res.text().catch(() => "") : "";
 

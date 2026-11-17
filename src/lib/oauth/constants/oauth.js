@@ -120,6 +120,9 @@ export const CODEBUDDY_INTL_CONFIG = { ...PROVIDER_OAUTH["codebuddy-intl"] };
 // Kimchi OAuth Configuration (Browser token callback flow)
 export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 
+// DeepAI Code sign-in (browser → local callback with a one-time code → api_key exchange)
+export const DEEPAI_CONFIG = { ...PROVIDER_OAUTH["deepai"] };
+
 // Grok CLI / Grok Build OAuth Configuration (Device Code Flow)
 // Endpoint: cli-chat-proxy.grok.com — same client_id as xai, different flow + scopes
 export const GROK_CLI_CONFIG = { ...PROVIDER_OAUTH["grok-cli"] };
@@ -219,6 +222,7 @@ export const PROVIDERS = {
   CODEBUDDY: "codebuddy-cn",
   CODEBUDDY_INTL: "codebuddy-intl",
   KIMCHI: "kimchi",
+  DEEPAI: "deepai",
   GROK_CLI: "grok-cli",
   TRAE: "trae",
   WINDSURF: "windsurf",

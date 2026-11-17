@@ -7,6 +7,7 @@ import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
+import { resolveDeepAIModels } from "open-sse/services/deepaiClient.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -269,6 +270,14 @@ const PROVIDER_MODELS_CONFIG = {
         models: getStaticProviderModels("kimchi"),
         warning: "Kimchi returned no live models; falling back to static catalog.",
       };
+    }
+  },
+  deepai: {
+    customResolver: async (connection) => {
+      const result = await resolveDeepAIModels({ accessToken: connection.accessToken, apiKey: connection.apiKey });
+      return result.source === "live"
+        ? { models: result.models }
+        : { models: result.models, warning: "DeepAI returned no live models; falling back to the bundled catalog." };
     }
   },
   cursor: {

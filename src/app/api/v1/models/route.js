@@ -9,6 +9,7 @@ import { getProviderConnections, getCombos, getCustomModels, getModelAliases } f
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
+import { resolveDeepAIModels } from "open-sse/services/deepaiClient.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
@@ -59,6 +60,10 @@ const LIVE_MODEL_RESOLVERS = {
       providerSpecificData: conn.providerSpecificData || {}
     }, { log: console });
     return result?.models?.length ? { models: result.models } : null;
+  },
+  deepai: async (conn) => {
+    const result = await resolveDeepAIModels({ accessToken: conn.accessToken, apiKey: conn.apiKey });
+    return result.source === "live" ? { models: result.models } : null;
   },
   github: async (conn) => {
     const result = await resolveCopilotModels({
