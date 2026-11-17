@@ -12,14 +12,14 @@
 //                is passed only when path === "/theos"). One /theos fires before each
 //                chat request, so the server sees a live client without a nonce per call.
 //
-// Identity headers are NOT fabricated per account: every account on this
-// deployment reports the same machine digest (this host's own identifier), and
-// the beacon carries only facts derivable here (uptime). Presence signals the
-// desktop app reads from a window (focus, agent activity) are omitted — the
-// client itself omits them when unknown.
+// Device identity is per account: each signed-in account presents as its own
+// desktop install — its own machine digest (persisted in the data dir so it
+// survives restarts), its own per-launch instance id, and its own uptime offset
+// — so the upstream cannot tie the deployment's accounts to one another through
+// these headers. Presence signals the desktop app reads from a window (focus,
+// agent activity) are omitted — the client itself omits them when unknown.
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -59,48 +59,29 @@ const MODEL_ID = /^[a-zA-Z0-9_.-]{1,128}$/;
 export const DEEPAI_STATIC_MODELS = deepaiRegistry.models.map(({ id, name }) => ({ id, name }));
 
 const startedAt = Date.now();
-// One instance id per process, like the app's per-launch id.
-const INSTANCE_ID = randomBytes(16).toString("hex");
 
-// ─── machine id (one per deployment) ─────────────────────────────────────────
+// ─── device identity (one per account) ───────────────────────────────────────
 
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-let machineIdPromise = null;
-
-function run(file, args) {
-  return new Promise((resolve) => {
-    execFile(file, args, { encoding: "utf8", timeout: 10_000, windowsHide: true }, (error, stdout) =>
-      resolve(error ? "" : stdout));
-  });
+export function deepaiAccountKey(apiKey) {
+  return createHash("sha256").update(String(apiKey || "")).digest("hex");
 }
 
-async function readHostIdentifier() {
-  try {
-    if (process.platform === "darwin") {
-      const out = await run("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
-      const m = /"IOPlatformUUID"\s*=\s*"([^"]+)"/.exec(out);
-      if (m && UUID_RE.test(m[1])) return m[1].toLowerCase();
-    } else if (process.platform === "linux") {
-      for (const file of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
-        try {
-          const id = fs.readFileSync(file, "utf8").trim().toLowerCase();
-          if (/^[0-9a-f]{32}$/.test(id) && !/^0+$/.test(id)) return id;
-        } catch { /* try next */ }
-      }
-    }
-  } catch { /* fall through to the persisted id */ }
-  return null;
-}
+/** @type {Map<string, string>} account key → machine digest */
+const machineIds = new Map();
+/** @type {Map<string, string>} account key → per-launch instance id */
+const instanceIds = new Map();
+/** @type {Map<string, number>} account key → fixed uptime offset (seconds) */
+const beaconOffsets = new Map();
 
-function persistedIdFile() {
+function machineIdFile(accountKey) {
   const dir = process.env.DATA_DIR || path.join(os.homedir(), ".derouter");
-  return path.join(dir, "deepai-machine-id");
+  return path.join(dir, "deepai-machine-ids", `${accountKey}.uuid`);
 }
 
-// A container has no stable firmware id, so the fallback is generated once and
-// kept in the data dir: the same value for every account, across restarts.
-function readOrCreatePersistedId() {
-  const file = persistedIdFile();
+// Each account gets its own random UUID, kept in the data dir: the account keeps
+// the same machine digest across restarts, like a real install keeps its hardware id.
+function readOrCreateMachineUuid(accountKey) {
+  const file = machineIdFile(accountKey);
   try {
     const existing = fs.readFileSync(file, "utf8").trim();
     if (existing) return existing;
@@ -113,35 +94,56 @@ function readOrCreatePersistedId() {
   return id;
 }
 
-/** SHA-256 digest of this host's identifier; computed once per process. */
-export function deepaiMachineId() {
-  machineIdPromise ??= readHostIdentifier().then((raw) =>
-    createHash("sha256").update(raw || readOrCreatePersistedId()).digest("hex"));
-  return machineIdPromise;
+/** This account's machine digest (64 hex chars); stable for the account across restarts. */
+export function deepaiMachineId(apiKey) {
+  const key = deepaiAccountKey(apiKey);
+  let digest = machineIds.get(key);
+  if (!digest) {
+    digest = createHash("sha256").update(readOrCreateMachineUuid(key)).digest("hex");
+    machineIds.set(key, digest);
+  }
+  return digest;
+}
+
+/** This account's instance id — one per account per process, like the app's per-launch id. */
+export function deepaiInstanceId(apiKey) {
+  const key = deepaiAccountKey(apiKey);
+  let id = instanceIds.get(key);
+  if (!id) {
+    id = randomBytes(16).toString("hex");
+    instanceIds.set(key, id);
+  }
+  return id;
 }
 
 export function resetDeepAIStateForTests() {
-  machineIdPromise = null;
+  machineIds.clear();
+  instanceIds.clear();
+  beaconOffsets.clear();
   checkIns.clear();
   models.clear();
 }
 
 // ─── headers ─────────────────────────────────────────────────────────────────
 
-export function deepaiBeacon() {
-  return `v=${DEEPAI_APP_VERSION};up=${Math.floor((Date.now() - startedAt) / 1000)}`;
+export function deepaiBeacon(apiKey) {
+  // Each account's "app" claims a launch time up to 4h before this process, fixed
+  // for the process lifetime, so two accounts never report the same uptime tick.
+  const key = deepaiAccountKey(apiKey);
+  let offset = beaconOffsets.get(key);
+  if (offset === undefined) {
+    offset = randomInt(0, 4 * 60 * 60 + 1);
+    beaconOffsets.set(key, offset);
+  }
+  return `v=${DEEPAI_APP_VERSION};up=${Math.floor((Date.now() - startedAt) / 1000) + offset}`;
 }
 
-export async function deepaiLaneHeaders() {
+export function deepaiLaneHeaders(apiKey) {
   return {
     "X-DeepAI-Code-Theos": DEEPAI_LANE_VERSION,
-    "X-DeepAI-Code-Instance": INSTANCE_ID,
-    [DEEPAI_MACHINE_HEADER]: await deepaiMachineId(),
+    "X-DeepAI-Code-Instance": deepaiInstanceId(apiKey),
+    [DEEPAI_MACHINE_HEADER]: deepaiMachineId(apiKey),
   };
-}
-
-export function deepaiAccountKey(apiKey) {
-  return createHash("sha256").update(String(apiKey || "")).digest("hex");
 }
 
 // ─── check-in ────────────────────────────────────────────────────────────────
@@ -169,9 +171,9 @@ async function requestTheos(apiKey, previousNonce, proxyOptions) {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      ...(await deepaiLaneHeaders()),
+      ...deepaiLaneHeaders(apiKey),
       "api-key": apiKey,
-      [DEEPAI_BEACON_HEADER]: deepaiBeacon(),
+      [DEEPAI_BEACON_HEADER]: deepaiBeacon(apiKey),
       ...(previousNonce ? { [DEEPAI_CHECK_IN_HEADER]: previousNonce } : {}),
     },
     redirect: "error",
@@ -268,7 +270,7 @@ export async function resolveDeepAIModels(credentials, { proxyOptions = null } =
   try {
     const response = await proxyAwareFetch(`${deepaiModelBase()}/models`, {
       method: "GET",
-      headers: { "Content-Type": "application/json", ...(await deepaiLaneHeaders()), "api-key": apiKey },
+      headers: { "Content-Type": "application/json", ...deepaiLaneHeaders(apiKey), "api-key": apiKey },
       redirect: "error",
       signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
     }, proxyOptions);

@@ -19,15 +19,22 @@ test("registry: deepai uses the api-key header and the OpenAI chat route", () =>
   assert.deepEqual({ header: t.auth.header, scheme: t.auth.scheme }, { header: "api-key", scheme: "raw" });
 });
 
-test("machine id is one stable sha256 digest shared by every account", async () => {
-  const a = await client.deepaiMachineId();
-  const b = await client.deepaiMachineId();
-  assert.match(a, /^[0-9a-f]{64}$/);
-  assert.equal(a, b);
-  const headersA = await client.deepaiLaneHeaders();
-  const headersB = await client.deepaiLaneHeaders();
-  assert.equal(headersA[client.DEEPAI_MACHINE_HEADER], headersB[client.DEEPAI_MACHINE_HEADER]);
+test("machine id is per account: stable for the account, distinct across accounts", async () => {
+  const a1 = client.deepaiMachineId("key-a");
+  const a2 = client.deepaiMachineId("key-a");
+  const b = client.deepaiMachineId("key-b");
+  assert.match(a1, /^[0-9a-f]{64}$/);
+  assert.equal(a1, a2);
+  assert.notEqual(a1, b);
+  const headersA = client.deepaiLaneHeaders("key-a");
+  const headersB = client.deepaiLaneHeaders("key-b");
+  assert.equal(headersA[client.DEEPAI_MACHINE_HEADER], a1);
+  assert.notEqual(headersA[client.DEEPAI_MACHINE_HEADER], headersB[client.DEEPAI_MACHINE_HEADER]);
+  assert.notEqual(headersA["X-DeepAI-Code-Instance"], headersB["X-DeepAI-Code-Instance"]);
   assert.equal(headersA["X-DeepAI-Code-Theos"], client.DEEPAI_LANE_VERSION);
+  // persisted in the data dir: the account keeps its machine across a state reset
+  client.resetDeepAIStateForTests();
+  assert.equal(client.deepaiMachineId("key-a"), a1);
 });
 
 test("beacon reports only version and uptime, never presence signals", () => {
@@ -54,12 +61,13 @@ test("normalizeDeepAIModels keeps valid unique ids and drops junk", () => {
 
 test("executor sends only api-key and lane headers; check-in and beacon stay on /theos", async () => {
   const executor = new DeepAIExecutor();
-  executor._laneHeaders = await client.deepaiLaneHeaders();
   const headers = executor.buildHeaders({ accessToken: "key-abc" }, true, "u", "glm-5.3-flash", {});
   assert.equal(headers["api-key"], "key-abc");
   assert.equal(headers.Authorization, undefined);
   assert.equal(headers["X-DeepAI-Code-Theos"], client.DEEPAI_LANE_VERSION);
-  assert.match(headers[client.DEEPAI_MACHINE_HEADER], /^[0-9a-f]{64}$/);
+  // lane headers are derived from the request's own credentials, per account
+  assert.equal(headers[client.DEEPAI_MACHINE_HEADER], client.deepaiMachineId("key-abc"));
+  assert.equal(headers["X-DeepAI-Code-Instance"], client.deepaiInstanceId("key-abc"));
   // the desktop app passes checkInHeaders() only for /theos
   assert.equal(headers[client.DEEPAI_BEACON_HEADER], undefined);
   assert.equal(headers[client.DEEPAI_CHECK_IN_HEADER], undefined);
@@ -158,8 +166,8 @@ test("check-in: nonce is fetched once per account and reused while fresh", async
     assert.equal(hits.length, 2, "each account checks in on its own");
     assert.equal(client.currentCheckInNonce("key-2"), NONCE_B);
     assert.equal(client.currentCheckInNonce("key-1"), NONCE_A);
-    // every account reports the deployment's single machine digest
-    assert.equal(hits[0].headers["x-deepai-code-machine"], hits[1].headers["x-deepai-code-machine"]);
+    // every account reports its own machine digest, not the deployment's
+    assert.notEqual(hits[0].headers["x-deepai-code-machine"], hits[1].headers["x-deepai-code-machine"]);
   });
 });
 
