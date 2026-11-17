@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 39;
+export const SCHEMA_VERSION = 40;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -689,6 +689,67 @@ export const TABLES = {
       updatedAt: "TEXT",
     },
     primaryKey: "PRIMARY KEY (userPlanId, capId)",
+    indexes: [],
+  },
+  // Hourly rollups of usageHistory for the admin Users / Providers summaries (see
+  // repos/usageRollup.js). One row per COMPLETE hour (`hour` = "YYYY-MM-DDTHH", UTC), so a
+  // month is ~720 hours of rows instead of millions of requests. Rebuildable from
+  // usageHistory at any time: invalidation just deletes rows and rewinds the watermark.
+  usageRollupProvider: {
+    columns: {
+      hour: "TEXT NOT NULL",
+      provider: "TEXT NOT NULL",
+      requests: "INTEGER NOT NULL DEFAULT 0",
+      input: "INTEGER NOT NULL DEFAULT 0",
+      output: "INTEGER NOT NULL DEFAULT 0",
+      costNano: "INTEGER NOT NULL DEFAULT 0",
+      // Highest per-minute tokens / requests inside the hour, and the fastest single
+      // request (output tokens per second of generation).
+      peakTpm: "INTEGER NOT NULL DEFAULT 0",
+      peakRpm: "INTEGER NOT NULL DEFAULT 0",
+      peakTokS: "REAL NOT NULL DEFAULT 0",
+    },
+    primaryKey: "PRIMARY KEY (hour, provider)",
+    indexes: [],
+  },
+  // Per (hour, key, effective model). `rawHash` is the SHA-256 of a raw API key for the
+  // legacy rows that carry no apiKeyId — never the key itself. '' = absent.
+  usageRollupKey: {
+    columns: {
+      hour: "TEXT NOT NULL",
+      apiKeyId: "TEXT NOT NULL DEFAULT ''",
+      rawHash: "TEXT NOT NULL DEFAULT ''",
+      model: "TEXT NOT NULL",
+      requests: "INTEGER NOT NULL DEFAULT 0",
+      input: "INTEGER NOT NULL DEFAULT 0",
+      output: "INTEGER NOT NULL DEFAULT 0",
+      cacheRead: "INTEGER NOT NULL DEFAULT 0",
+      cacheCreation: "INTEGER NOT NULL DEFAULT 0",
+      costNano: "INTEGER NOT NULL DEFAULT 0",
+      est: "INTEGER NOT NULL DEFAULT 0",
+      lastTs: "TEXT",
+    },
+    primaryKey: "PRIMARY KEY (hour, apiKeyId, rawHash, model)",
+    indexes: [],
+  },
+  // Per (hour, owner) highest per-minute tokens / requests, with the owner resolved when
+  // the hour was rolled up.
+  usageRollupOwnerPeak: {
+    columns: {
+      hour: "TEXT NOT NULL",
+      owner: "TEXT NOT NULL",
+      peakTpm: "INTEGER NOT NULL DEFAULT 0",
+      peakRpm: "INTEGER NOT NULL DEFAULT 0",
+    },
+    primaryKey: "PRIMARY KEY (hour, owner)",
+    indexes: [],
+  },
+  // The rollup watermark: every hour before `rolledThrough` is in the tables above.
+  usageRollupMeta: {
+    columns: {
+      name: "TEXT PRIMARY KEY",
+      value: "TEXT",
+    },
     indexes: [],
   },
   // One row per (purchase, window length) holding the current window's start and

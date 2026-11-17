@@ -1,0 +1,6 @@
+- [x] 1.1 Rollup tables and watermark (schema 40); `usageRollup.js`: roll one hour, background catch-up, plan a range, read
+- [x] 1.2 Providers and Users summaries read rollup + raw edges; `useRollup:false` is the raw oracle
+- [x] 1.3 Invalidate on deleting a key's history; prune with retention; raw keys stored as a hash only
+- [x] 1.4 Overview lastUsed refinement limited to 48 h
+- [x] 2.1 `test/usage-rollup.test.js`: rollup read equals raw read for 8 ranges (both summaries), invalidation, late row, retention, idempotence, the stuck-loop regression
+- [ ] 3.1 Deploy; watch the first backfill on production data
