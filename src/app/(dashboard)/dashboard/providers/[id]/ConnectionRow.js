@@ -132,6 +132,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     if (oneByOneStatus.state === "testing") return "testing";
     if (oneByOneStatus.state === "success") return "success";
     if (oneByOneStatus.state === "failed") return oneByOneStatus.error ? `failed: ${oneByOneStatus.error}` : "failed";
+    if (oneByOneStatus.state === "untestable") return "chưa hỗ trợ test";
     return null;
   };
 

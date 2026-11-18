@@ -91,6 +91,7 @@ export async function POST(request) {
           connectionName: conn.name || conn.email || conn.provider,
           authType: conn.authType || getAuthGroup(conn.provider, conn),
           valid: data.valid,
+          untestable: data.untestable === true,
           latencyMs: data.latencyMs || 0,
           error: data.error || null,
           diagnosis: data.diagnosis || null,
@@ -121,7 +122,9 @@ export async function POST(request) {
       summary: {
         total: results.length,
         passed: results.filter((r) => r.valid).length,
-        failed: results.filter((r) => !r.valid).length,
+        // A provider without a connection test was not checked: neither passed nor failed.
+        failed: results.filter((r) => !r.valid && !r.untestable).length,
+        untestable: results.filter((r) => r.untestable).length,
       },
     });
   } catch {

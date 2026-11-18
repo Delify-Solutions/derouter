@@ -20,6 +20,7 @@ import {
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
 import { deepaiLaneHeaders } from "open-sse/services/deepaiClient.js";
+import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -324,13 +325,18 @@ async function refreshOAuthToken(connection) {
   }
 }
 
+// A provider with no connection test. This says nothing about the credential, so it must not
+// mark a working connection as broken: testSingleConnection leaves testStatus and lastError as
+// they were (a stale "not supported" there used to hide the real upstream error on a 503).
+const UNTESTABLE = Object.freeze({ valid: false, untestable: true, error: "Provider test not supported", refreshed: false });
+
 function isTokenExpired(connection) {
   return shouldRefreshCredentials(connection.provider, connection);
 }
 
 async function testOAuthConnection(connection, effectiveProxy = null) {
   const config = OAUTH_TEST_CONFIG[connection.provider];
-  if (!config) return { valid: false, error: "Provider test not supported", refreshed: false };
+  if (!config) return UNTESTABLE;
   if (!connection.accessToken) return { valid: false, error: "No access token", refreshed: false };
 
   // Cursor uses protobuf API - can only verify token exists, not test endpoint
@@ -880,6 +886,28 @@ case "llm7": {
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key or base URL" };
       }
+      case "commandcode": {
+        // Same check the add-key validation uses: a 1-token generation; only 401/403 mean
+        // the key is bad (any other answer means the key was accepted).
+        const cfg = PROVIDERS.commandcode;
+        const payload = openaiToCommandCodeRequest(getDefaultModel("commandcode"), {
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }, false);
+        const res = await fetchWithConnectionProxy(cfg.baseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(cfg.headers || {}),
+            "x-session-id": crypto.randomUUID(),
+            Authorization: `Bearer ${connection.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        }, effectiveProxy);
+        const valid = res.status !== 401 && res.status !== 403;
+        return { valid, error: valid ? null : "Invalid API key", refreshed: false };
+      }
       case "kimchi": {
         // Dual-auth: same validation endpoint as the OAuth flow — the token (API key
         // or OAuth access token) is sent as Authorization: Bearer.
@@ -895,7 +923,7 @@ case "llm7": {
         return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
       default:
-        return { valid: false, error: "Provider test not supported" };
+        return UNTESTABLE;
     }
   } catch (err) {
     return { valid: false, error: err.message };
@@ -934,6 +962,10 @@ export async function testSingleConnection(id) {
   }
 
   const latencyMs = Date.now() - start;
+
+  if (result.untestable) {
+    return { valid: false, untestable: true, error: result.error, latencyMs, testedAt: new Date().toISOString() };
+  }
 
   // Soft success (e.g. Grok CLI 402 spending-limit): credentials are good, account is
   // out of credits. Keep testStatus active; surface the message as lastError so the

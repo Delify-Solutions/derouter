@@ -696,19 +696,27 @@ export default function ProviderDetailPage() {
           const data = await res.json();
           const valid = !!data.valid;
 
-          if (valid) {
-            passed += 1;
+          // No connection test for this provider: neither a pass nor a failure.
+          if (data.untestable) {
+            setOneByOneResults((prev) => ({
+              ...prev,
+              [connection.id]: { state: "untestable", error: null },
+            }));
           } else {
-            failed += 1;
-          }
+            if (valid) {
+              passed += 1;
+            } else {
+              failed += 1;
+            }
 
-          setOneByOneResults((prev) => ({
-            ...prev,
-            [connection.id]: {
-              state: valid ? "success" : "failed",
-              error: valid ? null : (data.error || null),
-            },
-          }));
+            setOneByOneResults((prev) => ({
+              ...prev,
+              [connection.id]: {
+                state: valid ? "success" : "failed",
+                error: valid ? null : (data.error || null),
+              },
+            }));
+          }
         } catch (error) {
           failed += 1;
           setOneByOneResults((prev) => ({
@@ -1722,7 +1730,7 @@ export default function ProviderDetailPage() {
                 {providerThinkingLevels.map((opt) => (
                   <option key={opt} value={opt}>
                     {opt === "auto" ? "Thinking: Auto (theo CLI của user)"
-                      : opt === "off" ? "Thinking: Off (tắt)"
+                      : opt === "off" ? "Thinking: Off (tắt; model không tắt được thì về mức thấp nhất)"
                       : opt === "thinking" ? "Thinking: On (luôn bật)"
                       : `Thinking: ${opt.charAt(0).toUpperCase() + opt.slice(1)} (ép mức)`}
                   </option>

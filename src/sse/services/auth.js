@@ -120,7 +120,8 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       }
       const earliest = expiries.sort()[0] || null;
       if (earliest) {
-        const earliestConn = lockedConns[0];
+        // The message names the connection whose lock ends first, matching the retry time.
+        const earliestConn = lockedConns.find((c) => getEarliestModelLockUntil(c) === earliest) || lockedConns[0];
         log.warn("AUTH", `${provider} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
         return {
           allRateLimited: true,

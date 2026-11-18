@@ -13,6 +13,8 @@ export async function POST(request, { params }) {
 
     return NextResponse.json({
       valid: result.valid,
+      // The provider has no connection test: nothing was checked and nothing was changed.
+      untestable: result.untestable === true,
       error: result.error,
       refreshed: result.refreshed || false,
     });
