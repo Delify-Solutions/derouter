@@ -45,6 +45,72 @@ export function parseSuffix(model) {
   return { cleanModel, override: null };
 }
 
+// The admin's per-provider "Thinking" setting (Providers page) as the value of a
+// "model(value)" suffix, or null when it should not touch the request.
+//   auto            → null: the client's own thinking (whatever its CLI chose) goes through
+//   off / none      → "none": thinking is switched off
+//   low … max       → that level, FORCED whatever the client sent
+// "on" (an older stored value) is read as a medium level. Anything the suffix grammar would
+// not understand is ignored rather than guessed.
+// "thinking" is the single "on" level of the on/off formats (zai, minimax).
+const PROVIDER_THINKING_ALIASES = { on: "medium", off: "none", thinking: "medium" };
+export function providerThinkingSuffix(setting) {
+  const raw = String(setting?.mode ?? setting ?? "").trim().toLowerCase();
+  if (!raw || raw === "auto") return null;
+  const value = PROVIDER_THINKING_ALIASES[raw] ?? raw;
+  const parsed = parseSuffix(`m(${value})`).override;
+  return parsed && parsed.mode !== "auto" ? value : null;
+}
+
+// A forced level the model does not serve would be rejected upstream on every request, so it
+// is moved to the nearest level the model does list (by thinking budget; the lower one on a
+// tie). "none" is never moved: a format that cannot switch off has its own floor in applyFormat.
+// No known level list (an uncatalogued model) leaves the value as the admin set it.
+export function clampThinkingLevel(value, levels) {
+  if (!value || value === "none" || !Array.isArray(levels) || levels.length === 0) return value;
+  if (levels.includes(value)) return value;
+  const want = LEVEL_TO_BUDGET[value];
+  if (want === undefined) return value;
+  let best = null;
+  for (const level of levels) {
+    const budget = LEVEL_TO_BUDGET[level];
+    if (budget === undefined || level === "none") continue;
+    const distance = Math.abs(budget - want);
+    if (best === null || distance < best.distance || (distance === best.distance && budget < best.budget)) {
+      best = { level, budget, distance };
+    }
+  }
+  return best ? best.level : value;
+}
+
+// applyThinking rewrites thinking fields in place, and for the Gemini envelopes those live in
+// objects shared with the client's original body (`request.generationConfig`). A body that is
+// reused for a fallback attempt must not carry this attempt's forced level, so the objects that
+// can hold thinking fields are copied first (the messages are not).
+export function cloneThinkingBearing(body) {
+  if (!body || typeof body !== "object") return body;
+  const copy = { ...body };
+  for (const key of ["thinking", "reasoning", "output_config", "thinkingConfig", "params"]) {
+    if (copy[key] && typeof copy[key] === "object") copy[key] = structuredClone(copy[key]);
+  }
+  if (copy.generationConfig && typeof copy.generationConfig === "object") {
+    copy.generationConfig = structuredClone(copy.generationConfig);
+  }
+  if (copy.request && typeof copy.request === "object") {
+    copy.request = { ...copy.request };
+    if (copy.request.generationConfig && typeof copy.request.generationConfig === "object") {
+      copy.request.generationConfig = structuredClone(copy.request.generationConfig);
+    }
+  }
+  return copy;
+}
+
+// "model(old)" / "model" + value → "model(value)". A suffix the client already put on the
+// model is replaced: the admin's forced level wins over it, like over every other field.
+export function withThinkingSuffix(model, value) {
+  return value ? `${stripThinkingSuffix(model)}(${value})` : model;
+}
+
 // Extract unified thinking intent from a request body (post-translation, mixed shapes).
 // Returns { mode, budget?, level? } or null when no thinking intent present.
 export function extractThinking(body) {

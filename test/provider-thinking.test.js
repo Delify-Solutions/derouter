@@ -1,0 +1,129 @@
+// The admin's per-provider Thinking setting (Providers page):
+//   Auto  → the client's own thinking goes through untouched;
+//   level → that level is FORCED, whatever the client's CLI sent;
+//   Off   → thinking is switched off.
+// chatCore turns the setting into the "model(level)" suffix, which the translator already
+// treats as the top-priority instruction. These tests pin both halves: the mapping from the
+// stored setting to the suffix, and what the translator then writes for real providers.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { register } from "node:module";
+
+register("./helpers/alias-hook.mjs", import.meta.url);
+
+const { translateRequest } = await import("../open-sse/translator/index.js");
+const { FORMATS } = await import("../open-sse/translator/formats.js");
+const { providerThinkingSuffix, withThinkingSuffix, clampThinkingLevel, cloneThinkingBearing } = await import("../open-sse/translator/concerns/thinkingUnified.js");
+
+test("the stored setting maps to a suffix; Auto and junk map to none", () => {
+  assert.equal(providerThinkingSuffix("auto"), null);
+  assert.equal(providerThinkingSuffix({ mode: "auto" }), null);
+  assert.equal(providerThinkingSuffix(undefined), null);
+  assert.equal(providerThinkingSuffix(null), null);
+  assert.equal(providerThinkingSuffix({ mode: "" }), null);
+  assert.equal(providerThinkingSuffix({ mode: "not-a-level" }), null);
+  assert.equal(providerThinkingSuffix({ mode: "off" }), "none");
+  assert.equal(providerThinkingSuffix({ mode: "none" }), "none");
+  for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"]) {
+    assert.equal(providerThinkingSuffix({ mode: level }), level);
+  }
+  assert.equal(providerThinkingSuffix({ mode: " HIGH " }), "high");
+  // an older stored value
+  assert.equal(providerThinkingSuffix({ mode: "on" }), "medium");
+  // the single "on" level of the on/off formats (zai, minimax)
+  assert.equal(providerThinkingSuffix({ mode: "thinking" }), "medium");
+});
+
+test("the forced suffix replaces one the client put on the model", () => {
+  assert.equal(withThinkingSuffix("claude-sonnet-4-5", "high"), "claude-sonnet-4-5(high)");
+  assert.equal(withThinkingSuffix("claude-sonnet-4-5(low)", "max"), "claude-sonnet-4-5(max)");
+  assert.equal(withThinkingSuffix("claude-sonnet-4-5(low)", null), "claude-sonnet-4-5(low)", "Auto leaves the model alone");
+});
+
+const run = (src, dst, model, body, provider) =>
+  translateRequest(src, dst, model, structuredClone(body), true, { apiKey: "k" }, provider, null, [], "conn", null, false);
+
+const CLAUDE_CODE = { model: "m", max_tokens: 4000, stream: true, thinking: { type: "enabled", budget_tokens: 12000 }, messages: [{ role: "user", content: "hi" }] };
+const OPENAI_CLI = { model: "m", stream: true, reasoning_effort: "high", messages: [{ role: "user", content: "hi" }] };
+
+test("Claude provider: Auto keeps the client's budget; a level overrides it; Off disables", () => {
+  const model = "claude-sonnet-4-5";
+  const auto = run(FORMATS.CLAUDE, FORMATS.CLAUDE, model, CLAUDE_CODE, "claude");
+  assert.deepEqual(auto.thinking, { type: "enabled", budget_tokens: 12000 });
+
+  const low = run(FORMATS.CLAUDE, FORMATS.CLAUDE, `${model}(low)`, CLAUDE_CODE, "claude");
+  assert.equal(low.thinking.type, "enabled");
+  assert.equal(low.thinking.budget_tokens, 1024, "forced low replaces the client's 12000");
+
+  const max = run(FORMATS.CLAUDE, FORMATS.CLAUDE, `${model}(max)`, CLAUDE_CODE, "claude");
+  assert.ok(max.thinking.budget_tokens > 12000, "forced max replaces the client's 12000");
+
+  const off = run(FORMATS.CLAUDE, FORMATS.CLAUDE, `${model}(none)`, CLAUDE_CODE, "claude");
+  assert.deepEqual(off.thinking, { type: "disabled" });
+});
+
+test("an OpenAI-shaped CLI is overridden the same way", () => {
+  const model = "claude-sonnet-4-5";
+  const auto = run(FORMATS.OPENAI, FORMATS.CLAUDE, model, OPENAI_CLI, "claude");
+  assert.equal(auto.thinking.budget_tokens, 24576, "the client's high is kept");
+  assert.equal(run(FORMATS.OPENAI, FORMATS.CLAUDE, `${model}(low)`, OPENAI_CLI, "claude").thinking.budget_tokens, 1024);
+  assert.deepEqual(run(FORMATS.OPENAI, FORMATS.CLAUDE, `${model}(none)`, OPENAI_CLI, "claude").thinking, { type: "disabled" });
+});
+
+// The Responses translation leaves the effort as `reasoning_effort` (the codex executor moves it
+// into `reasoning.effort`); either spelling counts.
+const effortOf = (body) => body.reasoning_effort ?? body.reasoning?.effort;
+
+test("Codex (Responses): the forced level beats the client's effort; Off is 'none'", () => {
+  const model = "gpt-5.5";
+  const auto = run(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, model, OPENAI_CLI, "codex");
+  assert.equal(effortOf(auto), "high");
+  assert.equal(effortOf(run(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, `${model}(low)`, OPENAI_CLI, "codex")), "low");
+  assert.equal(effortOf(run(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, `${model}(low)`, CLAUDE_CODE, "codex")), "low");
+  assert.equal(effortOf(run(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, `${model}(none)`, OPENAI_CLI, "codex")), "none");
+});
+
+test("Command Code: the forced level replaces the client's; Off sends no effort", () => {
+  const model = "deepseek/deepseek-v4-pro";
+  const auto = run(FORMATS.OPENAI, FORMATS.OPENAI, model, OPENAI_CLI, "commandcode");
+  assert.equal(auto.params.reasoning_effort, "high");
+  for (const [src, body] of [[FORMATS.OPENAI, OPENAI_CLI], [FORMATS.CLAUDE, CLAUDE_CODE]]) {
+    assert.equal(run(src, FORMATS.OPENAI, `${model}(max)`, body, "commandcode").params.reasoning_effort, "max");
+    assert.equal(run(src, FORMATS.OPENAI, `${model}(low)`, body, "commandcode").params.reasoning_effort, "low");
+    const off = run(src, FORMATS.OPENAI, `${model}(none)`, body, "commandcode");
+    assert.equal(off.params.reasoning_effort, undefined);
+    assert.equal(off.thinking, undefined);
+  }
+});
+
+test("a forced level the model does not serve moves to the nearest one it does", () => {
+  const deepseek = ["low", "high", "max"];
+  assert.equal(clampThinkingLevel("high", deepseek), "high", "served: unchanged");
+  assert.equal(clampThinkingLevel("medium", deepseek), "low", "equidistant-ish: nearer by budget, lower on a tie");
+  assert.equal(clampThinkingLevel("xhigh", deepseek), "high");
+  assert.equal(clampThinkingLevel("max", ["low", "high"]), "high");
+  assert.equal(clampThinkingLevel("low", ["high", "max"]), "high");
+  // never moved: Off, an unknown value, or a model with no known level list
+  assert.equal(clampThinkingLevel("none", ["low"]), "none");
+  assert.equal(clampThinkingLevel("xhigh", null), "xhigh");
+  assert.equal(clampThinkingLevel("xhigh", []), "xhigh");
+  assert.equal(clampThinkingLevel(null, ["low"]), null);
+});
+
+test("applying a level to a copy never touches the client's original body", () => {
+  const original = {
+    model: "m",
+    request: { contents: [{ role: "user", parts: [{ text: "hi" }] }], generationConfig: { thinkingConfig: { thinkingBudget: 100 }, maxOutputTokens: 50 } },
+    thinking: { type: "enabled", budget_tokens: 5000 },
+    params: { reasoning_effort: "high" },
+  };
+  const snapshot = structuredClone(original);
+  const copy = cloneThinkingBearing(original);
+  // what applyThinking does: strip, then write
+  delete copy.thinking;
+  delete copy.params.reasoning_effort;
+  delete copy.request.generationConfig.thinkingConfig;
+  copy.request.generationConfig.maxOutputTokens = 9999;
+  assert.deepEqual(original, snapshot, "the shared original is unchanged");
+  assert.equal(copy.request.contents, original.request.contents, "messages are shared, not copied");
+});

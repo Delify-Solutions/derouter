@@ -169,7 +169,9 @@ export default function ProviderDetailPage() {
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
     const levels = getThinkingLevels(providerId, modelId);
-    return levels && levels.includes(thinkingMode) ? thinkingMode : null;
+    // "Off" is spelled "none" in a model suffix, and only where the model can be switched off.
+    const wanted = thinkingMode === "off" ? "none" : thinkingMode;
+    return levels && levels.includes(wanted) ? wanted : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   // Union of levels across this provider's reasoning models — drives the level picker options.
@@ -177,11 +179,13 @@ export default function ProviderDetailPage() {
   const providerThinkingLevels = (() => {
     const set = new Set();
     const seen = new Set();
+    // Off is offered only when some model of the provider can really be switched off.
+    let canSwitchOff = false;
     const addLevels = (modelId) => {
       if (!modelId || seen.has(modelId)) return;
       seen.add(modelId);
       const lv = getThinkingLevels(providerId, modelId);
-      if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
+      if (lv) lv.forEach((l) => { if (l === "none") canSwitchOff = true; else set.add(l); });
     };
     for (const m of models) addLevels(m.id);
     for (const m of kiloFreeModels) addLevels(m.id);
@@ -190,7 +194,8 @@ export default function ProviderDetailPage() {
       if ((entry.kind || entry.type || "llm") !== "llm") continue;
       addLevels(entry.id);
     }
-    return set.size ? ["auto", ...[...set]] : null;
+    // Auto = keep what the client sent; a level = force it; off = switch thinking off.
+    return set.size ? ["auto", ...(canSwitchOff ? ["off"] : []), ...[...set]] : null;
   })();
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
@@ -317,7 +322,8 @@ export default function ProviderDetailPage() {
       setProviderStickyLimit(override.stickyRoundRobinLimit != null ? String(override.stickyRoundRobinLimit) : "1");
       // Load per-provider thinking config
       const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
-      setThinkingMode(thinkingCfg.mode || "auto");
+      // "on" is an older stored value; the server reads it as medium, so does the picker.
+      setThinkingMode(thinkingCfg.mode === "on" ? "medium" : (thinkingCfg.mode || "auto"));
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
@@ -1674,11 +1680,17 @@ export default function ProviderDetailPage() {
               <select
                 value={thinkingMode}
                 onChange={(e) => handleThinkingModeChange(e.target.value)}
-                title="Appends (level) suffix to copied model names"
+                aria-label="Thinking của provider"
+                title="Auto: giữ nguyên mức thinking CLI của user gửi. Chọn một mức: ép mức đó cho mọi request tới provider này, bất kể user chọn gì. Off: tắt thinking. Mức đã chọn cũng được thêm dạng (mức) vào tên model khi bấm copy."
                 className="rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
               >
                 {providerThinkingLevels.map((opt) => (
-                  <option key={opt} value={opt}>{`Thinking: ${opt.charAt(0).toUpperCase() + opt.slice(1)}`}</option>
+                  <option key={opt} value={opt}>
+                    {opt === "auto" ? "Thinking: Auto (theo CLI của user)"
+                      : opt === "off" ? "Thinking: Off (tắt)"
+                      : opt === "thinking" ? "Thinking: On (luôn bật)"
+                      : `Thinking: ${opt.charAt(0).toUpperCase() + opt.slice(1)} (ép mức)`}
+                  </option>
                 ))}
               </select>
             )}

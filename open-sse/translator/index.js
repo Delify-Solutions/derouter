@@ -159,8 +159,8 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   // Strict same-format: the client's own thinking fields are forwarded verbatim. Only an
   // explicit "model(level)" suffix, which the router strips from the upstream model id,
   // still has to be turned into the provider-native field.
-  // The admin's per-provider thinking override (chatCore) is treated the same way: it injected a
-  // field of the wrong format for this upstream and must be mapped to the native one.
+  // The admin's per-provider thinking setting (chatCore) arrives as exactly such a suffix: a forced
+  // level replaces whatever the client sent and is written as the upstream's own field.
   const thinkingSuffix = parseSuffix(model).override || credentials?._thinkingOverride === true;
   if (!kiroThinkingMappedByTranslator && (!strictSameFormat || thinkingSuffix)) {
     applyThinking(targetFormat, model, result, provider, thinkingIntent);
