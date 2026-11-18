@@ -8,6 +8,8 @@ const ACTION_LABEL = {
   group_auto_assigned: "Tự gán nhóm",
   storage_set: "Đặt CDN ảnh",
   storage_removed: "Gỡ CDN ảnh",
+  storage_local_on: "Bật lưu ảnh trên máy chủ",
+  storage_local_off: "Tắt lưu ảnh trên máy chủ",
   group_changed: "Đổi nhóm",
   status_changed: "Đổi trạng thái",
   profile_changed: "Sửa hồ sơ",

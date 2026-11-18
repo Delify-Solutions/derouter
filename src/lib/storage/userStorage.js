@@ -11,6 +11,7 @@ import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { assertPublicUrl, assertPublicUrlResolved, fetchPublic } from "../../shared/utils/ssrfGuard.js";
 import { safeFetch } from "./safeHttp.js";
 import { deleteObject, encodeKey, presignGetUrl, putObject } from "./s3.js";
+import { isLocalImageUserSync, LOCAL_IMAGE_ROUTE, localImageUsersSync, saveLocalImage } from "./localImages.js";
 
 /** Form presets. They only prefill the form; every one speaks the S3 API. */
 export const STORAGE_PROVIDERS = {
@@ -262,6 +263,84 @@ export function usableStorageSync(db, userId) {
   return { config };
 }
 
+// ─── the system storage (admin-configured fallback) ──────────────────────────
+
+/**
+ * The router's own storage lives in the same table under this id. It is no
+ * account (no user has this id) and no customer route can name it: customer
+ * routes take the id from the session, the admin user routes require a user.
+ */
+export const SYSTEM_STORAGE_ID = "__system__";
+
+/** The system storage's config when it is enabled and its last write succeeded, else null. */
+export function systemStorageConfigSync(db) {
+  const row = getStorageRowSync(db, SYSTEM_STORAGE_ID);
+  if (!row || Number(row.lastTestOk) !== 1) return null;
+  return usableConfig(row);
+}
+
+/** Whether the system storage would be used, without decrypting its secret (page views). */
+export function systemStorageReadySync(db) {
+  const row = getStorageRowSync(db, SYSTEM_STORAGE_ID);
+  return Boolean(row && Number(row.enabled) === 1 && Number(row.lastTestOk) === 1 && row.secretAccessKey);
+}
+
+/**
+ * Where a customer's images go: the router's disk when the admin picked the
+ * customer for it; else their own storage when it is usable; else the system
+ * storage when the admin enabled one; else nowhere (refused with the reason their
+ * own storage gave). `baseUrl` is the public origin local links are built on.
+ * @returns {{ id: string, system: boolean, local: boolean, config: object } | { error: string }}
+ */
+export function imageStorageForUserSync(db, userId, { baseUrl = "" } = {}) {
+  if (isLocalImageUserSync(db, userId)) {
+    if (!baseUrl) return { error: "Máy chủ chưa có địa chỉ công khai để trả link ảnh. Liên hệ admin." };
+    return { id: userId, system: false, local: true, config: { local: true, baseUrl } };
+  }
+  const own = usableStorageSync(db, userId);
+  if (own.config) return { id: userId, system: false, local: false, config: own.config };
+  const system = systemStorageConfigSync(db);
+  if (system) return { id: SYSTEM_STORAGE_ID, system: true, local: false, config: system };
+  return { error: own.error };
+}
+
+/** "ok" | "failing" | "untested" | "disabled" for one storage row. */
+export function storageStatusOf(row) {
+  if (Number(row.enabled) !== 1) return "disabled";
+  if (row.lastTestOk == null) return "untested";
+  return Number(row.lastTestOk) === 1 ? "ok" : "failing";
+}
+
+/**
+ * The admin overview: every customer storage with its owner, the counts per
+ * status, and how many customers have none.
+ */
+export function storageOverviewSync(db) {
+  const rows = db.all(
+    `SELECT s.*, u.email AS userEmail, u.displayName AS userName
+       FROM userStorage s LEFT JOIN users u ON u.id = s.userId
+      WHERE s.userId <> ?
+      ORDER BY s.updatedAt DESC`,
+    [SYSTEM_STORAGE_ID]
+  );
+  const counts = { ok: 0, failing: 0, untested: 0, disabled: 0, none: 0 };
+  const storages = rows.map((row) => {
+    const status = storageStatusOf(row);
+    counts[status] += 1;
+    return { userId: row.userId, email: row.userEmail || null, name: row.userName || null, status, ...toPublicStorage(row) };
+  });
+  const customers = Number(db.get(`SELECT COUNT(*) AS n FROM users`)?.n) || 0;
+  counts.none = Math.max(0, customers - rows.filter((r) => r.userEmail).length);
+  return {
+    localUsers: localImageUsersSync(db),
+    storages,
+    counts,
+    customers,
+    system: toPublicStorage(getStorageRowSync(db, SYSTEM_STORAGE_ID)),
+    systemActive: Boolean(systemStorageConfigSync(db)),
+  };
+}
+
 // ─── calls to the customer's endpoint ────────────────────────────────────────
 
 // The endpoint is customer-supplied: https only, no redirect, and the address
@@ -373,10 +452,22 @@ async function imageBytes(item, downloadImpl) {
  *   sent: the bytes may have reached the customer's endpoint (the request is charged).
  *   storageFault: the storage refused or failed, as opposed to a bad image.
  */
-export async function uploadImage(config, bytes, { fetchImpl = storageFetch, now = new Date() } = {}) {
+export async function uploadImage(config, bytes, { fetchImpl = storageFetch, now = new Date(), saveLocal = saveLocalImage } = {}) {
   if (bytes.length > IMAGE_DOWNLOAD_MAX_BYTES) return { ok: false, error: "Ảnh vượt quá 25 MB", sent: false, storageFault: false };
   const type = sniffImage(bytes);
   if (!type) return { ok: false, error: "Ảnh trả về không đọc được", sent: false, storageFault: false };
+  if (config.local) {
+    // The router's own disk: nothing leaves the server, so nothing is "sent".
+    try {
+      return { ok: true, url: `${config.baseUrl}${LOCAL_IMAGE_ROUTE}/${saveLocal(bytes, type, now)}` };
+    } catch (error) {
+      // The code tells the admin which: LOW_DISK (our own guard), ENOSPC, EACCES…
+      const code = error?.code || "unknown";
+      console.error(`[images] local write failed: ${code}`);
+      const why = code === "LOW_DISK" || code === "ENOSPC" ? "Máy chủ sắp hết dung lượng lưu ảnh" : "Máy chủ không ghi được ảnh";
+      return { ok: false, error: `${why} (${code})`, sent: false, storageFault: true };
+    }
+  }
   const key = objectKey(config, EXT[type], now);
   const written = await put(config, key, bytes, type, fetchImpl);
   if (!written.ok) return { ok: false, error: describeStorageError(written), sent: written.sent, storageFault: true };
@@ -439,7 +530,13 @@ export function storageViewSync(db, userId) {
   const presets = Object.fromEntries(
     Object.entries(STORAGE_PROVIDERS).map(([id, p]) => [id, { label: p.label, region: p.region, forcePathStyle: p.forcePathStyle }])
   );
-  return { storage: toPublicStorage(getStorageRowSync(db, userId)), providers: presets };
+  const view = { storage: toPublicStorage(getStorageRowSync(db, userId)), providers: presets };
+  // Only whether it exists: nothing of the system storage reaches a customer.
+  if (userId !== SYSTEM_STORAGE_ID) {
+    view.systemFallback = systemStorageReadySync(db);
+    view.localStorage = isLocalImageUserSync(db, userId);
+  }
+  return view;
 }
 
 // Each test makes the server call the customer's host: a few a minute at most.

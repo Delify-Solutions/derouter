@@ -26,11 +26,14 @@ import { getRequestIp } from "@/lib/auth/clientIp.js";
 import { publicModelContextSync, maskOptionsFor, isCustomerKeySync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
 import { maskResponse } from "@/lib/models/publicModel.js";
 import {
+  getStorageRowSync,
+  imageStorageForUserSync,
   recordStorageResultSync,
   rehostImageBody,
   uploadImage,
-  usableStorageSync,
 } from "@/lib/storage/userStorage.js";
+import { notifyAdmin } from "@/lib/notify/telegram.js";
+import { localImageBaseUrl } from "@/lib/storage/localImages.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -107,19 +110,35 @@ function saveImageUsage({ provider, model, connectionId = null, apiKey, requeste
 }
 
 /**
- * The storage a customer key's images go to (spec image-storage). Admin and
- * local keys have none and are served as before. A customer without a usable
- * storage is refused before any upstream call.
- * @returns {Promise<null | { userId: string, config: object } | { error: Response }>}
+ * The storage a customer key's images go to (spec image-storage): the router's
+ * disk for customers the admin picked, else the customer's own, else the system
+ * storage when the admin enabled one. Admin and
+ * local keys have none and are served as before. A customer with neither is
+ * refused before any upstream call.
+ * @returns {Promise<null | { userId: string, system: boolean, local: boolean, config: object } | { error: Response }>}
+ *   `userId` is the storage row's id (SYSTEM_STORAGE_ID for the system storage).
  */
-async function resolveCustomerStorage(apiKey) {
+async function resolveCustomerStorage(apiKey, { baseUrl = "" } = {}) {
   if (!apiKey) return null;
   const db = await getAdapter();
   const owner = resolveApiKeyOwner(db, apiKey);
   if (!owner?.userId) return null;
-  const usable = usableStorageSync(db, owner.userId);
+  const usable = imageStorageForUserSync(db, owner.userId, { baseUrl });
   if (usable.error) return { error: markPlatform(errorResponse(HTTP_STATUS.FORBIDDEN, usable.error)) };
-  return { userId: owner.userId, config: usable.config };
+  return { userId: usable.id, system: usable.system, local: Boolean(usable.local), config: usable.config };
+}
+
+/** Mark a storage failing; the admin hears about the system storage going down (once). */
+async function markStorageFailing(storage, reason, { notify = notifyAdmin } = {}) {
+  const db = await getAdapter();
+  const wasOk = storage.system && Number(getStorageRowSync(db, storage.userId)?.lastTestOk) === 1;
+  recordStorageResultSync(db, storage.userId, { ok: false, error: reason });
+  if (wasOk) {
+    Promise.resolve(notify(
+      `⚠️ <b>CDN ảnh hệ thống lỗi</b>\nKhông lưu được ảnh: ${String(reason).replace(/[<>&]/g, "")}\n` +
+      `Khách không có CDN riêng sẽ bị từ chối model ảnh cho tới khi bạn bấm "Kiểm tra lại" ở /dashboard/storage.`
+    )).catch(() => {});
+  }
 }
 
 /**
@@ -127,7 +146,8 @@ async function resolveCustomerStorage(apiKey) {
  * storage and the links are rewritten, so the upstream's link never leaves the
  * router. Usage is saved only then. A failure is free only while no image byte
  * reached the customer's endpoint: that endpoint is theirs, so "stored, then
- * answered an error" must not turn into a free image.
+ * answered an error" must not turn into a free image. The system storage and the
+ * router's disk are the router's own, so a failure there is always free.
  */
 async function finishImage(response, { storage, usage, binaryOutput }, { rehost = rehostImageBody, upload = uploadImage } = {}) {
   const flush = () => usage.splice(0).forEach(saveImageUsage);
@@ -135,7 +155,9 @@ async function finishImage(response, { storage, usage, binaryOutput }, { rehost 
     flush();
     return response;
   }
-  const fail = async (reason, { charge = false, storageFault = false } = {}) => {
+  const fail = async (reason, { charge: sentToCustomer = false, storageFault = false } = {}) => {
+    const routerOwned = storage.system || storage.local;
+    const charge = sentToCustomer && !routerOwned;
     if (charge) flush();
     else usage.splice(0);
     const billing = charge
@@ -145,10 +167,23 @@ async function finishImage(response, { storage, usage, binaryOutput }, { rehost 
       // The upstream's fault (no image, unreadable, too large): the storage is fine.
       return markPlatform(errorResponse(HTTP_STATUS.BAD_GATEWAY, `Không nhận được ảnh hợp lệ từ model: ${reason}. ${billing}`));
     }
-    try {
-      // The storage must pass a test again before the next image request.
-      recordStorageResultSync(await getAdapter(), storage.userId, { ok: false, error: reason });
-    } catch { /* the page shows the last error; losing it is not worth a failure */ }
+    if (storage.local) {
+      log.error("IMAGE", `Local image store failed: ${reason}`);
+    } else {
+      try {
+        // The storage must pass a test again before the next image request.
+        await markStorageFailing(storage, reason);
+      } catch { /* the page shows the last error; losing it is not worth a failure */ }
+    }
+    if (routerOwned) {
+      // The reason is about the router's own bucket or disk: not the customer's business.
+      // A CDN of their own only helps on the system storage: local storage overrides it.
+      const way = storage.local ? "" : ", hoặc kết nối CDN riêng ở /account/storage";
+      return markPlatform(errorResponse(
+        HTTP_STATUS.BAD_GATEWAY,
+        `Ảnh đã tạo nhưng hệ thống tạm thời không lưu được ảnh. ${billing} Vui lòng thử lại sau${way}.`
+      ));
+    }
     return markPlatform(errorResponse(
       HTTP_STATUS.BAD_GATEWAY,
       `Ảnh đã tạo nhưng không lưu được lên CDN của bạn: ${reason}. Kiểm tra cấu hình ở /account/storage. ${billing}`
@@ -220,7 +255,7 @@ async function handleImageGenerationRequestInner(request, ctx) {
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   if (!body.prompt) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
 
-  const storage = await resolveCustomerStorage(apiKey);
+  const storage = await resolveCustomerStorage(apiKey, { baseUrl: localImageBaseUrl(request, settings) });
   if (storage?.error) return storage.error;
   // The images must be complete before they can be uploaded, so a customer's
   // request is never streamed.
@@ -376,4 +411,4 @@ async function handleImageGenerationRequest(request) {
 export const handleImageGeneration = withErrorLog(handleImageGenerationRequest, { cloneBody: true });
 
 // Test seam: the storage gate and the re-hosting step, without a full request.
-export const imageStorageForTests = { resolveCustomerStorage, finishImage };
+export const imageStorageForTests = { resolveCustomerStorage, finishImage, markStorageFailing };
