@@ -59,10 +59,11 @@ export function validateBroadcastText(text) {
 }
 
 /**
- * Create a broadcast and start sending it in the background.
+ * Create a broadcast and start sending it in the background. `photo`
+ * ({ buffer, type }, already validated) goes out with the text.
  * @returns {Promise<{ ok: true, broadcast: object } | { ok: false, error: string, status: number }>}
  */
-export async function startBroadcast({ text, createdBy = null }) {
+export async function startBroadcast({ text, createdBy = null, photo = null }) {
   const checked = validateBroadcastText(text);
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 };
   if (g.activeId) return { ok: false, error: "Đang gửi một thông báo khác, chờ xong rồi gửi tiếp", status: 409 };
@@ -86,17 +87,21 @@ export async function startBroadcast({ text, createdBy = null }) {
 
   const createdAt = new Date().toISOString();
   db.run(
-    `INSERT INTO telegramBroadcasts(id, text, createdBy, createdAt, status, total, sent, failed, skipped, finishedAt)
-     VALUES(?, ?, ?, ?, 'sending', ?, 0, 0, 0, NULL)`,
-    [id, checked.text, createdBy, createdAt, recipients.length]
+    `INSERT INTO telegramBroadcasts(id, text, createdBy, createdAt, hasPhoto, status, total, sent, failed, skipped, finishedAt)
+     VALUES(?, ?, ?, ?, ?, 'sending', ?, 0, 0, 0, NULL)`,
+    [id, checked.text, createdBy, createdAt, photo ? 1 : 0, recipients.length]
   );
-  runBroadcast(db, id, checked.text, recipients).catch((error) => {
+  const photoState = photo?.buffer?.length ? { buffer: photo.buffer, type: photo.type } : null;
+  runBroadcast(db, id, checked.text, recipients, { photo: photoState }).catch((error) => {
     console.error(`[broadcast] stopped: ${error?.message || "unknown error"}`);
   });
   return { ok: true, broadcast: db.get(`SELECT * FROM telegramBroadcasts WHERE id = ?`, [id]) };
 }
 
-async function runBroadcast(db, id, text, recipients, { pace = PACE_MS } = {}) {
+// A photo Telegram refused was dropped mid-run: the history must not claim it went out.
+const photoShown = (photo) => (photo && !photo.rejected ? 1 : 0);
+
+async function runBroadcast(db, id, text, recipients, { pace = PACE_MS, photo = null } = {}) {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
@@ -105,26 +110,28 @@ async function runBroadcast(db, id, text, recipients, { pace = PACE_MS } = {}) {
     db.run(`UPDATE telegramBroadcasts SET sent = ?, failed = ?, skipped = ? WHERE id = ?`, [sent, failed, skipped, id]);
   try {
     for (let i = 0; i < recipients.length; i++) {
-      let result = await notifyCustomer(recipients[i], "announcements", build);
+      let result = await notifyCustomer(recipients[i], "announcements", build, { photo });
       // Flood limit: wait as told, a few times, before giving up on this one.
       for (let tries = 0; result.reason === "rate_limited" && tries < MAX_FLOOD_RETRIES; tries++) {
         await sleep(Math.min(60, result.retryAfterSec || 1) * 1000);
-        result = await notifyCustomer(recipients[i], "announcements", build);
+        result = await notifyCustomer(recipients[i], "announcements", build, { photo });
       }
       if (result.ok) sent += 1;
       else if (SKIPPED.has(result.reason)) skipped += 1;
       else failed += 1;
       if ((i + 1) % PROGRESS_EVERY === 0) progress();
-      if (pace) await sleep(pace);
+      // A photo whose text does not fit its caption is two messages per recipient.
+      const gap = photo?.twoMessages && !photo.rejected ? pace * 2 : pace;
+      if (gap) await sleep(gap);
     }
     db.run(
-      `UPDATE telegramBroadcasts SET sent = ?, failed = ?, skipped = ?, status = 'done', finishedAt = ? WHERE id = ?`,
-      [sent, failed, skipped, new Date().toISOString(), id]
+      `UPDATE telegramBroadcasts SET sent = ?, failed = ?, skipped = ?, status = 'done', finishedAt = ?, hasPhoto = ? WHERE id = ?`,
+      [sent, failed, skipped, new Date().toISOString(), photoShown(photo), id]
     );
   } catch (error) {
     db.run(
-      `UPDATE telegramBroadcasts SET sent = ?, failed = ?, skipped = ?, status = 'failed', finishedAt = ? WHERE id = ?`,
-      [sent, failed, skipped, new Date().toISOString(), id]
+      `UPDATE telegramBroadcasts SET sent = ?, failed = ?, skipped = ?, status = 'failed', finishedAt = ?, hasPhoto = ? WHERE id = ?`,
+      [sent, failed, skipped, new Date().toISOString(), photoShown(photo), id]
     );
     throw error;
   } finally {

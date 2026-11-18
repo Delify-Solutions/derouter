@@ -1,24 +1,47 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { validateAnnouncement, updateAnnouncementSync, deleteAnnouncementSync } from "@/lib/notify/inbox.js";
+import {
+  validateAnnouncement,
+  updateAnnouncementSync,
+  deleteAnnouncementSync,
+  setAnnouncementImageSync,
+} from "@/lib/notify/inbox.js";
+import {
+  readAnnouncementRequest,
+  removeAnnouncementImage,
+  saveAnnouncementImage,
+} from "@/lib/notify/announcementImage.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
-/** PATCH /api/announcements/[id] — `{ title, body, important }` (web copy only; a sent Telegram message stays as sent). */
+/**
+ * PATCH /api/announcements/[id] — `{ title, body, important, image?, removeImage? }`
+ * (web copy only; a sent Telegram message stays as sent). A new `image` replaces
+ * the old one; `removeImage` drops it; neither keeps it.
+ */
 export async function PATCH(request, { params }) {
   const { id } = await params;
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Dữ liệu không hợp lệ" }, { status: 400, headers: NO_STORE });
-  }
-  const checked = validateAnnouncement(body || {});
+  const input = await readAnnouncementRequest(request);
+  if (input.error) return NextResponse.json({ error: input.error }, { status: 400, headers: NO_STORE });
+  const checked = validateAnnouncement(input.fields);
   if (checked.error) return NextResponse.json({ error: checked.error }, { status: 400, headers: NO_STORE });
   const db = await getAdapter();
-  const announcement = updateAnnouncementSync(db, id, checked.value);
+  let announcement = updateAnnouncementSync(db, id, checked.value);
   if (!announcement) return NextResponse.json({ error: "Không tìm thấy thông báo" }, { status: 404, headers: NO_STORE });
+  if (input.image) {
+    try {
+      saveAnnouncementImage(id, input.image.buffer);
+    } catch {
+      return NextResponse.json({ error: "Đã lưu nội dung nhưng không lưu được ảnh" }, { status: 500, headers: NO_STORE });
+    }
+    setAnnouncementImageSync(db, id, input.image.type, { now: announcement.updatedAt });
+    announcement = { ...announcement, hasImage: true };
+  } else if (input.fields.removeImage === true) {
+    setAnnouncementImageSync(db, id, null, { now: announcement.updatedAt });
+    removeAnnouncementImage(id);
+    announcement = { ...announcement, hasImage: false };
+  }
   return NextResponse.json({ ok: true, announcement }, { headers: NO_STORE });
 }
 
@@ -29,5 +52,6 @@ export async function DELETE(request, { params }) {
   if (!deleteAnnouncementSync(db, id)) {
     return NextResponse.json({ error: "Không tìm thấy thông báo" }, { status: 404, headers: NO_STORE });
   }
+  removeAnnouncementImage(id);
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
