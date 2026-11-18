@@ -1,0 +1,5 @@
+- [x] 1.1 `ensureClaudeCache` / `providerCacheMode`; chatCore applies it last for Claude-format requests; chat.js passes `providerCache`
+- [x] 1.2 Providers page: Cache dropdown for Claude-format providers
+- [x] 1.3 `test/provider-cache.test.js`
+- [x] 1.4 Copy-on-write (retry-safe), nested `tool_result` markers count, null messages and empty text blocks are left alone, MODIFIED delta for proxy-transparency
+- [ ] 2.1 Try it with a CLI that sends no cache hint against a live custom `anthropic-compatible` node after deploy and watch cache read tokens (built-in providers already get breakpoints)
