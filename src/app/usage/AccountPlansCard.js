@@ -49,6 +49,11 @@ export default function AccountPlansCard({ account }) {
         <ul className="mt-3 flex flex-col divide-y divide-border border-t border-border" aria-label="Gói đang hoạt động">
           {shown.map((entry) => {
             const scheduled = entry.statusLabel === "scheduled";
+            // An image purchase is paid in images, so its balance is part of what
+            // the customer must see without opening the panel. Credit plans keep
+            // the same compact line they had.
+            const imageTotal = Math.max(0, Number(entry.imageTotal) || 0);
+            const imageRemaining = Math.max(0, Math.min(Number(entry.imageRemaining) || 0, imageTotal));
             return (
               <li key={entry.id} className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-1.5 text-xs">
                 <span className="flex min-w-0 items-baseline gap-1.5">
@@ -58,6 +63,13 @@ export default function AccountPlansCard({ account }) {
                   <span className="truncate font-medium text-text-main" title={entry.planName || entry.planCode || ""}>
                     {entry.planName || entry.planCode || "Gói"}
                   </span>
+                  {entry.kind === "image" && (
+                    <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums text-text-muted">
+                      {scheduled
+                        ? `${imageTotal.toLocaleString("vi-VN")} ảnh`
+                        : `còn ${imageRemaining.toLocaleString("vi-VN")}/${imageTotal.toLocaleString("vi-VN")} ảnh`}
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 font-mono tabular-nums text-text-muted">
                   {scheduled ? `từ ${dateTimeOf(entry.startsAt)}` : `hết ${dateTimeOf(entry.expiresAt)}`}
