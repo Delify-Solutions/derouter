@@ -83,16 +83,43 @@ test("Codex (Responses): the forced level beats the client's effort; Off is 'non
   assert.equal(effortOf(run(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, `${model}(none)`, OPENAI_CLI, "codex")), "none");
 });
 
-test("Command Code: the forced level replaces the client's; Off sends no effort", () => {
-  const model = "deepseek/deepseek-v4-pro";
-  const auto = run(FORMATS.OPENAI, FORMATS.OPENAI, model, OPENAI_CLI, "commandcode");
+test("Command Code: the forced level replaces the client's; Off sends no effort; the model id stays clean", () => {
+  const model = "deepseek/deepseek-v4.1-flash";
+  const cc = (src, m, body) => run(src, FORMATS.COMMANDCODE, m, body, "commandcode");
+  const auto = cc(FORMATS.OPENAI, model, OPENAI_CLI);
   assert.equal(auto.params.reasoning_effort, "high");
+  assert.equal(auto.params.model, model);
   for (const [src, body] of [[FORMATS.OPENAI, OPENAI_CLI], [FORMATS.CLAUDE, CLAUDE_CODE]]) {
-    assert.equal(run(src, FORMATS.OPENAI, `${model}(max)`, body, "commandcode").params.reasoning_effort, "max");
-    assert.equal(run(src, FORMATS.OPENAI, `${model}(low)`, body, "commandcode").params.reasoning_effort, "low");
-    const off = run(src, FORMATS.OPENAI, `${model}(none)`, body, "commandcode");
+    for (const level of ["max", "low", "none"]) {
+      const out = cc(src, `${model}(${level})`, body);
+      // regression: the envelope's params.model carried "…(none)" and Command Code rejected
+      // every request of a provider whose Thinking was set
+      assert.equal(out.params.model, model, `params.model for (${level})`);
+    }
+    assert.equal(cc(src, `${model}(max)`, body).params.reasoning_effort, "max");
+    assert.equal(cc(src, `${model}(low)`, body).params.reasoning_effort, "low");
+    const off = cc(src, `${model}(none)`, body);
     assert.equal(off.params.reasoning_effort, undefined);
     assert.equal(off.thinking, undefined);
+  }
+});
+
+test("no target format embeds the model(level) suffix anywhere in the upstream body", () => {
+  // chatCore replaces the top-level `model`; anything nested (an envelope's params.model, a
+  // Kiro modelId…) must already be the clean id, or the upstream rejects the request.
+  const suffixed = "some-model(none)";
+  const bodies = {
+    [FORMATS.OPENAI]: { model: "x", stream: true, reasoning_effort: "high", messages: [{ role: "user", content: "hi" }] },
+    [FORMATS.CLAUDE]: { model: "x", max_tokens: 100, messages: [{ role: "user", content: "hi" }] },
+  };
+  for (const target of Object.values(FORMATS)) {
+    for (const [source, body] of Object.entries(bodies)) {
+      let out;
+      try { out = run(source, target, suffixed, body, "openai"); } catch { continue; }
+      if (!out || typeof out !== "object") continue;
+      const { model: _topLevel, ...rest } = out;
+      assert.ok(!JSON.stringify(rest).includes(suffixed), `${source} -> ${target} leaks the suffix`);
+    }
   }
 });
 
