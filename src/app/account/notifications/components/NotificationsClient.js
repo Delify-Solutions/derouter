@@ -140,6 +140,15 @@ export default function NotificationsClient() {
                       {a.important ? <Tag tone="warning" icon="priority_high">Quan trọng</Tag> : null}
                       {a.unread ? <Tag tone="success">Mới</Tag> : null}
                     </div>
+                    {a.hasImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/account/notifications/${a.id}/image?v=${encodeURIComponent(a.updatedAt || "")}`}
+                        alt={`Ảnh kèm thông báo ${a.title}`}
+                        loading="lazy"
+                        className="max-h-96 w-auto max-w-full self-start border border-border object-contain"
+                      />
+                    ) : null}
                     <p className="whitespace-pre-line text-sm leading-6 text-text-muted [overflow-wrap:anywhere]">{a.body}</p>
                     <time dateTime={a.createdAt} className="font-mono text-xs text-text-subtle">{dateTimeOf(a.createdAt)}</time>
                   </li>

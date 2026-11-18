@@ -58,6 +58,8 @@ function toAnnouncement(row) {
     body: row.body,
     important: Number(row.important) === 1,
     telegramBroadcastId: row.telegramBroadcastId ?? null,
+    // Image URLs carry updatedAt so a replaced image is not served from cache.
+    hasImage: Boolean(row.imageType),
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -80,6 +82,16 @@ export function updateAnnouncementSync(db, id, value, { now = new Date().toISOSt
   );
   if ((res?.changes ?? 0) === 0) return null;
   return toAnnouncement(db.get(`SELECT * FROM announcements WHERE id = ?`, [id]));
+}
+
+/** Record (type) or clear (null) the announcement's image; bumps updatedAt. */
+export function setAnnouncementImageSync(db, id, imageType, { now = new Date().toISOString() } = {}) {
+  db.run(`UPDATE announcements SET imageType = ?, updatedAt = ? WHERE id = ?`, [imageType || null, now, id]);
+}
+
+/** The stored image type of one announcement, or null (no image, or no such announcement). */
+export function announcementImageTypeSync(db, id) {
+  return db.get(`SELECT imageType FROM announcements WHERE id = ?`, [id])?.imageType || null;
 }
 
 export function setAnnouncementBroadcastSync(db, id, broadcastId) {

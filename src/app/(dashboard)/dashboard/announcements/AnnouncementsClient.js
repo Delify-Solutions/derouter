@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, CardSkeleton, ConfirmModal, Input, Modal, Toggle } from "@/shared/components";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
 const EMPTY = { title: "", body: "", important: false, sendTelegram: false };
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const imageUrl = (row) => `/api/announcements/${row.id}/image?v=${encodeURIComponent(row.updatedAt || "")}`;
 
 function fmt(value) {
   const d = new Date(value);
@@ -96,6 +100,15 @@ export default function AnnouncementsClient() {
                   <Button size="sm" variant="ghost" onClick={() => setDeleting(row)}>Xóa</Button>
                 </div>
               </div>
+              {row.hasImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imageUrl(row)}
+                  alt={`Ảnh kèm thông báo ${row.title}`}
+                  loading="lazy"
+                  className="max-h-64 w-auto max-w-full self-start border border-border object-contain"
+                />
+              ) : null}
               <p className="whitespace-pre-line text-sm text-text-muted [overflow-wrap:anywhere]">{row.body}</p>
             </li>
           ))}
@@ -126,15 +139,62 @@ function AnnouncementModal({ row, onClose, onSaved }) {
   const [form, setForm] = useState(row ? { title: row.title, body: row.body, important: row.important, sendTelegram: false } : EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The picked file (not uploaded until save), its local preview, and whether the
+  // saved image should be dropped.
+  const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState("");
+  const [removeImage, setRemoveImage] = useState(false);
+  const fileInput = useRef(null);
+  const previewRef = useRef("");
+
+  const showPreview = (url) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current = url;
+    setPreview(url);
+  };
+  useEffect(() => () => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+  }, []);
+
+  const pick = (file) => {
+    if (fileInput.current) fileInput.current.value = "";
+    if (!file) return;
+    if (!IMAGE_TYPES.includes(file.type)) {
+      setError("Chỉ nhận ảnh JPG, PNG hoặc WebP");
+      return;
+    }
+    if (file.size > IMAGE_MAX_BYTES) {
+      setError("Ảnh tối đa 5 MB");
+      return;
+    }
+    setError("");
+    setImage(file);
+    showPreview(URL.createObjectURL(file));
+    setRemoveImage(false);
+  };
+
+  const dropImage = () => {
+    setImage(null);
+    showPreview("");
+    if (row?.hasImage) setRemoveImage(true);
+  };
+
+  const shownImage = preview || (row?.hasImage && !removeImage ? imageUrl(row) : "");
 
   const save = async () => {
     setBusy(true);
     setError("");
     try {
+      const data = new FormData();
+      data.append("title", form.title);
+      data.append("body", form.body);
+      data.append("important", String(form.important));
+      data.append("sendTelegram", String(form.sendTelegram));
+      if (image) data.append("image", image);
+      else if (removeImage) data.append("removeImage", "true");
       const res = await fetch(row ? `/api/announcements/${row.id}` : "/api/announcements", {
         method: row ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: data,
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -184,6 +244,33 @@ function AnnouncementModal({ row, onClose, onSaved }) {
           />
           <span className="text-right font-mono text-[11px] text-text-muted">{form.body.length} / 2000</span>
         </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Ảnh (tuỳ chọn)</span>
+          {shownImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={shownImage} alt="Ảnh kèm thông báo" className="max-h-48 w-auto max-w-full self-start border border-border object-contain" />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInput}
+              id="ann-image"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+              onChange={(e) => pick(e.target.files?.[0] || null)}
+            />
+            <Button size="sm" variant="secondary" icon="image" onClick={() => fileInput.current?.click()}>
+              {shownImage ? "Đổi ảnh" : "Chọn ảnh"}
+            </Button>
+            {shownImage ? <Button size="sm" variant="ghost" onClick={dropImage}>Bỏ ảnh</Button> : null}
+            {image ? <span className="font-mono text-[11px] text-text-muted [overflow-wrap:anywhere]">{image.name}</span> : null}
+          </div>
+          <span className="text-xs text-text-muted">
+            JPG, PNG hoặc WebP, tối đa 5 MB. Hiện trên trang Thông báo và gửi kèm tin Telegram.
+          </span>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <span className="text-sm text-text-main">Đánh dấu quan trọng</span>
           <Toggle aria-label="Đánh dấu quan trọng" checked={form.important} onChange={(v) => setForm((f) => ({ ...f, important: v }))} />
@@ -192,12 +279,15 @@ function AnnouncementModal({ row, onClose, onSaved }) {
           <div className="flex items-center justify-between gap-4">
             <span className="flex flex-col">
               <span className="text-sm text-text-main">Gửi kèm qua Telegram</span>
-              <span className="text-xs text-text-muted">Tới khách đã liên kết và đang bật &quot;Thông báo từ admin&quot;.</span>
+              <span className="text-xs text-text-muted">
+                Tới khách đã liên kết và đang bật &quot;Thông báo từ admin&quot;. Có ảnh thì gửi ảnh, nội dung làm chú thích
+                (dài quá 1024 ký tự thì gửi thành tin riêng ngay sau ảnh).
+              </span>
             </span>
             <Toggle aria-label="Gửi kèm qua Telegram" checked={form.sendTelegram} onChange={(v) => setForm((f) => ({ ...f, sendTelegram: v }))} />
           </div>
         ) : (
-          <p className="text-xs text-text-muted">Sửa chỉ đổi bản trên web; tin đã gửi qua Telegram giữ nguyên.</p>
+          <p className="text-xs text-text-muted">Sửa (kể cả ảnh) chỉ đổi bản trên web; tin đã gửi qua Telegram giữ nguyên.</p>
         )}
         {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
       </div>

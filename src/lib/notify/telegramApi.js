@@ -60,6 +60,70 @@ export async function sendTelegramMessage(token, chatId, text, { fetchImpl = fet
   return { ok: false, reason: "telegram_error" };
 }
 
+/** Telegram's ceiling for a photo caption (counted on the text, not the HTML). */
+export const MAX_CAPTION_LENGTH = 1024;
+
+const PHOTO_TIMEOUT_MS = 30_000;
+const PHOTO_REJECTED = /PHOTO_[A-Z_]+|IMAGE_PROCESS_FAILED|wrong file identifier|wrong remote file|failed to get HTTP URL content|wrong type of the web page content|file is too big/i;
+
+/**
+ * Send a photo to `chatId`, with an optional caption (Telegram HTML subset).
+ * `photo` is either `{ fileId }` — a photo this bot already sent, reused without
+ * uploading — or `{ buffer, type }`, uploaded as multipart.
+ *
+ * @returns {Promise<{ ok: boolean, fileId?: string, blocked?: boolean, retryAfterSec?: number,
+ *                     reason?: string }>}
+ *   fileId: Telegram's id of the largest size, to send the same photo to the next chat.
+ *   reason "photo_rejected": Telegram refused the photo itself (size, dimensions),
+ *   so sending it to anyone else will fail the same way.
+ */
+export async function sendTelegramPhoto(token, chatId, photo, caption = "", { fetchImpl = fetch } = {}) {
+  if (!token || !chatId || !(photo?.fileId || photo?.buffer?.length)) return { ok: false, reason: "not_configured" };
+  const fields = { chat_id: String(chatId), ...(caption ? { caption: String(caption), parse_mode: "HTML" } : {}) };
+  let init;
+  if (photo.fileId) {
+    init = {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...fields, photo: String(photo.fileId) }),
+    };
+  } else {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    const ext = { "image/png": "png", "image/webp": "webp" }[photo.type] || "jpg";
+    form.append("photo", new Blob([photo.buffer], { type: photo.type || "image/jpeg" }), `image.${ext}`);
+    init = { body: form };
+  }
+  let res;
+  try {
+    res = await fetchImpl(`${API_BASE}/bot${token}/sendPhoto`, {
+      method: "POST",
+      ...init,
+      signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
+    });
+  } catch (error) {
+    console.error(`[telegram] photo request failed: ${error?.name === "TimeoutError" ? "timeout" : "network error"}`);
+    return { ok: false, reason: "network_error" };
+  }
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) {
+    const sizes = Array.isArray(body?.result?.photo) ? body.result.photo : [];
+    const fileId = sizes.length ? sizes[sizes.length - 1]?.file_id : null;
+    return typeof fileId === "string" && fileId ? { ok: true, fileId } : { ok: true };
+  }
+  const description = String(body?.description || "").slice(0, 200);
+  if (res.status === 429) {
+    return { ok: false, reason: "rate_limited", retryAfterSec: Number(body?.parameters?.retry_after) || 1 };
+  }
+  if (res.status === 403 || (res.status === 400 && /chat not found/i.test(description))) {
+    return { ok: false, reason: "blocked", blocked: true };
+  }
+  console.error(`[telegram] sendPhoto responded ${res.status}${description ? `: ${description}` : ""}`);
+  // Only refusals of the photo itself: a per-chat refusal ("not enough rights to
+  // send photos") must not drop the photo for every other recipient.
+  if (res.status === 400 && PHOTO_REJECTED.test(description)) return { ok: false, reason: "photo_rejected" };
+  return { ok: false, reason: "telegram_error" };
+}
+
 /**
  * Long polling for bot updates (spec telegram-support). The bot is the same one that
  * sends notifications, so it can only have ONE reader: whoever calls this owns the

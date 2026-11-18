@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 40;
+export const SCHEMA_VERSION = 41;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -960,6 +960,8 @@ export const TABLES = {
       text: "TEXT NOT NULL",
       createdBy: "TEXT",
       createdAt: "TEXT NOT NULL",
+      // 1 when the broadcast went out with a photo.
+      hasPhoto: "INTEGER DEFAULT 0",
       status: "TEXT NOT NULL", // sending | done | failed
       total: "INTEGER DEFAULT 0",
       sent: "INTEGER DEFAULT 0",
@@ -981,6 +983,9 @@ export const TABLES = {
       createdBy: "TEXT",
       // telegramBroadcasts.id when it was also sent through Telegram.
       telegramBroadcastId: "TEXT",
+      // MIME type of the attached image (DATA_DIR/announcement-images/<id>);
+      // NULL = no image.
+      imageType: "TEXT",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
     },

@@ -11,8 +11,8 @@
 import { getAdapter } from "../db/driver.js";
 import { getSettings } from "../db/repos/settingsRepo.js";
 import { fmtCreditNano } from "../../shared/utils/money.js";
-import { escapeHtml, sendTelegramMessage } from "./telegramApi.js";
-import { recordInboxSync } from "./inbox.js";
+import { escapeHtml, MAX_CAPTION_LENGTH, sendTelegramMessage, sendTelegramPhoto } from "./telegramApi.js";
+import { plainText, recordInboxSync } from "./inbox.js";
 
 export const NOTIFY_GROUPS = ["billing", "expiry", "announcements"];
 export const SECURITY = "security";
@@ -105,6 +105,44 @@ let transport = sendTelegramMessage;
 export function setTelegramTransportForTests(fn) {
   transport = fn || sendTelegramMessage;
 }
+let photoTransport = sendTelegramPhoto;
+export function setTelegramPhotoTransportForTests(fn) {
+  photoTransport = fn || sendTelegramPhoto;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const FOLLOW_UP_RETRIES = 3;
+
+/**
+ * The photo, then the text: as its caption when it fits, as the next message when
+ * it does not. `photo` is shared by every recipient of one broadcast: the first
+ * upload records Telegram's file id so the others reuse it, and a photo Telegram
+ * refuses outright is dropped so the rest get the text alone.
+ */
+async function deliverWithPhoto(token, chatId, text, photo) {
+  const asCaption = plainText(text).length <= MAX_CAPTION_LENGTH;
+  const ref = photo.fileId ? { fileId: photo.fileId } : { buffer: photo.buffer, type: photo.type };
+  const sent = await photoTransport(token, chatId, ref, asCaption ? text : "");
+  if (sent?.reason === "photo_rejected") {
+    photo.rejected = true;
+    return transport(token, chatId, text);
+  }
+  if (!sent?.ok) return sent;
+  if (sent.fileId && !photo.fileId) photo.fileId = sent.fileId;
+  if (asCaption) return sent;
+  photo.twoMessages = true;
+  // The photo is already delivered: wait out a flood limit here rather than let
+  // the caller retry the pair and send the photo twice.
+  let result = await transport(token, chatId, text);
+  for (let tries = 0; result?.reason === "rate_limited" && tries < FOLLOW_UP_RETRIES; tries++) {
+    await sleep(Math.min(60, result.retryAfterSec || 1) * 1000);
+    result = await transport(token, chatId, text);
+  }
+  if (result?.ok) return result;
+  // Never hand back a reason a caller retries (rate_limited): that would repeat
+  // the photo. A refusal (blocked) still counts, so the marker is set.
+  return result?.blocked ? result : { ok: false, reason: "follow_up_failed" };
+}
 
 /**
  * Deliver one message to a linked customer, honouring their preferences and the
@@ -113,10 +151,12 @@ export function setTelegramTransportForTests(fn) {
  * @param {string} userId
  * @param {"billing"|"expiry"|"announcements"|"security"} group
  * @param {(siteName: string) => string} buildText HTML text, built once the site name is known
- * @param {{ force?: boolean }} [options] force: try even when marked blocked (test message, fresh link)
+ * @param {{ force?: boolean, photo?: { buffer: Buffer, type: string, fileId?: string, rejected?: boolean } }} [options]
+ *   force: try even when marked blocked (test message, fresh link).
+ *   photo: send this image with the text (broadcasts); see deliverWithPhoto.
  * @returns {Promise<{ ok: boolean, reason?: string, retryAfterSec?: number }>}
  */
-export async function notifyCustomer(userId, group, buildText, { force = false, inbox = true } = {}) {
+export async function notifyCustomer(userId, group, buildText, { force = false, inbox = true, photo = null } = {}) {
   try {
     if (!userId) return { ok: false, reason: "no_user" };
     const { token, siteName } = await loadBot();
@@ -150,7 +190,9 @@ export async function notifyCustomer(userId, group, buildText, { force = false, 
 
     const text = typeof buildText === "function" ? buildText(siteName) : String(buildText || "");
     if (!text) return { ok: false, reason: "empty" };
-    const result = await transport(token, row.telegramUserId, text);
+    const result = photo && !photo.rejected
+      ? await deliverWithPhoto(token, row.telegramUserId, text, photo)
+      : await transport(token, row.telegramUserId, text);
     markDelivery(db, userId, row, result);
     return result;
   } catch (error) {

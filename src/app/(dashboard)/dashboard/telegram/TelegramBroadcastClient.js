@@ -174,6 +174,9 @@ export default function TelegramBroadcastClient() {
                             </td>
                             <td className="max-w-md py-2 pr-4 text-text-main">
                               <p className="line-clamp-3 whitespace-pre-line break-words">{b.text}</p>
+                              {Number(b.hasPhoto) === 1 ? (
+                                <span className="mt-1 inline-block font-mono text-[11px] text-text-muted">+ kèm ảnh</span>
+                              ) : null}
                             </td>
                             <td className="py-2 pr-4">
                               <Badge variant={status.variant} size="sm">{status.label}</Badge>
