@@ -77,6 +77,22 @@ export class CommandCodeExecutor extends BaseExecutor {
   }
 }
 
+// Messages in which Command Code refuses the request rather than failing to serve it.
+const REJECTED_REQUEST_PATTERNS = [
+  // the model id itself is refused — anchored on refusal wording, so an outage that merely
+  // mentions a model ("model temporarily not available", "invalid response from model") is not
+  /^(invalid|unknown|unsupported) model\b/,
+  /\bmodel\b[^.]*\bis (not supported|not a valid model|invalid)\b/,
+  /\b(unsupported|unknown) model\b/,
+  /\bmodel\b[^.]*\bdoes not exist\b/,
+  // the body is refused
+  /^(bad request|invalid request)\b/,
+  /\bvalidation (error|failed)\b/,
+];
+function isRejectedRequestMessage(lower) {
+  return REJECTED_REQUEST_PATTERNS.some((re) => re.test(lower));
+}
+
 export function parseCommandCodeError(event) {
   if (!event || typeof event !== "object") {
     return {
@@ -129,6 +145,11 @@ export function parseCommandCodeError(event) {
     } else if (lower.includes("unavailable") || lower.includes("overloaded") || lower.includes("server error")) {
       statusCode = 503;
       type = "server_error";
+    } else if (isRejectedRequestMessage(lower)) {
+      // The request itself was refused (an unknown or invalid model, a malformed body): no
+      // outage, so no 503 — the executor's 503 retries would resend the same bad request.
+      statusCode = 400;
+      type = "invalid_request_error";
     } else {
       statusCode = 503;
     }

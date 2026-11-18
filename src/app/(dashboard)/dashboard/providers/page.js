@@ -251,9 +251,10 @@ export default function ProvidersPage() {
       const data = await res.json();
       setTestResults(data);
       if (data.summary) {
-        const { passed, failed, total } = data.summary;
-        if (failed === 0) notify.success(`All ${total} tests passed`);
-        else notify.warning(`${passed}/${total} passed, ${failed} failed`);
+        const { passed, failed, total, untestable = 0 } = data.summary;
+        const skipped = untestable ? `, ${untestable} chưa hỗ trợ test` : "";
+        if (failed === 0) notify.success(untestable ? `${passed}/${total} passed${skipped}` : `All ${total} tests passed`);
+        else notify.warning(`${passed}/${total} passed, ${failed} failed${skipped}`);
       }
     } catch (error) {
       setTestResults({ error: "Test request failed" });
@@ -991,9 +992,9 @@ function ProviderTestResultsView({ results }) {
           className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg bg-black/[0.03] px-3 py-2 text-xs dark:bg-white/[0.03] sm:flex-nowrap"
         >
           <span
-            className={`material-symbols-outlined text-[16px] ${r.valid ? "text-emerald-500" : "text-red-500"}`}
+            className={`material-symbols-outlined text-[16px] ${r.valid ? "text-emerald-500" : r.untestable ? "text-text-muted" : "text-red-500"}`}
           >
-            {r.valid ? "check_circle" : "error"}
+            {r.valid ? "check_circle" : r.untestable ? "help" : "error"}
           </span>
           <div className="min-w-0 flex-[1_1_160px]">
             <span className="block truncate font-medium sm:inline">
@@ -1012,10 +1013,12 @@ function ProviderTestResultsView({ results }) {
             className={`shrink-0 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
               r.valid
                 ? "bg-emerald-500/15 text-emerald-400"
-                : "bg-red-500/15 text-red-400"
+                : r.untestable
+                  ? "bg-black/[0.06] text-text-muted dark:bg-white/[0.06]"
+                  : "bg-red-500/15 text-red-400"
             }`}
           >
-            {r.valid ? "OK" : r.diagnosis?.type || "ERROR"}
+            {r.valid ? "OK" : r.untestable ? "chưa hỗ trợ test" : r.diagnosis?.type || "ERROR"}
           </span>
         </div>
       ))}

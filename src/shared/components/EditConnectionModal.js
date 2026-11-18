@@ -80,7 +80,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     try {
       const res = await fetch(`/api/providers/${connection.id}/test`, { method: "POST" });
       const data = await res.json();
-      setTestResult(data.valid ? "success" : "failed");
+      // untestable: the provider has no connection test, which says nothing about the key
+      setTestResult(data.valid ? "success" : data.untestable ? "untestable" : "failed");
     } catch {
       setTestResult("failed");
     } finally {
@@ -279,8 +280,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
               {testing ? "Testing..." : "Test Connection"}
             </Button>
             {testResult && (
-              <Badge variant={testResult === "success" ? "success" : "error"}>
-                {testResult === "success" ? "Valid" : "Failed"}
+              <Badge variant={testResult === "success" ? "success" : testResult === "untestable" ? "default" : "error"}>
+                {testResult === "success" ? "Valid" : testResult === "untestable" ? "Chưa hỗ trợ test" : "Failed"}
               </Badge>
             )}
           </div>
