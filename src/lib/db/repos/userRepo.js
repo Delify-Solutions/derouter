@@ -322,6 +322,8 @@ export async function deleteUser(id, { actor = "system", reason = null } = {}) {
     // in-flight request of these keys has nobody left to charge.
     db.run(`DELETE FROM apiKeys WHERE userId = ?`, [id]);
     db.run(`DELETE FROM userSessions WHERE userId = ?`, [id]);
+    // The account's image storage holds an encrypted S3 secret: it goes with it.
+    db.run(`DELETE FROM userStorage WHERE userId = ?`, [id]);
     db.run(`DELETE FROM emailVerifications WHERE userId = ?`, [id]);
     // Window state is keyed by userPlanId; without a foreign key the cascade has
     // to be explicit. The table only exists from GĐ1 on, so a database upgraded
