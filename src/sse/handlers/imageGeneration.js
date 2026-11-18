@@ -25,6 +25,12 @@ import { withErrorLog } from "../utils/withErrorLog.js";
 import { getRequestIp } from "@/lib/auth/clientIp.js";
 import { publicModelContextSync, maskOptionsFor, isCustomerKeySync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
 import { maskResponse } from "@/lib/models/publicModel.js";
+import {
+  recordStorageResultSync,
+  rehostImageBody,
+  uploadImage,
+  usableStorageSync,
+} from "@/lib/storage/userStorage.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -71,8 +77,20 @@ async function refuseUnpricedImage(apiKey, { provider, model, requestedModel }) 
   ));
 }
 
-/** Record a finished image request so it is priced and charged like any other. */
-function recordImageUsage({ provider, model, connectionId = null, apiKey, requestedModel, result, clientIp = null }) {
+/**
+ * Record a finished image request so it is priced and charged like any other.
+ * With a `sink` the record waits there: a customer's images are charged only once
+ * they reached the customer's storage (finishImage).
+ */
+function recordImageUsage(args, sink = null) {
+  if (sink) {
+    sink.push(args);
+    return;
+  }
+  saveImageUsage(args);
+}
+
+function saveImageUsage({ provider, model, connectionId = null, apiKey, requestedModel, result, clientIp = null }) {
   if (!apiKey) return;
   saveRequestUsage({
     provider,
@@ -86,6 +104,79 @@ function recordImageUsage({ provider, model, connectionId = null, apiKey, reques
     requestedModel,
     clientIp,
   }).catch(() => {});
+}
+
+/**
+ * The storage a customer key's images go to (spec image-storage). Admin and
+ * local keys have none and are served as before. A customer without a usable
+ * storage is refused before any upstream call.
+ * @returns {Promise<null | { userId: string, config: object } | { error: Response }>}
+ */
+async function resolveCustomerStorage(apiKey) {
+  if (!apiKey) return null;
+  const db = await getAdapter();
+  const owner = resolveApiKeyOwner(db, apiKey);
+  if (!owner?.userId) return null;
+  const usable = usableStorageSync(db, owner.userId);
+  if (usable.error) return { error: markPlatform(errorResponse(HTTP_STATUS.FORBIDDEN, usable.error)) };
+  return { userId: owner.userId, config: usable.config };
+}
+
+/**
+ * Hand a successful response to the customer: every image is uploaded to their
+ * storage and the links are rewritten, so the upstream's link never leaves the
+ * router. Usage is saved only then. A failure is free only while no image byte
+ * reached the customer's endpoint: that endpoint is theirs, so "stored, then
+ * answered an error" must not turn into a free image.
+ */
+async function finishImage(response, { storage, usage, binaryOutput }, { rehost = rehostImageBody, upload = uploadImage } = {}) {
+  const flush = () => usage.splice(0).forEach(saveImageUsage);
+  if (!storage || !response?.ok) {
+    flush();
+    return response;
+  }
+  const fail = async (reason, { charge = false, storageFault = false } = {}) => {
+    if (charge) flush();
+    else usage.splice(0);
+    const billing = charge
+      ? "Ảnh đã được gửi tới CDN của bạn nên lượt này vẫn tính phí."
+      : "Lượt này không bị tính phí.";
+    if (!storageFault) {
+      // The upstream's fault (no image, unreadable, too large): the storage is fine.
+      return markPlatform(errorResponse(HTTP_STATUS.BAD_GATEWAY, `Không nhận được ảnh hợp lệ từ model: ${reason}. ${billing}`));
+    }
+    try {
+      // The storage must pass a test again before the next image request.
+      recordStorageResultSync(await getAdapter(), storage.userId, { ok: false, error: reason });
+    } catch { /* the page shows the last error; losing it is not worth a failure */ }
+    return markPlatform(errorResponse(
+      HTTP_STATUS.BAD_GATEWAY,
+      `Ảnh đã tạo nhưng không lưu được lên CDN của bạn: ${reason}. Kiểm tra cấu hình ở /account/storage. ${billing}`
+    ));
+  };
+  try {
+    const type = response.headers.get("content-type") || "";
+    if (binaryOutput && !type.includes("json")) {
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const uploaded = await upload(storage.config, bytes);
+      if (!uploaded.ok) return fail(uploaded.error, { charge: uploaded.sent, storageFault: uploaded.storageFault });
+      flush();
+      const headers = new Headers(response.headers);
+      headers.set("X-Image-Url", uploaded.url);
+      headers.append("Access-Control-Expose-Headers", "X-Image-Url");
+      return new Response(bytes, { status: response.status, headers });
+    }
+    const body = await response.json();
+    const rehosted = await rehost(body, storage.config);
+    if (!rehosted.ok) return fail(rehosted.error, { charge: rehosted.charge, storageFault: rehosted.storageFault });
+    flush();
+    return new Response(JSON.stringify(rehosted.body), {
+      status: response.status,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  } catch {
+    return fail("không đọc được kết quả tạo ảnh");
+  }
 }
 
 /**
@@ -129,6 +220,13 @@ async function handleImageGenerationRequestInner(request, ctx) {
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   if (!body.prompt) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
 
+  const storage = await resolveCustomerStorage(apiKey);
+  if (storage?.error) return storage.error;
+  // The images must be complete before they can be uploaded, so a customer's
+  // request is never streamed.
+  const stream = storage ? false : wantsStream;
+  const usage = [];
+
   // Combo expansion: model may be a combo name → run fallback/round-robin across models
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
@@ -136,28 +234,31 @@ async function handleImageGenerationRequestInner(request, ctx) {
     const comboStrategy = comboStrategies[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
     log.info("IMAGE", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
-    return handleComboChat({
+    const response = await handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, requestedModel: modelStr, clientIp: getRequestIp(request) }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream: stream, binaryOutput, preferredConnectionId, apiKey, requestedModel: modelStr, clientIp: getRequestIp(request), usage }),
       log,
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
     });
+    return finishImage(response, { storage, usage, binaryOutput });
   }
 
-  return handleSingleModelImage(body, modelStr, {
-    wantsStream,
+  const response = await handleSingleModelImage(body, modelStr, {
+    wantsStream: stream,
     binaryOutput,
     preferredConnectionId,
     apiKey,
     requestedModel: modelStr.includes("/") ? null : modelStr,
     clientIp: getRequestIp(request),
+    usage,
   });
+  return finishImage(response, { storage, usage, binaryOutput });
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey = null, requestedModel = null, clientIp = null } = {}) {
+async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey = null, requestedModel = null, clientIp = null, usage = null } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -175,7 +276,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       binaryOutput,
     });
     if (result.success) {
-      recordImageUsage({ provider, model, apiKey, requestedModel, result, clientIp });
+      recordImageUsage({ provider, model, apiKey, requestedModel, result, clientIp }, usage);
       return result.response;
     }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
@@ -225,7 +326,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
     });
 
     if (result.success) {
-      recordImageUsage({ provider, model, connectionId: credentials.connectionId, apiKey, requestedModel, result, clientIp });
+      recordImageUsage({ provider, model, connectionId: credentials.connectionId, apiKey, requestedModel, result, clientIp }, usage);
       return result.response;
     }
 
@@ -273,3 +374,6 @@ async function handleImageGenerationRequest(request) {
 }
 
 export const handleImageGeneration = withErrorLog(handleImageGenerationRequest, { cloneBody: true });
+
+// Test seam: the storage gate and the re-hosting step, without a full request.
+export const imageStorageForTests = { resolveCustomerStorage, finishImage };

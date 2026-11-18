@@ -23,6 +23,7 @@ const NAV = [
   // disabled program must not hand out a link.
   { href: "/account/affiliate", label: "Giới thiệu", icon: "group_add", affiliateOnly: true },
   { href: "/account/keys", label: "API key", icon: "key" },
+  { href: "/account/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
   { href: "/account/notifications", label: "Thông báo", icon: "notifications", badge: "unread" },
   { href: "/account/settings", label: "Tài khoản", icon: "manage_accounts" },

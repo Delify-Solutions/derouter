@@ -139,6 +139,17 @@ function isBlockedIpv6Groups(g) {
   return false;
 }
 
+/**
+ * True when a resolved address (what a DNS lookup returned) is internal. For a
+ * connect-time `lookup` hook, so the address checked is the address dialed.
+ */
+export function isBlockedAddress(address) {
+  const text = String(address || "").replace(/^\[|\]$/g, "");
+  if (ipv4ToInt(text) !== null) return isBlockedIpv4(text);
+  if (text.includes(":")) return isBlockedIpv6Groups(parseIPv6ToGroups(text) || []);
+  return true;
+}
+
 function normalizeHost(hostname) {
   // A trailing dot marks an FQDN and is semantically insignificant
   // ("localhost." and "localhost" are the same host) but was being compared

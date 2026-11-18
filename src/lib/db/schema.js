@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -970,6 +970,33 @@ export const TABLES = {
       // was suspended after the broadcast started.
       skipped: "INTEGER DEFAULT 0",
       finishedAt: "TEXT",
+    },
+  },
+  // A customer's own S3-compatible storage (S3, R2, B2, MinIO…). Generated images
+  // are uploaded here and the customer receives this storage's link, never the
+  // upstream's. One row per account; image models refuse a customer without one.
+  userStorage: {
+    columns: {
+      userId: "TEXT PRIMARY KEY",
+      provider: "TEXT NOT NULL", // s3 | r2 | b2 | spaces | minio | other (a form preset only)
+      endpoint: "TEXT NOT NULL",
+      region: "TEXT NOT NULL",
+      bucket: "TEXT NOT NULL",
+      accessKeyId: "TEXT NOT NULL",
+      // encryptSecret() ciphertext; never returned by any API.
+      secretAccessKey: "TEXT NOT NULL",
+      forcePathStyle: "INTEGER DEFAULT 1",
+      // Public base the object key is appended to (custom domain, r2.dev…);
+      // NULL = links are presigned GET URLs valid 7 days.
+      publicBaseUrl: "TEXT",
+      pathPrefix: "TEXT",
+      enabled: "INTEGER DEFAULT 1",
+      lastTestAt: "TEXT",
+      lastTestOk: "INTEGER",
+      lastError: "TEXT",
+      updatedBy: "TEXT", // "customer" or the admin actor
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
     },
   },
   // Announcements the admin publishes to every customer on /account/notifications

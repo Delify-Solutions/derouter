@@ -6,6 +6,8 @@ import { dateOf, timeOf } from "@/shared/components/billing";
 
 const ACTION_LABEL = {
   group_auto_assigned: "Tự gán nhóm",
+  storage_set: "Đặt CDN ảnh",
+  storage_removed: "Gỡ CDN ảnh",
   group_changed: "Đổi nhóm",
   status_changed: "Đổi trạng thái",
   profile_changed: "Sửa hồ sơ",

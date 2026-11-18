@@ -17,6 +17,7 @@ import GiftsTab from "./components/GiftsTab";
 import AuditTab from "./components/AuditTab";
 import IpTab from "./components/IpTab";
 import AccountActions from "./components/AccountActions";
+import StorageConfigPanel from "@/shared/components/StorageConfigPanel";
 
 // The tabs of the spec, in its order (IP: spec activity-ip-log). `?tab=<id>` selects one; an unknown value
 // falls back to the overview rather than a blank screen.
@@ -27,6 +28,7 @@ const TABS = [
   { id: "ledger", label: "Sổ cái" },
   { id: "usage", label: "Usage" },
   { id: "keys", label: "API key" },
+  { id: "storage", label: "CDN ảnh" },
   { id: "sessions", label: "Phiên đăng nhập" },
   { id: "ip", label: "IP" },
   { id: "gifts", label: "Mã quà tặng" },
@@ -179,6 +181,7 @@ export default function UserDetailClient() {
           {activeTab === "ledger" && <LedgerTab userId={id} />}
           {activeTab === "usage" && <UsageTab userId={id} />}
           {activeTab === "keys" && <KeysTab userId={id} />}
+          {activeTab === "storage" && <StorageConfigPanel apiBase={`/api/users/${id}/storage`} audience="admin" />}
           {activeTab === "sessions" && <SessionsTab userId={id} />}
           {activeTab === "ip" && <IpTab userId={id} />}
           {activeTab === "gifts" && <GiftsTab userId={id} />}
