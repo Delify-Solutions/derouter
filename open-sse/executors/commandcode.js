@@ -1,4 +1,5 @@
 import { BaseExecutor } from "./base.js";
+import { refreshCommandCodeEffortsIfStale } from "../services/commandcodeEfforts.js";
 import { PROVIDERS } from "../config/providers.js";
 import { buildCommandCodeHeaders } from "../shared/commandCodeHeaders.js";
 import { commandCodeToOpenAIResponse } from "../translator/response/commandcode-to-openai.js";
@@ -40,6 +41,8 @@ export class CommandCodeExecutor extends BaseExecutor {
   }
 
   async execute(opts) {
+    // Background refresh of the per-model effort list; this request uses what is known now.
+    void refreshCommandCodeEffortsIfStale();
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const result = await super.execute(opts);

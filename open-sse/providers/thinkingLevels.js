@@ -4,6 +4,9 @@ import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
 import { getProviderModels } from "../config/providerModels.js";
+import { getCommandCodeEfforts, COMMAND_CODE_EFFORTS } from "../services/commandcodeEfforts.js";
+
+export { COMMAND_CODE_EFFORTS };
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
 const L = {
@@ -114,7 +117,11 @@ export function getThinkingLevels(provider, model) {
   const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
   const modelLevels = provider === "codex"
     ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
-    : null;
+    : (provider === "commandcode" || provider === "cmc")
+      ? getCommandCodeEfforts(baseId) ?? null
+      : null;
+  // A catalogued Command Code model with no effort list takes no reasoning_effort at all.
+  if (Array.isArray(modelLevels) && modelLevels.length === 0) return null;
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
   );

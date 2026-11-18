@@ -14,6 +14,7 @@ register("./helpers/alias-hook.mjs", import.meta.url);
 const { translateRequest } = await import("../open-sse/translator/index.js");
 const { FORMATS } = await import("../open-sse/translator/formats.js");
 const { providerThinkingSuffix, withThinkingSuffix, clampThinkingLevel, cloneThinkingBearing } = await import("../open-sse/translator/concerns/thinkingUnified.js");
+const THINKING_LEVELS = await import("../open-sse/providers/thinkingLevels.js");
 
 test("the stored setting maps to a suffix; Auto and junk map to none", () => {
   assert.equal(providerThinkingSuffix("auto"), null);
@@ -83,7 +84,7 @@ test("Codex (Responses): the forced level beats the client's effort; Off is 'non
   assert.equal(effortOf(run(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, `${model}(none)`, OPENAI_CLI, "codex")), "none");
 });
 
-test("Command Code: the forced level replaces the client's; Off sends no effort; the model id stays clean", () => {
+test("Command Code: the forced level replaces the client's; Off sends \"off\"; the model id stays clean", () => {
   const model = "deepseek/deepseek-v4.1-flash";
   const cc = (src, m, body) => run(src, FORMATS.COMMANDCODE, m, body, "commandcode");
   const auto = cc(FORMATS.OPENAI, model, OPENAI_CLI);
@@ -98,9 +99,57 @@ test("Command Code: the forced level replaces the client's; Off sends no effort;
     }
     assert.equal(cc(src, `${model}(max)`, body).params.reasoning_effort, "max");
     assert.equal(cc(src, `${model}(low)`, body).params.reasoning_effort, "low");
+    // Off is "off" on the wire, as the official CLI sends it (omitting it lets the model think)
     const off = cc(src, `${model}(none)`, body);
-    assert.equal(off.params.reasoning_effort, undefined);
+    assert.equal(off.params.reasoning_effort, "off");
     assert.equal(off.thinking, undefined);
+  }
+});
+
+test("Command Code: each model only gets an effort its catalog entry lists", () => {
+  const cc = (m) => run(FORMATS.OPENAI, FORMATS.COMMANDCODE, m, OPENAI_CLI, "commandcode").params;
+  // deepseek-v4.1-flash lists off/low/high/max: medium and xhigh move to the nearest
+  assert.equal(cc("deepseek/deepseek-v4.1-flash(medium)").reasoning_effort, "low");
+  assert.equal(cc("deepseek/deepseek-v4.1-flash(xhigh)").reasoning_effort, "high");
+  // GLM-5.3 on Command Code cannot switch off (low/high/max): Off becomes its lowest level
+  assert.equal(cc("zai-org/GLM-5.3(none)").reasoning_effort, "low");
+  assert.equal(cc("zai-org/GLM-5.2(none)").reasoning_effort, "high");
+  // a model whose catalog has no "off": its lowest listed level, never "off"
+  assert.equal(cc("claude-sonnet-5-5(none)").reasoning_effort, "low");
+  // models that were missing from the first table, and catalog aliases
+  assert.equal(cc("meta/muse-spark-1.2(none)").reasoning_effort, "low");
+  assert.equal(cc("meta/muse-spark-1.2(max)").reasoning_effort, "xhigh", "muse-spark-1.2 lists up to xhigh");
+  assert.equal(cc("minimax/minimax-m3.1-flash:free(none)").reasoning_effort !== undefined, true);
+  // a model not in the catalog: Off says nothing, as before
+  assert.equal(cc("some/unlisted-model(none)").reasoning_effort, undefined);
+  // a catalogued model with no effort list never gets one, even when a level is forced
+  assert.equal(cc("moonshotai/Kimi-K2.6(max)").reasoning_effort, undefined);
+  assert.equal(run(FORMATS.OPENAI, FORMATS.COMMANDCODE, "moonshotai/Kimi-K2.6", OPENAI_CLI, "commandcode").params.reasoning_effort, undefined);
+});
+
+test("Command Code in Auto: a client's own value is mapped to what the model accepts", () => {
+  const send = (model, body) => run(FORMATS.OPENAI, FORMATS.COMMANDCODE, model, body, "commandcode").params;
+  // the CLI asks for medium; deepseek-v4.1-flash serves off/low/high/max
+  assert.equal(send("deepseek/deepseek-v4.1-flash", { ...OPENAI_CLI, reasoning_effort: "medium" }).reasoning_effort, "low");
+  // the CLI switches thinking off itself
+  assert.equal(send("deepseek/deepseek-v4.1-flash", { ...OPENAI_CLI, reasoning_effort: "none" }).reasoning_effort, "off");
+  // ...on a model that cannot: its lowest level
+  assert.equal(send("zai-org/GLM-5.3", { ...OPENAI_CLI, reasoning_effort: "none" }).reasoning_effort, "low");
+  // the cmc alias reads the same table
+  const { getThinkingLevels } = THINKING_LEVELS;
+  assert.deepEqual(getThinkingLevels("cmc", "deepseek/deepseek-v4.1-flash"), ["none", "low", "high", "max"]);
+  assert.deepEqual(getThinkingLevels("commandcode", "zai-org/GLM-5.2"), ["high", "max"]);
+});
+
+test("the Command Code snapshot keeps every catalogued model, with or without efforts", () => {
+  const { COMMAND_CODE_EFFORTS } = THINKING_LEVELS;
+  // every catalogued model (CLI 1.91.0 / live catalog) + aliases; an empty list means the
+  // model takes no reasoning_effort (its catalog entry has none)
+  const withEfforts = Object.values(COMMAND_CODE_EFFORTS).filter((l) => l.length > 0).length;
+  assert.ok(withEfforts >= 83, `${withEfforts} with efforts`);
+  for (const [id, levels] of Object.entries(COMMAND_CODE_EFFORTS)) {
+    assert.ok(Array.isArray(levels), id);
+    for (const l of levels) assert.ok(["none", "low", "medium", "high", "xhigh", "max"].includes(l), `${id}: ${l}`);
   }
 });
 
