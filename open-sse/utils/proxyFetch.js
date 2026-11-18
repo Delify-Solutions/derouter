@@ -44,6 +44,41 @@ async function rawFetch(url, options) {
   return undiciFetch(url, options);
 }
 
+function headersToObject(headers) {
+  if (!headers) return {};
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  if (typeof headers.entries === "function") return Object.fromEntries(headers.entries());
+  return { ...headers };
+}
+
+/**
+ * A body the npm undici above cannot send, turned into bytes it can.
+ *
+ * The global FormData is Node's built-in undici class, and the npm undici this
+ * module sends with does not recognise it (its body check is per class): it
+ * would send the string "[object FormData]" as text/plain, so every multipart
+ * upload made through the patched global fetch lost its fields and files.
+ * The global Response encodes a built-in FormData into the multipart bytes and
+ * the boundary header. Anything it cannot encode as multipart is left as it was.
+ */
+export async function encodeForeignBody(options) {
+  const body = options?.body;
+  if (!body || typeof body !== "object" || Object.prototype.toString.call(body) !== "[object FormData]") return options;
+  // The npm undici's own FormData (sttCore builds one) is sent as a stream as is:
+  // encoding it here would only hold the whole upload in memory.
+  const { FormData: UndiciFormData } = await import("undici");
+  if (body instanceof UndiciFormData) return options;
+  const encoded = new Response(body);
+  const type = encoded.headers.get("content-type") || "";
+  if (!type.startsWith("multipart/form-data")) return options;
+  const headers = headersToObject(options.headers);
+  for (const name of Object.keys(headers)) {
+    if (name.toLowerCase() === "content-type") delete headers[name];
+  }
+  headers["content-type"] = type;
+  return { ...options, headers, body: Buffer.from(await encoded.arrayBuffer()) };
+}
+
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
 // Restore the original block to re-enable per-host JA3 spoofing.
@@ -474,6 +509,8 @@ async function createBypassRequest(parsedUrl, realIP, options) {
 }
 
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
+  // Before any transport below sees it: every path ends in the npm undici.
+  options = await encodeForeignBody(options);
   // Keep the spoofed Claude Code version current (new models require a minimum CLI version).
   // Refresh in the background: the request uses the version already known, so an
   // unreachable npm registry can never add latency to the chat path.
@@ -586,6 +623,20 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
  * Patched global fetch with env-proxy support and MITM DNS bypass
  */
 async function patchedFetch(url, options = {}) {
+  // A built-in Request is as foreign to the npm undici as a built-in FormData
+  // (it would become the URL "[object Request]"): unpack it into a URL and init.
+  if (url && typeof url === "object" && Object.prototype.toString.call(url) === "[object Request]") {
+    const req = url;
+    const hasBody = req.body != null && !["GET", "HEAD"].includes(req.method);
+    return proxyAwareFetch(req.url, {
+      method: req.method,
+      headers: Object.fromEntries(req.headers.entries()),
+      body: hasBody ? Buffer.from(await req.arrayBuffer()) : undefined,
+      redirect: req.redirect,
+      signal: req.signal,
+      ...options,
+    }, null);
+  }
   return proxyAwareFetch(url, options, null);
 }
 
