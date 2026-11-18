@@ -98,10 +98,25 @@ test("Command Code: the forced level replaces the client's; Off sends no effort;
     }
     assert.equal(cc(src, `${model}(max)`, body).params.reasoning_effort, "max");
     assert.equal(cc(src, `${model}(low)`, body).params.reasoning_effort, "low");
+    // Off is "off" on the wire, as the official CLI sends it (omitting it lets the model think)
     const off = cc(src, `${model}(none)`, body);
-    assert.equal(off.params.reasoning_effort, undefined);
+    assert.equal(off.params.reasoning_effort, "off");
     assert.equal(off.thinking, undefined);
   }
+});
+
+test("Command Code: each model only gets an effort its catalog entry lists", () => {
+  const cc = (m) => run(FORMATS.OPENAI, FORMATS.COMMANDCODE, m, OPENAI_CLI, "commandcode").params;
+  // deepseek-v4.1-flash lists off/low/high/max: medium and xhigh move to the nearest
+  assert.equal(cc("deepseek/deepseek-v4.1-flash(medium)").reasoning_effort, "low");
+  assert.equal(cc("deepseek/deepseek-v4.1-flash(xhigh)").reasoning_effort, "high");
+  // GLM-5.3 on Command Code cannot switch off (low/high/max): Off becomes its lowest level
+  assert.equal(cc("zai-org/GLM-5.3(none)").reasoning_effort, "low");
+  assert.equal(cc("zai-org/GLM-5.2(none)").reasoning_effort, "high");
+  // a model whose catalog has no "off": never sent "off"
+  assert.notEqual(cc("claude-sonnet-5-5(none)").reasoning_effort, "off");
+  // a model not in the catalog: Off says nothing, as before
+  assert.equal(cc("some/unlisted-model(none)").reasoning_effort, undefined);
 });
 
 test("no target format embeds the model(level) suffix anywhere in the upstream body", () => {

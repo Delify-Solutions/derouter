@@ -3,7 +3,7 @@
 // never hardcoded per-model here. See .docs/thinking/plan.md MATRIX VI-A.
 
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
-import { getThinkingLevels } from "../../providers/thinkingLevels.js";
+import { getThinkingLevels, COMMAND_CODE_EFFORTS } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
 
@@ -491,17 +491,35 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
       // Kiro thinking handled via system-tag injection in openai-to-kiro.js; no body field here.
       break;
     case "commandcode": {
-      // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope.
+      // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope, with
+      // only the values the model's catalog entry lists; "off" is how it switches thinking off.
       if (!body.params || typeof body.params !== "object") body.params = {};
-      if (none && canDisable) {
-        delete body.params.reasoning_effort;
+      // Only a model in Command Code's own catalog has a verified effort list.
+      const known = Boolean(COMMAND_CODE_EFFORTS[stripThinkingSuffix(model)]) && Array.isArray(supportedLevels) && supportedLevels.length > 0;
+      const wire = (level) => (level === "none" ? "off" : level);
+      if (cfg.mode === "none") {
+        if (!known) {
+          // An uncatalogued model: say nothing, as before, rather than send a value it may refuse.
+          delete body.params.reasoning_effort;
+        } else if (supportedLevels.includes("none")) {
+          body.params.reasoning_effort = "off";
+        } else {
+          // The model cannot switch thinking off: its lowest level is the closest to "off".
+          const lowest = supportedLevels.filter((l) => l !== "none")
+            .sort((a, b) => (LEVEL_TO_BUDGET[a] ?? 0) - (LEVEL_TO_BUDGET[b] ?? 0))[0];
+          if (lowest) body.params.reasoning_effort = wire(lowest);
+        }
         break;
       }
       const rawLevel = toLevel(eff);
-      const level = rawLevel === "auto" ? "high"
+      let level = rawLevel === "auto" ? "high"
         : rawLevel === "minimal" ? "low"
         : rawLevel;
-      const validLevels = ["off", "low", "medium", "high", "xhigh", "max"];
+      // A level the model does not list would be refused: use the nearest one it does.
+      if (level && known && !supportedLevels.includes(level)) {
+        level = clampThinkingLevel(level, supportedLevels.filter((l) => l !== "none"));
+      }
+      const validLevels = ["low", "medium", "high", "xhigh", "max"];
       if (level && validLevels.includes(level)) {
         body.params.reasoning_effort = level;
       }

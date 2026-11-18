@@ -107,6 +107,90 @@ const OPENAI_MAX_EFFORT_MODEL = /(?:^|\/)gpt-(?:5\.6|6)(?:[.-]|$)/i;
 const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("openai-compatible-");
 
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
+// Command Code publishes the efforts each model accepts in its catalog (command-code CLI
+// 1.91.0, `reasoningEfforts`; "off" there is "none" here). The /alpha/generate endpoint takes
+// exactly those values, and "off" is how the official CLI switches thinking off. A model not
+// listed falls back to the generic commandcode set.
+export const COMMAND_CODE_EFFORTS = {
+  "MiniMaxAI/MiniMax-M3": ["low", "medium", "high"],
+  "MiniMaxAI/MiniMax-M3-Free": ["low", "medium", "high"],
+  "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
+  "Qwen/Qwen3.8-Flash": ["low", "medium", "xhigh"],
+  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
+  "Qwen/Qwen3.8-Max-0902": ["low", "medium", "xhigh"],
+  "Qwen/Qwen3.8-Max-Prime": ["low", "medium", "xhigh"],
+  "Qwen/Qwen3.8-Omni-Flash": ["low", "medium", "xhigh"],
+  "Qwen/Qwen4-Max": ["none", "low", "high", "xhigh"],
+  "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
+  "claude-fable-5-2": ["low", "medium", "high", "xhigh", "max"],
+  "claude-haiku-5-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-5-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-5-5": ["low", "medium", "high", "xhigh", "max"],
+  "deepseek/deepseek-v4-flash": ["none", "high", "max"],
+  "deepseek/deepseek-v4-flash-fast": ["low", "high", "max"],
+  "deepseek/deepseek-v4-flash-vision-exp": ["none", "high", "max"],
+  "deepseek/deepseek-v4-pro": ["none", "high", "max"],
+  "deepseek/deepseek-v4.1-flash": ["none", "low", "high", "max"],
+  "deepseek/deepseek-v4.1-flash-fast": ["none", "low", "high", "max"],
+  "deepseek/deepseek-v4.1-flash-ultrafast": ["none", "low", "high", "max"],
+  "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
+  "google/gemini-3.5-flash": ["low", "medium", "high"],
+  "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
+  "google/gemini-3.6-flash": ["low", "medium", "high"],
+  "google/gemini-3.7-flash": ["low", "medium", "high"],
+  "google/gemini-3.8-flash": ["low", "medium", "high"],
+  "google/gemini-4-argon": ["low", "medium", "high"],
+  "google/gemini-4-carbon": ["low", "medium", "high"],
+  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6-sol": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6.1-terra": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6.2-astra": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-6.2-sol": ["low", "medium", "high", "xhigh", "max"],
+  "inclusionai/ling-3.1-flash": ["low", "medium", "high"],
+  "inclusionai/ling-3.1-flash-1019": ["low", "medium", "high"],
+  "meta/muse-ember": ["low", "medium", "high", "xhigh", "max"],
+  "meta/muse-spark-1.1": ["low", "medium", "high", "xhigh"],
+  "meta/muse-spark-1.3": ["low", "medium", "high", "xhigh", "max"],
+  "meta/muse-spark-1.3-contributor": ["low", "medium", "high", "xhigh"],
+  "meta/muse-spark-open": ["low", "medium", "high"],
+  "meta/muse-wonder-1.0": ["low", "medium", "high", "xhigh"],
+  "minimax/minimax-m3-free": ["low", "medium", "high"],
+  "minimax/minimax-m3.1-flash": ["low", "medium", "high", "xhigh", "max"],
+  "mistral/mistral-large-4": ["low", "medium", "high"],
+  "moonshotai/Kimi-K3": ["low", "high", "max"],
+  "moonshotai/Kimi-K3.1-Pro": ["low", "high", "max"],
+  "nvidia/nemotron-3.5-super-vl": ["low", "medium", "high"],
+  "reflection/beam:free": ["low", "medium", "high", "xhigh", "max"],
+  "sakana/fugu-ultra": ["high", "xhigh"],
+  "stealth/crouton-alpha": ["low", "medium", "high", "xhigh", "max"],
+  "stepfun/Step-5-Preview": ["low", "medium", "high"],
+  "tencent/hy4": ["low", "medium", "high"],
+  "tencent/hy4-flash": ["none", "high"],
+  "tencent/hy4-preview": ["low", "medium", "high"],
+  "xai/grok-4.5": ["low", "medium", "high"],
+  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
+  "xai/grok-4.7": ["low", "medium", "high", "xhigh"],
+  "z-ai/glm-5.3-flash": ["low", "high", "max"],
+  "z-ai/glm-5.3-flashx": ["low", "high", "max"],
+  "zai-org/GLM-5.2": ["high", "max"],
+  "zai-org/GLM-5.3": ["low", "high", "max"],
+};
+
 export function getThinkingLevels(provider, model) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
   const caps = getCapabilitiesForModel(provider, model);
@@ -114,7 +198,9 @@ export function getThinkingLevels(provider, model) {
   const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
   const modelLevels = provider === "codex"
     ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
-    : null;
+    : (provider === "commandcode" || provider === "cmc")
+      ? COMMAND_CODE_EFFORTS[baseId] ?? null
+      : null;
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
   );
