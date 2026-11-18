@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 42;
+export const SCHEMA_VERSION = 43;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -301,6 +301,10 @@ export const TABLES = {
       // Set when Telegram refuses to deliver to this user (bot blocked, never
       // allowed to message). Sending stops until a test message or a re-link works.
       telegramDmBlockedAt: "TEXT",
+      // Admin-picked (spec image-storage "Local image storage"): 1 = this
+      // customer's generated images are kept on the router's disk and served
+      // from /api/public/images, whatever storage they connected.
+      imageStorageLocal: "INTEGER DEFAULT 0",
       // Referral attribution (spec affiliate-program "Registration records the
       // referrer"): the affiliate user id whose code brought this account in.
       // Lives on the REFERRED account, not on `affiliates`, because the referrer

@@ -44,6 +44,8 @@ const navItems = [
   { href: "/dashboard/payments", label: "Thanh toán", icon: "account_balance", badge: "needsReview" },
   { href: "/dashboard/content", label: "Nội dung", icon: "article" },
   { href: "/dashboard/announcements", label: "Thông báo", icon: "notifications" },
+  // The system image storage and every customer's (spec image-storage).
+  { href: "/dashboard/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/dashboard/telegram", label: "Telegram", icon: "campaign" },
 ];
 

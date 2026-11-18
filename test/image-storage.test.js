@@ -475,3 +475,244 @@ test("a failure before the connection is up is not charged", async () => {
   assert.equal(notConnected.storageFault, true);
 });
 
+
+// ── the system storage (admin fallback) and the admin overview ───────────────
+
+function systemStorage({ ok = true } = {}) {
+  st.saveStorageSync(db, st.SYSTEM_STORAGE_ID, st.validateStorageInput({ ...R2, bucket: "system-images" }).value, { actor: "admin" });
+  if (ok != null) st.recordStorageResultSync(db, st.SYSTEM_STORAGE_ID, { ok });
+}
+
+test("the system storage serves customers whose own storage is missing, failing or off", async () => {
+  key("ks", "cust-sys");
+  // no system storage yet: refused as before
+  assert.equal((await handler.resolveCustomerStorage("sk-ks")).error.status, 403);
+
+  // configured but its test failed: not used
+  systemStorage({ ok: false });
+  assert.equal((await handler.resolveCustomerStorage("sk-ks")).error.status, 403);
+  assert.equal(st.storageViewSync(db, "cust-sys").systemFallback, false);
+
+  systemStorage({ ok: true });
+  const viaSystem = await handler.resolveCustomerStorage("sk-ks");
+  assert.equal(viaSystem.system, true);
+  assert.equal(viaSystem.userId, st.SYSTEM_STORAGE_ID);
+  assert.equal(viaSystem.config.bucket, "system-images");
+  const view = st.storageViewSync(db, "cust-sys");
+  assert.equal(view.systemFallback, true);
+  assert.equal(view.storage, null, "the customer never sees the system storage itself");
+
+  // the customer's own working storage wins
+  st.saveStorageSync(db, "cust-sys", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "cust-sys", { ok: true });
+  const own = await handler.resolveCustomerStorage("sk-ks");
+  assert.equal(own.system, false);
+  assert.equal(own.userId, "cust-sys");
+
+  // own storage failing: back to the system one
+  st.recordStorageResultSync(db, "cust-sys", { ok: false, error: "x" });
+  assert.equal((await handler.resolveCustomerStorage("sk-ks")).system, true);
+
+  // the system storage switched off: refused with the customer's own reason
+  systemStorage({ ok: true });
+  const row = st.getStorageRowSync(db, st.SYSTEM_STORAGE_ID);
+  st.saveStorageSync(db, st.SYSTEM_STORAGE_ID, { ...st.validateStorageInput({ ...R2, bucket: "system-images" }, row).value, enabled: false }, { actor: "admin" });
+  const refused = await handler.resolveCustomerStorage("sk-ks");
+  assert.equal(refused.error.status, 403);
+  assert.match(JSON.stringify(await refused.error.json()), /Kiểm tra lại/);
+});
+
+test("a system storage failure is never charged, marks it failing and hides its reason", async () => {
+  systemStorage({ ok: true });
+  const storage = { userId: st.SYSTEM_STORAGE_ID, system: true, config: config() };
+  const upstream = () => new Response(JSON.stringify({ data: [{ url: "https://up.example/x.png" }] }), {
+    status: 200, headers: { "Content-Type": "application/json" },
+  });
+  const pending = [{ apiKey: "sk-would-be-charged" }];
+  const res = await handler.finishImage(upstream(), { storage, usage: pending, binaryOutput: false }, {
+    rehost: async () => ({ ok: false, error: "Sai Access Key ID hoặc Secret", charge: true, storageFault: true }),
+  });
+  assert.equal(res.status, 502);
+  const text = JSON.stringify(await res.json());
+  assert.match(text, /không bị tính phí/);
+  assert.ok(!text.includes("Access Key"), "the system bucket's error stays with the admin");
+  assert.ok(!text.includes("up.example"));
+  assert.equal(pending.length, 0, "dropped, not saved");
+  assert.equal(st.systemStorageConfigSync(db), null, "unusable until re-tested");
+  assert.equal(st.getStorageRowSync(db, st.SYSTEM_STORAGE_ID).lastError, "Sai Access Key ID hoặc Secret");
+});
+
+test("the admin overview lists customer storages by status, never the system one or a secret", () => {
+  const now = new Date().toISOString();
+  for (const [id, email] of [["ov-1", "a@x.test"], ["ov-2", "b@x.test"], ["ov-3", "c@x.test"]]) {
+    db.run(
+      `INSERT OR REPLACE INTO users(id, email, passwordHash, displayName, groupId, status, overdraftNanoUsd, createdAt, updatedAt)
+       VALUES(?, ?, 'h', NULL, NULL, 'active', 0, ?, ?)`,
+      [id, email, now, now]
+    );
+  }
+  st.saveStorageSync(db, "ov-1", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "ov-1", { ok: true });
+  st.saveStorageSync(db, "ov-2", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "ov-2", { ok: false, error: "Không tìm thấy bucket" });
+  systemStorage({ ok: true });
+
+  const overview = st.storageOverviewSync(db);
+  assert.deepEqual(overview.storages.map((s) => [s.userId, s.status]).sort(), [["ov-1", "ok"], ["ov-2", "failing"]]);
+  assert.equal(overview.storages.find((s) => s.userId === "ov-1").email, "a@x.test");
+  assert.equal(overview.counts.ok, 1);
+  assert.equal(overview.counts.failing, 1);
+  assert.equal(overview.counts.none, overview.customers - 2);
+  assert.equal(overview.systemActive, true);
+  assert.equal(overview.system.bucket, "system-images");
+  const text = JSON.stringify(overview);
+  assert.ok(!text.includes(R2.secretAccessKey), "no secret");
+  assert.ok(!text.includes(R2.accessKeyId), "key ids masked");
+});
+
+test("the admin is alerted once when the system storage goes down, never for a customer's", async () => {
+  const sent = [];
+  const notify = async (text) => { sent.push(text); return { ok: true }; };
+  systemStorage({ ok: true });
+  const system = { userId: st.SYSTEM_STORAGE_ID, system: true, config: config() };
+  await handler.markStorageFailing(system, "Không tìm thấy bucket", { notify });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /CDN ảnh hệ thống lỗi/);
+  await handler.markStorageFailing(system, "again", { notify });
+  assert.equal(sent.length, 1, "already failing: no second alert");
+
+  st.saveStorageSync(db, "cust-alert", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "cust-alert", { ok: true });
+  await handler.markStorageFailing({ userId: "cust-alert", system: false, config: config() }, "x", { notify });
+  assert.equal(sent.length, 1, "a customer's storage never alerts the admin");
+  assert.equal(st.getStorageRowSync(db, "cust-alert").lastTestOk, 0);
+});
+
+// ── local storage (admin-picked customers) ───────────────────────────────────
+
+test("an admin-picked customer's images go to the router's disk, ahead of any CDN", async () => {
+  const local = await import("../src/lib/storage/localImages.js");
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT OR REPLACE INTO users(id, email, passwordHash, displayName, groupId, status, overdraftNanoUsd, createdAt, updatedAt)
+     VALUES('loc-1', 'loc@x.test', 'h', NULL, NULL, 'active', 0, ?, ?)`,
+    [now, now]
+  );
+  key("kl", "loc-1");
+  st.saveStorageSync(db, "loc-1", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "loc-1", { ok: true });
+  assert.equal((await handler.resolveCustomerStorage("sk-kl", { baseUrl: "https://ai.example" })).local, false);
+
+  assert.equal(local.setLocalImageUserSync(db, "loc-1", true), true);
+  const picked = await handler.resolveCustomerStorage("sk-kl", { baseUrl: "https://ai.example" });
+  assert.equal(picked.local, true, "the admin's pick wins over the customer's own CDN");
+  assert.equal(st.storageViewSync(db, "loc-1").localStorage, true);
+  assert.equal((await handler.resolveCustomerStorage("sk-kl")).error.status, 403, "no public origin: refused, not a broken link");
+
+  // the image is written under DATA_DIR and served back by its public name
+  const out = await st.rehostImageBody({ data: [{ url: "https://up.example/x.png" }] }, picked.config, {
+    downloadImpl: async () => new Response(PNG, { status: 200 }),
+  });
+  assert.equal(out.ok, true);
+  const link = out.body.data[0].url;
+  assert.match(link, /^https:\/\/ai\.example\/api\/public\/images\/\d{8}-[0-9a-f-]{36}\.png$/);
+  const served = await local.readLocalImage(link.split("/").pop());
+  assert.deepEqual(served.bytes, PNG);
+  assert.equal(served.type, "image/png");
+  assert.ok((await local.localImagesUsage({ fresh: true })).files >= 1);
+
+  // names are ours only: no traversal, no other file under DATA_DIR
+  for (const bad of ["../storage.sqlite", "20260101-x.png", `20260101-${"0".repeat(8)}-0000-0000-0000-${"0".repeat(12)}.svg`, ""]) {
+    assert.equal(await local.readLocalImage(bad), null, bad);
+  }
+
+  const overview = st.storageOverviewSync(db);
+  assert.deepEqual(overview.localUsers.map((u) => u.email), ["loc@x.test"]);
+
+  local.setLocalImageUserSync(db, "loc-1", false);
+  assert.equal((await handler.resolveCustomerStorage("sk-kl", { baseUrl: "https://ai.example" })).local, false);
+});
+
+test("a failed write to the router's disk is free and marks no storage", async () => {
+  st.saveStorageSync(db, "loc-2", st.validateStorageInput(R2).value);
+  st.recordStorageResultSync(db, "loc-2", { ok: true });
+  const failed = await st.uploadImage({ local: true, baseUrl: "https://ai.example" }, PNG, {
+    saveLocal: () => { throw new Error("ENOSPC"); },
+  });
+  assert.deepEqual(failed, { ok: false, error: "Máy chủ không ghi được ảnh (unknown)", sent: false, storageFault: true });
+
+  const storage = { userId: "loc-2", system: false, local: true, config: { local: true, baseUrl: "https://ai.example" } };
+  const pending = [{ apiKey: "sk-would-be-charged" }];
+  const res = await handler.finishImage(
+    new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    { storage, usage: pending, binaryOutput: false },
+    { rehost: async () => ({ ok: false, error: "Máy chủ không ghi được ảnh", charge: true, storageFault: true }) },
+  );
+  assert.equal(res.status, 502);
+  assert.match(JSON.stringify(await res.json()), /không bị tính phí/);
+  assert.equal(pending.length, 0, "dropped, not saved");
+  assert.equal(st.getStorageRowSync(db, "loc-2").lastTestOk, 1, "the customer's own CDN is untouched");
+});
+
+test("local links use the configured or forwarded origin, never the server's bind address", async () => {
+  const { localImageBaseUrl } = await import("../src/lib/storage/localImages.js");
+  const req = (url, headers = {}) => new Request(url, { headers });
+  // Next hands route handlers the bind address: never usable as a link.
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/v1/images/generations"), {}), "");
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "0.0.0.0:20128" }), {}), "");
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "localhost:20128" }), {}), "");
+  assert.equal(
+    localImageBaseUrl(req("http://0.0.0.0:20128/x", { "x-forwarded-host": "ai.example", "x-forwarded-proto": "https", host: "127.0.0.1:20128" }), {}),
+    "https://ai.example"
+  );
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "AI.example" }), {}), "https://ai.example");
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "evil.example/path?x" }), {}), "", "not a host");
+  for (const internal of ["router:20128", "172.18.0.3:20128", "10.0.0.5", "[fd00::1]:20128", "192.168.1.2"]) {
+    assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: internal }), {}), "", internal);
+  }
+  assert.equal(localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "8.8.8.8:8443" }), {}), "https://8.8.8.8:8443");
+  assert.equal(
+    localImageBaseUrl(req("http://0.0.0.0:20128/x", { host: "other.example" }), { publicBaseUrl: "https://ai.delify.example/" }),
+    "https://ai.delify.example",
+    "the configured origin wins"
+  );
+});
+
+test("the router's disk is not filled: writes stop below the free-space floor", async () => {
+  const local = await import("../src/lib/storage/localImages.js");
+  assert.throws(
+    () => local.saveLocalImage(PNG, "image/png", new Date(), { freeBytes: () => local.LOCAL_IMAGE_MIN_FREE_BYTES }),
+    (e) => e.code === "LOW_DISK"
+  );
+  const failed = await st.uploadImage({ local: true, baseUrl: "https://ai.example" }, PNG, {
+    saveLocal: () => { const e = new Error("full"); e.code = "LOW_DISK"; throw e; },
+  });
+  assert.equal(failed.ok, false);
+  assert.match(failed.error, /sắp hết dung lượng.*LOW_DISK/);
+  assert.equal(failed.sent, false);
+});
+
+test("the public image route streams a stored image with safe headers and 404s anything else", async () => {
+  const local = await import("../src/lib/storage/localImages.js");
+  const { GET } = await import("../src/app/api/public/images/[name]/route.js");
+  const name = local.saveLocalImage(PNG, "image/png", new Date(), { freeBytes: () => null });
+  const res = await GET(new Request(`https://ai.example/api/public/images/${name}`), { params: Promise.resolve({ name }) });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "image/png");
+  assert.equal(res.headers.get("content-length"), String(PNG.length));
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.match(res.headers.get("content-security-policy"), /sandbox/);
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), PNG);
+  // HEAD answers from stat alone: no stream is opened that nobody would close
+  const { HEAD } = await import("../src/app/api/public/images/[name]/route.js");
+  const head = await HEAD(new Request(`https://ai.example/api/public/images/${name}`, { method: "HEAD" }), { params: Promise.resolve({ name }) });
+  assert.equal(head.status, 200);
+  assert.equal(head.body, null);
+  assert.equal(head.headers.get("content-length"), String(PNG.length));
+  assert.equal(head.headers.get("x-content-type-options"), "nosniff");
+  assert.equal((await HEAD(new Request("https://ai.example/x", { method: "HEAD" }), { params: Promise.resolve({ name: "../x" }) })).status, 404);
+  for (const bad of ["../storage.sqlite", name.replace(".png", ".svg"), name.toUpperCase()]) {
+    const miss = await GET(new Request("https://ai.example/x"), { params: Promise.resolve({ name: bad }) });
+    assert.equal(miss.status, 404, bad);
+  }
+});
