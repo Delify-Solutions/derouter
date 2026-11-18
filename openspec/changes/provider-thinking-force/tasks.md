@@ -1,0 +1,4 @@
+- [x] 1.1 `providerThinkingSuffix` / `withThinkingSuffix`; chatCore forces the level through the suffix; native passthrough applies it too
+- [x] 1.2 Providers page: Auto / Off / levels with clear labels; legacy `on` read as medium
+- [x] 1.3 `test/provider-thinking.test.js` (Claude, Codex, Command Code targets; Claude- and OpenAI-shaped clients)
+- [ ] 2.1 Try it against a live provider (Command Code) after deploy

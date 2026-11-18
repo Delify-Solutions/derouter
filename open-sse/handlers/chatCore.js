@@ -1,6 +1,7 @@
 import { detectFormat, getTargetFormat, resolveTransport } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
-import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
+import { applyThinking, extractThinking, stripThinkingSuffix, providerThinkingSuffix, withThinkingSuffix, clampThinkingLevel, cloneThinkingBearing } from "../translator/concerns/thinkingUnified.js";
+import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
@@ -147,29 +148,30 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
   if (useTransport && credentials) credentials.runtimeTransport = useTransport;
   const stripList = getModelStrip(alias, model);
 
-  // Inject provider-level thinking config override (only if client hasn't set)
-  // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
-  let thinkingOverrideInjected = false;
-  if (providerThinking?.mode && providerThinking.mode !== "auto") {
-    const mode = providerThinking.mode;
-    if (mode === "on" && !body.thinking) {
-      body = { ...body, thinking: { type: "enabled", budget_tokens: 10000 } };
-      thinkingOverrideInjected = true;
-    } else if (mode === "off" && !body.thinking) {
-      body = { ...body, thinking: { type: "disabled" } };
-      thinkingOverrideInjected = true;
-    } else if (!body.reasoning_effort) {
-      body = { ...body, reasoning_effort: mode };
-      thinkingOverrideInjected = true;
-    }
-  }
+  // The admin's per-provider Thinking setting (Providers page):
+  //   Auto      → nothing here: the client's own thinking, whatever its CLI chose, goes through;
+  //   a level   → that level for every request to this provider, whatever the client sent;
+  //   Off       → thinking switched off.
+  // It is carried as the same "model(level)" suffix a client may send, which the translator
+  // already treats as the highest-priority instruction: it drops every thinking field of the
+  // client's body and writes the one the target provider understands (also in strict
+  // same-format mode, see translator/index.js). The suffix is stripped before the upstream call.
+  // A level the model does not serve is moved to the nearest one it does (it would be a 400 on
+  // every request); the suffix is applied BEFORE the upstream id is resolved, so a tiered id
+  // (antigravity gemini-4-*) follows the forced level exactly like a level the client sent.
+  const baseUpstreamModel = getModelUpstreamId(alias, model, body);
+  const requestedThinking = providerThinkingSuffix(providerThinking);
+  const forcedThinking = clampThinkingLevel(requestedThinking, getThinkingLevels(provider, stripThinkingSuffix(baseUpstreamModel)));
+  const thinkingOverrideInjected = forcedThinking != null;
 
-  const upstreamModel = getModelUpstreamId(alias, model, body);
+  const upstreamModel = forcedThinking ? getModelUpstreamId(alias, withThinkingSuffix(model, forcedThinking), body) : baseUpstreamModel;
+  // Without the suffix: what the upstream, the compressors and the response mask know it by.
+  const cleanUpstreamModel = stripThinkingSuffix(upstreamModel);
   // Ids that name this upstream model, for the customer response mask (spec
   // model-privacy): set by the chat handler, absent for internal callers.
   const usedIds = clientRawRequest?.upstreamModels;
   if (usedIds && typeof usedIds.add === "function") {
-    for (const id of [upstreamModel, model, `${provider}/${model}`, `${alias}/${model}`]) {
+    for (const id of [upstreamModel, cleanUpstreamModel, model, `${provider}/${model}`, `${alias}/${model}`]) {
       if (typeof id === "string" && id) usedIds.add(id);
     }
   }
@@ -238,9 +240,8 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
   // Translators and executors read the same switch (max_tokens policy, identity prompt, generic
   // param stripping, reasoning injection). It means "legacy shaping runs", see `legacy` above.
   if (credentials) credentials.compatNormalization = legacy;
-  // The admin's per-provider thinking override wrote a Claude-style `thinking` or an OpenAI-style
-  // `reasoning_effort` into the body; translateRequest must map it to the target's native field
-  // even in strict mode, exactly like a model(level) suffix.
+  // A forced provider thinking level travels as the model(level) suffix; the flag below only
+  // tells translateRequest that the strict same-format shortcut must not skip it.
   if (credentials) credentials._thinkingOverride = thinkingOverrideInjected;
 
   if (!passthrough) {
@@ -280,6 +281,13 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
         };
         delete translatedBody.reasoning_effort;
       }
+    }
+    // A forced provider setting must also reach a native client whose body is forwarded as is
+    // (Claude Code -> claude): codex is handled above, every other provider here.
+    if (forcedThinking && provider !== "codex") {
+      // Copies first: the Gemini envelopes keep thinking fields in objects shared with `body`.
+      translatedBody = cloneThinkingBearing(translatedBody);
+      applyThinking(sourceFormat, upstreamModel, translatedBody, provider);
     }
     // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API
     // rejects. This reshapes the client's messages (folds system turns, drops thinking blocks with
@@ -361,7 +369,7 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
 
   // Headroom: optional external proxy compression; fail open if proxy is absent.
   const headroomDiagnostics = {};
-  const headroomStats = await compressWithHeadroom(translatedBody, { enabled: tokenSaverEnabled && headroomEnabled, url: headroomUrl, model: upstreamModel, format: finalFormat, compressUserMessages: headroomCompressUserMessages, timeoutMs: headroomTimeoutMs, diagnostics: headroomDiagnostics });
+  const headroomStats = await compressWithHeadroom(translatedBody, { enabled: tokenSaverEnabled && headroomEnabled, url: headroomUrl, model: cleanUpstreamModel, format: finalFormat, compressUserMessages: headroomCompressUserMessages, timeoutMs: headroomTimeoutMs, diagnostics: headroomDiagnostics });
   const headroomLine = formatHeadroomLog(headroomStats);
   const headroomSizeLine = formatHeadroomSizeLog(headroomDiagnostics);
   if (headroomLine) {
@@ -397,7 +405,7 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
   let pxpipeSummary = null;
   if (pxpipeEnabled) {
     const pxpipeResult = await compressWithPxpipe(translatedBody, {
-      enabled: true, format: finalFormat, model: upstreamModel,
+      enabled: true, format: finalFormat, model: cleanUpstreamModel,
       minChars: pxpipeMinChars, timeoutMs: pxpipeTimeoutMs, transform: pxpipeTransform,
     });
     pxpipeSummary = pxpipeResult.summary;
