@@ -464,6 +464,88 @@ export function anchorClaudeCache(body) {
   return body;
 }
 
+// The admin's per-provider Cache setting (Providers page): "auto" or the default ("default",
+// also for anything unknown). Default leaves caching exactly as before.
+export function providerCacheMode(setting) {
+  const raw = String(setting?.mode ?? setting ?? "").trim().toLowerCase();
+  return raw === "auto" ? "auto" : "default";
+}
+
+// Does the request carry a cache hint ANYWHERE? System, tools, message blocks and blocks nested
+// inside a tool_result. Any one is enough: the client knows its prompt better than a heuristic.
+function hasAnyCacheMarker(body) {
+  const blockHas = (b) => {
+    if (!b || typeof b !== "object") return false;
+    if (b.cache_control) return true;
+    return Array.isArray(b.content) && b.content.some(blockHas);
+  };
+  if (Array.isArray(body?.system) && body.system.some(blockHas)) return true;
+  if (Array.isArray(body?.tools) && body.tools.some(blockHas)) return true;
+  if (Array.isArray(body?.messages)) {
+    for (const m of body.messages) {
+      if (!m || typeof m !== "object") continue;
+      if (blockHas(m)) return true;
+      if (Array.isArray(m.content) && m.content.some(blockHas)) return true;
+      if (m.content && typeof m.content === "object" && !Array.isArray(m.content) && m.content.cache_control) return true;
+    }
+  }
+  return false;
+}
+
+// Cache "auto": make sure a request that is going to a Claude-format upstream can be cached.
+// A CLI that sends no cache_control anywhere gets none cached by the upstream, so the
+// breakpoints are added here with the same policy as the re-anchoring above (last system block
+// and last tool at 1h, the last assistant turn, or the last message on a first turn, at 5m).
+// A request that already carries any marker is returned as it is: the client knows its prompt
+// better than a heuristic does.
+//
+// COPY-ON-WRITE: the body (its system, tools, messages and their blocks) is shared with the
+// client's original request and with the next account/combo attempt of the same request, so
+// nothing in it is edited. The result is a new body, and doing it again on the same input
+// gives the same result — a retry on another account ships the same breakpoints as the first
+// attempt did.
+//
+// A string `system` and non-empty string message contents become one text block each, because a
+// breakpoint can only sit on a block; empty strings and empty text blocks stay unmarked (the
+// upstream rejects a marker on empty text).
+//
+// @returns {{ body: object, added: boolean }}
+export function ensureClaudeCache(body) {
+  if (!body || typeof body !== "object" || hasAnyCacheMarker(body)) return { body, added: false };
+  if (Array.isArray(body.messages) && body.messages.some((m) => !m || typeof m !== "object")) {
+    return { body, added: false }; // not a shape to reason about: leave it to the upstream
+  }
+
+  const cloneBlock = (b) => (b && typeof b === "object" && !Array.isArray(b) ? { ...b } : b);
+  const out = { ...body };
+  if (typeof body.system === "string") {
+    out.system = body.system.trim() ? [{ type: CLAUDE_BLOCK.TEXT, text: body.system }] : body.system;
+  } else if (Array.isArray(body.system)) {
+    out.system = body.system.map(cloneBlock);
+  }
+  if (Array.isArray(body.tools)) out.tools = body.tools.map(cloneBlock);
+  if (Array.isArray(body.messages)) {
+    out.messages = body.messages.map((m) => {
+      if (typeof m.content === "string") {
+        return m.content.trim() ? { ...m, content: [{ type: CLAUDE_BLOCK.TEXT, text: m.content }] } : m;
+      }
+      if (Array.isArray(m.content)) return { ...m, content: m.content.map(cloneBlock) };
+      return { ...m };
+    });
+  }
+
+  anchorClaudeCache(out);
+
+  // A marker on an empty text block would be rejected upstream.
+  const unmarkEmptyText = (b) => {
+    if (b && b.type === CLAUDE_BLOCK.TEXT && b.cache_control && !String(b.text ?? "").trim()) delete b.cache_control;
+  };
+  if (Array.isArray(out.system)) out.system.forEach(unmarkEmptyText);
+  if (Array.isArray(out.messages)) for (const m of out.messages) if (Array.isArray(m.content)) m.content.forEach(unmarkEmptyText);
+
+  return hasAnyCacheMarker(out) ? { body: out, added: true } : { body, added: false };
+}
+
 // Prepare request for Claude format endpoints
 // - Cleanup cache_control
 // - Filter empty messages

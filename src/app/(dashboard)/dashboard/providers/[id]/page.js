@@ -9,6 +9,7 @@ import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthW
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { PROVIDERS as ENGINE_PROVIDERS } from "open-sse/providers/index.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
@@ -67,6 +68,8 @@ export default function ProviderDetailPage() {
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
+  // Cache: "default" (as before) or "auto" (add cache breakpoints when the request has none).
+  const [cacheMode, setCacheMode] = useState("default");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -324,6 +327,7 @@ export default function ProviderDetailPage() {
       const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
       // "on" is an older stored value; the server reads it as medium, so does the picker.
       setThinkingMode(thinkingCfg.mode === "on" ? "medium" : (thinkingCfg.mode || "auto"));
+      setCacheMode(((settingsData.providerCache || {})[providerId] || {}).mode === "auto" ? "auto" : "default");
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
@@ -438,6 +442,37 @@ export default function ProviderDetailPage() {
     setThinkingMode(mode);
     saveThinkingConfig(mode);
   };
+
+  const saveCacheConfig = async (mode) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const updated = { ...(settingsData.providerCache || {}) };
+      if (mode === "auto") updated[providerId] = { mode: "auto" };
+      else delete updated[providerId];
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerCache: updated }),
+      });
+    } catch (error) {
+      console.error("Error saving cache config:", error);
+    }
+  };
+
+  const handleCacheModeChange = (mode) => {
+    setCacheMode(mode);
+    saveCacheConfig(mode);
+  };
+
+  // The Cache setting only acts on requests sent in the Claude/Anthropic format (the only format
+  // where the client has to mark what may be cached), so only those providers show it.
+  const speaksClaudeFormat = isAnthropicCompatibleProvider(providerId) || (() => {
+    const transport = ENGINE_PROVIDERS[providerId];
+    if (!transport) return false;
+    return transport.format === "claude"
+      || Object.values(transport.transports || {}).some((t) => (t?.format ?? t) === "claude");
+  })();
 
   const saveAutoPing = async (next) => {
     const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
@@ -1692,6 +1727,18 @@ export default function ProviderDetailPage() {
                       : `Thinking: ${opt.charAt(0).toUpperCase() + opt.slice(1)} (ép mức)`}
                   </option>
                 ))}
+              </select>
+            )}
+            {speaksClaudeFormat && (
+              <select
+                value={cacheMode}
+                onChange={(e) => handleCacheModeChange(e.target.value)}
+                aria-label="Cache của provider"
+                title="Mặc định: giữ cách xử lý cache như trước. Auto: nếu request chưa có cache_control ở đâu cả (CLI không gửi) thì chèn điểm cache (system và tool cuối 1 giờ, cuối hội thoại 5 phút); nếu CLI đã gửi thì giữ nguyên. Tác dụng rõ nhất với node tương thích Anthropic tự thêm; provider có sẵn (MiniMax, GLM, Kimi…) vốn đã được router tự chèn điểm cache."
+                className="rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
+              >
+                <option value="default">Cache: Mặc định</option>
+                <option value="auto">Cache: Auto (chèn nếu thiếu)</option>
               </select>
             )}
           </div>

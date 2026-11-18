@@ -3,7 +3,7 @@ import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix, providerThinkingSuffix, withThinkingSuffix, clampThinkingLevel, cloneThinkingBearing } from "../translator/concerns/thinkingUnified.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { FORMATS } from "../translator/formats.js";
-import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
+import { normalizeClaudePassthrough, anchorClaudeCache, ensureClaudeCache, providerCacheMode } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { getTrace, noteUpstreamBody, reportStreamError, bodyText } from "../utils/errorTrace.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -80,7 +80,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, requestSignal = null, compatNormalization = false, cacheEstimation = false, providerOverrides }) {
+async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerCache, requestSignal = null, compatNormalization = false, cacheEstimation = false, providerOverrides }) {
   const { provider, model } = modelInfo;
   // Strict transparency (spec proxy-transparency) applies to CUSTOM NODES only: the operator
   // pointed those at an arbitrary upstream and the router knows none of its quirks. A built-in
@@ -420,6 +420,17 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.
   // Rewrites the client's own cache breakpoints, so it follows the same rule as the shaping above.
   if (passthrough && clientTool === "claude" && nativeClaudeShaping) anchorClaudeCache(translatedBody);
+  // Cache "auto" (Providers page): a request for a Claude-format upstream that carries no cache
+  // breakpoint at all gets them added; one that already has any is left alone. After every step
+  // above for the same reason as the anchor: it must see the final body.
+  if (finalFormat === FORMATS.CLAUDE && providerCacheMode(providerCache) === "auto") {
+    // A new body, never an edit: the shared one belongs to the client and to the next attempt.
+    const cached = ensureClaudeCache(translatedBody);
+    if (cached.added) {
+      translatedBody = cached.body;
+      log?.debug?.("CACHE", `auto: added cache breakpoints for ${provider}/${model}`);
+    }
+  }
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
