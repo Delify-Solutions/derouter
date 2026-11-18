@@ -3,7 +3,8 @@
 // never hardcoded per-model here. See .docs/thinking/plan.md MATRIX VI-A.
 
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
-import { getThinkingLevels, COMMAND_CODE_EFFORTS } from "../../providers/thinkingLevels.js";
+import { getThinkingLevels } from "../../providers/thinkingLevels.js";
+import { getCommandCodeEfforts } from "../../services/commandcodeEfforts.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
 
@@ -495,7 +496,12 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
       // only the values the model's catalog entry lists; "off" is how it switches thinking off.
       if (!body.params || typeof body.params !== "object") body.params = {};
       // Only a model in Command Code's own catalog has a verified effort list.
-      const catalogued = COMMAND_CODE_EFFORTS[model];
+      const catalogued = getCommandCodeEfforts(model);
+      // In the catalog without an effort list: the model takes no reasoning_effort at all.
+      if (Array.isArray(catalogued) && catalogued.length === 0) {
+        delete body.params.reasoning_effort;
+        break;
+      }
       const known = Array.isArray(catalogued) && catalogued.length > 0;
       if (cfg.mode === "none") {
         if (!known) {

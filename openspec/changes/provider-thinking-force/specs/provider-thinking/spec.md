@@ -21,3 +21,14 @@ When a provider publishes the thinking levels each model accepts (Command Code's
 #### Scenario: Command Code deepseek-v4.1-flash
 - **WHEN** a request asks for medium, or for no thinking, on a model that lists off/low/high/max
 - **THEN** the upstream receives low, or "off"
+
+### Requirement: Command Code's effort lists come from its live catalog
+The router SHALL take the efforts each Command Code model accepts from Command Code's public model catalog, read in the background at most every `refreshAfterSeconds` (bounded to 1 minute – 24 hours) and never blocking a request, and SHALL fall back to a bundled snapshot of that catalog when the live one is not available or does not list the model. A model whose catalog entry has no effort list SHALL never receive `reasoning_effort`, even when a level is forced or the client sends one.
+
+#### Scenario: A model added by Command Code
+- **WHEN** the live catalog lists a model the snapshot does not know
+- **THEN** its efforts are used from the next background refresh on, without a code change
+
+#### Scenario: A model without effort setting
+- **WHEN** a level is forced for `moonshotai/Kimi-K2.6` (catalog efforts: none)
+- **THEN** the upstream request carries no `reasoning_effort`

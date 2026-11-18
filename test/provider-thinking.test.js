@@ -122,6 +122,9 @@ test("Command Code: each model only gets an effort its catalog entry lists", () 
   assert.equal(cc("minimax/minimax-m3.1-flash:free(none)").reasoning_effort !== undefined, true);
   // a model not in the catalog: Off says nothing, as before
   assert.equal(cc("some/unlisted-model(none)").reasoning_effort, undefined);
+  // a catalogued model with no effort list never gets one, even when a level is forced
+  assert.equal(cc("moonshotai/Kimi-K2.6(max)").reasoning_effort, undefined);
+  assert.equal(run(FORMATS.OPENAI, FORMATS.COMMANDCODE, "moonshotai/Kimi-K2.6", OPENAI_CLI, "commandcode").params.reasoning_effort, undefined);
 });
 
 test("Command Code in Auto: a client's own value is mapped to what the model accepts", () => {
@@ -138,12 +141,14 @@ test("Command Code in Auto: a client's own value is mapped to what the model acc
   assert.deepEqual(getThinkingLevels("commandcode", "zai-org/GLM-5.2"), ["high", "max"]);
 });
 
-test("the Command Code table keeps the catalog's every entry with an effort list", () => {
+test("the Command Code snapshot keeps every catalogued model, with or without efforts", () => {
   const { COMMAND_CODE_EFFORTS } = THINKING_LEVELS;
-  // 83 catalogued models with efforts + their aliases (CLI 1.91.0 / live catalog)
-  assert.ok(Object.keys(COMMAND_CODE_EFFORTS).length >= 83);
+  // every catalogued model (CLI 1.91.0 / live catalog) + aliases; an empty list means the
+  // model takes no reasoning_effort (its catalog entry has none)
+  const withEfforts = Object.values(COMMAND_CODE_EFFORTS).filter((l) => l.length > 0).length;
+  assert.ok(withEfforts >= 83, `${withEfforts} with efforts`);
   for (const [id, levels] of Object.entries(COMMAND_CODE_EFFORTS)) {
-    assert.ok(levels.length > 0, id);
+    assert.ok(Array.isArray(levels), id);
     for (const l of levels) assert.ok(["none", "low", "medium", "high", "xhigh", "max"].includes(l), `${id}: ${l}`);
   }
 });

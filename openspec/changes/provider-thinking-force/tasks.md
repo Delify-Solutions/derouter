@@ -2,3 +2,4 @@
 - [x] 1.2 Providers page: Auto / Off / levels with clear labels; legacy `on` read as medium
 - [x] 1.3 `test/provider-thinking.test.js` (Claude, Codex, Command Code targets; Claude- and OpenAI-shaped clients)
 - [ ] 2.1 Try it against a live provider (Command Code) after deploy
+- [x] 3.1 Command Code: Off sends "off"; per-model effort lists (snapshot + live catalog, background refresh); models without an effort list never get one; Providers page shows the suffix the router forces

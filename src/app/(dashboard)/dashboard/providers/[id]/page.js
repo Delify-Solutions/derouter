@@ -9,6 +9,7 @@ import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthW
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { clampThinkingLevel, providerThinkingSuffix } from "open-sse/translator/concerns/thinkingUnified.js";
 import { PROVIDERS as ENGINE_PROVIDERS } from "open-sse/providers/index.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
@@ -169,12 +170,15 @@ export default function ProviderDetailPage() {
     : providerId === "qoder" ? "PAT"
     : "API Key";
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
+  // The suffix shown (and copied) next to a model is exactly what the router forces for it:
+  // the same mapping chatCore uses — Auto adds nothing, Off is "(none)", "On" is medium, and a
+  // level the model does not list moves to the nearest listed one. What "(none)" becomes on a
+  // model that cannot switch off is then decided by the provider's own format, as for a client.
+  // The page reads the bundled effort snapshot; the server may know a newer live catalog.
   const resolveThinkingSuffix = (modelId) => {
-    if (!thinkingMode || thinkingMode === "auto") return null;
     const levels = getThinkingLevels(providerId, modelId);
-    // "Off" is spelled "none" in a model suffix, and only where the model can be switched off.
-    const wanted = thinkingMode === "off" ? "none" : thinkingMode;
-    return levels && levels.includes(wanted) ? wanted : null;
+    if (!levels || levels.length === 0) return null;
+    return clampThinkingLevel(providerThinkingSuffix({ mode: thinkingMode }), levels.filter((l) => l !== "none")) || null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   // Union of levels across this provider's reasoning models — drives the level picker options.
