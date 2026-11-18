@@ -4,10 +4,6 @@ import Link from "next/link";
 import PropTypes from "prop-types";
 import { fmtUsd } from "./salesData";
 
-const DOCS_URL = "https://github.com/Delify-Solutions/derouter#readme";
-const REPO_URL = "https://github.com/Delify-Solutions/derouter";
-const LICENSE_URL = "https://github.com/Delify-Solutions/derouter/blob/main/LICENSE";
-
 const COLUMNS = [
   {
     title: "Gói",
@@ -31,9 +27,6 @@ const COLUMNS = [
     title: "Tài liệu",
     links: [
       { href: "/docs", label: "Hướng dẫn sử dụng" },
-      { href: DOCS_URL, label: "README", external: true },
-      { href: REPO_URL, label: "Mã nguồn", external: true },
-      { href: LICENSE_URL, label: "Giấy phép MIT", external: true },
     ],
   },
 ];
@@ -94,15 +87,6 @@ export default function Footer({ modelCount, plans = [], channelUrl = "" }) {
           <p className="font-mono text-xs text-text-subtle">
             © {new Date().getFullYear()} derouter
           </p>
-          <a
-            href={REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 font-mono text-xs text-text-subtle transition-colors duration-150 hover:text-text-main"
-          >
-            <span className="material-symbols-outlined text-[14px]">code</span>
-            Delify-Solutions/derouter
-          </a>
         </div>
       </div>
     </footer>
@@ -112,4 +96,5 @@ export default function Footer({ modelCount, plans = [], channelUrl = "" }) {
 Footer.propTypes = {
   plans: PropTypes.array,
   modelCount: PropTypes.number.isRequired,
+  channelUrl: PropTypes.string,
 };
