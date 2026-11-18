@@ -106,11 +106,11 @@ const PATTERN_THINKING = [
 const OPENAI_MAX_EFFORT_MODEL = /(?:^|\/)gpt-(?:5\.6|6)(?:[.-]|$)/i;
 const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("openai-compatible-");
 
-// Returns valid thinking levels for a model, or null when the model has no reasoning.
-// Command Code publishes the efforts each model accepts in its catalog (command-code CLI
-// 1.91.0, `reasoningEfforts`; "off" there is "none" here). The /alpha/generate endpoint takes
-// exactly those values, and "off" is how the official CLI switches thinking off. A model not
-// listed falls back to the generic commandcode set.
+// Command Code publishes the efforts each model accepts in its catalog (`reasoningEfforts`,
+// identical in the command-code CLI 1.91.0 bundle and in GET
+// api.commandcode.ai/provider/v1/models?view=client; "off" there is "none" here). Every
+// catalogued model with an effort list is here, hidden ones and aliases included. A model
+// not listed falls back to the generic commandcode set, and Off then sends nothing.
 export const COMMAND_CODE_EFFORTS = {
   "MiniMaxAI/MiniMax-M3": ["low", "medium", "high"],
   "MiniMaxAI/MiniMax-M3-Free": ["low", "medium", "high"],
@@ -125,10 +125,14 @@ export const COMMAND_CODE_EFFORTS = {
   "claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
   "claude-fable-5-2": ["low", "medium", "high", "xhigh", "max"],
   "claude-haiku-5-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-5-20251101": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-6": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-5-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-4-20250514": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-4-5-20250929": ["low", "medium", "high", "xhigh", "max"],
   "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
   "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
   "claude-sonnet-5-5": ["low", "medium", "high", "xhigh", "max"],
@@ -163,14 +167,20 @@ export const COMMAND_CODE_EFFORTS = {
   "gpt-6.2-sol": ["low", "medium", "high", "xhigh", "max"],
   "inclusionai/ling-3.1-flash": ["low", "medium", "high"],
   "inclusionai/ling-3.1-flash-1019": ["low", "medium", "high"],
+  "inclusionai/ling-3.1-flash-1019:free": ["low", "medium", "high"],
   "meta/muse-ember": ["low", "medium", "high", "xhigh", "max"],
   "meta/muse-spark-1.1": ["low", "medium", "high", "xhigh"],
+  "meta/muse-spark-1.2": ["low", "medium", "high", "xhigh"],
+  "meta/muse-spark-1.2-contributor": ["low", "medium", "high", "xhigh"],
   "meta/muse-spark-1.3": ["low", "medium", "high", "xhigh", "max"],
   "meta/muse-spark-1.3-contributor": ["low", "medium", "high", "xhigh"],
   "meta/muse-spark-open": ["low", "medium", "high"],
   "meta/muse-wonder-1.0": ["low", "medium", "high", "xhigh"],
   "minimax/minimax-m3-free": ["low", "medium", "high"],
   "minimax/minimax-m3.1-flash": ["low", "medium", "high", "xhigh", "max"],
+  "minimax/minimax-m3.1-flash-preview": ["low", "medium", "high", "xhigh", "max"],
+  "minimax/minimax-m3.1-flash-preview:free": ["low", "medium", "high", "xhigh", "max"],
+  "minimax/minimax-m3.1-flash:free": ["low", "medium", "high", "xhigh", "max"],
   "mistral/mistral-large-4": ["low", "medium", "high"],
   "moonshotai/Kimi-K3": ["low", "high", "max"],
   "moonshotai/Kimi-K3.1-Pro": ["low", "high", "max"],
@@ -178,10 +188,12 @@ export const COMMAND_CODE_EFFORTS = {
   "reflection/beam:free": ["low", "medium", "high", "xhigh", "max"],
   "sakana/fugu-ultra": ["high", "xhigh"],
   "stealth/crouton-alpha": ["low", "medium", "high", "xhigh", "max"],
+  "stealth/glyph-cluster:free": ["low", "medium", "high", "xhigh"],
   "stepfun/Step-5-Preview": ["low", "medium", "high"],
   "tencent/hy4": ["low", "medium", "high"],
   "tencent/hy4-flash": ["none", "high"],
   "tencent/hy4-preview": ["low", "medium", "high"],
+  "thinkingmachines/inkling-2-small:free": ["low", "medium", "high", "max"],
   "xai/grok-4.5": ["low", "medium", "high"],
   "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
   "xai/grok-4.7": ["low", "medium", "high", "xhigh"],
@@ -191,6 +203,7 @@ export const COMMAND_CODE_EFFORTS = {
   "zai-org/GLM-5.3": ["low", "high", "max"],
 };
 
+// Returns valid thinking levels for a model, or null when the model has no reasoning.
 export function getThinkingLevels(provider, model) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
   const caps = getCapabilitiesForModel(provider, model);

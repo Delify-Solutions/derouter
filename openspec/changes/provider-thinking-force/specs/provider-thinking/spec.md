@@ -14,3 +14,10 @@ The admin SHALL be able to set each provider's Thinking to Auto, to one of the l
 #### Scenario: Off
 - **GIVEN** provider Thinking is Off and a client asks for high
 - **THEN** the upstream request has thinking disabled, or the provider's lowest allowed level where it cannot be disabled
+
+### Requirement: A level the provider's model does not accept is mapped, not sent as is
+When a provider publishes the thinking levels each model accepts (Command Code's catalog), the router SHALL send only a listed level: a requested or forced level that is not listed moves to the nearest listed one, and Off is sent as the provider's own "off" value when the model lists it, or as the model's lowest listed level when it cannot switch thinking off. This applies in Auto too, because a value the model does not accept would be refused.
+
+#### Scenario: Command Code deepseek-v4.1-flash
+- **WHEN** a request asks for medium, or for no thinking, on a model that lists off/low/high/max
+- **THEN** the upstream receives low, or "off"

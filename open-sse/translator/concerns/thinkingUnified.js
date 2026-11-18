@@ -495,19 +495,19 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
       // only the values the model's catalog entry lists; "off" is how it switches thinking off.
       if (!body.params || typeof body.params !== "object") body.params = {};
       // Only a model in Command Code's own catalog has a verified effort list.
-      const known = Boolean(COMMAND_CODE_EFFORTS[stripThinkingSuffix(model)]) && Array.isArray(supportedLevels) && supportedLevels.length > 0;
-      const wire = (level) => (level === "none" ? "off" : level);
+      const catalogued = COMMAND_CODE_EFFORTS[model];
+      const known = Array.isArray(catalogued) && catalogued.length > 0;
       if (cfg.mode === "none") {
         if (!known) {
           // An uncatalogued model: say nothing, as before, rather than send a value it may refuse.
           delete body.params.reasoning_effort;
-        } else if (supportedLevels.includes("none")) {
+        } else if (catalogued.includes("none")) {
           body.params.reasoning_effort = "off";
         } else {
           // The model cannot switch thinking off: its lowest level is the closest to "off".
-          const lowest = supportedLevels.filter((l) => l !== "none")
+          const lowest = catalogued.filter((l) => l !== "none")
             .sort((a, b) => (LEVEL_TO_BUDGET[a] ?? 0) - (LEVEL_TO_BUDGET[b] ?? 0))[0];
-          if (lowest) body.params.reasoning_effort = wire(lowest);
+          if (lowest) body.params.reasoning_effort = lowest;
         }
         break;
       }
@@ -516,8 +516,8 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
         : rawLevel === "minimal" ? "low"
         : rawLevel;
       // A level the model does not list would be refused: use the nearest one it does.
-      if (level && known && !supportedLevels.includes(level)) {
-        level = clampThinkingLevel(level, supportedLevels.filter((l) => l !== "none"));
+      if (level && known && !catalogued.includes(level)) {
+        level = clampThinkingLevel(level, catalogued.filter((l) => l !== "none"));
       }
       const validLevels = ["low", "medium", "high", "xhigh", "max"];
       if (level && validLevels.includes(level)) {
