@@ -39,12 +39,15 @@ export const DEEPAI_MACHINE_HEADER = "X-DeepAI-Code-Machine";
 
 // Local test routing is an explicit process opt-in and only ever a loopback origin,
 // never a server- or request-provided URL (same rule as the desktop app's local mode).
-export function deepaiModelBase() {
+export function deepaiApiOrigin() {
   const override = process.env.DEEPAI_LOCAL_TEST_ORIGIN;
-  const origin = override && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(override)
+  return override && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(override)
     ? override
     : DEEPAI_API_ORIGIN;
-  return `${origin}/deepai_code`;
+}
+
+export function deepaiModelBase() {
+  return `${deepaiApiOrigin()}/deepai_code`;
 }
 
 // A check-in the server refused or never answered is not retried for a while, so an
@@ -190,18 +193,29 @@ async function requestTheos(apiKey, previousNonce, proxyOptions) {
  * the caller.
  */
 export async function ensureDeepAICheckIn(apiKey, proxyOptions = null, log = null) {
+  return runCheckIn(apiKey, proxyOptions, log, false);
+}
+
+// Every /theos call for an account goes through here, one at a time (the desktop app holds a
+// lock around /theos): two concurrent calls would present the same nonce, and the one that
+// answers last could leave a nonce the server no longer honours. `force` skips the
+// half-lifetime gate (the quota page wants a fresh balance), never the in-flight request.
+async function runCheckIn(apiKey, proxyOptions, log, force) {
   if (!apiKey) return;
   const key = deepaiAccountKey(apiKey);
   const entry = checkIns.get(key);
-  if (entry?.pending) return entry.pending;
   const now = Date.now();
+  // A chat request whose nonce is still fresh never waits, not even on a quota read in flight.
+  if (!force && entry && now - entry.at < (entry.seconds * 1000) / 2) return;
+  if (entry?.pending) return entry.pending;
   if (entry?.retryAt && now < entry.retryAt) return;
-  if (entry && now - entry.at < (entry.seconds * 1000) / 2) return;
 
   const pending = (async () => {
     let renewed = false;
+    let allowance = null;
     try {
       const result = await requestTheos(apiKey, entry?.nonce || null, proxyOptions);
+      if (result.ok && result.body && typeof result.body === "object") allowance = result.body;
       const next = readCheckIn(result.body);
       if (next) {
         checkIns.set(key, { ...next, at: Date.now() });
@@ -217,6 +231,11 @@ export async function ensureDeepAICheckIn(apiKey, proxyOptions = null, log = nul
         delete latest.pending;
         // A failed renewal keeps the previous nonce until its own lifetime ends.
         if (!renewed) latest.retryAt = Date.now() + CHECK_IN_FAILURE_BACKOFF_MS;
+        // The same answer carries the allowance the quota page shows.
+        if (allowance) {
+          latest.allowance = allowance;
+          latest.allowanceAt = Date.now();
+        }
       }
     }
   })();
@@ -224,13 +243,51 @@ export async function ensureDeepAICheckIn(apiKey, proxyOptions = null, log = nul
   return pending;
 }
 
-/** Account allowance from /theos (balance, daily grant), or null. For the usage panel. */
+// A balance read this recently (by a chat check-in or the quota page) is shown as is.
+const ALLOWANCE_FRESH_MS = 30_000;
+
+/**
+ * Account allowance from /theos (balance, daily grant), or null. For the usage panel. Shares
+ * the check-in's single in-flight /theos call instead of sending a second one.
+ */
 export async function fetchDeepAIAllowance(apiKey, proxyOptions = null) {
+  if (!apiKey) return null;
+  const key = deepaiAccountKey(apiKey);
+  const fresh = (e) => e?.allowance && Date.now() - e.allowanceAt < ALLOWANCE_FRESH_MS;
+  const entry = checkIns.get(key);
+  if (!entry?.pending && fresh(entry)) return entry.allowance;
+  const startedAt = Date.now();
   try {
-    const result = await requestTheos(apiKey, currentCheckInNonce(apiKey), proxyOptions);
-    const next = readCheckIn(result.body);
-    if (next) checkIns.set(deepaiAccountKey(apiKey), { ...next, at: Date.now() });
-    return result.ok ? result.body : null;
+    await runCheckIn(apiKey, proxyOptions, null, true);
+  } catch {
+    return null;
+  }
+  // Only an answer read now (or within the freshness window) is shown: after a failed read or
+  // during the retry backoff an older balance would pass for the current one.
+  const latest = checkIns.get(key);
+  return latest?.allowance && (latest.allowanceAt >= startedAt || fresh(latest)) ? latest.allowance : null;
+}
+
+/**
+ * The account's plan from GET https://api.deepai.org/get_usage_summary (the entitlement call
+ * the desktop app makes on each account status refresh): true = DeepAI Pro, false = free,
+ * null = unknown (call failed).
+ */
+export async function fetchDeepAIIsPro(apiKey, proxyOptions = null) {
+  if (!apiKey) return null;
+  try {
+    // The app sends this one call to the API origin, not under /deepai_code
+    // (app v0.3.40 requestDeepAIJson: "/get_usage_summary" → `${DEEPAI_API_ORIGIN}${path}`).
+    const response = await proxyAwareFetch(`${deepaiApiOrigin()}/get_usage_summary`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json", ...deepaiLaneHeaders(apiKey), "api-key": apiKey },
+      redirect: "error",
+      signal: AbortSignal.timeout(CHECK_IN_TIMEOUT_MS),
+    }, proxyOptions);
+    if (!response.ok) return null;
+    const body = await response.json().catch(() => null);
+    if (!body || body.is_authenticated !== true || typeof body.is_pro !== "boolean" || body.error) return null;
+    return body.is_pro;
   } catch {
     return null;
   }
@@ -241,6 +298,17 @@ export async function fetchDeepAIAllowance(apiKey, proxyOptions = null) {
 /** @type {Map<string, { models: object[], at: number }>} */
 const models = new Map();
 const MODELS_TTL_MS = 5 * 60 * 1000;
+
+const THEOS_AMOUNT = /^\d+(?:\.\d+)?$/;
+function isTheosAmount(value) {
+  return typeof value === "string" && THEOS_AMOUNT.test(value.trim());
+}
+
+/** Whether a catalog entry spends Theos: true / false, or null when the catalog gives no price. */
+export function isDeepAIModelMetered(model) {
+  if (!model || !isTheosAmount(model.theosPerRequest)) return model?.premier === true ? true : null;
+  return /[1-9]/.test(model.theosPerRequest);
+}
 
 export function normalizeDeepAIModels(payload) {
   const list = payload?.models;
@@ -255,18 +323,22 @@ export function normalizeDeepAIModels(payload) {
       name: typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0, 100) : item.id,
       ...(Number(item.contextWindow) > 0 ? { contextLength: Number(item.contextWindow) } : {}),
       ...(Number(item.maxTokens) > 0 ? { maxOutputTokens: Number(item.maxTokens) } : {}),
+      // Account-owned pricing (app v0.3.40 modelRates.ts): Theos per request, "0" = free;
+      // `premier` marks a premium model (usable with DeepAI Pro or an enabled Theos allowance).
+      ...(isTheosAmount(item.theosPerRequest) ? { theosPerRequest: item.theosPerRequest.trim() } : {}),
+      ...(typeof item.premier === "boolean" ? { premier: item.premier } : {}),
     });
   }
   return out;
 }
 
 /** Live catalog for an account; falls back to the static list when unreachable. */
-export async function resolveDeepAIModels(credentials, { proxyOptions = null } = {}) {
+export async function resolveDeepAIModels(credentials, { proxyOptions = null, forceRefresh = false } = {}) {
   const apiKey = credentials?.apiKey || credentials?.accessToken;
   if (!apiKey) return { models: DEEPAI_STATIC_MODELS, source: "static" };
   const key = deepaiAccountKey(apiKey);
   const cached = models.get(key);
-  if (cached && Date.now() - cached.at < MODELS_TTL_MS) return { models: cached.models, source: "cache" };
+  if (!forceRefresh && cached && Date.now() - cached.at < MODELS_TTL_MS) return { models: cached.models, source: "cache" };
   try {
     const response = await proxyAwareFetch(`${deepaiModelBase()}/models`, {
       method: "GET",

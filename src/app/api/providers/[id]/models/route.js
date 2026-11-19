@@ -273,8 +273,11 @@ const PROVIDER_MODELS_CONFIG = {
     }
   },
   deepai: {
-    customResolver: async (connection) => {
-      const result = await resolveDeepAIModels({ accessToken: connection.accessToken, apiKey: connection.apiKey });
+    customResolver: async (connection, { forceRefresh = false } = {}) => {
+      const result = await resolveDeepAIModels(
+        { accessToken: connection.accessToken, apiKey: connection.apiKey },
+        { forceRefresh },
+      );
       return result.source === "live"
         ? { models: result.models }
         : { models: result.models, warning: "DeepAI returned no live models; falling back to the bundled catalog." };
@@ -531,7 +534,9 @@ export async function GET(request, { params }) {
 
     // Config-driven custom resolver path (OAuth refresh, non-OpenAI shape, etc.)
     if (typeof config.customResolver === "function") {
-      const result = await config.customResolver(connection);
+      // ?refresh=1 (the "Tải model mới nhất" button) skips a resolver's own short cache.
+      const forceRefresh = new URL(request.url).searchParams.get("refresh") === "1";
+      const result = await config.customResolver(connection, { forceRefresh });
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: result.status || 500 });
       }
