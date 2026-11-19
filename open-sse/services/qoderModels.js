@@ -33,7 +33,7 @@ import {
   qoderRegionOf,
   qoderJobTokenExchangeUrl,
   qoderUserInfoUrl,
-  qoderInferenceBase,
+  withQoderGateway,
   QODER_STATIC_MODEL_CONFIGS,
 } from "../shared/qoder/constants.js";
 
@@ -197,20 +197,7 @@ function cosyCredsFromConnection(credentials) {
   };
 }
 
-/**
- * Fetch the live model list for this credential. Returns:
- *   { models: [{ id, name, contextLength, isVL, isReasoning, ... }, ...],
- *     rawConfigs: Map<modelKey, modelConfigObject> }
- * or `null` on any error.
- */
-async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, region = "intl") {
-  const creds = cosyCredsFromConnection(credentials);
-  if (!creds.userId || !creds.authToken) return null;
-
-  // Intl job-token traffic is rejected by api3 ("Login expired" 403) — the
-  // official qodercli serves it from api2 instead; CN uses the single gateway.
-  const modelListUrl = `${qoderInferenceBase(credentials, region)}/algo/api/v2/model/list`;
-
+async function fetchModelList(modelListUrl, creds, signal, proxyOptions) {
   const headers = {
     Accept: "application/json",
     "Accept-Encoding": "identity",
@@ -220,7 +207,6 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, re
   const controller = new AbortController();
   let timer = null;
   let abortListener = null;
-  let response;
   try {
     timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
     if (signal && typeof signal.addEventListener === "function") {
@@ -234,7 +220,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, re
         signal.addEventListener("abort", abortListener);
       }
     }
-    response = await proxyAwareFetch(
+    return await proxyAwareFetch(
       modelListUrl,
       {
         method: "GET",
@@ -247,6 +233,24 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, re
     if (timer) clearTimeout(timer);
     if (signal && abortListener) signal.removeEventListener("abort", abortListener);
   }
+}
+
+/**
+ * Fetch the live model list for this credential. Returns:
+ *   { models: [{ id, name, contextLength, isVL, isReasoning, ... }, ...],
+ *     rawConfigs: Map<modelKey, modelConfigObject> }
+ * or `null` on any error.
+ */
+async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, region = "intl") {
+  const creds = cosyCredsFromConnection(credentials);
+  if (!creds.userId || !creds.authToken) return null;
+
+  // Gateways healthiest first (job tokens: api2 only; CN: the single gateway). A gateway that
+  // cannot be reached on a direct connection is skipped for the next one.
+  const { result: response } = await withQoderGateway(
+    { credentials, region, proxyOptions, signal },
+    (base) => fetchModelList(`${base}/algo/api/v2/model/list`, creds, signal, proxyOptions),
+  );
 
   if (!response.ok) return null;
 
