@@ -8,7 +8,7 @@ import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveDeepAIModels } from "open-sse/services/deepaiClient.js";
-import { resolveQoderModels } from "open-sse/services/qoderModels.js";
+import { resolveQoderModels, qoderDashboardModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
@@ -342,8 +342,11 @@ const PROVIDER_MODELS_CONFIG = {
     }
   },
   qoder: {
-    customResolver: async (connection) => {
+    // The page load reads the 1 h catalog cache the executor shares; "Tải model mới nhất"
+    // (?refresh=1) forces a new upstream read and logs the scenes ("model catalog: …").
+    customResolver: async (connection, { forceRefresh = false } = {}) => {
       const credentials = {
+        provider: connection.provider,
         accessToken: connection.accessToken,
         apiKey: connection.apiKey,
         refreshToken: connection.refreshToken,
@@ -353,23 +356,8 @@ const PROVIDER_MODELS_CONFIG = {
       };
       let warning;
       try {
-        // log: the scenes the server published land in the server log ("model catalog: …").
-        const result = await resolveQoderModels(credentials, { forceRefresh: true, log: console });
-        if (result?.models?.length) {
-          return {
-            models: result.models.map((m) => ({
-              // Use the canonical "qoder/<key>" id so the dashboard
-              // surfaces the same identifier the chat router expects.
-              id: `qoder/${m.id}`,
-              name: m.name,
-              contextLength: m.contextLength,
-              isVL: m.isVL,
-              isReasoning: m.isReasoning,
-              maxOutputTokens: m.maxOutputTokens,
-              description: m.description,
-            })),
-          };
-        }
+        const result = await resolveQoderModels(credentials, { forceRefresh, log: console });
+        if (result?.models?.length) return { models: qoderDashboardModels(result) };
         warning = "Qoder returned no models; falling back to static catalog.";
       } catch (error) {
         warning = `Failed to fetch Qoder models: ${error.message}`;

@@ -437,6 +437,35 @@ export function seedQoderCatalogForTests(credentials, body) {
   return true;
 }
 
+/**
+ * The provider page's Qoder list: the live catalog first (Qoder's own names and limits), then
+ * the static Sonus/Cantus fallbacks the chat router also accepts, then entries the catalog marks
+ * enable:false. Ids carry the "qoder/" prefix the dashboard and the import button expect.
+ */
+export function qoderDashboardModels(catalog) {
+  if (!catalog) return [];
+  const byKey = new Map((catalog.models || []).map((m) => [m.id, m]));
+  const routable = routableQoderModels(catalog);
+  const order = (r) => (byKey.has(r.id) ? 0 : r.hidden ? 2 : 1);
+  return routable
+    .map((r, index) => ({ r, index }))
+    .sort((a, b) => order(a.r) - order(b.r) || a.index - b.index)
+    .map(({ r }) => {
+      const m = byKey.get(r.id);
+      return {
+        id: `qoder/${r.id}`,
+        name: r.name,
+        ...(m ? {
+          contextLength: m.contextLength,
+          isVL: m.isVL,
+          isReasoning: m.isReasoning,
+          maxOutputTokens: m.maxOutputTokens,
+          description: m.description,
+        } : {}),
+      };
+    });
+}
+
 export function invalidateQoderCatalog(credentials) {
   if (!credentials) return;
   catalogCache.delete(cacheKey(credentials));
