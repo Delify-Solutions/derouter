@@ -353,7 +353,8 @@ const PROVIDER_MODELS_CONFIG = {
       };
       let warning;
       try {
-        const result = await resolveQoderModels(credentials, { forceRefresh: true });
+        // log: the scenes the server published land in the server log ("model catalog: …").
+        const result = await resolveQoderModels(credentials, { forceRefresh: true, log: console });
         if (result?.models?.length) {
           return {
             models: result.models.map((m) => ({
