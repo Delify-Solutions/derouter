@@ -118,23 +118,113 @@ export const QODER_CONTEXT_TIER_HEADROOM = 0.15;
 export const QODER_CONTEXT_TIER_ENV = "QODER_CONTEXT_TIER";
 export const QODER_CONTEXT_TIER_MODES = Object.freeze({ AUTO: "auto", MAX: "max", DEFAULT: "default" });
 
-/**
- * Job-token (jt-...) traffic must hit api2.qoder.sh — api3 rejects jt- with
- * "Login expired" (403). Device tokens (dt-...) stay on api3. PATs (pt-...)
- * are exchanged for jt- before this is consulted.
- */
-export function qoderInferenceBase(credentials, region = QODER_REGION_INTL) {
-  // CN serves every token kind from the single gateway host.
-  if (region === QODER_REGION_CN) return QODER_REGION_BASES[QODER_REGION_CN].chat;
+// Intl inference gateways for device tokens (browser sign-in). The Qoder app 0.5.14 knows
+// us = api1, sg = api2 (its default) and jp = api3 as "gateway" endpoints and fails over among
+// the gateways it is given. api3 is the router's long-standing default; api2 is the app's own
+// default for signed-in users. api1 is left out: nothing shows it accepts device tokens, and a
+// 401 there would read as a broken account.
+const QODER_INTL_GATEWAYS = ["https://api3.qoder.sh", "https://api2.qoder.sh"];
+// A gateway that could not be reached is tried last for this long, like the app's failedOrigins.
+export const QODER_GATEWAY_FAILED_MS = 5 * 60 * 1000;
+const failedGateways = new Map(); // origin -> failed until (ms)
+
+function isJobToken(credentials) {
   const raw = credentials?.apiKey || credentials?.accessToken;
-  if (
-    typeof raw === "string" &&
+  return typeof raw === "string" &&
     !raw.startsWith("pt-") &&
-    (raw.startsWith("jt-") || (credentials?.accessToken || "").startsWith("jt-"))
-  ) {
-    return QODER_CHAT_BASE_ALT;
+    (raw.startsWith("jt-") || (credentials?.accessToken || "").startsWith("jt-"));
+}
+
+/**
+ * Every inference gateway this credential may use, healthiest first.
+ *   - CN: the single gateway.
+ *   - Job tokens (jt-...): api2 only. api3 rejects jt- with "Login expired" (403), and api1 is
+ *     not known to accept it. PATs (pt-...) are exchanged for jt- before this is consulted.
+ *   - Device tokens (dt-..., browser sign-in): api3, then api2. A gateway marked unreachable
+ *     in the last QODER_GATEWAY_FAILED_MS moves to the end.
+ */
+export function qoderInferenceBases(credentials, region = QODER_REGION_INTL, now = Date.now()) {
+  if (region === QODER_REGION_CN) return [QODER_REGION_BASES[QODER_REGION_CN].chat];
+  if (isJobToken(credentials)) return [QODER_CHAT_BASE_ALT];
+  const healthy = [];
+  const failed = [];
+  for (const base of QODER_INTL_GATEWAYS) {
+    const until = failedGateways.get(base);
+    if (until && until > now) failed.push(base);
+    else healthy.push(base);
   }
-  return QODER_CHAT_BASE;
+  return [...healthy, ...failed.sort((a, b) => failedGateways.get(a) - failedGateways.get(b))];
+}
+
+/** The gateway to use now for this credential (see qoderInferenceBases). */
+export function qoderInferenceBase(credentials, region = QODER_REGION_INTL) {
+  return qoderInferenceBases(credentials, region)[0];
+}
+
+/** Remember that `base` could not be reached, so requests prefer another gateway for a while. */
+export function markQoderGatewayFailed(base, now = Date.now()) {
+  if (QODER_INTL_GATEWAYS.includes(base)) failedGateways.set(base, now + QODER_GATEWAY_FAILED_MS);
+}
+
+export function resetQoderGatewaysForTests() {
+  failedGateways.clear();
+}
+
+// Errors raised before a connection exists: the request never reached Qoder, so sending it to
+// another gateway cannot run it twice. A timeout after connecting is NOT one of these (the
+// executor's own headers timer aborts long before a kernel-level EHOSTUNREACH on an open socket).
+const CONNECT_ERROR_CODES = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EAI_FAIL",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+]);
+
+/** True when `error` or its cause chain carries a connect-phase error code. */
+export function isQoderConnectError(error) {
+  for (let e = error, depth = 0; e && depth < 5; e = e.cause, depth += 1) {
+    if (CONNECT_ERROR_CODES.has(e.code)) return true;
+  }
+  return false;
+}
+
+const PROXY_ENV_KEYS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
+
+/**
+ * Failover only on a direct connection. Through a relay or a proxy a connect error is about
+ * the relay/proxy, not the gateway: moving on would wait on the same dead hop again and mark
+ * healthy gateways as failed for every account (the Qoder app likewise skips failover when a
+ * route is a proxy).
+ */
+export function qoderGatewayFailoverAllowed(proxyOptions) {
+  if (proxyOptions?.vercelRelayUrl) return false;
+  if (proxyOptions?.connectionProxyEnabled === true && proxyOptions?.connectionProxyUrl) return false;
+  return !PROXY_ENV_KEYS.some((key) => typeof process.env[key] === "string" && process.env[key].trim());
+}
+
+/**
+ * Run `attempt(base)` on the credential's gateways, healthiest first, moving to the next one
+ * only after a connect-phase failure on a direct connection. Every gateway that failed that way
+ * is marked. Returns { result, base } for the gateway that answered; rethrows anything else.
+ */
+export async function withQoderGateway({ credentials, region = QODER_REGION_INTL, proxyOptions = null, signal = null, log = null }, attempt) {
+  const bases = qoderInferenceBases(credentials, region);
+  const failover = qoderGatewayFailoverAllowed(proxyOptions);
+  for (let i = 0; i < bases.length; i += 1) {
+    try {
+      return { result: await attempt(bases[i]), base: bases[i] };
+    } catch (error) {
+      if (!failover || signal?.aborted || !isQoderConnectError(error)) throw error;
+      markQoderGatewayFailed(bases[i]);
+      if (i === bases.length - 1) throw error;
+      const code = error?.cause?.code || error?.code || "connect error";
+      log?.warn?.("QODER", `${new URL(bases[i]).host} unreachable (${code}), trying ${new URL(bases[i + 1]).host}`);
+    }
+  }
+  throw new Error("qoder: no gateway");
 }
 
 // COSY header constants. These are not arbitrary — the upstream signature

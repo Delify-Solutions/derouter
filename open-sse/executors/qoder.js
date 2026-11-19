@@ -34,6 +34,7 @@ import {
   QODER_CONTEXT_TIER_ENV,
   getQoderStaticModelConfig,
   qoderInferenceBase,
+  withQoderGateway,
 } from "../shared/qoder/constants.js";
 import { getQoderModelConfig, resolveQoderModels, isQoderPat, resolveQoderCredentials } from "../services/qoderModels.js";
 import { OPENAI_BLOCK, CLAUDE_BLOCK } from "../translator/schema/blocks.js";
@@ -649,10 +650,12 @@ export class QoderExecutor extends BaseExecutor {
   constructor(provider = "qoder") {
     super(provider, PROVIDERS[provider]);
     this.region = provider === "qoder-cn" ? "cn" : "intl";
+    // Tests replace the transport (proxyAwareFetch signature); production leaves it null.
+    this.fetchImpl = null;
   }
 
-  buildUrl(credentials) {
-    return `${qoderInferenceBase(credentials, this.region)}/algo${QODER_CHAT_SIG_PATH}?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
+  buildUrl(credentials, base = qoderInferenceBase(credentials, this.region)) {
+    return `${base}/algo${QODER_CHAT_SIG_PATH}?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
   }
 
   // Override execute entirely — Qoder needs:
@@ -760,7 +763,24 @@ export class QoderExecutor extends BaseExecutor {
      * signature — reusing one reuses its requestId and upstream answers
      * 403/code 103.
      */
+    // The gateway that took this request's first send. Queue replays and status polls stay on
+    // it: Qoder's queue may be per gateway, and a replay elsewhere could leave the queued entry
+    // behind.
+    let pinnedBase = null;
+
     const sendOnce = async (attemptPayload) => {
+      if (pinnedBase) return sendTo(attemptPayload, this.buildUrl(credentials, pinnedBase));
+      // Gateways healthiest first; a connect-phase failure on a direct connection (the request
+      // never reached Qoder) moves on to the next gateway with a fresh signature for its URL.
+      const { result, base } = await withQoderGateway(
+        { credentials, region: this.region, proxyOptions, signal, log },
+        (b) => sendTo(attemptPayload, this.buildUrl(credentials, b)),
+      );
+      pinnedBase = base;
+      return result;
+    };
+
+    const sendTo = async (attemptPayload, url) => {
       const attemptPlain = Buffer.from(JSON.stringify(attemptPayload), "utf8");
       const attemptEncoded = Buffer.from(qoderEncodeBody(attemptPlain), "latin1");
 
@@ -800,7 +820,7 @@ export class QoderExecutor extends BaseExecutor {
 
       let response;
       try {
-        response = await proxyAwareFetch(
+        response = await (this.fetchImpl || proxyAwareFetch)(
           url,
           { method: "POST", headers: attemptHeadersFull, body: attemptEncoded, signal: mergedSignal },
           // A failed proxy request may already have reached Qoder. Replaying
@@ -825,7 +845,7 @@ export class QoderExecutor extends BaseExecutor {
      * replays" (endpoint missing, erroring, or answering an unknown shape).
      */
     const fetchQueueStatus = async (modelKey, queueType, requestSetId, requestId, sessionId) => {
-      const statusUrl = qoderQueueStatusUrl(qoderInferenceBase(credentials, this.region), {
+      const statusUrl = qoderQueueStatusUrl(pinnedBase || qoderInferenceBase(credentials, this.region), {
         requestSetId,
         modelKey,
         queueType,

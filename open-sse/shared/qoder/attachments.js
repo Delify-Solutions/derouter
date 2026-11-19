@@ -24,7 +24,8 @@ import {
   QODER_IMAGE_UPLOAD_SIG_PATH,
   QODER_INLINE_FALLBACK_MAX_BYTES,
   QODER_MAX_PAYLOAD_BYTES,
-  qoderInferenceBase,
+  qoderRegionOf,
+  withQoderGateway,
 } from "./constants.js";
 
 const IMAGE_MIME_RE = /^image\//i;
@@ -83,32 +84,34 @@ function extractUrlFromUploadResponse(json) {
 }
 
 async function defaultUploadImage({ buffer, mediaType, credentials, proxyOptions, signal }) {
-  const requestId = uuidv4();
-  const url = `${qoderInferenceBase(credentials)}${`/algo${QODER_IMAGE_UPLOAD_SIG_PATH}`}?request_id=${requestId}`;
   const { boundary, body } = buildMultipartFile(buffer, {
     fileName: `image.${mimeExt(mediaType)}`,
     mediaType: mediaType || "application/octet-stream",
   });
   const psd = credentials?.providerSpecificData || {};
-  const cosyHeaders = buildCosyHeaders(body, url, {
-    userId: psd.userId,
-    authToken: credentials.accessToken,
-    name: credentials.displayName || "",
-    email: credentials.email || "",
-    machineId: connectionMachineId(credentials),
-  });
-  const headers = {
-    ...cosyHeaders,
-    Accept: "application/json",
-    "Content-Type": `multipart/form-data; boundary=${boundary}`,
-    "Content-Length": String(body.length),
-    "AI-CLIENT-TIMESTAMP": String(Math.floor(Date.now() / 1000)),
-    "Accept-Encoding": "identity",
-  };
-  const res = await proxyAwareFetch(
-    url,
-    { method: "PUT", headers, body, signal },
-    proxyOptions,
+  // Same gateway choice and failover as chat (the region follows the connection's provider);
+  // each gateway gets its own signed URL and request id.
+  const { result: res } = await withQoderGateway(
+    { credentials, region: qoderRegionOf(credentials?.provider), proxyOptions, signal },
+    (base) => {
+      const url = `${base}/algo${QODER_IMAGE_UPLOAD_SIG_PATH}?request_id=${uuidv4()}`;
+      const cosyHeaders = buildCosyHeaders(body, url, {
+        userId: psd.userId,
+        authToken: credentials.accessToken,
+        name: credentials.displayName || "",
+        email: credentials.email || "",
+        machineId: connectionMachineId(credentials),
+      });
+      const headers = {
+        ...cosyHeaders,
+        Accept: "application/json",
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": String(body.length),
+        "AI-CLIENT-TIMESTAMP": String(Math.floor(Date.now() / 1000)),
+        "Accept-Encoding": "identity",
+      };
+      return proxyAwareFetch(url, { method: "PUT", headers, body, signal }, proxyOptions);
+    },
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
