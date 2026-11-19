@@ -2,7 +2,8 @@
  * Qoder model catalog fetcher.
  *
  * Calls /algo/api/v2/model/list (COSY-signed) on the inference host to get
- * the live catalog for an authenticated Qoder account, then caches the
+ * the live catalog for an authenticated Qoder account (the `chat` and
+ * `assistant` scenes, see parseQoderCatalog), then caches the
  * per-model `model_config` blocks by key. Chat requests later look up the
  * exact server-published metadata for the model they want — Qoder's chat
  * endpoint silently downgrades to a different model when the wrong
@@ -250,32 +251,62 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, re
   if (!response.ok) return null;
 
   const body = await response.json().catch(() => null);
-  if (!body || !Array.isArray(body.chat)) return null;
+  return parseQoderCatalog(body);
+}
+
+// Catalog scenes the chat endpoint serves, in priority order. The IDE reads `chat`; the Qoder
+// app and CLI (agent SDK 0.5.x) read `assistant`, its default scene, and newer models such as
+// DeepSeek and GLM are published there only. `quest`, `service_account`, `byok_enterprise`
+// and `external_models` belong to other products or account kinds and are not read.
+const QODER_CHAT_SCENES = ["chat", "assistant"];
+
+/**
+ * The /algo/api/v2/model/list body → { models, rawConfigs, scenes } (null when it holds no
+ * chat scene). A key present in several scenes keeps the first scene's entry. `scenes` lists
+ * the model keys of every array-valued key, so the log shows what the server published.
+ */
+export function parseQoderCatalog(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  // The keys each scene publishes (capped), so the log shows where a model lives — chat,
+  // assistant, or external_models (which needs outerProviders and is not read here).
+  const scenes = {};
+  for (const [name, value] of Object.entries(body)) {
+    if (!Array.isArray(value)) continue;
+    const keys = value
+      .map((entry) => (entry && typeof entry === "object" ? entry.key ?? entry.model_key : null))
+      .filter((key) => typeof key === "string" && key);
+    scenes[name] = keys.length > 60 ? [...keys.slice(0, 60), `…+${keys.length - 60}`] : keys;
+  }
+  if (!QODER_CHAT_SCENES.some((scene) => Array.isArray(body[scene]))) return null;
 
   const models = [];
   const rawConfigs = new Map();
-  for (const entry of body.chat) {
-    if (!entry || typeof entry !== "object") continue;
-    const key = entry.key;
-    if (!key) continue;
+  for (const scene of QODER_CHAT_SCENES) {
+    const list = body[scene];
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      const key = entry.key;
+      if (!key || rawConfigs.has(key)) continue;
 
-    // enable:false 的模型仍可在 IDE 使用，保留其配置并展示上游名称。
-    rawConfigs.set(key, entry);
+      // enable:false 的模型仍可在 IDE 使用，保留其配置并展示上游名称。
+      rawConfigs.set(key, entry);
 
-    const display = entry.display_name || key;
-    const ctx = Number(entry.max_input_tokens) || 131_072;
-    models.push({
-      id: key,
-      name: `${display}`,
-      contextLength: ctx,
-      isVL: !!entry.is_vl,
-      isReasoning: !!entry.is_reasoning,
-      maxOutputTokens: Number(entry.max_output_tokens) || 0,
-      description: entry.description || "",
-    });
+      const display = entry.display_name || key;
+      const ctx = Number(entry.max_input_tokens) || 131_072;
+      models.push({
+        id: key,
+        name: `${display}`,
+        contextLength: ctx,
+        isVL: !!entry.is_vl,
+        isReasoning: !!entry.is_reasoning,
+        maxOutputTokens: Number(entry.max_output_tokens) || 0,
+        description: entry.description || "",
+      });
+    }
   }
 
-  return { models, rawConfigs };
+  return { models, rawConfigs, scenes };
 }
 
 /**
@@ -333,6 +364,9 @@ export async function resolveQoderModels(credentials, options = {}) {
   const fetchPromise = (async () => {
     const fetched = await fetchQoderCatalogRaw(resolved, options.signal, options.proxyOptions, region);
     if (!fetched) return null;
+    if (options.forceRefresh) {
+      options.log?.info?.("QODER", `model catalog: ${fetched.models.length} models; scenes ${JSON.stringify(fetched.scenes || {})}`);
+    }
     const entry = {
       expiresAt: Date.now() + CACHE_TTL_MS,
       models: fetched.models,
@@ -393,6 +427,14 @@ export function routableQoderModels(catalog) {
     out.push({ id: key, name: cfg?.display_name || key, hidden: true });
   }
   return out;
+}
+
+/** Tests only: install a catalog body for a credential without a network call. */
+export function seedQoderCatalogForTests(credentials, body) {
+  const parsed = parseQoderCatalog(body);
+  if (!parsed) return false;
+  catalogCache.set(cacheKey(credentials), { expiresAt: Date.now() + CACHE_TTL_MS, ...parsed, fetched: true });
+  return true;
 }
 
 export function invalidateQoderCatalog(credentials) {
