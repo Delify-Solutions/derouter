@@ -19,7 +19,7 @@ import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { parseDataUri } from "../../translator/concerns/image.js";
 import { OPENAI_BLOCK, CLAUDE_BLOCK } from "../../translator/schema/blocks.js";
 import { MAX_IMAGE_BYTES } from "../../config/mediaConfig.js";
-import { buildCosyHeaders } from "./cosy.js";
+import { buildCosyHeaders, connectionMachineId } from "./cosy.js";
 import {
   QODER_IMAGE_UPLOAD_SIG_PATH,
   QODER_INLINE_FALLBACK_MAX_BYTES,
@@ -95,7 +95,7 @@ async function defaultUploadImage({ buffer, mediaType, credentials, proxyOptions
     authToken: credentials.accessToken,
     name: credentials.displayName || "",
     email: credentials.email || "",
-    machineId: psd.machineId || "",
+    machineId: connectionMachineId(credentials),
   });
   const headers = {
     ...cosyHeaders,

@@ -38,7 +38,7 @@ import {
 import { getQoderModelConfig, resolveQoderModels, isQoderPat, resolveQoderCredentials } from "../services/qoderModels.js";
 import { OPENAI_BLOCK, CLAUDE_BLOCK } from "../translator/schema/blocks.js";
 import { encodeDataUri } from "../translator/concerns/image.js";
-import { buildCosyHeaders, deriveMachineId } from "../shared/qoder/cosy.js";
+import { buildCosyHeaders, connectionMachineId } from "../shared/qoder/cosy.js";
 import {
   computeQoderQueueDelayMs,
   isQoderQueuedBody,
@@ -725,10 +725,10 @@ export class QoderExecutor extends BaseExecutor {
           authToken: credentials.accessToken,
           name: credentials.displayName || "",
           email: credentials.email || "",
-          // PAT connections store no machine id. A random uuid per request
-          // makes each call look like a brand-new device, and a new device
-          // rejoins the back of the model queue. Derive a stable one instead.
-          machineId: psd.machineId || deriveMachineId(psd.userId),
+          // One stable device identity per connection, shared by every Qoder
+          // call this credential makes. A random uuid made each request look
+          // like a new device and let two accounts collide on one identity.
+          machineId: connectionMachineId(credentials),
         },
       );
     } catch (err) {
@@ -771,7 +771,7 @@ export class QoderExecutor extends BaseExecutor {
           authToken: credentials.accessToken,
           name: credentials.displayName || "",
           email: credentials.email || "",
-          machineId: psd.machineId || deriveMachineId(psd.userId),
+          machineId: connectionMachineId(credentials),
         });
       } catch (err) {
         const fakeResp = new Response(
@@ -846,7 +846,7 @@ export class QoderExecutor extends BaseExecutor {
                 authToken: credentials.accessToken,
                 name: credentials.displayName || "",
                 email: credentials.email || "",
-                machineId: psd.machineId || deriveMachineId(psd.userId),
+                machineId: connectionMachineId(credentials),
               }),
             },
             signal,

@@ -26,7 +26,7 @@
 import { createHash } from "crypto";
 
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { buildCosyHeaders } from "../shared/qoder/cosy.js";
+import { buildCosyHeaders, connectionMachineId } from "../shared/qoder/cosy.js";
 import {
   QODER_IDE_VERSION,
   QODER_CLIENT_TYPE,
@@ -165,7 +165,7 @@ export async function resolveQoderCredentials(credentials, proxyOptions = null, 
         authMethod: "pat",
         ...(credentials?.providerSpecificData || {}),
         userId: resolved.userId || credentials?.providerSpecificData?.userId || "",
-        machineId: credentials?.providerSpecificData?.machineId || "",
+        machineId: connectionMachineId(credentials),
       },
     };
   }
@@ -193,7 +193,7 @@ function cosyCredsFromConnection(credentials) {
     authToken: credentials.accessToken,
     name: credentials.displayName || "",
     email: credentials.email || "",
-    machineId: psd.machineId || "",
+    machineId: connectionMachineId(credentials),
   };
 }
 

@@ -124,6 +124,51 @@ export function deriveMachineId(seed) {
 }
 
 /**
+ * The machine id one credential signs with, always stable.
+ *
+ * A credential has exactly one device identity: chat, model-list, image upload
+ * and queue polling must all present the same value, or the upstream treats
+ * them as different devices (queue state, session context and any device-scoped
+ * accounting then land on the wrong one). A stored `machineId` wins; otherwise
+ * it is derived from the parts of the credential that never rotate, never from
+ * a random uuid, so a second account on the same router gets a different but
+ * equally stable id. Tokens are last: a job token is re-exchanged every 24h and
+ * must not move the device identity with it.
+ *
+ * @param {{ machineId?: string, userId?: string, authToken?: string, refreshToken?: string, connectionId?: string, seed?: string }} creds
+ */
+export function resolveMachineId(creds = {}) {
+  if (creds.machineId) return creds.machineId;
+  if (creds.seed) return deriveMachineId(creds.seed);
+  if (creds.connectionId) return deriveMachineId(`connection\0${creds.connectionId}`);
+  if (creds.userId) return deriveMachineId(`user\0${creds.userId}`);
+  const token = creds.refreshToken || creds.authToken;
+  // Nothing identifies the caller: a shared constant would make every such
+  // request the same device, so fall back to a fresh id instead.
+  return token ? deriveMachineId(`token\0${token}`) : generateMachineId();
+}
+
+/**
+ * Machine id for a stored provider connection.
+ *
+ * Every Qoder call site (chat, model list, image upload, queue poll) must sign
+ * with this one value. Falling back to a random uuid made each request look
+ * like a new device, and two accounts could not be told apart.
+ *
+ * @param {object} credentials connection record as auth.js hands it over
+ */
+export function connectionMachineId(credentials = {}) {
+  const psd = credentials?.providerSpecificData || {};
+  return resolveMachineId({
+    machineId: psd.machineId || "",
+    userId: psd.userId || "",
+    connectionId: credentials?.connectionId || "",
+    refreshToken: credentials?.refreshToken || "",
+    authToken: credentials?.apiKey || credentials?.accessToken || "",
+  });
+}
+
+/**
  * Build the full Cosy-* header set for a single Qoder request.
  *
  * @param {Buffer|Uint8Array|string} body  The exact bytes that will be sent.
@@ -171,7 +216,7 @@ export function buildCosyHeaders(body, requestUrl, creds) {
   const sigInput = `${payloadB64}\n${cosyKey}\n${timestamp}\n${bodyBuf.toString("latin1")}\n${sigPath}`;
   const sig = md5Hex(Buffer.from(sigInput, "latin1"));
 
-  const machineId = creds.machineId || generateMachineId();
+  const machineId = resolveMachineId(creds);
   const bodyHash = md5Hex(bodyBuf);
   const bodyLength = String(bodyBuf.length);
 
