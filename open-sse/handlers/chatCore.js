@@ -1,7 +1,6 @@
 import { detectFormat, getTargetFormat, resolveTransport } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
-import { applyThinking, extractThinking, stripThinkingSuffix, providerThinkingSuffix, withThinkingSuffix, clampThinkingLevel, cloneThinkingBearing } from "../translator/concerns/thinkingUnified.js";
-import { getThinkingLevels } from "../providers/thinkingLevels.js";
+import { applyThinking, extractThinking, stripThinkingSuffix, withThinkingSuffix, cloneThinkingBearing, forcedThinkingLevel } from "../translator/concerns/thinkingUnified.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache, ensureClaudeCache, providerCacheMode } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
@@ -160,8 +159,7 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
   // every request); the suffix is applied BEFORE the upstream id is resolved, so a tiered id
   // (antigravity gemini-4-*) follows the forced level exactly like a level the client sent.
   const baseUpstreamModel = getModelUpstreamId(alias, model, body);
-  const requestedThinking = providerThinkingSuffix(providerThinking);
-  const forcedThinking = clampThinkingLevel(requestedThinking, getThinkingLevels(provider, stripThinkingSuffix(baseUpstreamModel)));
+  const forcedThinking = forcedThinkingLevel(providerThinking, provider, baseUpstreamModel, credentials);
   const thinkingOverrideInjected = forcedThinking != null;
 
   const upstreamModel = forcedThinking ? getModelUpstreamId(alias, withThinkingSuffix(model, forcedThinking), body) : baseUpstreamModel;

@@ -5,7 +5,7 @@ import { cloakClaudeTools, decloakStreamChunk, applyCloaking } from "../utils/cl
 import { restoreToolNames } from "../utils/opencodeFingerprint.js";
 import { filterToOpenAIFormat } from "./formats/openai.js";
 import { normalizeThinkingConfig } from "../services/provider.js";
-import { applyThinking, captureThinking, parseSuffix } from "./concerns/thinkingUnified.js";
+import { applyThinking, captureThinking, parseSuffix, isCommandCodeNode } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { ensureStreamToolCallIds } from "../utils/streamHelpers.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
@@ -163,7 +163,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   // level replaces whatever the client sent and is written as the upstream's own field.
   const thinkingSuffix = parseSuffix(model).override || credentials?._thinkingOverride === true;
   if (!kiroThinkingMappedByTranslator && (!strictSameFormat || thinkingSuffix)) {
-    applyThinking(targetFormat, model, result, provider, thinkingIntent);
+    applyThinking(targetFormat, model, result, provider, thinkingIntent, { commandCodeNode: isCommandCodeNode(provider, credentials) });
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI

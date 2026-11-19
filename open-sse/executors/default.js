@@ -8,6 +8,8 @@ import { buildClineHeaders } from "../shared/clineAuth.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
+import { commandCodeOpenAIBody, isCommandCodeNode } from "../translator/concerns/thinkingUnified.js";
+import { refreshCommandCodeEffortsIfStale } from "../services/commandcodeEfforts.js";
 import { isCustomNodeProvider } from "../utils/transparency.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 
@@ -133,6 +135,14 @@ export class DefaultExecutor extends BaseExecutor {
         delete transformed.client_metadata;
       }
       stripUnsupportedParams(this.provider, model, transformed, { compat });
+      // A node pointed at Command Code's OpenAI-compatible API: Command Code refuses every
+      // effort outside its own enum (no "none", "minimal" or "auto"), so the effort is put in its
+      // vocabulary even in strict mode — forwarding it as is would only ever produce a 400.
+      if (isCommandCodeNode(this.provider, credentials)) {
+        // Keep the per-model effort lists current for node-only traffic too (background, never blocks).
+        void refreshCommandCodeEffortsIfStale();
+        transformed = commandCodeOpenAIBody(transformed, transformed.model || model);
+      }
     }
 
     return injectReasoningContent({ provider: this.provider, model, body: transformed, compat });
