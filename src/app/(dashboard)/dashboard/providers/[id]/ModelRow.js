@@ -28,6 +28,15 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
           <code className="max-w-[72vw] truncate rounded bg-sidebar px-1.5 py-0.5 font-mono text-xs text-text-muted sm:max-w-[360px]">{displayModel}</code>
           <span className="flex min-w-0 items-center text-[9px] gap-1 pl-1">
             {model.name && <span className="truncate text-[9px] italic text-text-muted/70">{model.name}</span>}
+            {/* Account catalog price (DeepAI): free, Theos per request, premium */}
+            {typeof model.theosPerRequest === "string" && (
+              <span className="shrink-0 border border-border px-1 font-mono text-[9px] uppercase tracking-wide text-text-muted">
+                {/[1-9]/.test(model.theosPerRequest) ? `${model.theosPerRequest} Theos/request` : "Free"}
+              </span>
+            )}
+            {model.premier === true && (
+              <span className="shrink-0 border border-border px-1 font-mono text-[9px] uppercase tracking-wide text-text-muted">Premium</span>
+            )}
             <CapacityBadges caps={caps} colorOverride="text-text-muted/70" size={12} />
           </span>
         </div>

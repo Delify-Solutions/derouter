@@ -1066,6 +1066,12 @@ export default function ProviderLimits() {
                           {getConnectionSecondaryLabel(conn)}
                         </p>
                       ) : null}
+                      {/* The account's plan as the provider reports it (e.g. DeepAI Pro / Free). */}
+                      {quota?.plan && conn.provider !== "kiro" && !/^\s*unknown\s*$/i.test(String(quota.plan)) ? (
+                        <span className="mt-1 inline-block border border-border px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                          Gói: {quota.plan}
+                        </span>
+                      ) : null}
                       {conn.provider === "kiro" && (
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
@@ -1265,6 +1271,9 @@ export default function ProviderLimits() {
                   <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">
                     {quota.message}
                   </p>
+                )}
+                {conn.provider === "deepai" && quota?.raw?.deepaiModels && !error && !isLoading && (
+                  <DeepAIModelSummary summary={quota.raw.deepaiModels} />
                 )}
                 {hiddenQuotaRows.length > 0 && (
                   <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">
@@ -1518,6 +1527,31 @@ export default function ProviderLimits() {
           setSelectedConnection(null);
         }}
       />
+    </div>
+  );
+}
+
+// DeepAI: which models this account gets for free and which spend Theos (catalog prices).
+// Free models have no counter: when DeepAI answers "Daily limit reached" the router locks that
+// model on this account for 30 minutes (Providers page shows the lock).
+function DeepAIModelSummary({ summary }) {
+  const free = Array.isArray(summary?.free) ? summary.free : [];
+  const metered = Array.isArray(summary?.metered) ? summary.metered : [];
+  if (free.length === 0 && metered.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1 border-t border-black/5 px-1 pt-2 text-[10px] leading-relaxed text-text-muted dark:border-white/5">
+      {free.length > 0 && (
+        <p>
+          <span className="font-medium text-text-main">Model free</span> (không tốn Theos, hết lượt thì DeepAI báo lỗi):{" "}
+          <span className="font-mono">{free.join(", ")}</span>
+        </p>
+      )}
+      {metered.length > 0 && (
+        <p>
+          <span className="font-medium text-text-main">Tốn Theos</span> (Theos/request):{" "}
+          <span className="font-mono">{metered.join(", ")}</span>
+        </p>
+      )}
     </div>
   );
 }

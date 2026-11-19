@@ -37,6 +37,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Providers whose model list is the active account's live catalog (static registry = fallback).
+const LIVE_CATALOG_PROVIDERS = new Set(["cursor", "deepai"]);
+// Providers that get the "Tải model mới nhất" button.
+const LIVE_CATALOG_REFRESH = new Set(["deepai"]);
+
 export default function ProviderDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -74,6 +79,8 @@ export default function ProviderDetailPage() {
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
+  const [refreshingLiveModels, setRefreshingLiveModels] = useState(false);
+  const [liveModelsNotice, setLiveModelsNotice] = useState("");
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
@@ -150,7 +157,7 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  const models = providerId === "cursor" && liveModels.length > 0
+  const models = LIVE_CATALOG_PROVIDERS.has(providerId) && liveModels.length > 0
     ? liveModels
     : staticModels;
   const providerAlias = getProviderAlias(providerId);
@@ -505,11 +512,11 @@ export default function ProviderDetailPage() {
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
 
-  // Cursor's model availability is account-specific and changes frequently.
+  // Cursor's and DeepAI's model lists are account-specific and change frequently.
   // Load the active account's live catalog for the dashboard; the static
   // registry remains the fallback while the request is pending or unavailable.
   useEffect(() => {
-    if (providerId !== "cursor") {
+    if (!LIVE_CATALOG_PROVIDERS.has(providerId)) {
       setLiveModels([]);
       return;
     }
@@ -601,6 +608,31 @@ export default function ProviderDetailPage() {
       }
     } catch (error) {
       console.error("Error deleting custom model:", error);
+    }
+  };
+
+  // Re-read the active account's live catalog now, skipping the server's short cache.
+  const handleRefreshLiveModels = async () => {
+    if (refreshingLiveModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection?.id) return;
+    setRefreshingLiveModels(true);
+    setLiveModelsNotice("");
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models?refresh=1`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLiveModelsNotice(data.error || "Không tải được danh sách model.");
+      } else if (Array.isArray(data.models) && data.models.length > 0) {
+        setLiveModels(data.models);
+        setLiveModelsNotice(data.warning ? "Không đọc được danh sách live, đang hiện danh sách có sẵn." : `Đã tải ${data.models.length} model mới nhất.`);
+      } else {
+        setLiveModelsNotice("Provider không trả về model nào.");
+      }
+    } catch {
+      setLiveModelsNotice("Không tải được danh sách model.");
+    } finally {
+      setRefreshingLiveModels(false);
     }
   };
 
@@ -1234,6 +1266,24 @@ export default function ProviderDetailPage() {
           <span className="material-symbols-outlined text-sm">add</span>
           Add Model
         </button>
+
+        {/* Live catalog providers (DeepAI): re-read the account's newest model list */}
+        {LIVE_CATALOG_REFRESH.has(providerId) && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            type="button"
+            onClick={handleRefreshLiveModels}
+            disabled={refreshingLiveModels}
+            className="flex w-full items-center justify-center gap-1.5 border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5 sm:w-auto disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-sm" style={refreshingLiveModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {refreshingLiveModels ? "progress_activity" : "refresh"}
+            </span>
+            {refreshingLiveModels ? "Đang tải…" : "Tải model mới nhất"}
+          </button>
+        )}
+        {liveModelsNotice && LIVE_CATALOG_REFRESH.has(providerId) && (
+          <span role="status" className="w-full text-[11px] text-text-muted">{liveModelsNotice}</span>
+        )}
 
         {/* Import Qoder models button — only show for qoder provider */}
         {providerId === "qoder" && connections.some((conn) => conn.isActive !== false) && (

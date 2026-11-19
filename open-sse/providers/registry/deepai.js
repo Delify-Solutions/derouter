@@ -39,5 +39,9 @@ const deepaiProvider = {
     callbackPath: "/auth-callback",
   },
   passthroughModels: true,
+  // /dashboard/quota: the account's Theos allowance (GET /deepai_code/theos).
+  features: {
+    usage: true,
+  },
 };
 export default deepaiProvider;
