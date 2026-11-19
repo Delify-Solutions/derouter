@@ -84,6 +84,108 @@ export function clampThinkingLevel(value, levels) {
   return best ? best.level : value;
 }
 
+// Command Code validates reasoning_effort against its own enum, on its native /alpha/generate
+// and on its OpenAI-compatible /provider/v1 endpoints alike; anything else is a 400
+// ("Invalid option: expected one of off|low|medium|high|xhigh|max").
+const COMMAND_CODE_WIRE_EFFORTS = new Set(["off", "low", "medium", "high", "xhigh", "max"]);
+
+// An effort (OpenAI or router vocabulary: none, minimal, auto, a level …) as the value Command
+// Code accepts for `model`, or null when the field must be left out. Only the values the
+// model's catalog entry lists are sent; "off" is how Command Code switches thinking off.
+export function toCommandCodeEffort(value, model) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim().toLowerCase();
+  // Only a model in Command Code's own catalog has a verified effort list.
+  const catalogued = getCommandCodeEfforts(model);
+  // In the catalog without an effort list: the model takes no reasoning_effort at all.
+  if (Array.isArray(catalogued) && catalogued.length === 0) return null;
+  const known = Array.isArray(catalogued) && catalogued.length > 0;
+  if (raw === "none" || raw === "off" || raw === "disabled") {
+    // An uncatalogued model: say nothing rather than send a value it may refuse.
+    if (!known) return null;
+    if (catalogued.includes("none")) return "off";
+    // The model cannot switch thinking off: its lowest level is the closest to "off".
+    const lowest = catalogued.filter((l) => l !== "none")
+      .sort((a, b) => (LEVEL_TO_BUDGET[a] ?? 0) - (LEVEL_TO_BUDGET[b] ?? 0))[0];
+    return lowest && COMMAND_CODE_WIRE_EFFORTS.has(lowest) ? lowest : null;
+  }
+  let level = raw === "auto" ? "high" : raw === "minimal" ? "low" : raw === "ultra" ? "max" : raw;
+  // A level the model does not list would be refused: use the nearest one it does.
+  if (known && !catalogued.includes(level)) {
+    level = clampThinkingLevel(level, catalogued.filter((l) => l !== "none"));
+  }
+  return level !== "off" && COMMAND_CODE_WIRE_EFFORTS.has(level) ? level : null;
+}
+
+// True when `url` is a Command Code API endpoint (an OpenAI-compatible node pointed at it).
+export function isCommandCodeUrl(url) {
+  if (typeof url !== "string" || !url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+    return host === "commandcode.ai" || host.endsWith(".commandcode.ai");
+  } catch {
+    return false;
+  }
+}
+
+// An OpenAI-compatible node (Chat or Responses) whose endpoint is Command Code's API.
+export function isCommandCodeNode(provider, credentials) {
+  return typeof provider === "string" && provider.startsWith("openai-compatible-")
+    && isCommandCodeUrl(credentials?.providerSpecificData?.baseUrl);
+}
+
+// The admin's forced Thinking setting for this provider and upstream model, as the level the
+// "(level)" suffix will carry (null: not forced), moved to a level the model lists. A node at
+// Command Code's OpenAI API is checked against Command Code's catalog, not the guessed levels
+// of the model family's name.
+export function forcedThinkingLevel(providerThinking, provider, upstreamModel, credentials = null) {
+  const levelsProvider = isCommandCodeNode(provider, credentials) ? "commandcode" : provider;
+  return clampThinkingLevel(providerThinkingSuffix(providerThinking), getThinkingLevels(levelsProvider, stripThinkingSuffix(upstreamModel)));
+}
+
+// The thinking intent written for a Command Code-hosted OpenAI-compatible node: the effort in
+// Command Code's vocabulary, as Chat `reasoning_effort` or Responses `reasoning.effort`.
+function applyCommandCodeOpenAI(targetFormat, body, cfg, model) {
+  const previous = body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+    ? body.reasoning
+    : null;
+  stripAll(body);
+  const effort = toCommandCodeEffort(cfg.mode === "none" ? "none" : toLevel(cfg), model);
+  if (!effort) return;
+  if (targetFormat === "openai-responses") {
+    body.reasoning = { effort, summary: typeof previous?.summary === "string" && previous.summary ? previous.summary : "auto" };
+  } else {
+    body.reasoning_effort = effort;
+  }
+}
+
+// An OpenAI-shaped body (Chat `reasoning_effort` or Responses `reasoning.effort`) bound for a
+// Command Code endpoint, with its effort in Command Code's vocabulary. Returns the same object
+// when nothing changes, otherwise a copy (the client's body is never mutated).
+export function commandCodeOpenAIBody(body, model) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  let out = body;
+  if (typeof body.reasoning_effort === "string") {
+    const effort = toCommandCodeEffort(body.reasoning_effort, model);
+    if (effort !== body.reasoning_effort) {
+      out = { ...body };
+      if (effort) out.reasoning_effort = effort;
+      else delete out.reasoning_effort;
+    }
+  }
+  const reasoning = out.reasoning;
+  if (reasoning && typeof reasoning === "object" && !Array.isArray(reasoning) && typeof reasoning.effort === "string") {
+    const effort = toCommandCodeEffort(reasoning.effort, model);
+    if (effort !== reasoning.effort) {
+      if (out === body) out = { ...body };
+      out.reasoning = { ...reasoning };
+      if (effort) out.reasoning.effort = effort;
+      else delete out.reasoning.effort;
+    }
+  }
+  return out;
+}
+
 // applyThinking rewrites thinking fields in place, and for the Gemini envelopes those live in
 // objects shared with the client's original body (`request.generationConfig`). A body that is
 // reused for a fallback attempt must not carry this attempt's forced level, so the objects that
@@ -492,43 +594,11 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
       // Kiro thinking handled via system-tag injection in openai-to-kiro.js; no body field here.
       break;
     case "commandcode": {
-      // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope, with
-      // only the values the model's catalog entry lists; "off" is how it switches thinking off.
+      // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope.
       if (!body.params || typeof body.params !== "object") body.params = {};
-      // Only a model in Command Code's own catalog has a verified effort list.
-      const catalogued = getCommandCodeEfforts(model);
-      // In the catalog without an effort list: the model takes no reasoning_effort at all.
-      if (Array.isArray(catalogued) && catalogued.length === 0) {
-        delete body.params.reasoning_effort;
-        break;
-      }
-      const known = Array.isArray(catalogued) && catalogued.length > 0;
-      if (cfg.mode === "none") {
-        if (!known) {
-          // An uncatalogued model: say nothing, as before, rather than send a value it may refuse.
-          delete body.params.reasoning_effort;
-        } else if (catalogued.includes("none")) {
-          body.params.reasoning_effort = "off";
-        } else {
-          // The model cannot switch thinking off: its lowest level is the closest to "off".
-          const lowest = catalogued.filter((l) => l !== "none")
-            .sort((a, b) => (LEVEL_TO_BUDGET[a] ?? 0) - (LEVEL_TO_BUDGET[b] ?? 0))[0];
-          if (lowest) body.params.reasoning_effort = lowest;
-        }
-        break;
-      }
-      const rawLevel = toLevel(eff);
-      let level = rawLevel === "auto" ? "high"
-        : rawLevel === "minimal" ? "low"
-        : rawLevel;
-      // A level the model does not list would be refused: use the nearest one it does.
-      if (level && known && !catalogued.includes(level)) {
-        level = clampThinkingLevel(level, catalogued.filter((l) => l !== "none"));
-      }
-      const validLevels = ["low", "medium", "high", "xhigh", "max"];
-      if (level && validLevels.includes(level)) {
-        body.params.reasoning_effort = level;
-      }
+      const effort = toCommandCodeEffort(cfg.mode === "none" ? "none" : toLevel(eff), model);
+      if (effort) body.params.reasoning_effort = effort;
+      else delete body.params.reasoning_effort;
       break;
     }
     default:
@@ -540,11 +610,20 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
 // Mutates and returns body. No-op when model has no reasoning capability.
 // `intent` is a pre-captured config (from captureThinking on the original body);
 // falls back to extracting from the current body when omitted.
-export function applyThinking(targetFormat, model, body, provider = null, intent = undefined) {
+export function applyThinking(targetFormat, model, body, provider = null, intent = undefined, { commandCodeNode = false } = {}) {
   if (!body || typeof body !== "object") return body;
 
   const { cleanModel, override } = parseSuffix(model);
   const cfg = override || intent || extractThinking(body);
+
+  // A node at Command Code's OpenAI API: Command Code's own catalog decides, not the
+  // name-based capabilities of the model family (deepseek → thinking:{type}, qwen →
+  // enable_thinking …), whose fields Command Code would not honour.
+  if (commandCodeNode) {
+    if (cfg) applyCommandCodeOpenAI(targetFormat, body, cfg, cleanModel);
+    return body;
+  }
+
   const caps = getCapabilitiesForModel(provider, cleanModel);
 
   // Model cannot reason → strip any stray thinking fields.
