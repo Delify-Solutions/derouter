@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { parseQoderCatalog, routableQoderModels, seedQoderCatalogForTests, clearQoderCatalog } = await import("../open-sse/services/qoderModels.js");
+const { parseQoderCatalog, routableQoderModels, seedQoderCatalogForTests, clearQoderCatalog, qoderDashboardModels } = await import("../open-sse/services/qoderModels.js");
 const { __test__ } = await import("../open-sse/executors/qoder.js");
 
 test("models from the assistant scene are listed next to the chat scene", () => {
@@ -61,4 +61,25 @@ test("a chat request for an assistant-only model sends that entry as model_confi
   assert.equal(payload.model_config.source, "system");
   assert.equal(payload.model_config.max_input_tokens, 200000);
   clearQoderCatalog();
+});
+
+test("dashboard list: live catalog first with Qoder's names, then static fallbacks, prefixed ids", () => {
+  const catalog = parseQoderCatalog({
+    chat: [
+      { key: "auto", display_name: "Auto", max_input_tokens: 200000 },
+      { key: "dmodel", display_name: "DeepSeek-V4.1-Pro" },
+      { key: "qmodel_latest_preview", display_name: "Qwen3.9-Max-Preview" },
+    ],
+  });
+  const list = qoderDashboardModels(catalog);
+  const ids = list.map((m) => m.id);
+  assert.deepEqual(ids.slice(0, 3), ["qoder/auto", "qoder/dmodel", "qoder/qmodel_latest_preview"]);
+  // the static Sonus/Cantus fallbacks the router still routes come after the live models
+  assert.ok(ids.indexOf("qoder/smodel") > 2 && ids.indexOf("qoder/cmodel") > 2);
+  assert.equal(list[1].name, "DeepSeek-V4.1-Pro");
+  assert.equal(list[0].contextLength, 200000);
+  assert.equal(list.find((m) => m.id === "qoder/smodel").contextLength, undefined);
+  // a static registry key the catalog dropped is not listed
+  assert.ok(!ids.includes("qoder/lite"));
+  assert.deepEqual(qoderDashboardModels(null), []);
 });

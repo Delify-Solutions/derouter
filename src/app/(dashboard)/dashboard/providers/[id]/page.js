@@ -38,9 +38,15 @@ function sleep(ms) {
 }
 
 // Providers whose model list is the active account's live catalog (static registry = fallback).
-const LIVE_CATALOG_PROVIDERS = new Set(["cursor", "deepai"]);
+const LIVE_CATALOG_PROVIDERS = new Set(["cursor", "deepai", "qoder"]);
 // Providers that get the "Tải model mới nhất" button.
-const LIVE_CATALOG_REFRESH = new Set(["deepai"]);
+const LIVE_CATALOG_REFRESH = new Set(["deepai", "qoder"]);
+
+// The models API may answer "<provider>/<key>" (Qoder); the page lists bare keys.
+function toLiveModels(providerId, list) {
+  const prefix = `${providerId}/`;
+  return list.map((m) => (typeof m?.id === "string" && m.id.startsWith(prefix) ? { ...m, id: m.id.slice(prefix.length) } : m));
+}
 
 export default function ProviderDetailPage() {
   const params = useParams();
@@ -91,7 +97,6 @@ export default function ProviderDetailPage() {
   const [oneByOneResults, setOneByOneResults] = useState({});
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
-  const [importingQoderModels, setImportingQoderModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -512,7 +517,7 @@ export default function ProviderDetailPage() {
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
 
-  // Cursor's and DeepAI's model lists are account-specific and change frequently.
+  // Cursor's, DeepAI's and Qoder's model lists are account-specific and change frequently.
   // Load the active account's live catalog for the dashboard; the static
   // registry remains the fallback while the request is pending or unavailable.
   useEffect(() => {
@@ -532,7 +537,7 @@ export default function ProviderDetailPage() {
       .then(async (res) => ({ ok: res.ok, data: await res.json() }))
       .then(({ ok, data }) => {
         if (!cancelled && ok && Array.isArray(data.models) && data.models.length > 0) {
-          setLiveModels(data.models);
+          setLiveModels(toLiveModels(providerId, data.models));
         }
       })
       .catch(() => {});
@@ -623,8 +628,10 @@ export default function ProviderDetailPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setLiveModelsNotice(data.error || "Không tải được danh sách model.");
+      } else if (data.warning && !(Array.isArray(data.models) && data.models.length > 0)) {
+        setLiveModelsNotice("Không đọc được danh sách live, đang hiện danh sách có sẵn.");
       } else if (Array.isArray(data.models) && data.models.length > 0) {
-        setLiveModels(data.models);
+        setLiveModels(toLiveModels(providerId, data.models));
         setLiveModelsNotice(data.warning ? "Không đọc được danh sách live, đang hiện danh sách có sẵn." : `Đã tải ${data.models.length} model mới nhất.`);
       } else {
         setLiveModelsNotice("Provider không trả về model nào.");
@@ -633,60 +640,6 @@ export default function ProviderDetailPage() {
       setLiveModelsNotice("Không tải được danh sách model.");
     } finally {
       setRefreshingLiveModels(false);
-    }
-  };
-
-  // Fetch Qoder model list and automatically add to available models
-  const handleImportQoderModels = async () => {
-    if (importingQoderModels) return;
-    const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) {
-      alert(translate("Please add an active Qoder connection first"));
-      return;
-    }
-
-    setImportingQoderModels(true);
-    try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
-        return;
-      }
-
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
-        
-        // Qoder model ID format may be "qoder/auto" or "auto", need to remove prefix
-        const cleanModelId = modelId.replace(/^qoder\//, "");
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`);
-        if (alreadyExists) {
-          continue;
-        }
-
-        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias);
-        importedCount += 1;
-      }
-      
-      if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
-      }
-    } catch (error) {
-      console.error("Error importing Qoder models:", error);
-      alert(translate("Error fetching models") + ": " + error.message);
-    } finally {
-      setImportingQoderModels(false);
     }
   };
 
@@ -1267,7 +1220,7 @@ export default function ProviderDetailPage() {
           Add Model
         </button>
 
-        {/* Live catalog providers (DeepAI): re-read the account's newest model list */}
+        {/* Live catalog providers (DeepAI, Qoder): re-read the account's newest model list */}
         {LIVE_CATALOG_REFRESH.has(providerId) && connections.some((conn) => conn.isActive !== false) && (
           <button
             type="button"
@@ -1286,18 +1239,6 @@ export default function ProviderDetailPage() {
         )}
 
         {/* Import Qoder models button — only show for qoder provider */}
-        {providerId === "qoder" && connections.some((conn) => conn.isActive !== false) && (
-          <button
-            onClick={handleImportQoderModels}
-            disabled={importingQoderModels}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-sm" style={importingQoderModels ? { animation: "spin 1s linear infinite" } : undefined}>
-              {importingQoderModels ? "progress_activity" : "download"}
-            </span>
-            {importingQoderModels ? translate("Fetching...") : translate("Fetch Qoder Models")}
-          </button>
-        )}
 
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {

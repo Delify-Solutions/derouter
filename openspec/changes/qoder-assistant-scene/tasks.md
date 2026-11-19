@@ -4,4 +4,5 @@
 
 ## 2. Tests
 - [x] 2.1 `test/qoder-catalog-scenes.test.js`: assistant models listed and routable, chat entry wins, other scenes ignored, IDE-only shape unchanged, scene keys reported; a chat request for an assistant-only key sends that entry as `model_config`
-- [ ] 2.2 Live check on the owner's server (after deploy): "Fetch Qoder Models", read the `model catalog:` log line to see which scene holds DeepSeek/GLM, then send one chat to that key. If they sit under `external_models`, open a follow-up change for `outerProviders`.
+- [x] 2.2 Live catalog check on the owner's server (2026-11-20, revision eb13ac14). The catalog publishes chat, assistant, inline, quest, nap, qwork, experts, qwake, app, qcode, byok_teams and byok_enterprise. `chat` and `assistant` hold the same 14 keys. DeepSeek and GLM are there under Qoder's code names (`dmodel`/`dfmodel`, `gmodel`/`gfmodel`), not under `external_models`. The owner's missing models were a provider-page problem (follow-up change `qoder-live-catalog-page`).
+- [ ] 2.3 Live chat check: send one request to `dmodel` and one to `gmodel` and confirm the answering model
