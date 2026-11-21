@@ -7,6 +7,8 @@ import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 import { safeEqual } from "@/lib/auth/internalHeaders";
 import { keyLookupLimited, recordKeyLookupMiss } from "@/lib/auth/keyLookupLimiter";
 import { isObfuscatedPath } from "@/lib/auth/obfuscatedPath";
+// Shared with every LLM handler: the key the guard accepts is the key they enforce.
+import { extractApiKey } from "@/lib/auth/apiKeyExtract.js";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const CLI_TOKEN_SALT = "dr-cli-auth";
@@ -146,16 +148,6 @@ function notFound() {
 
 function isPublicLlmApi(pathname) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
-
-function extractApiKey(request) {
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
-  const apiKeyHeader = request.headers.get("x-api-key");
-  if (apiKeyHeader) return apiKeyHeader;
-  const googleApiKeyHeader = request.headers.get("x-goog-api-key");
-  if (googleApiKeyHeader) return googleApiKeyHeader;
-  return request.nextUrl.searchParams?.get("key") || null;
 }
 
 async function hasValidApiKey(request) {

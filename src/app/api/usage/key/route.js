@@ -4,7 +4,9 @@ import {
   getKeyRateUsage,
   getKeyCostSince,
   getKeyRequestCountSince,
+  getSettings,
 } from "@/lib/localDb";
+import { customerVisibleModelsSync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getQueueSync, getPlanHistorySync } from "@/lib/db/repos/accountPlansRepo.js";
 import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
@@ -52,7 +54,7 @@ const WINDOW_MS = {
  * Response shape:
  * {
  *   name, active, groupId, groupName,
- *   allowedModels: string[] | null,     // null = all models allowed
+ *   allowedModels: string[] | null,     // null = all models allowed; combo names only for a customer key
  *   rpm: number | null,                  // resolved (key || group || null)
  *   tpm: number | null,
  *   budgetUsd: number | null,
@@ -147,13 +149,22 @@ export async function GET(request) {
     const remainingBudgetUsd =
       budgetUsd == null ? null : Math.max(0, budgetUsd - displayCost);
 
+    // A customer reads only the combo names of its group's list, never a
+    // `provider/model` id the group may also hold (spec model-privacy).
+    let allowedModels = resolved.allowedModels ?? null;
+    if (k.userId) {
+      let hide = true;
+      try { hide = hideUpstreamModelsEnabled(await getSettings()); } catch { /* fail closed */ }
+      if (hide) allowedModels = customerVisibleModelsSync(await getAdapter(), allowedModels);
+    }
+
     return NextResponse.json({
       name: k.name,
       active: k.isActive ?? true,
       groupId: k.groupId ?? null,
       groupName: group?.name ?? null,
 
-      allowedModels: resolved.allowedModels ?? null,
+      allowedModels,
       rpm: account ? account.rate.rpm : resolved.rpm ?? null,
       tpm: account ? account.rate.tpm : resolved.tpm ?? null,
       // Budget is an admin-key mechanism; a customer key is bounded by its plans.

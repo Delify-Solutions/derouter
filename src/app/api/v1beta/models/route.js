@@ -1,4 +1,10 @@
 import { PROVIDER_MODELS } from "@/shared/constants/models";
+import { extractApiKey } from "@/lib/auth/apiKeyExtract.js";
+import { getSettings } from "@/lib/localDb";
+import { getAdapter } from "@/lib/db/driver.js";
+import { hideUpstreamModelsEnabled, isCustomerKeySync } from "@/lib/models/customerModels.js";
+import { geminiCatalogModels, geminiComboModels } from "@/lib/models/geminiModelList.js";
+import { buildModelsList, resolveKeyScopeForModels } from "@/app/api/v1/models/route.js";
 
 /**
  * Handle CORS preflight
@@ -15,47 +21,23 @@ export async function OPTIONS() {
 
 /**
  * GET /v1beta/models - Gemini compatible models list
- * Returns models in Gemini API format
+ * Returns models in Gemini API format.
+ *
+ * A customer key (hideUpstreamModels on) gets the combos it may call, scoped
+ * exactly like /v1/models; everyone else gets the built-in provider catalog
+ * (spec model-privacy "Customer catalogs list only what the customer can call").
  */
-export async function GET() {
+export async function GET(request) {
   try {
-    const models = [];
-    const seen = new Set();
-
-    function addModel({ name, displayName, description, methods = ["generateContent"] }) {
-      if (seen.has(name)) return;
-      seen.add(name);
-      models.push({
-        name,
-        displayName,
-        description,
-        supportedGenerationMethods: methods,
-        inputTokenLimit: 128000,
-        outputTokenLimit: 8192,
-      });
+    const apiKey = extractApiKey(request);
+    if (apiKey && hideUpstreamModelsEnabled(await getSettings()) && isCustomerKeySync(await getAdapter(), apiKey)) {
+      const scope = await resolveKeyScopeForModels(request);
+      if (scope.response) return scope.response;
+      const combos = await buildModelsList(["llm"], { allowedModels: scope.allowedModels });
+      return Response.json({ models: geminiComboModels(combos) });
     }
-    
-    for (const [provider, providerModels] of Object.entries(PROVIDER_MODELS)) {
-      for (const model of providerModels) {
-        addModel({
-          name: `models/${provider}/${model.id}`,
-          displayName: model.name || model.id,
-          description: `${provider} model: ${model.name || model.id}`,
-        });
-
-        if (provider === "gemini") {
-          addModel({
-            name: `models/${model.id}`,
-            displayName: model.name || model.id,
-            description: `Gemini model: ${model.name || model.id}`,
-            methods: ["generateContent", "streamGenerateContent"],
-          });
-        }
-      }
-    }
-
-    return Response.json({ models });
-  } catch (error) {
-    return Response.json({ error: { message: error.message } }, { status: 500 });
+    return Response.json({ models: geminiCatalogModels(PROVIDER_MODELS) });
+  } catch {
+    return Response.json({ error: { message: "Failed to list models" } }, { status: 500 });
   }
 }

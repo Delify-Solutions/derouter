@@ -1,6 +1,10 @@
 import { PROVIDER_MODELS } from "open-sse/config/providerModels.js";
 import { AI_PROVIDERS, ALIAS_TO_ID } from "@/shared/constants/providers";
 import { getModelKind } from "@/shared/constants/models";
+import { extractApiKey } from "@/lib/auth/apiKeyExtract.js";
+import { getSettings } from "@/lib/localDb";
+import { getAdapter } from "@/lib/db/driver.js";
+import { hideUpstreamModelsEnabled, isCustomerKeySync } from "@/lib/models/customerModels.js";
 
 const KIND_ENDPOINT = {
   llm: "/v1/chat/completions",
@@ -76,6 +80,16 @@ function lookup(fullId, requestedKind) {
   return null;
 }
 
+async function customerCatalogHidden(request) {
+  const apiKey = extractApiKey(request);
+  if (!apiKey) return false;
+  try {
+    return hideUpstreamModelsEnabled(await getSettings()) && isCustomerKeySync(await getAdapter(), apiKey);
+  } catch {
+    return true; // fail closed: an admin may see a 404 once, a customer never the catalog
+  }
+}
+
 export async function OPTIONS() {
   return new Response(null, {
     headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS" },
@@ -93,7 +107,11 @@ export async function GET(request) {
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } },
     );
   }
-  const info = lookup(id, kind);
+  // The built-in catalog names upstream providers and models: a customer key
+  // (hideUpstreamModels on) calls combos only, which have no catalog entry, so
+  // every id reads as unknown to it (spec model-privacy "Customer catalogs list
+  // only what the customer can call").
+  const info = (await customerCatalogHidden(request)) ? null : lookup(id, kind);
   if (!info) {
     return Response.json(
       { error: { message: `Model not found: ${id}`, type: "not_found" } },

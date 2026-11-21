@@ -15,6 +15,7 @@ import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { newResponseId } from "../../utils/responseIds.js";
 
 // Upper bound for reading a whole (non-streaming) provider body. Without it a
 // provider that answers 200 and then trickles bytes forever pins the request
@@ -157,7 +158,8 @@ function openAICompletionToResponses(responseBody, customToolNames = null) {
   const status = choice.finish_reason === "tool_calls" ? "completed" : (choice.finish_reason === "stop" ? "completed" : (choice.finish_reason || "completed"));
 
   return {
-    id: `resp_${responseBody.id || ""}`.replace(/^resp_chatcmpl-/, "resp_"),
+    // Router-owned: the upstream's id named the provider (utils/responseIds.js).
+    id: newResponseId(),
     object: "response",
     created_at: responseBody.created || Math.floor(Date.now() / 1000),
     model: responseBody.model || "unknown",

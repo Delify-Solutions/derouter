@@ -12,13 +12,29 @@ import { resolveApiKeyOwner } from "../db/repos/billingRepo.js";
 export const UNMETERED_ENDPOINT_MESSAGE =
   "Endpoint này chưa được tính phí nên chưa mở cho API key của khách hàng.";
 
+// Paths that call a provider directly instead of going through the masked chat
+// handler (the Gemini native TTS path): metered, but they would hand a customer
+// the provider's own model ids, headers and error texts and bypass the
+// combo-only rule (spec model-privacy "Provider-native paths are closed to
+// customer keys").
+export const CUSTOMER_CLOSED_ENDPOINT_MESSAGE = "Endpoint này chưa mở cho API key của khách hàng.";
+
+/**
+ * The denial for a customer key on an endpoint closed to customers, or null when
+ * the call may proceed (no key, or an admin/local key).
+ * @returns {{ status:number, code:string, message:string } | null}
+ */
+export function refuseCustomerEndpointSync(db, apiKey, message = CUSTOMER_CLOSED_ENDPOINT_MESSAGE) {
+  if (!apiKey) return null;
+  if (!resolveApiKeyOwner(db, apiKey)) return null;
+  return { status: 403, code: "endpoint_not_available", message };
+}
+
 /**
  * The denial for a customer key on an unmetered endpoint, or null when the call
  * may proceed (no key, or an admin/local key).
  * @returns {{ status:number, code:string, message:string } | null}
  */
 export function refuseUnmeteredSync(db, apiKey) {
-  if (!apiKey) return null;
-  if (!resolveApiKeyOwner(db, apiKey)) return null;
-  return { status: 403, code: "endpoint_not_available", message: UNMETERED_ENDPOINT_MESSAGE };
+  return refuseCustomerEndpointSync(db, apiKey, UNMETERED_ENDPOINT_MESSAGE);
 }

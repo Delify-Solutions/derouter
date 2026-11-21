@@ -6,6 +6,7 @@
 
 import fs from "fs";
 import path from "path";
+import { newResponseId } from "../utils/responseIds.js";
 
 // Create log directory for responses (Node.js only)
 export function createResponsesLogger(model, logsDir = null) {
@@ -54,7 +55,8 @@ export function createResponsesLogger(model, logsDir = null) {
 export function createResponsesApiTransformStream(logger = null) {
   const state = {
     seq: 0,
-    responseId: `resp_${Date.now()}`,
+    // Router-owned, never the upstream's id (utils/responseIds.js).
+    responseId: newResponseId(),
     created: Math.floor(Date.now() / 1000),
     started: false,
     msgTextBuf: {},
@@ -273,7 +275,6 @@ export function createResponsesApiTransformStream(logger = null) {
         // Emit initial events
         if (!state.started) {
           state.started = true;
-          state.responseId = parsed.id ? `resp_${parsed.id}` : state.responseId;
           
           emit(controller, "response.created", {
             type: "response.created",

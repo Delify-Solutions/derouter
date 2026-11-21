@@ -5,6 +5,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { PROVIDERS } from "../../config/providers.js";
+import { newResponseId } from "../../utils/responseIds.js";
 import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine, usageOrEstimate } from "./requestDetail.js";
 // readBodyWithTimeout/guardWithTimeout live in nonStreamingHandler (which imports
@@ -97,7 +98,8 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
 
   const usage = responseBody.usage || {};
   return {
-    id: `resp_${responseBody.id || ""}`.replace(/^resp_chatcmpl-/, "resp_"),
+    // Router-owned: the upstream's id named the provider (utils/responseIds.js).
+    id: newResponseId(),
     object: "response",
     created_at: responseBody.created || Math.floor(Date.now() / 1000),
     model: responseBody.model || "unknown",
@@ -118,6 +120,8 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
     },
   };
 }
+
+export const __test__ = { chatCompletionToResponses };
 
 /**
  * Parse OpenAI-style SSE text into a single chat completion JSON.

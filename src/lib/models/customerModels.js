@@ -38,6 +38,16 @@ export function isComboNameSync(db, name) {
 }
 
 /**
+ * A group allow-list as a customer may read it: only the combo names in it. A
+ * group may list `provider/model` ids, which are neither callable by a customer
+ * nor theirs to see. `null` (every model allowed) stays `null`.
+ */
+export function customerVisibleModelsSync(db, allowedModels) {
+  if (!Array.isArray(allowedModels)) return allowedModels ?? null;
+  return allowedModels.filter((name) => isComboNameSync(db, name));
+}
+
+/**
  * Whether a customer key may call `model` on a chat endpoint: always when the
  * protection is off or the key is not a customer's, otherwise only a combo name.
  */

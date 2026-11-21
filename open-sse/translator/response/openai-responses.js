@@ -4,6 +4,7 @@
  */
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
+import { newResponseId } from "../../utils/responseIds.js";
 import { buildChunk } from "../concerns/chunk.js";
 import { buildUsage, responsesUsageFromChat } from "../concerns/usage.js";
 import { fallbackToolCallId } from "../concerns/toolCall.js";
@@ -77,7 +78,9 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
   // Emit initial events
   if (!state.started) {
     state.started = true;
-    state.responseId = chunk.id ? `resp_${chunk.id}` : state.responseId;
+    // The router's own id (set when the state was created), never the upstream
+    // chunk id: that named the provider (`resp_gen-…`), see utils/responseIds.js.
+    if (!state.responseId) state.responseId = newResponseId();
     
     emit("response.created", {
       type: "response.created",
