@@ -4,6 +4,23 @@ import { register } from "node:module";
 
 register("./alias-hook.mjs", import.meta.url);
 
+/**
+ * Poll `predicate` until it is truthy, or throw after `timeoutMs`.
+ *
+ * Loopback tests must not assume the upstream handler ran within a fixed sleep:
+ * `node --test` runs files in parallel, and a CPU-starved event loop can take
+ * hundreds of milliseconds to dispatch a request the kernel already accepted.
+ * Waiting for the observable condition is both faster and load-independent.
+ */
+export async function waitFor(predicate, { timeoutMs = 2000, intervalMs = 10, label = "condition" } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await predicate()) return;
+    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for ${label}`);
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 export const streamMod = await import("../../open-sse/utils/stream.js");
 export const { FORMATS } = await import("../../open-sse/translator/formats.js");
 

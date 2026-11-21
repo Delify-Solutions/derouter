@@ -59,6 +59,7 @@ async function holder({ modelCaps, credit = 150, code = "cap" } = {}) {
   });
   const { userPlan } = grantUserPlan(db, {
     userId: user.id, planId: plan.id, source: "admin", creditNanoUsd: USD(credit), durationDays: 30,
+    now: iso(T0),
   });
   return { user, plan, userPlan, group };
 }
@@ -207,7 +208,7 @@ test("another purchase pays when this one's cap is full", async () => {
   assert.equal(admitSync(db, user.id, null, { model: "img" }).code, "model_cap");
 
   // A second purchase without caps (an admin credit grant) joins the queue.
-  const extra = grantUserPlan(db, { userId: user.id, planId: null, source: "admin", creditNanoUsd: USD(50), durationDays: 30 });
+  const extra = grantUserPlan(db, { userId: user.id, planId: null, source: "admin", creditNanoUsd: USD(50), durationDays: 30, now: iso(T0) });
   const verdict = admitSync(db, user.id, null, { model: "img" });
   assert.equal(verdict.ok, true);
   assert.equal(verdict.planId, extra.userPlan.id);
@@ -225,6 +226,7 @@ test("a window block wins over a cap that reopens; a permanent cap is reported a
   grantUserPlan(db, {
     userId: solo.id, planId: plan.id, source: "admin", creditNanoUsd: USD(100), durationDays: 30,
     limits: [{ hours: 5, maxNanoUsd: USD(20) }],
+    now: iso(T0),
   });
   pay(solo.id, "img", 15, T0);
   // cap full, window ($15 of $20) not: only the cap refuses, and only images
@@ -336,6 +338,7 @@ test("a window block plus a whole-term cap never promises a reopen time", async 
   grantUserPlan(db, {
     userId: solo.id, planId: plan.id, source: "admin", creditNanoUsd: USD(100), durationDays: 30,
     limits: [{ hours: 5, maxNanoUsd: USD(20) }],
+    now: iso(T0),
   });
   pay(solo.id, "img", 10, T0);       // whole-term cap used up
   pay(solo.id, "deepseek", 10, T0);  // and the 5 h window ($20) too
@@ -355,6 +358,7 @@ test("window and windowed cap both block: the reopen time is the later one", asy
   grantUserPlan(db, {
     userId: solo.id, planId: plan.id, source: "admin", creditNanoUsd: USD(100), durationDays: 30,
     limits: [{ hours: 5, maxNanoUsd: USD(20) }],
+    now: iso(T0),
   });
   pay(solo.id, "img", 10, T0);
   pay(solo.id, "deepseek", 10, T0);
@@ -385,7 +389,7 @@ test("an unlimited-credit plan enforces its cap: the cap is the only bound on th
 test("a purchase without a plan (gift, admin grant) has no caps", async () => {
   const { user } = await holder();
   const solo = await createUser({ email: `g-${Math.random().toString(36).slice(2, 8)}@example.com`, passwordHash: "x", status: "active", groupId: user.groupId });
-  const { userPlan } = grantUserPlan(db, { userId: solo.id, planId: null, source: "admin", creditNanoUsd: USD(100), durationDays: 30 });
+  const { userPlan } = grantUserPlan(db, { userId: solo.id, planId: null, source: "admin", creditNanoUsd: USD(100), durationDays: 30, now: iso(T0) });
   pay(solo.id, "img", 60);
   assert.equal(admitSync(db, solo.id, null, { model: "img" }).ok, true);
   assert.equal(listQueueSync(db, solo.id).find((e) => e.id === userPlan.id).caps.length, 0);
