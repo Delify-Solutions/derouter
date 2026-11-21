@@ -251,3 +251,40 @@ test("the admin thinking override is mapped to the upstream's own field even in 
   const out = translateRequest(FORMATS.CLAUDE, FORMATS.CLAUDE, "claude-sonnet-4-5", clone(eff), true, { apiKey: "k", _thinkingOverride: true }, "anthropic-compatible-x", null, [], "c", null, false);
   assert.equal(out.reasoning_effort, undefined, "no reasoning_effort to an Anthropic upstream");
 });
+
+// A Responses-API client talking to a Chat-completions upstream: `tool_choice` is the one
+// field whose shape differs, and copying it verbatim made every such request a 400
+// (spec upstream-error-handling). Observed in production as "Invalid input,
+// param: tool_choice" on all accounts — which read as a provider outage, not a body bug.
+test("tool_choice is reshaped between Responses and Chat, never copied", () => {
+  const base = {
+    model: "m", stream: true,
+    input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+  };
+  const toChat = (choice) => translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "m", { ...clone(base), tool_choice: choice }, true, {}, "openai-compatible-chat-x", null, [], "c");
+  const toResponses = (choice) => translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, "m", {
+    model: "m", stream: true, messages: [{ role: "user", content: "hi" }], tool_choice: choice,
+  }, true, {}, "openai", null, [], "c");
+
+  assert.deepEqual(toChat({ type: "function", name: "respond" }).tool_choice,
+    { type: "function", function: { name: "respond" } }, "flat Responses name becomes the nested Chat form");
+  assert.deepEqual(toResponses({ type: "function", function: { name: "respond" } }).tool_choice,
+    { type: "function", name: "respond" }, "and back again");
+
+  // The plain string forms mean the same thing in both APIs.
+  for (const s of ["auto", "none", "required"]) {
+    assert.equal(toChat(s).tool_choice, s);
+    assert.equal(toResponses(s).tool_choice, s);
+  }
+
+  // Already in the target shape: idempotent, not double-wrapped.
+  assert.deepEqual(toChat({ type: "function", function: { name: "respond" } }).tool_choice,
+    { type: "function", function: { name: "respond" } });
+
+  // A Responses-only selector has no Chat equivalent. Sending it malformed would fail
+  // the whole request; dropping it lets the upstream apply its default.
+  assert.equal(toChat({ type: "allowed_tools", mode: "auto", tools: [] }).tool_choice, undefined);
+
+  // Absent stays absent.
+  assert.equal(toChat(undefined).tool_choice, undefined);
+});

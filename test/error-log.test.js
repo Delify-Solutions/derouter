@@ -16,6 +16,7 @@ const repo = await import("../src/lib/db/repos/errorLogsRepo.js");
 const { createTrace, runWithTrace, noteClientBody, noteUpstreamBody, noteAttempt, getTrace } =
   await import("../open-sse/utils/errorTrace.js");
 const { createWithErrorLog } = await import("../src/lib/errorLog/wrap.js");
+const { errorReportMarkdown } = await import("../src/lib/errorLog/report.js");
 
 let db;
 before(async () => { db = await getAdapter(); });
@@ -451,6 +452,47 @@ test("wrapper: engine notes made inside the handler end up in the entry", async 
   assert.equal(row.connectionName, "Vin");
   assert.equal(row.message, "[400]: context_length", "the provider tag is stripped from the message");
   assert.equal(JSON.parse(row.data).upstreamRequest.model, "glm-5.3:pre");
+});
+
+test("wrapper: an entry keeps the raw error body before the customer mask", async () => {
+  const rawBody = JSON.stringify({ error: { message: "Invalid input", type: "invalid_request_error", param: "tool_choice" } });
+  const handler = withLog(async () => {
+    // The engine hands the trace the body it is about to hand to the customer mask.
+    const { noteRawErrorResponse } = await import("../open-sse/utils/errorTrace.js");
+    noteRawErrorResponse(rawBody);
+    // What maskResponse() leaves for the client: same status, the field that named the
+    // fault replaced by a generic sentence.
+    return jsonRes(503, { error: { message: "Model tạm thời không khả dụng.", type: "server_error", code: "model_unavailable" } });
+  });
+  await handler(postReq({}));
+  await settle();
+  const [row] = rows();
+  const data = JSON.parse(row.data);
+  assert.match(data.rawResponse, /"param":"tool_choice"/, "the raw body keeps the field that names the fault");
+  assert.doesNotMatch(data.response, /tool_choice/, "the customer-facing body stays masked");
+  assert.match(data.rawResponse, /Invalid input/, "both are stored, not one replacing the other");
+
+  const md = errorReportMarkdown({ ...row, data });
+  assert.match(md, /Raw error response \(before masking\)/);
+  assert.match(md, /What the customer received/);
+});
+
+test("wrapper: only the first raw error body is kept, and none outside a trace", async () => {
+  const handler = withLog(async () => {
+    const { noteRawErrorResponse } = await import("../open-sse/utils/errorTrace.js");
+    noteRawErrorResponse('{"error":{"message":"first"}}');
+    noteRawErrorResponse('{"error":{"message":"second"}}');
+    return jsonRes(400, { error: { message: "masked" } });
+  });
+  await handler(postReq({}));
+  await settle();
+  const data = JSON.parse(rows()[0].data);
+  assert.match(data.rawResponse, /first/, "the first body describes the failure that was reported");
+  assert.doesNotMatch(data.rawResponse, /second/);
+  // Outside a trace the helper is a no-op rather than a throw: handlers run without
+  // one in tests and in the Worker path.
+  const { noteRawErrorResponse } = await import("../open-sse/utils/errorTrace.js");
+  noteRawErrorResponse("ignored");
 });
 
 test("wrapper: a stream that dies after its headers is recorded with how far it got", async () => {

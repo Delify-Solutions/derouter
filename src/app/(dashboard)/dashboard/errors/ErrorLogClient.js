@@ -228,9 +228,17 @@ function Detail({ detail, onDelete }) {
         actions={<Button size="sm" variant="ghost" icon="content_copy" onClick={() => doCopy(detail.message || "")}>Sao chép</Button>}
       >
         <Pre>{detail.message || "—"}</Pre>
+        {data.rawResponse && (
+          <details className="border border-border" open>
+            <summary className="cursor-pointer px-3 py-2 meta text-text-subtle">Phản hồi lỗi từ upstream (nguyên bản)</summary>
+            <Pre>{pretty(data.rawResponse)}</Pre>
+          </details>
+        )}
         {data.response && pretty(data.response) !== detail.message && (
           <details className="border border-border">
-            <summary className="cursor-pointer px-3 py-2 meta text-text-subtle">Nội dung phản hồi gốc</summary>
+            <summary className="cursor-pointer px-3 py-2 meta text-text-subtle">
+              Nội dung khách đã nhận{data.rawResponse ? " (đã ẩn danh cho khách)" : ""}
+            </summary>
             <Pre>{pretty(data.response)}</Pre>
           </details>
         )}

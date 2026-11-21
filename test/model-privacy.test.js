@@ -108,6 +108,28 @@ test("the response mask applies to customer keys only", () => {
   assert.equal(cm.publicModelContextSync(db, { hideUpstreamModels: false }, { apiKey: customerKey, publicName: "glm-5" }), null);
 });
 
+test("maskResponse keeps the pre-mask error body for the error log", async () => {
+  const { createTrace, runWithTrace } = await import("../open-sse/utils/errorTrace.js");
+  const upstreamError = new Response(JSON.stringify({
+    error: { message: "Invalid input", type: "invalid_request_error", param: "tool_choice" },
+  }), { status: 400, headers: { "content-type": "application/json" } });
+
+  const trace = createTrace("/v1/responses");
+  const masked = await runWithTrace(trace, async () => {
+    const res = await pm.maskResponse(upstreamError, OPTS);
+    return res.json();
+  });
+  assert.equal(masked.error.code, "invalid_request", "the customer still gets the masked body");
+  assert.doesNotMatch(JSON.stringify(masked), /tool_choice/, "the field that names the fault never reaches the customer");
+  assert.match(trace.rawErrorResponseText, /"param":"tool_choice"/, "the log keeps it, so the entry can be debugged");
+
+  // No trace active (tests, Worker path): still masks, records nothing, never throws.
+  const outside = await pm.maskResponse(new Response(JSON.stringify({ error: { message: "Invalid input" } }), {
+    status: 400, headers: { "content-type": "application/json" },
+  }), OPTS);
+  assert.equal((await outside.json()).error.code, "invalid_request");
+});
+
 test("an upstream error is reworded for a customer; a router denial keeps its message", async () => {
   const upstream401 = new Response(JSON.stringify({
     error: { message: "[openai-compatible-chat-x/glm-5.3:pre] [401]: Incorrect API key provided: sk-mock. See https://platform.openai.com", type: "invalid_request_error", code: "invalid_api_key" },
