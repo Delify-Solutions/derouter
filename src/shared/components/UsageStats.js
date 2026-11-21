@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
 import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
 
 // Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
@@ -12,8 +11,14 @@ function isLLMProvider(id) {
 }
 import Badge from "./Badge";
 import Card from "./Card";
+import TableToolbar, { useTableQuery } from "./TableToolbar";
+import TableState from "./TableState";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
-import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
+import UsageTable, { fmt, fmtTime, ProviderList } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
+import { useModelView } from "@/app/(dashboard)/dashboard/usage/components/ModelViewSwitch";
+import {
+  filterRows, sortRows, normalizeTop, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf,
+} from "@/shared/utils/tableQuery";
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react out of the shared bundle until topology renders
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
@@ -30,12 +35,12 @@ function timeAgo(timestamp) {
 // Auto-update time display every second without re-rendering parent
 function TimeAgo({ timestamp }) {
   const [, setTick] = useState(0);
-  
+
   useEffect(() => {
     const timer = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(timer);
   }, []);
-  
+
   return <>{timeAgo(timestamp)}</>;
 }
 
@@ -86,31 +91,27 @@ function RecentRequests({ requests = [] }) {
   );
 }
 
-function sortData(dataMap, pendingMap = {}, sortBy, sortOrder) {
-  return Object.entries(dataMap || {})
-    .map(([key, data]) => {
-      const totalTokens = (data.promptTokens || 0) + (data.completionTokens || 0);
-      const totalCost = data.cost || 0;
-      // ponytail: cost split is a token-share allocation of the (rate-accurate)
-      // server total, not a per-rate recompute. cached is a subset of prompt, so
-      // peel it out of the input share. Upgrade to a stored per-component cost
-      // breakdown if exact cached-rate cost display is needed.
-      const cachedTokens = data.cachedTokens || 0;
-      const nonCachedInput = Math.max(0, (data.promptTokens || 0) - cachedTokens);
-      const inputCost = totalTokens > 0 ? nonCachedInput * (totalCost / totalTokens) : 0;
-      const cachedCost = totalTokens > 0 ? cachedTokens * (totalCost / totalTokens) : 0;
-      const outputCost = totalTokens > 0 ? (data.completionTokens || 0) * (totalCost / totalTokens) : 0;
-      return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: pendingMap[key] || 0 };
-    })
-    .sort((a, b) => {
-      let valA = a[sortBy];
-      let valB = b[sortBy];
-      if (typeof valA === "string") valA = valA.toLowerCase();
-      if (typeof valB === "string") valB = valB.toLowerCase();
-      if (valA < valB) return sortOrder === "asc" ? -1 : 1;
-      if (valA > valB) return sortOrder === "asc" ? 1 : -1;
-      return 0;
-    });
+// Model names come from clients ("__proto__", "constructor"…): never index a plain
+// object with them. Own properties only, and Maps for grouping.
+const ownValue = (obj, key) => (obj != null && Object.hasOwn(obj, key) ? obj[key] : undefined);
+
+// Rows of one stats map, with the derived token and cost-share fields the table shows.
+// `pendingOf(key, data)` is the in-flight count of a row.
+function toRows(dataMap, pendingOf = () => 0) {
+  return Object.entries(dataMap || {}).map(([key, data]) => {
+    const totalTokens = (data.promptTokens || 0) + (data.completionTokens || 0);
+    const totalCost = data.cost || 0;
+    // ponytail: cost split is a token-share allocation of the (rate-accurate)
+    // server total, not a per-rate recompute. cached is a subset of prompt, so
+    // peel it out of the input share. Upgrade to a stored per-component cost
+    // breakdown if exact cached-rate cost display is needed.
+    const cachedTokens = data.cachedTokens || 0;
+    const nonCachedInput = Math.max(0, (data.promptTokens || 0) - cachedTokens);
+    const inputCost = totalTokens > 0 ? nonCachedInput * (totalCost / totalTokens) : 0;
+    const cachedCost = totalTokens > 0 ? cachedTokens * (totalCost / totalTokens) : 0;
+    const outputCost = totalTokens > 0 ? (data.completionTokens || 0) * (totalCost / totalTokens) : 0;
+    return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: Number(pendingOf(key, data)) || 0 };
+  });
 }
 
 function getGroupKey(item, keyField) {
@@ -125,23 +126,25 @@ function getGroupKey(item, keyField) {
 
 function groupDataByKey(data, keyField) {
   if (!Array.isArray(data)) return [];
-  const groups = {};
+  const groups = new Map();
   data.forEach((item) => {
     const gk = getGroupKey(item, keyField);
-    if (!groups[gk]) {
-      groups[gk] = {
+    if (!groups.has(gk)) {
+      groups.set(gk, {
         groupKey: gk,
-        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null, pending: 0 },
+        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, costNanoUsd: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null, pending: 0 },
         items: [],
-      };
+      });
     }
-    const s = groups[gk].summary;
+    const group = groups.get(gk);
+    const s = group.summary;
     s.requests += item.requests || 0;
     s.promptTokens += item.promptTokens || 0;
     s.completionTokens += item.completionTokens || 0;
     s.cachedTokens += item.cachedTokens || 0;
     s.totalTokens += item.totalTokens || 0;
     s.cost += item.cost || 0;
+    s.costNanoUsd += item.costNanoUsd != null ? item.costNanoUsd : Math.round((item.cost || 0) * 1e9);
     s.inputCost += item.inputCost || 0;
     s.cachedCost += item.cachedCost || 0;
     s.outputCost += item.outputCost || 0;
@@ -149,40 +152,82 @@ function groupDataByKey(data, keyField) {
     if (item.lastUsed && (!s.lastUsed || new Date(item.lastUsed) > new Date(s.lastUsed))) {
       s.lastUsed = item.lastUsed;
     }
-    groups[gk].items.push(item);
+    group.items.push(item);
   });
-  return Object.values(groups);
+  return [...groups.values()];
 }
 
+// ─── Toolbar state (spec admin-usage-views "Shared table toolbar") ───
+const OVERVIEW_SORTS = [
+  { value: "requests", label: "Requests" },
+  { value: "tokens", label: "Tokens" },
+  { value: "cost", label: "Chi phí" },
+  { value: "lastUsed", label: "Lần dùng cuối" },
+  { value: "name", label: "Tên" },
+];
+const OVERVIEW_DEFAULTS = { sort: "requests", dir: "desc", top: 0 };
+// The column fields the Overview sorted by before the toolbar existed (`sortBy`), so an
+// old link still opens in its order.
+const OVERVIEW_QUERY_OPTIONS = {
+  sortFields: OVERVIEW_SORTS.map((s) => s.value),
+  legacy: {
+    map: {
+      rawModel: "name", accountName: "name", keyName: "name", endpoint: "name",
+      requests: "requests", lastUsed: "lastUsed",
+      totalTokens: "tokens", promptTokens: "tokens", completionTokens: "tokens", cachedTokens: "tokens",
+      cost: "cost", cachedCost: "cost",
+    },
+  },
+};
+const TABLE_NAMESPACES = { model: "ov-model", account: "ov-account", apiKey: "ov-key", endpoint: "ov-endpoint" };
+
+// A sort value of a row or a group summary; null sorts last.
+function metricOf(obj, field, name) {
+  switch (field) {
+    case "requests": return obj.requests || 0;
+    case "tokens": return obj.totalTokens ?? ((obj.promptTokens || 0) + (obj.completionTokens || 0));
+    case "cost": return obj.costNanoUsd != null ? obj.costNanoUsd : Math.round((obj.cost || 0) * 1e9);
+    case "lastUsed": {
+      const t = obj.lastUsed ? Date.parse(obj.lastUsed) : NaN;
+      return Number.isFinite(t) ? t : null;
+    }
+    case "name": return name || null;
+    default: return null;
+  }
+}
+
+const providerNamesOf = (row) => (Array.isArray(row.providers) && row.providers.length ? row.providers.map((p) => p.name) : (row.provider ? [row.provider] : []));
+const itemNameOf = (row) => `${row.rawModel || ""} ${row.provider || ""}`.trim();
+
 const MODEL_COLUMNS = [
-  { field: "rawModel", label: "Model" },
+  { field: "rawModel", label: "Model", sortField: "name" },
   { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
+  { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
 const ACCOUNT_COLUMNS = [
-  { field: "rawModel", label: "Model" },
+  { field: "rawModel", label: "Model", sortField: "name" },
   { field: "provider", label: "Provider" },
   { field: "accountName", label: "Account" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
+  { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
 const API_KEY_COLUMNS = [
-  { field: "keyName", label: "API Key Name" },
+  { field: "keyName", label: "API Key Name", sortField: "name" },
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
+  { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
 const ENDPOINT_COLUMNS = [
-  { field: "endpoint", label: "Endpoint" },
+  { field: "endpoint", label: "Endpoint", sortField: "name" },
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
-  { field: "requests", label: "Requests", align: "right" },
-  { field: "lastUsed", label: "Last Used", align: "right" },
+  { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
 const TABLE_OPTIONS = [
@@ -200,24 +245,71 @@ const PERIODS = [
   { value: "60d", label: "60D" },
 ];
 
-export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+// While the requested-model rebuild runs, the figures are refreshed at this pace.
+const REBUILD_POLL_MS = 10_000;
 
-  const sortBy = searchParams.get("sortBy") || "rawModel";
-  const sortOrder = searchParams.get("sortOrder") || "asc";
+function fmtDay(dateKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(dateKey || "");
+}
+
+function ModelViewNotes({ stats, modelView }) {
+  if (modelView !== "requested" || !stats) return null;
+  const notes = [];
+  if (stats.requestedBackfill?.running) {
+    notes.push({ icon: "sync", text: "Đang tính lại số liệu theo model khách gọi…" });
+  }
+  if (stats.requestedPartial) {
+    const days = Array.isArray(stats.upstreamOnlyDays) ? stats.upstreamOnlyDays : [];
+    let text;
+    if (stats.requestedSince && stats.upstreamOnlyIsPrefix) {
+      text = `Trước ngày ${fmtDay(stats.requestedSince)} chỉ có model gốc`;
+    } else if (days.length > 0) {
+      // Days without requested figures that are not simply "everything before a date"
+      // (a day being rebuilt, or one whose raw requests were partly deleted).
+      const shown = days.slice(-5).map(fmtDay).join(", ");
+      const more = days.length > 5 ? ` và ${days.length - 5} ngày trước đó` : "";
+      text = `Ngày ${shown}${more} chỉ có model gốc`;
+    } else {
+      text = "Khoảng thời gian này chỉ có model gốc";
+    }
+    notes.push({ icon: "info", text });
+  }
+  if (notes.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1" role="status">
+      {notes.map((n) => (
+        <p key={n.text} className="flex items-center gap-2 border border-border bg-surface px-3 py-2 text-xs text-text-muted">
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{n.icon}</span>
+          {n.text}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, modelView: modelViewProp, hidePeriodSelector = false } = {}) {
+  const [urlModelView] = useModelView();
+  const modelView = modelViewProp ?? urlModelView;
+  const reqView = modelView === "requested";
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
+  const [error, setError] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  // When the last stats response (or failure) arrived: the rebuild poll counts from here.
+  const [settledAt, setSettledAt] = useState(0);
   const [tableView, setTableView] = useState("model");
   const [viewMode, setViewMode] = useState("costs");
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
-  const isInitialLoad = useRef(true);
   const hasLoadedStats = useRef(false);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
+
+  const [query, setQuery] = useTableQuery(TABLE_NAMESPACES[tableView], OVERVIEW_DEFAULTS, OVERVIEW_QUERY_OPTIONS);
+  const retry = useCallback(() => setReloadTick((t) => t + 1), []);
 
   // Fetch connected providers once, deduplicate by provider type
   // Always include noAuth free providers (e.g. opencode) regardless of connections
@@ -251,30 +343,56 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       .catch(() => {});
   }, []);
 
-  // Fetch filtered stats via REST when period changes
+  // Fetch the stats via REST when the period or the model view changes (or on retry)
   useEffect(() => {
-    // First load: show full spinner; subsequent: show subtle fetching indicator
-    if (isInitialLoad.current) {
-      isInitialLoad.current = false;
+    let cancelled = false;
+    // Until stats have loaded once (first load, retry after a failed first load): full
+    // spinner; afterwards: subtle fetching indicator
+    if (!hasLoadedStats.current) {
       setLoading(true);
     } else {
       setFetching(true);
     }
+    setError(null);
 
-    fetch(`/api/usage/stats?period=${period}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data) {
-          hasLoadedStats.current = true;
-          setStats((prev) => ({ ...prev, ...data }));
-        }
+    const params = new URLSearchParams({ period, modelView });
+    fetch(`/api/usage/stats?${params}`)
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok || !data) throw new Error(data?.error || "Failed to load usage statistics");
+        return data;
       })
-      .catch(() => {})
+      .then((data) => {
+        if (cancelled) return;
+        hasLoadedStats.current = true;
+        // Replace the period/view-dependent maps instead of merging them into the previous
+        // response: a map key of the other view must not linger.
+        setStats((prev) => ({
+          ...data,
+          activeRequests: data.activeRequests ?? prev?.activeRequests,
+        }));
+      })
+      .catch((e) => { if (!cancelled) setError(e.message || "Failed to load usage statistics"); })
       .finally(() => {
+        if (cancelled) return;
         setLoading(false);
         setFetching(false);
+        setSettledAt(Date.now());
       });
-  }, [period]);
+    return () => { cancelled = true; };
+  }, [period, modelView, reloadTick]);
+
+  // While the requested-model rebuild runs, refresh until it is done.
+  // `stale`: the figures predate the latest rebuilt day; refresh until they do not.
+  // The next refresh is scheduled REBUILD_POLL_MS after a response arrives, never while a
+  // fetch is still running, so a slow response is never cancelled by the next poll.
+  const rebuilding = Boolean(reqView && (stats?.requestedBackfill?.running || stats?.requestedBackfill?.stale));
+  const inFlight = loading || fetching;
+  useEffect(() => {
+    if (!rebuilding || inFlight) return undefined;
+    const timer = setTimeout(() => setReloadTick((t) => t + 1), REBUILD_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [rebuilding, inFlight, settledAt]);
 
   // SSE connection - real-time updates for activeRequests + recentRequests only
   useEffect(() => {
@@ -305,66 +423,70 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     return () => es.close();
   }, []);
 
-  const toggleSort = useCallback((tableType, field) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (params.get("sortBy") === field) {
-      params.set("sortOrder", params.get("sortOrder") === "asc" ? "desc" : "asc");
-    } else {
-      params.set("sortBy", field);
-      params.set("sortOrder", "asc");
-    }
-    router.replace(`?${params.toString()}`, { scroll: false });
-  }, [searchParams, router]);
+  const onHeaderSort = useCallback((field) => {
+    setQuery((s) => nextSortState(s, field, { ascFirst: ["name"] }));
+  }, [setQuery]);
+  const clearFilters = useCallback(() => setQuery(clearQueryFilters), [setQuery]);
 
   // Compute active table data
   const activeTableConfig = useMemo(() => {
     if (!stats) return null;
+    const providerCell = (item) => (reqView && Array.isArray(item.providers)
+      ? <ProviderList providers={item.providers} highlight={item.pending > 0} />
+      : <Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge>);
+    // The live in-flight counters are kept per UPSTREAM model ("model (provider)"), so the
+    // in-flight highlight is shown in the upstream view only; requested rows never match
+    // them by accident.
+    const noPending = () => 0;
     switch (tableView) {
       case "model": {
-        const pendingMap = stats.pending?.byModel || {};
+        const pendingByModel = stats.pending?.byModel;
         return {
           columns: MODEL_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byModel, pendingMap, sortBy, sortOrder), "rawModel"),
+          rows: toRows(stats.byModel, reqView ? noPending : (key) => ownValue(pendingByModel, key)),
+          groupBy: "rawModel",
+          searchFields: ["rawModel", "provider"],
           storageKey: "usage-stats:expanded-models",
           emptyMessage: "No usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
-              <td className="px-6 py-3 text-text-muted">—</td>
-              <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-text-muted">
+                {/* One row per requested model: its providers are the group's providers. */}
+                {reqView && group.items.length === 1 ? <ProviderList providers={group.items[0].providers || []} /> : "—"}
+              </td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
           renderDetailCells: (item) => (
             <>
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
-              <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
-              <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3">{providerCell(item)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
         };
       }
       case "account": {
-        const pendingMap = {};
-        if (stats?.pending?.byAccount) {
-          Object.entries(stats.byAccount || {}).forEach(([accountKey, data]) => {
-            const connPending = stats.pending.byAccount[data.connectionId];
-            if (connPending) {
-              const modelKey = data.provider ? `${data.rawModel} (${data.provider})` : data.rawModel;
-              pendingMap[accountKey] = connPending[modelKey] || 0;
-            }
-          });
-        }
+        const pendingByAccount = stats?.pending?.byAccount;
+        const accountPending = (_key, data) => {
+          const connPending = ownValue(pendingByAccount, data.connectionId);
+          const modelKey = data.provider ? `${data.rawModel} (${data.provider})` : data.rawModel;
+          return ownValue(connPending, modelKey) || 0;
+        };
         return {
           columns: ACCOUNT_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byAccount, pendingMap, sortBy, sortOrder), "accountName"),
+          rows: toRows(stats.byAccount, reqView ? noPending : accountPending),
+          groupBy: "accountName",
+          searchFields: ["accountName", "rawModel", "provider"],
           storageKey: "usage-stats:expanded-accounts",
           emptyMessage: "No account-specific usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
-              <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -373,7 +495,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.accountName || `Account ${item.connectionId?.slice(0, 8)}...`}</td>
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
               <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
-              <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -382,14 +504,16 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       case "apiKey": {
         return {
           columns: API_KEY_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byApiKey, {}, sortBy, sortOrder), "keyName"),
+          rows: toRows(stats.byApiKey),
+          groupBy: "keyName",
+          searchFields: ["keyName", "apiKeyMasked", "rawModel", "provider"],
           storageKey: "usage-stats:expanded-apikeys",
           emptyMessage: "No API key usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
-              <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -397,8 +521,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             <>
               <td className="px-6 py-3 font-medium">{item.keyName}</td>
               <td className="px-6 py-3">{item.rawModel}</td>
-              <td className="px-6 py-3"><Badge variant="neutral" size="sm">{item.provider}</Badge></td>
-              <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3">{providerCell(item)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -408,14 +532,16 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       default: {
         return {
           columns: ENDPOINT_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byEndpoint, {}, sortBy, sortOrder), "endpoint"),
+          rows: toRows(stats.byEndpoint),
+          groupBy: "endpoint",
+          searchFields: ["endpoint", "rawModel", "provider"],
           storageKey: "usage-stats:expanded-endpoints",
           emptyMessage: "No endpoint usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
-              <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -423,23 +549,72 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             <>
               <td className="px-6 py-3 font-medium font-mono text-sm">{item.endpoint}</td>
               <td className="px-6 py-3">{item.rawModel}</td>
-              <td className="px-6 py-3"><Badge variant="neutral" size="sm">{item.provider}</Badge></td>
-              <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3">{providerCell(item)}</td>
+              <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
         };
       }
     }
-  }, [stats, tableView, sortBy, sortOrder]);
+  }, [stats, tableView, reqView]);
 
-  if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
+  // Search and filters apply to rows; groups are then sorted by their summed value, the rows
+  // inside a group by the same field, and Top N cuts the groups.
+  const tableData = useMemo(() => {
+    if (!activeTableConfig) return null;
+    const { rows, groupBy, searchFields } = activeTableConfig;
+    const modelOptions = [...new Set(rows.map((r) => r.rawModel).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const providerOptions = [...new Set(rows.flatMap(providerNamesOf))].sort((a, b) => a.localeCompare(b));
+    const matched = filterRows(rows, {
+      search: query.q,
+      searchFields,
+      filters: query.filters,
+      filterFields: { model: "rawModel", provider: providerNamesOf },
+    });
+    const sortOpts = { sortField: query.sort, sortDir: query.dir };
+    const groups = sortRows(groupDataByKey(matched, groupBy), {
+      ...sortOpts,
+      valueOf: (g, f) => metricOf(g.summary, f, g.groupKey),
+      nameOf: (g) => g.groupKey,
+    }).map((g) => ({
+      ...g,
+      items: sortRows(g.items, { ...sortOpts, valueOf: (r, f) => metricOf(r, f, itemNameOf(r)), nameOf: itemNameOf }),
+    }));
+    const top = normalizeTop(query.top);
+    const totalGroups = new Set(rows.map((r) => getGroupKey(r, groupBy))).size;
+    return {
+      groups: top ? groups.slice(0, top) : groups,
+      matchedGroups: groups.length,
+      totalGroups,
+      filters: [
+        { name: "model", label: "Model", options: modelOptions.map((m) => ({ value: m, label: m })) },
+        { name: "provider", label: "Provider", options: providerOptions.map((p) => ({ value: p, label: p })) },
+      ],
+    };
+  }, [activeTableConfig, query]);
 
   const spinner = (
     <div className="flex items-center justify-center py-12 text-text-muted">
       <span className="material-symbols-outlined text-[32px] animate-spin">progress_activity</span>
     </div>
   );
+
+  if (!stats && !loading) {
+    return (
+      <Card>
+        <TableState state="error" onRetry={retry} />
+      </Card>
+    );
+  }
+
+  const tableState = tableStateOf({
+    loading,
+    error,
+    total: tableData?.totalGroups ?? 0,
+    matched: tableData?.matchedGroups ?? 0,
+    filtersActive: hasActiveQuery(query),
+  });
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -463,6 +638,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           )}
         </div>
       )}
+
+      <ModelViewNotes stats={stats} modelView={modelView} />
 
       {/* Overview cards */}
       {loading ? spinner : <OverviewCards stats={stats} />}
@@ -489,6 +666,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           <select
             value={tableView}
             onChange={(e) => setTableView(e.target.value)}
+            aria-label="Bảng"
             className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 sm:w-auto"
             style={{ colorScheme: 'auto' }}
           >
@@ -511,22 +689,34 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             </button>
           </div>
         </div>
-        {loading ? spinner : activeTableConfig && (
+        {activeTableConfig || loading || error ? (
           <UsageTable
             title=""
-            columns={activeTableConfig.columns}
-            groupedData={activeTableConfig.groupedData}
-            tableType={tableView}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onToggleSort={toggleSort}
+            columns={activeTableConfig?.columns || MODEL_COLUMNS}
+            groupedData={tableData?.groups || []}
+            sortState={query}
+            onSort={onHeaderSort}
             viewMode={viewMode}
-            storageKey={activeTableConfig.storageKey}
-            renderSummaryCells={activeTableConfig.renderSummaryCells}
-            renderDetailCells={activeTableConfig.renderDetailCells}
-            emptyMessage={activeTableConfig.emptyMessage}
+            storageKey={activeTableConfig?.storageKey || "usage-stats:expanded-models"}
+            renderSummaryCells={activeTableConfig?.renderSummaryCells || (() => null)}
+            renderDetailCells={activeTableConfig?.renderDetailCells || (() => null)}
+            emptyMessage={activeTableConfig?.emptyMessage || "No usage recorded yet."}
+            tableState={tableState}
+            onRetry={retry}
+            onClearFilters={clearFilters}
+            toolbar={(
+              <TableToolbar
+                state={query}
+                onChange={setQuery}
+                searchPlaceholder="Model, provider, account, key, endpoint…"
+                filters={tableData?.filters || []}
+                sortOptions={OVERVIEW_SORTS}
+                shown={tableData?.groups.length ?? 0}
+                total={tableData?.totalGroups ?? 0}
+              />
+            )}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

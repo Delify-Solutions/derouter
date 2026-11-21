@@ -6,6 +6,7 @@ import { UsageStats, RequestLogger, CardSkeleton, SegmentedControl } from "@/sha
 import RequestDetailsTab from "./components/RequestDetailsTab";
 import UserUsageTable from "./components/UserUsageTable";
 import ProviderUsageTable from "./components/ProviderUsageTable";
+import ModelViewSwitch, { useModelView } from "./components/ModelViewSwitch";
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -28,6 +29,7 @@ function UsageContent() {
   const router = useRouter();
 
   const [period, setPeriod] = useState("today");
+  const [modelView, setModelView] = useModelView();
 
   const tabFromUrl = searchParams.get("tab");
   // "keys" is the old name of the per-user tab; links to it still land there.
@@ -58,25 +60,30 @@ function UsageContent() {
           onChange={handleTabChange}
           className="w-full sm:w-auto"
         />
-        {activeTab === "overview" && (
-          <SegmentedControl
-            options={PERIODS}
-            value={period}
-            onChange={setPeriod}
-            size="sm"
-            className="w-full sm:w-auto"
-          />
+        {(activeTab === "overview" || activeTab === "details") && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <ModelViewSwitch value={modelView} onChange={setModelView} />
+            {activeTab === "overview" && (
+              <SegmentedControl
+                options={PERIODS}
+                value={period}
+                onChange={setPeriod}
+                size="sm"
+                className="w-full sm:w-auto"
+              />
+            )}
+          </div>
         )}
       </div>
 
       {activeTab === "overview" && (
         <Suspense fallback={<CardSkeleton />}>
-          <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
+          <UsageStats period={period} setPeriod={setPeriod} modelView={modelView} hidePeriodSelector />
         </Suspense>
       )}
       {activeTab === "logs" && <RequestLogger />}
       {activeTab === "users" && <UserUsageTable />}
-      {activeTab === "details" && <RequestDetailsTab />}
+      {activeTab === "details" && <RequestDetailsTab modelView={modelView} />}
       {activeTab === "providers" && <ProviderUsageTable />}
     </div>
   );

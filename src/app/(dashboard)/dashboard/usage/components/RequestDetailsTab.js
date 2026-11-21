@@ -5,6 +5,10 @@ import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
+import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
+import { TableStateRow } from "@/shared/components/TableState";
+import { nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
+import { useModelView } from "./ModelViewSwitch";
 import { cn } from "@/shared/utils/cn";
 import { maskKeyFull } from "@/shared/utils/apiKey";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
@@ -227,7 +231,30 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
-export default function RequestDetailsTab() {
+// Shared toolbar (spec admin-usage-views): sorted and filtered on the server, before
+// pagination; newest first by default.
+const DETAIL_SORTS = [
+  { value: "time", label: "Thời gian" },
+  { value: "tokens", label: "Tokens" },
+  { value: "latency", label: "Độ trễ" },
+];
+const DETAIL_DEFAULTS = { sort: "time", dir: "desc", top: 0 };
+const DETAIL_QUERY_OPTIONS = { sortFields: DETAIL_SORTS.map((s) => s.value) };
+
+/** The model a row is listed under in a view; requested falls back to the upstream model. */
+function shownModel(detail, modelView) {
+  return modelView === "requested" ? (detail.requestedModel || detail.model) : detail.model;
+}
+
+const EMPTY_FILTERS = { provider: "", apiKey: "", user: null, status: "", startDate: "", endDate: "" };
+
+export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
+  const [urlModelView] = useModelView();
+  const modelView = modelViewProp ?? urlModelView;
+  const [query, setQuery] = useTableQuery("details", DETAIL_DEFAULTS, DETAIL_QUERY_OPTIONS);
+  const [models, setModels] = useState([]);
+  const [error, setError] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const [details, setDetails] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -242,17 +269,18 @@ export default function RequestDetailsTab() {
   const [keys, setKeys] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
   const [showRaw, setShowRaw] = useState(false);
-  const [filters, setFilters] = useState({
-    provider: "",
-    apiKey: "",
-    // { id, email } of the customer whose keys to show, or null.
-    user: null,
-    status: "",
-    startDate: "",
-    endDate: ""
-  });
+  // `user` is the { id, email } of the customer whose keys to show, or null.
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  // A new model view, search, filter or sort starts again from page 1.
+  const queryKey = [modelView, query.q, query.sort, query.dir, query.filters.model || "", JSON.stringify(filters)].join("\u0000");
+  const [lastQueryKey, setLastQueryKey] = useState(queryKey);
+  if (queryKey !== lastQueryKey) {
+    setLastQueryKey(queryKey);
+    setPagination((p) => (p.page === 1 ? p : { ...p, page: 1 }));
+  }
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -281,11 +309,17 @@ export default function RequestDetailsTab() {
 
   const fetchDetails = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({
         page: pagination.page.toString(),
-        pageSize: pagination.pageSize.toString()
+        pageSize: pagination.pageSize.toString(),
+        modelView,
+        sort: query.sort || "time",
+        order: query.dir || "desc",
       });
+      if (query.q?.trim()) params.append("q", query.q.trim());
+      if (query.filters.model) params.append("model", query.filters.model);
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.apiKey) params.append("apiKey", filters.apiKey);
       if (filters.user?.id) params.append("userId", filters.user.id);
@@ -295,25 +329,30 @@ export default function RequestDetailsTab() {
       if (showRaw) params.append("includeRaw", "1");
 
       const res = await fetch(`/api/usage/request-details?${params}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to fetch request details");
 
       setDetails(data.details || []);
+      setModels(Array.isArray(data.models) ? data.models : []);
       setPagination(prev => ({ ...prev, ...data.pagination }));
     } catch (error) {
-      console.error("Failed to fetch request details:", error);
+      console.error("Failed to fetch request details:", error.message);
+      setDetails([]);
+      setError(error.message || "Failed to fetch request details");
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, filters, showRaw]);
+  }, [pagination.page, pagination.pageSize, filters, showRaw, modelView, query]);
 
   useEffect(() => {
     fetchProviders();
     fetchKeys();
   }, [fetchProviders, fetchKeys]);
 
+  // reloadTick: "Thử lại" runs the same fetch again.
   useEffect(() => {
     fetchDetails();
-  }, [fetchDetails]);
+  }, [fetchDetails, reloadTick]);
 
   const handleViewDetail = (detail) => {
     setSelectedDetail(detail);
@@ -329,9 +368,28 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", apiKey: "", user: null, status: "", startDate: "", endDate: "" });
+    setFilters(EMPTY_FILTERS);
     setShowRaw(false);
+    setQuery(clearQueryFilters);
   };
+
+  const existingFiltersActive = Boolean(
+    filters.provider || filters.apiKey || filters.user || filters.status || filters.startDate || filters.endDate
+  );
+  const filtersActive = existingFiltersActive || hasActiveQuery(query);
+  // "Xoá bộ lọc": search and every filter, never the sort or the model view.
+  const clearAllFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setQuery(clearQueryFilters);
+    setPagination((p) => ({ ...p, page: 1 }));
+  };
+  const tableState = tableStateOf({ loading, error, total: null, matched: details.length, filtersActive });
+  const onHeaderSort = (field) => setQuery((s) => nextSortState(s, field));
+  const modelOptions = models.map((m) => ({ value: m, label: m }));
+  // A chosen model that is not in the list (old link, another view) stays selectable.
+  if (query.filters.model && !models.includes(query.filters.model)) {
+    modelOptions.unshift({ value: query.filters.model, label: query.filters.model });
+  }
 
   // "Clear all request logs" — wipes every row in the requestDetails (log)
   // table. Destructive across all keys/providers; usageHistory accounting is NOT
@@ -356,6 +414,17 @@ export default function RequestDetailsTab() {
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
+        <TableToolbar
+          className="mb-4"
+          state={query}
+          onChange={setQuery}
+          searchPlaceholder="Model, provider, email, key name…"
+          filters={[{ name: "model", label: "Model", options: modelOptions }]}
+          sortOptions={DETAIL_SORTS}
+          showTop={false}
+          shown={details.length}
+          total={pagination.totalItems || 0}
+        />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
@@ -522,7 +591,7 @@ export default function RequestDetailsTab() {
           <Button
             variant="ghost"
             onClick={handleClearFilters}
-            disabled={!filters.provider && !filters.apiKey && !filters.status && !filters.startDate && !filters.endDate && !showRaw}
+            disabled={!filtersActive && !showRaw}
             className="w-full sm:w-auto"
           >
             Clear Filters
@@ -531,12 +600,12 @@ export default function RequestDetailsTab() {
       </Card>
 
       <Card padding="none">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" aria-busy={loading}>
           <table className="w-full min-w-[1000px]">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
+                <SortableHeader label="Timestamp" field="time" state={query} onSort={onHeaderSort} className="p-4 text-sm font-semibold text-text-main" />
+                <th className="text-left p-4 text-sm font-semibold text-text-main">{modelView === "requested" ? "Model (khách gọi)" : "Model (gốc)"}</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Người dùng / Key</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Status</th>
@@ -544,27 +613,27 @@ export default function RequestDetailsTab() {
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main" title="Tokens (input + output); Tok/s = output tokens / total time">Tok</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
+                <SortableHeader
+                  label="Tok"
+                  field="tokens"
+                  state={query}
+                  onSort={onHeaderSort}
+                  align="right"
+                  className="p-4 text-sm font-semibold text-text-main"
+                />
+                <SortableHeader label="Latency" field="latency" state={query} onSort={onHeaderSort} className="p-4 text-sm font-semibold text-text-main" />
                 <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="12" className="p-8 text-center text-text-muted">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
-                      Loading...
-                    </div>
-                  </td>
-                </tr>
-              ) : details.length === 0 ? (
-                <tr>
-                  <td colSpan="12" className="p-8 text-center text-text-muted">
-                    No request details found
-                  </td>
-                </tr>
+              {tableState !== "ready" ? (
+                <TableStateRow
+                  state={tableState}
+                  colSpan={12}
+                  emptyMessage="No request details found"
+                  onRetry={() => setReloadTick((t) => t + 1)}
+                  onClearFilters={clearAllFilters}
+                />
               ) : (
                 details.map((detail, index) => (
                   <tr
@@ -574,8 +643,8 @@ export default function RequestDetailsTab() {
                     <td className="whitespace-nowrap p-4 text-sm text-text-main">
                       {new Date(detail.timestamp).toLocaleString()}
                     </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
-                      {detail.model}
+                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main" title={shownModel(detail, modelView) || ""}>
+                      {shownModel(detail, modelView)}
                     </td>
                     <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
                        <span className="font-medium">
@@ -688,8 +757,15 @@ export default function RequestDetailsTab() {
                 <span className="inline-flex max-w-full align-top"><KeyOwner apiKey={selectedDetail.apiKey} info={selectedDetail.keyInfo} compact={false} /></span>
               </div>
               <div>
-                <span className="text-text-muted">Model:</span>{" "}
-                <span className="text-text-main font-mono">{selectedDetail.model}</span>
+                <span className="text-text-muted">Model khách gọi:</span>{" "}
+                <span className="text-text-main font-mono">{selectedDetail.requestedModel || selectedDetail.model}</span>
+                {!selectedDetail.requestedModel && (
+                  <span className="ml-1 text-xs text-text-muted">(không ghi nhận, tính theo model gốc)</span>
+                )}
+              </div>
+              <div>
+                <span className="text-text-muted">Model gốc:</span>{" "}
+                <span className="text-text-main font-mono">{selectedDetail.upstreamModel ?? selectedDetail.model}</span>
               </div>
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
