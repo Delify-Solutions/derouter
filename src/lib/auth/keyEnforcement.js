@@ -33,8 +33,9 @@ import {
   getUserRateUsage,
   getUserOldestTokenAt,
 } from "../db/repos/usageRepo.js";
-import { admitSync } from "../billing/planQueue.js";
+import { admitSync, productLineOfKey } from "../billing/planQueue.js";
 import { payingRatesSync } from "../billing/rates.js";
+import { businessModelIds, getBusinessSettings } from "../biz/settings.js";
 import { usdToNano } from "../../shared/utils/money.js";
 import { matchesAllowed } from "./modelMatching.js";
 import { acquireSlot, concurrencyCapFor, concurrencyLimitMessage, slotKey } from "../billing/inflight.js";
@@ -89,6 +90,22 @@ const WINDOW_MS = {
 
 function windowDurationMs(resetWindow) {
   return WINDOW_MS[resetWindow] || 0; // 0 = no reset (unlimited-window budget until exhausted)
+}
+
+/**
+ * The business settings, or silence when the table is not readable.
+ *
+ * A failed read must not grant a customer key access to a business model, so the
+ * model check treats an unreadable setting as "the business list is empty and the
+ * key is not special" — which is exactly what happens before any business model is
+ * configured, and how every existing test keeps passing.
+ */
+async function loadBusinessSettings() {
+  try {
+    return await getBusinessSettings();
+  } catch {
+    return { businessModels: [], guardModel: "", embeddingModel: "" };
+  }
 }
 
 function deny(status, code, message, extra = {}) {
@@ -174,12 +191,16 @@ async function enforceRate(scope, resolved) {
  *
  * @param {string} apiKey - the raw API key
  * @param {string} [model] - the requested model id (combo name or pool model)
+ * @param {{ endpoint?: string }} [options] - the endpoint KIND the key is calling
+ *        (`chat`, `messages`, `responses`, `embeddings`, …). A bot key is accepted
+ *        on `chat` only (spec api-access-enforcement "Bot keys reach only chat
+ *        completions").
  * @returns {Promise<
  *   { ok: true, auth: object|null } |
  *   { ok: false, status: number, code: string, message: string, retryAfterSec?: number, resetAt?: string }
  * >}
  */
-export async function enforceKeyLimits(apiKey, model) {
+export async function enforceKeyLimits(apiKey, model, { endpoint = null } = {}) {
   if (!apiKey) return { ok: true, auth: null }; // no key (requireApiKey false) → no limits
 
   const auth = await getApiKeyForAuth(apiKey);
@@ -194,10 +215,25 @@ export async function enforceKeyLimits(apiKey, model) {
     const denial = statusDenial(owner);
     if (denial) return denial;
 
+    // A bot key (spec business-bots "Bot keys") is a customer key owned by the same
+    // account but bound to one bot: it answers only the business models, only on
+    // the chat endpoint, and only while its bot is active.
+    const botKey = Boolean(key.botId);
+    const productLine = productLineOfKey(key);
+    if (botKey) {
+      if (!auth.bot?.isActive) {
+        return deny(403, "bot_disabled", PLATFORM_MESSAGES.bot_disabled);
+      }
+      if (endpoint && endpoint !== "chat") {
+        return deny(403, "endpoint_not_allowed", PLATFORM_MESSAGES.endpoint_not_allowed);
+      }
+    }
+
     // 2. Group present. A group with no allow-list is legitimate ("all models"),
     //    so presence — not emptiness — is the test; isModelAllowed would treat an
     //    empty list as "allow everything" and hide a genuinely ungrouped account.
-    if (!auth.group) {
+    //    A bot key ignores the group entirely: its model list is the business list.
+    if (!auth.group && !botKey) {
       return deny(403, "model_not_allowed", PLATFORM_MESSAGES.group_missing);
     }
 
@@ -217,18 +253,31 @@ export async function enforceKeyLimits(apiKey, model) {
     //    The same function feeds the rates the account and /usage pages show.
     const db = await getAdapter();
     const pinnedPlanId = key.planId ?? null;
-    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const rates = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, productLine });
     const rate = rates.planId
       ? await enforceRate({ kind: "user", userId: key.userId, planId: rates.planId }, rates)
       : { ok: true };
     if (!rate.ok) return rate;
 
-    // 6. Model allow-list from the owner's group. Skipped when no model was given
-    //    (a non-chat endpoint); an empty allow-list means unrestricted.
+    // 6. Model allow-list. For a bot key it is exactly the current business
+    //    models; for every other customer key it is the owner's group MINUS the
+    //    business models (spec api-access-enforcement "Customer keys take their
+    //    model access from the owner's current group", exception 1 and 2).
+    //    Skipped when no model was given (a non-chat endpoint).
     if (model) {
-      const allowed = resolved.allowedModels;
-      if (Array.isArray(allowed) && allowed.length > 0 && !matchesAllowed(model, allowed)) {
-        return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+      const businessModels = businessModelIds(await loadBusinessSettings());
+      if (botKey) {
+        if (!businessModels.includes(String(model))) {
+          return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+        }
+      } else {
+        if (businessModels.includes(String(model))) {
+          return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+        }
+        const allowed = resolved.allowedModels;
+        if (Array.isArray(allowed) && allowed.length > 0 && !matchesAllowed(model, allowed)) {
+          return deny(403, "model_not_allowed", modelNotAllowedMessage(model));
+        }
       }
     }
 
@@ -238,7 +287,7 @@ export async function enforceKeyLimits(apiKey, model) {
     //    queued plan has credit left.
     //    Re-read after the rate step: a TPM wait can last seconds, and the queue may
     //    have moved on in that time.
-    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId });
+    const admitted = admitSync(db, key.userId, null, { planId: pinnedPlanId, productLine });
     if (!admitted.ok) {
       if (admitted.status === 429) {
         return deny(429, "plan_limit", planLimitMessage(admitted.resetAt), {
@@ -252,7 +301,13 @@ export async function enforceKeyLimits(apiKey, model) {
         const plan = db.get(`SELECT name FROM plans WHERE id = ?`, [pinnedPlanId]);
         return deny(402, "insufficient_quota", pinnedPlanUnavailableMessage(plan?.name));
       }
-      return deny(402, "insufficient_quota", PLATFORM_MESSAGES.insufficient_quota);
+      // Each line has its own shop, so the "nothing left" message names it
+      // (spec plan-queue-billing "Purchases are scoped to the key's product line").
+      return deny(
+        402,
+        "insufficient_quota",
+        productLine === "business" ? PLATFORM_MESSAGES.insufficient_quota_business : PLATFORM_MESSAGES.insufficient_quota
+      );
     }
 
     // 8. Concurrent requests, at most the paying plan's RPM, per (user, plan).
@@ -262,7 +317,7 @@ export async function enforceKeyLimits(apiKey, model) {
     //    slot is released when the response body ends (src/lib/billing/inflight.js).
     //    Re-read the paying plan: like admission, it may have moved on during a
     //    TPM wait, and the cap must be the plan that will actually pay.
-    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId });
+    const payer = payingRatesSync(db, key.userId, null, { planId: pinnedPlanId, productLine });
     const capFromRpm = Number(payer.rpm) > 0;
     const slot = acquireSlot(slotKey(key.userId, payer.planId), { max: concurrencyCapFor(payer.rpm) });
     if (!slot.ok) {

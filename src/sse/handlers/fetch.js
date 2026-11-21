@@ -73,7 +73,7 @@ async function handleFetchRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, providerInput, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, providerInput, { clientIp: getRequestIp(request), endpoint: "fetch" });
     if (denied) return denied;
   }
 

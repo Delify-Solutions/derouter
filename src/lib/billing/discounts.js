@@ -18,7 +18,7 @@
 // The cost is computed with BigInt — no float ever touches a balance.
 import { v4 as uuidv4 } from "uuid";
 import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
-import { listQueueSync, evaluatePlan, hasStarted } from "./planQueue.js";
+import { listQueueSync, evaluatePlan, hasStarted, scopeQueue } from "./planQueue.js";
 import { nano } from "./ledger.js";
 
 export const MAX_BP = 10000;
@@ -444,8 +444,12 @@ export function removeComboFromDiscountsSync(db, comboName) {
  *            when none is eligible, the first plan with credit left (where pass 2
  *            of chargeSync starts). null when no plan can pay or the paying
  *            purchase has no template (gift/grant).
+ *
+ * `productLine` keeps the lookup inside the key's line: a bot key is paid by
+ * business purchases only, so a plan-scoped discount on an api purchase must not
+ * reach a business charge (spec plan-queue-billing).
  */
-export function resolvePayerContextSync(db, userId, at) {
+export function resolvePayerContextSync(db, userId, at, productLine = "api") {
   if (!userId) return { groupId: null, planId: null };
   const groupRow = db.get(
     `SELECT u.groupId AS groupId FROM users u
@@ -454,7 +458,7 @@ export function resolvePayerContextSync(db, userId, at) {
     [userId]
   );
   const nowMs = ms(at) ?? Date.now();
-  const queue = listQueueSync(db, userId, new Date(nowMs).toISOString());
+  const queue = scopeQueue(listQueueSync(db, userId, new Date(nowMs).toISOString()), null, productLine);
   let paying = queue.find((entry) => evaluatePlan(entry, nowMs).eligible) ?? null;
   if (!paying) {
     paying = queue.find((entry) => hasStarted(entry, nowMs)
@@ -484,6 +488,7 @@ export function resolveDiscountSync(db, {
   userId = null,
   groupId,
   planId,
+  productLine = "api",
 } = {}) {
   const atMs = ms(at) ?? Date.now();
   const empty = { rules: [], ruleIds: [], rawBp: 0, totalBp: 0, capped: false, endsAt: null };
@@ -498,7 +503,7 @@ export function resolveDiscountSync(db, {
   const needsPayer = live.some((r) => r.scopeType === "group" || r.scopeType === "plan");
   let ctx = { groupId: groupId ?? null, planId: planId ?? null };
   if (needsPayer && userId && (groupId === undefined || planId === undefined)) {
-    const found = resolvePayerContextSync(db, userId, new Date(atMs).toISOString());
+    const found = resolvePayerContextSync(db, userId, new Date(atMs).toISOString(), productLine);
     ctx = {
       groupId: groupId === undefined ? found.groupId : groupId,
       planId: planId === undefined ? found.planId : planId,
@@ -529,14 +534,26 @@ export function resolveDiscountSync(db, {
  * @returns {{ listCostNanoUsd:number, costNanoUsd:number, discountBp:number,
  *             ruleIds:string[], capped:boolean, rawBp:number }}
  */
-export function applyRequestDiscountSync(db, { listCostNanoUsd, at = null, requestedModel = null, userId = null, planId = undefined } = {}) {
+export function applyRequestDiscountSync(db, {
+  listCostNanoUsd,
+  at = null,
+  requestedModel = null,
+  userId = null,
+  planId = undefined,
+  productLine = "api",
+} = {}) {
   const list = Math.max(0, nano(listCostNanoUsd));
   if (list === 0) {
     return { listCostNanoUsd: 0, costNanoUsd: 0, discountBp: 0, ruleIds: [], capped: false, rawBp: 0 };
   }
   // `planId` = the plan a pinned key is paid by: plan-scoped rules then follow that
   // plan instead of the head of the queue. Omitted (undefined) = look the payer up.
-  const found = resolveDiscountSync(db, planId ? { at, requestedModel, userId, planId } : { at, requestedModel, userId });
+  const found = resolveDiscountSync(
+    db,
+    planId
+      ? { at, requestedModel, userId, planId, productLine }
+      : { at, requestedModel, userId, productLine }
+  );
   return {
     listCostNanoUsd: list,
     costNanoUsd: applyBp(list, found.totalBp),

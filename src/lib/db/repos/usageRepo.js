@@ -469,6 +469,9 @@ export async function saveRequestUsage(entry) {
           requestedModel: entry.requestedModel,
           userId: owner?.userId ?? null,
           planId: keyPlanId ?? undefined,
+          // The key's line: a plan-scoped discount follows the purchase that pays
+          // for THIS line, never the other one.
+          productLine,
         });
         if (discounted.discountBp > 0) {
           discountMeta.listCostNanoUsd = discounted.listCostNanoUsd;

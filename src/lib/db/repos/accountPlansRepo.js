@@ -202,7 +202,13 @@ export function getLedgerPlanOptionsSync(db, userId) {
  */
 export function toCatalogPlan(plan, blocker, methods = []) {
   const limits = Array.isArray(plan.limits) ? plan.limits : parseLimits(plan.limits);
+  // The card groups by line (spec customer-portal) and a business card also shows
+  // its bot and knowledge-base limits, so both travel to the page explicitly.
+  const productLine = plan.productLine === "business" ? "business" : "api";
   return {
+    productLine,
+    maxBots: plan.maxBots ?? null,
+    maxKbBytes: plan.maxKbBytes ?? null,
     ...plan,
     priceUsd: usd(plan.priceNanoUsd),
     priceVnd: plan.priceVnd == null ? null : nano(plan.priceVnd),

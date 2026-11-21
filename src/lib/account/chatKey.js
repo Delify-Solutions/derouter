@@ -23,3 +23,26 @@ export async function ensureChatKey(userId) {
   const created = await createApiKey(CHAT_KEY_NAME, machineId, { userId });
   return created.key;
 }
+
+export const BOT_CHAT_KEY_NAME = "Chat thử";
+
+/**
+ * The per-bot key the business playground uses. It is a normal bot key owned by the
+ * customer, so the playground is billed, rate-limited and guarded exactly like the
+ * public API (spec business-bots "Playground"). It is hidden from the bot's key
+ * list because it exists for the console, not for the customer to copy.
+ *
+ * A key that exists but is inactive means an admin turned it off; like the web chat
+ * key it is NOT silently replaced.
+ */
+export async function ensureBotChatKey(userId, botId) {
+  const keys = await getApiKeys();
+  const mine = keys.find(
+    (key) => key.userId === userId && key.botId === botId && key.name === BOT_CHAT_KEY_NAME
+  );
+  if (mine) return mine.isActive && mine.key ? mine.key : null;
+
+  const machineId = await getConsistentMachineId();
+  const created = await createApiKey(BOT_CHAT_KEY_NAME, machineId, { userId, botId });
+  return created.key;
+}

@@ -48,7 +48,7 @@ async function requireValidApiKey(request) {
   // Advanced key limits: RPM/TPM/expiry/budget (model allow-list checked later
   // once the model is parsed from the body).
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, null, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, null, { clientIp: getRequestIp(request), endpoint: "videos" });
     if (denied) return denied;
   }
   return null;
@@ -122,7 +122,7 @@ async function handleVideoCreateRequest(request, action) {
   // Model allow-list for the key (RPM/TPM/expiry/budget already enforced above).
   const keyForModel = extractApiKey(request);
   if (keyForModel && provider && model) {
-    const denied = await enforceKeyAccess(keyForModel, `${provider}/${model}`, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(keyForModel, `${provider}/${model}`, { clientIp: getRequestIp(request), endpoint: "videos" });
     if (denied) return denied;
   }
 

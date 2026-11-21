@@ -72,7 +72,7 @@ async function handleEmbeddingsRequest(request) {
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request), endpoint: "embeddings" });
     if (denied) return denied;
   }
 

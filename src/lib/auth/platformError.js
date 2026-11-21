@@ -22,6 +22,9 @@ function typeForStatus(status) {
     case 402: return "insufficient_quota";
     case 403: return "permission_error";
     case 429: return "rate_limit_error";
+    // The guard pipeline fails closed (spec business-guard "Fail-closed
+    // availability"): a business answer that cannot be checked is not served.
+    case 503: return "service_unavailable";
     default: return "api_error";
   }
 }

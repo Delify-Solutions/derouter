@@ -71,6 +71,11 @@ export function hitLimit(bucket, { limit, windowMs, now = Date.now() } = {}) {
   return { allowed: true, retryAfterSec: 0, remaining: Math.max(0, max - hits.length) };
 }
 
+/** Drop one bucket — tests only; a running server must never call this. */
+export function resetBucket(bucket) {
+  store.buckets.delete(bucket);
+}
+
 /** Drop every bucket — tests only; a running server must never call this. */
 export function resetAll() {
   store.buckets.clear();

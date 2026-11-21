@@ -30,12 +30,29 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { noteClientBody } from "open-sse/utils/errorTrace.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
+import { runBusinessPipeline } from "@/lib/biz/pipeline.js";
 
 /**
  * Handle chat completion request
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
  */
+/**
+ * `chat` for `/v1/chat/completions` and `/v1/api/chat`, otherwise the protocol
+ * family the path names (`messages`, `responses`, ...). Unknown paths are `chat`:
+ * the chat handler is their only consumer.
+ */
+function chatEndpointKind(request) {
+  try {
+    const path = new URL(request.url).pathname.replace(/\/+$/, "");
+    if (path.endsWith("/messages") || path.endsWith("/messages/count_tokens")) return "messages";
+    if (path.endsWith("/responses") || path.endsWith("/responses/compact")) return "responses";
+    return "chat";
+  } catch {
+    return "chat";
+  }
+}
+
 async function handleChatRequest(request, clientRawRequest = null) {
   let body;
   let rawBody;
@@ -94,8 +111,23 @@ async function handleChatRequest(request, clientRawRequest = null) {
   }
 
   // Advanced key limits: RPM/TPM/expiry/budget + model allow-list.
+  //
+  // The ENDPOINT KIND matters for a bot key: `/v1/messages`, `/v1/responses` and
+  // their aliases all funnel into this handler, but only `/v1/chat/completions`
+  // is open to a bot (spec api-access-enforcement "Bot keys reach only chat
+  // completions"). It is read from the URL rather than the body, which a caller
+  // controls.
+  // The enforcement lookup hands back its `auth` object, so the business
+  // pipeline below does not repeat the key/bot read it already did.
+  let authForPipeline = null;
   if (apiKey) {
-    const denied = await enforceKeyAccess(apiKey, modelStr, { clientIp: getRequestIp(request) });
+    const denied = await enforceKeyAccess(apiKey, modelStr, {
+      clientIp: getRequestIp(request),
+      endpoint: chatEndpointKind(request),
+      onAuth: (auth) => {
+        if (auth?.key?.botId) authForPipeline = auth;
+      },
+    });
     if (denied) return denied;
   }
 
@@ -104,11 +136,42 @@ async function handleChatRequest(request, clientRawRequest = null) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
 
+  // ── AI doanh nghiệp ────────────────────────────────────────────────────────
+  // A bot key never reaches the model directly: every answer goes through the
+  // guard pipeline (spec business-guard, design D4). `dispatch` is the normal
+  // combo/single-model path forced non-streaming by the pipeline — so admission,
+  // combo pricing, usage history and charging stay byte-for-byte what they are
+  // for any other request of that combo.
+  //
+  // It runs BEFORE the Claude-CLI bypass below: that shortcut answers with a
+  // canned reply the router invents, which is not an answer this bot's owner
+  // configured and must not be labelled as one.
+  if (authForPipeline) {
+    return runBusinessPipeline({
+      body,
+      auth: authForPipeline,
+      stream: body?.stream === true,
+      dispatch: (modelBody) => dispatchChat(modelBody, { request, clientRawRequest, apiKey, settings }),
+    });
+  }
+
   // Bypass naming/warmup requests before combo rotation to avoid wasting rotation slots
   const userAgent = request?.headers?.get("user-agent") || "";
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming, { compat: settings.compatNormalization === true });
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
+  return dispatchChat(body, { request, clientRawRequest, apiKey, settings });
+}
+
+/**
+ * The normal combo / capacity-adapter / single-model dispatch for one body.
+ * Split out of `handleChatRequest` so the business pipeline can call it with the
+ * body IT built (locked system prompt, sanitised messages) without re-doing the
+ * auth and bypass steps.
+ */
+async function dispatchChat(body, { request = null, clientRawRequest = null, apiKey = null, settings = null } = {}) {
+  const modelStr = body.model;
+  const resolvedSettings = settings ?? (await getSettings());
   const requiredCapabilities = detectRequiredCapabilities(body);
 
   // Check if model is a combo (has multiple models with fallback)
@@ -119,10 +182,10 @@ async function handleChatRequest(request, clientRawRequest = null) {
     // The combo the client called decides; it is passed down (also to fusion) as a boolean.
     const cacheEstimation = comboInfo.cacheEstimation;
     // Check for combo-specific strategy first, fallback to global
-    const comboStrategies = settings.comboStrategies || {};
+    const comboStrategies = resolvedSettings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
-    const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
-    const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings, {
+    const comboStrategy = comboSpecificStrategy || resolvedSettings.comboStrategy || "fallback";
+    const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, resolvedSettings, {
       requestedModel: modelStr,
       declaredCaps: comboInfo.capabilities,
     });
@@ -148,7 +211,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
       });
     }
 
-    const comboStickyLimit = settings.comboStickyRoundRobinLimit;
+    const comboStickyLimit = resolvedSettings.comboStickyRoundRobinLimit;
     log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
@@ -166,7 +229,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
 
   // Single model request — may still switch to a capacity-adapter model if the
   // target lacks a capability the request needs (e.g. no vision, request has an image).
-  const soloAugmented = augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, settings, { requestedModel: modelStr });
+  const soloAugmented = augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, resolvedSettings, { requestedModel: modelStr });
   if (soloAugmented.length > 1) {
     const adapterAdded = soloAugmented.filter((m) => m !== modelStr);
     log.info("CHAT", `Capacity adapter for [${[...requiredCapabilities].join(",")}] on "${modelStr}" → trying ${soloAugmented.join(", ")}`);
@@ -179,7 +242,7 @@ async function handleChatRequest(request, clientRawRequest = null) {
       ),
       log,
       comboName: modelStr,
-      comboStrategy: getActiveAdapterStrategy(requiredCapabilities, settings)
+      comboStrategy: getActiveAdapterStrategy(requiredCapabilities, resolvedSettings)
     });
   }
 
