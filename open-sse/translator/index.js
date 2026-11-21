@@ -8,6 +8,7 @@ import { normalizeThinkingConfig } from "../services/provider.js";
 import { applyThinking, captureThinking, parseSuffix, isCommandCodeNode } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { ensureStreamToolCallIds } from "../utils/streamHelpers.js";
+import { newResponseId } from "../utils/responseIds.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
 import { PROVIDERS } from "../providers/index.js";
 import { isCustomNodeProvider } from "../utils/transparency.js";
@@ -315,7 +316,8 @@ export function initState(sourceFormat) {
     return {
       ...base,
       seq: 0,
-      responseId: `resp_${Date.now()}`,
+      // Router-owned, never the upstream's id (utils/responseIds.js).
+      responseId: newResponseId(),
       created: Math.floor(Date.now() / 1000),
       started: false,
       msgTextBuf: {},

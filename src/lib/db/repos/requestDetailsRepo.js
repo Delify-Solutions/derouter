@@ -69,18 +69,32 @@ function sanitizeHeaders(headers) {
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders };
+export const __test__ = { sanitizeHeaders, generateDetailId, truncateField: (obj, maxSize) => truncateField(obj, maxSize) };
 
-function generateDetailId(model) {
+// A timestamp and a random suffix. The model is NOT part of the id: ids are shown
+// to key holders, and the stored model is the upstream one (spec model-privacy).
+// Rows written before this change keep their old ids (which do embed the model);
+// the public usage API never returns a stored id to a customer key.
+function generateDetailId() {
   const timestamp = new Date().toISOString();
-  const random = Math.random().toString(36).substring(2, 8);
-  const modelPart = model ? model.replace(/[^a-zA-Z0-9-]/g, "-") : "unknown";
-  return `${timestamp}-${random}-${modelPart}`;
+  let random = "";
+  while (random.length < 12) random += Math.random().toString(36).slice(2);
+  return `${timestamp}-${random.slice(0, 12)}`;
 }
 
 function truncateField(obj, maxSize) {
   const str = JSON.stringify(obj || {});
   if (str.length > maxSize) {
+    // A stored request's `model` is the upstream one (it is recorded after combo
+    // expansion). Inside the cut preview string it could only be scrubbed as
+    // text; kept as a field of its own it is an ordinary model field, which the
+    // public usage API rewrites for a customer key (spec model-privacy) and an
+    // admin still reads. The preview is cut from the rest.
+    const isObject = obj && typeof obj === "object" && !Array.isArray(obj);
+    if (isObject && typeof obj.model === "string") {
+      const { model, ...rest } = obj;
+      return { _truncated: true, _originalSize: str.length, model, _preview: JSON.stringify(rest).substring(0, 200) };
+    }
     return { _truncated: true, _originalSize: str.length, _preview: str.substring(0, 200) };
   }
   return obj || {};
@@ -106,7 +120,7 @@ async function flushToDatabase() {
           return owners.get(key);
         };
         for (const item of items) {
-          if (!item.id) item.id = generateDetailId(item.model);
+          if (!item.id) item.id = generateDetailId();
           if (!item.timestamp) item.timestamp = new Date().toISOString();
           if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
 
@@ -352,6 +366,17 @@ export async function getDistinctProviders() {
   const db = await getAdapter();
   const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
   return rows.map((r) => r.provider);
+}
+
+/**
+ * One detail by its id, only when it belongs to `apiKey` (the public usage API:
+ * a key holder never reads another key's row). Indexed by the primary key.
+ */
+export async function getRequestDetailForKey(id, apiKey) {
+  if (!id || !apiKey) return null;
+  const db = await getAdapter();
+  const row = db.get(`SELECT data FROM requestDetails WHERE id = ? AND apiKey = ?`, [id, apiKey]);
+  return row ? parseJson(row.data, null) : null;
 }
 
 export async function getRequestDetailById(id) {

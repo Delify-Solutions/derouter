@@ -2,6 +2,8 @@ import { handleChat } from "@/sse/handlers/chat.js";
 import {
   clearAccountError,
   enforceKeyAccess,
+  extractApiKey,
+  refuseCustomerEndpoint,
   refuseUnpricedModelResponse,
   getProviderCredentials,
   isValidApiKey,
@@ -16,6 +18,8 @@ import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS } from "open-sse/config/runtimeConfig.js";
 import { initTranslators } from "open-sse/translator/index.js";
 import { getRequestIp } from "@/lib/auth/clientIp.js";
+import { hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
+import * as log from "@/sse/utils/logger.js";
 
 let initialized = false;
 const GEMINI_NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -124,22 +128,15 @@ async function handlePost(request, { params }) {
       return await convertOpenAIResponseToGemini(response, model);
     }
   } catch (error) {
+    // The raw text can name a provider, a host or a model (spec model-privacy):
+    // it is logged here, the caller gets a generic message. Only the error's name
+    // and a bounded message are logged; no headers, body or URL.
+    log.warn("GEMINI", `v1beta request failed: ${error?.name || "Error"}: ${String(error?.message || "").slice(0, 200)}`);
     return Response.json(
-      { error: { message: error.message, code: 500 } },
+      { error: { message: "Lỗi máy chủ khi xử lý yêu cầu. Vui lòng thử lại.", code: 500 } },
       { status: 500 }
     );
   }
-}
-
-function extractGeminiClientApiKey(request) {
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
-
-  const googleApiKey = request.headers.get("x-goog-api-key");
-  if (googleApiKey) return googleApiKey;
-
-  const url = new URL(request.url);
-  return url.searchParams.get("key");
 }
 
 function normalizeGeminiNativeModel(model) {
@@ -189,7 +186,7 @@ async function validateGeminiNativeClientKey(request) {
   const settings = await getSettings();
   if (!settings.requireApiKey) return null;
 
-  const apiKey = extractGeminiClientApiKey(request);
+  const apiKey = extractApiKey(request);
   if (!apiKey) {
     return Response.json({ error: { message: "Missing API key" } }, { status: 401 });
   }
@@ -286,6 +283,17 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   const authError = await validateGeminiNativeClientKey(request);
   if (authError) return authError;
 
+  // This path talks to Google directly: no combo-only rule, no response mask, the
+  // provider's own headers and error texts. A customer key is refused here, as on
+  // the other provider-native endpoints (spec model-privacy "Provider-native paths
+  // are closed to customer keys"); admin keys and local use keep it. Governed by
+  // the same switch as the rest of that capability.
+  const clientApiKey = extractApiKey(request);
+  if (clientApiKey && hideUpstreamModelsEnabled(await getSettings())) {
+    const closed = await refuseCustomerEndpoint(clientApiKey, { model, clientIp: getRequestIp(request) });
+    if (closed) return closed;
+  }
+
   const modelId = normalizeGeminiNativeModel(model);
   if (!GEMINI_NATIVE_MODEL_PATTERN.test(modelId)) {
     return Response.json({ error: { message: "Invalid model" } }, { status: 400 });
@@ -294,7 +302,6 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
   // This path calls Google directly instead of going through handleChat, so it
   // must apply the same account/group/RPM/TPM/plan gate itself — otherwise a
   // suspended, unverified or out-of-credit key could still spend provider quota.
-  const clientApiKey = extractGeminiClientApiKey(request);
   if (clientApiKey) {
     const denied = await enforceKeyAccess(clientApiKey, `gemini/${modelId}`, { clientIp: getRequestIp(request) });
     if (denied) return denied;

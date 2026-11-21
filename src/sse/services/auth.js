@@ -347,23 +347,11 @@ export async function clearAccountError(connectionId, currentConnection, model =
 }
 
 /**
- * Extract API key from request headers
+ * Extract the API key of an LLM request: the same extractor the request guard
+ * uses (Bearer, x-api-key, x-goog-api-key, ?key=), so a key the guard accepted is
+ * never served as keyless here (spec api-access-enforcement).
  */
-export function extractApiKey(request) {
-  // Check Authorization header first
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-
-  // Check Anthropic x-api-key header
-  const xApiKey = request.headers.get("x-api-key");
-  if (xApiKey) {
-    return xApiKey;
-  }
-
-  return null;
-}
+export { extractApiKey } from "@/lib/auth/apiKeyExtract.js";
 
 /**
  * Validate API key (optional - for local use can skip)
@@ -441,7 +429,23 @@ export async function refuseUnmeteredEndpoint(apiKey, { model = null, clientIp =
   if (!apiKey) return null;
   const { getAdapter } = await import("@/lib/db/driver.js");
   const { refuseUnmeteredSync } = await import("@/lib/auth/unmeteredEndpoints.js");
-  const denial = refuseUnmeteredSync(await getAdapter(), apiKey);
+  return platformDenialResponse(refuseUnmeteredSync(await getAdapter(), apiKey), { apiKey, model, clientIp });
+}
+
+/**
+ * The platform denial for a customer key on a path that calls a provider
+ * directly (the Gemini native TTS path), or null for an admin/local key or no key
+ * (spec model-privacy "Provider-native paths are closed to customer keys").
+ */
+export async function refuseCustomerEndpoint(apiKey, { model = null, clientIp = null } = {}) {
+  if (!apiKey) return null;
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const { refuseCustomerEndpointSync } = await import("@/lib/auth/unmeteredEndpoints.js");
+  return platformDenialResponse(refuseCustomerEndpointSync(await getAdapter(), apiKey), { apiKey, model, clientIp });
+}
+
+// A denial from the sync checks above, logged like every platform denial.
+async function platformDenialResponse(denial, { apiKey, model, clientIp }) {
   if (!denial) return null;
   const { platformErrorResponse, logPlatformDenial } = await import("@/lib/auth/platformError.js");
   await logPlatformDenial({ apiKey, model, status: denial.status, message: denial.message, clientIp });

@@ -30,7 +30,7 @@ async function comboPrice(combo, comboPricing) {
  * @param {object[]} [opts.combos] combos already loaded (else read)
  * @param {object} [opts.comboPricing] combo prices already loaded (else read)
  * @param {{ userId?: string|null, groupId?: string|null, planId?: string|null }} [opts.discountContext]
- * @returns {Promise<object[]>} `{ name, kind, modelsCount, maintenance, input, output, cached, reasoning, cacheCreation, discount?, discounted? }`
+ * @returns {Promise<object[]>} `{ name, kind, maintenance, input, output, cached, reasoning, cacheCreation, discount?, discounted? }`
  */
 export async function buildModelPriceList({ allowedModels = null, combos = null, comboPricing = null, discountContext = {} } = {}) {
   const [allCombos, pricing] = await Promise.all([
@@ -53,7 +53,8 @@ export async function buildModelPriceList({ allowedModels = null, combos = null,
     const entry = {
       name: c.name,
       kind: c.kind || "llm",
-      modelsCount: Array.isArray(c.models) ? c.models.length : 0,
+      // No member count: how many upstream models stand behind a combo is not a
+      // customer's to read (spec model-privacy), and no page shows it.
       input: p.input ?? 0,
       output: p.output ?? 0,
       cached: p.cached ?? 0,

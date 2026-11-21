@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines what the router may change on the way through a proxied request. For a CUSTOM NODE (a provider node the operator added, id `openai-compatible-*` or `anthropic-compatible-*`) whose format equals the client's (OpenAI chat to an OpenAI-compatible node, Anthropic to an Anthropic-compatible node, Responses to a Responses node) the router is transparent: the client's request reaches the upstream, and the upstream's response reaches the client, as sent, so provider prompt caching, billing and client behaviour match talking to the upstream directly. A BUILT-IN registry provider (MiniMax, Kimi, GLM, DeepSeek, Anthropic OAuth, ...) was chosen by the router's own registry entry and the client cannot know its quirks, so it keeps every shim its registry entry and executor rely on. The legacy shims for odd clients exist behind one operator setting.
-
 ## Requirements
 ### Requirement: Strict transparency is the default for custom nodes, one setting restores the shims
 The setting `compatNormalization` (default `false`) SHALL select the behaviour for custom nodes. Off means strict transparency as specified below. On means the legacy compatibility behaviour (id repair, field stripping, tool-id rewriting, invented tool responses, `cache_control` rewriting, content filtering and the other shims listed in the requirements below). For a built-in registry provider the legacy shaping always runs, whatever the setting, exactly as before this specification. The following apply to every provider regardless: no token margin is added anywhere, an omitted `stream` follows the protocol default, a second `[DONE]` and a repeated finish chunk are not forwarded twice, a JSON document answering a streamed request has its usage recorded, and the admin's per-provider thinking override is mapped to the upstream's own field. The setting SHALL be changeable through the settings API and the Token Saver page of the admin console, and SHALL apply to the next request without a restart. Token savers (RTK, Headroom, Caveman, Ponytail, PXPipE) SHALL all default to off and run only when enabled; they are independent of this setting.
@@ -16,7 +15,7 @@ The setting `compatNormalization` (default `false`) SHALL select the behaviour f
 - **THEN** the next request again gets the legacy repairs (for example `developer` becomes `system`, a missing tool response is inserted, `[DONE]` is added to a stream that lacks it), and no token count is ever inflated
 
 ### Requirement: Same-format response streams from a custom node are forwarded byte for byte
-For a streamed response where the upstream is a custom node and its format equals the client format, the router SHALL enqueue each upstream SSE line exactly as received (including comment lines, `event:` lines, spacing of `data:`, non-standard fields, empty `tool_calls`, Azure fields, short ids, empty-content chunks and non-JSON data lines) and SHALL only observe usage and generated text on the side. Chunk boundaries of the network SHALL NOT change the bytes. Only these lines MAY be withheld: the usage-only chunk the router itself requested, a finish chunk that repeats one already delivered, and a second `[DONE]`. One exception: for a customer key with `hideUpstreamModels` on, the model fields, the `provider` field and error texts of each JSON `data:` line are rewritten as specified in model-privacy, and that line is re-serialised; every other line is still forwarded unchanged.
+For a streamed response where the upstream is a custom node and its format equals the client format, the router SHALL enqueue each upstream SSE line exactly as received (including comment lines, `event:` lines, spacing of `data:`, non-standard fields, empty `tool_calls`, Azure fields, short ids, empty-content chunks and non-JSON data lines) and SHALL only observe usage and generated text on the side. Chunk boundaries of the network SHALL NOT change the bytes. Only these lines MAY be withheld: the usage-only chunk the router itself requested, a finish chunk that repeats one already delivered, and a second `[DONE]`. One exception: for a customer key with `hideUpstreamModels` on, the model fields, the provider-identifying fields, the usage extras, the chat-completion, Claude message and Gemini response ids, and the error texts of each JSON `data:` line are rewritten as specified in model-privacy, and that line is re-serialised (an event whose JSON data spans several `data:` lines is read whole, masked once and written as one `data:` line); data that is not JSON has URLs, host names and hidden ids removed as specified in model-privacy; every other line (`event:`, comments, blank lines, `[DONE]`) is still forwarded unchanged. A JSON document, JSON array or sequence of JSON lines answering the streamed request is, for such a key, held and masked as a document as specified in model-privacy.
 
 #### Scenario: Usage inside the finish chunk
 - **WHEN** an OpenAI-compatible upstream streams a reply whose finish chunk carries usage
@@ -36,7 +35,7 @@ For a streamed response where the upstream is a custom node and its format equal
 
 #### Scenario: Customer key
 - **WHEN** a customer key streams a combo from a custom node with `hideUpstreamModels` on
-- **THEN** each JSON `data:` line carries the combo name in its model field and is otherwise the same data
+- **THEN** each JSON `data:` line carries the combo name in its model field, a router-generated id and only standard usage fields, and is otherwise the same data
 
 ### Requirement: One `[DONE]` at most, never invented in strict mode
 The router SHALL deliver at most one `[DONE]` sentinel per stream. In strict mode it SHALL NOT synthesise one for an upstream that did not send it. In compat mode it SHALL add it for OpenAI chat streams only, never for Anthropic, Responses or Gemini-family streams.
@@ -46,15 +45,19 @@ The router SHALL deliver at most one `[DONE]` sentinel per stream. In strict mod
 - **THEN** the client receives one
 
 ### Requirement: Same-format JSON responses from a custom node are forwarded as received
-For a non-streamed response where the upstream is a custom node and its format equals the client format, and no tool name was cloaked on the way in, the router SHALL return the upstream's body text as received (whitespace, field order and unknown fields included) with the upstream's content type, and SHALL read usage from a parsed copy. Rewrites of the body (forcing `finish_reason`, filling `object`/`created`, stripping Azure fields, whitelisting usage fields, removing `reasoning_content` when `content` is non-empty) SHALL happen only in compat mode. One exception: for a customer key with `hideUpstreamModels` on, the body is re-serialised with its model fields, `provider` field and errors rewritten as specified in model-privacy.
+For a non-streamed response where the upstream is a custom node and its format equals the client format, and no tool name was cloaked on the way in, the router SHALL return the upstream's body text as received (whitespace, field order and unknown fields included) with the upstream's content type, and SHALL read usage from a parsed copy. Rewrites of the body (forcing `finish_reason`, filling `object`/`created`, stripping Azure fields, whitelisting usage fields, removing `reasoning_content` when `content` is non-empty) SHALL happen only in compat mode. One exception: for a customer key with `hideUpstreamModels` on, the body is re-serialised with its model fields, provider-identifying fields, usage extras, ids and errors rewritten as specified in model-privacy.
 
 #### Scenario: Reasoning is not removed
 - **WHEN** an upstream returns a message with both `content` and `reasoning_content`
 - **THEN** the client receives both, unchanged
 
 #### Scenario: Provider extras survive
-- **WHEN** an upstream body contains `service_tier` and `usage.prompt_cache_hit_tokens`
+- **WHEN** an upstream body contains `service_tier` and `usage.prompt_cache_hit_tokens` and the caller is an admin key
 - **THEN** the client receives them
+
+#### Scenario: Provider extras for a customer
+- **WHEN** the same body answers a customer key with `hideUpstreamModels` on
+- **THEN** `service_tier` and the message are unchanged and `usage.prompt_cache_hit_tokens` is absent
 
 ### Requirement: Same-format request bodies to a custom node are forwarded as sent
 For a request where the upstream is a custom node and the client format equals the upstream format the router SHALL forward the client's body with these exceptions only: the upstream model id (and a `model(level)` suffix turned into the provider's own field), the `stream_options.include_usage` addition required by usage-accuracy, and credentials. Field order and message content SHALL be preserved so provider prefix caching is not disturbed. The following run only in compat mode, for a real format conversion, or for a built-in provider: removing `thinking` when the last message is not from the user, rewriting tool-call ids, inserting empty tool responses, dropping thinking/reasoning fields for models not in the capability table, role and content filtering for OpenAI bodies (`developer` to `system`, `cache_control` and `signature` stripping, dropping blank messages, normalising tools), Anthropic preparation (rewriting every `cache_control` breakpoint, clamping `max_tokens` to a table ceiling, filtering built-in tools), `json_schema` to `json_object` fallback with an injected system prompt, name-keyed parameter stripping, name-keyed `reasoning_content` injection, dropping media for models the capability table marks text-only, tool de-duplication for Claude clients, and defaulting the Claude tool `type`. For a Claude Code client (a `claude-cli` user agent) the same holds: sent to a custom Anthropic node, its body SHALL NOT be reshaped (system turns folded, thinking blocks dropped, empty text removed, cache breakpoints re-anchored, tools de-duplicated, tool `type` defaulted) and its warmup, title and `count` requests SHALL reach the upstream instead of receiving a canned reply; this shaping and the canned replies remain for built-in providers and in compat mode. For a built-in Claude-format provider (MiniMax, Kimi, GLM, DeepSeek-anthropic, Xiaomi) a Claude body still goes through `prepareClaudeRequest`: tool `type` default, tool_use/tool_result ordering fix, thinking placeholder and signature handling, thinking-budget and `max_tokens` reconciliation and clamp. The `ccFilterNaming` option is a separate opt-in and is unchanged. Shims that the provider registry declares for a provider (quirks such as `dropClientMetadata` and `dropOutputConfig`, a provider's `reasoningInject`, provider-keyed parameter strips, the OAuth billing header for an OAuth credential) remain, because that provider requires them.
@@ -132,3 +135,15 @@ Combos and fallback, API-key enforcement and plan checks, upstream error mapping
 #### Scenario: Combo and error paths
 - **WHEN** a request names a combo, or an upstream answers with an error status
 - **THEN** routing, the error status mapping and the error log entry are the same as before this specification
+
+### Requirement: Responses objects the router builds carry the router's own ids
+When the router builds a Responses API response itself, because the client speaks the Responses format and the upstream does not (a Chat Completions, Claude or other non-Responses upstream, streamed or not), the response id SHALL be `resp_` followed by a random value the router generates once per response, and the reasoning and message item ids SHALL be derived from that id. Neither SHALL contain or be derived from the upstream's own id, for any caller. Every event of one stream SHALL carry the same response id. Tool-call ids (`call_id`, and the `fc_`/`ctc_` item ids built from them) SHALL keep the upstream's value. A Responses-format upstream answering a Responses client keeps its own ids.
+
+#### Scenario: OpenRouter behind a Responses client
+- **WHEN** a Responses client streams through a Chat Completions upstream whose chunks carry `"id":"gen-1763-abc"`
+- **THEN** every event carries the same `resp_<random>` response id, the item ids are built from it, and no event contains `gen-1763-abc`
+
+#### Scenario: Non-streamed reply
+- **WHEN** the same client asks without streaming and the upstream body has `"id":"msg_bdrk_01ABC"` and a tool call `call_up_7`
+- **THEN** the response id is `resp_<random>` and the function-call item keeps `call_id: "call_up_7"`
+
