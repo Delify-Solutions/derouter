@@ -138,6 +138,13 @@ async function runHeavyStartup() {
   import("@/lib/notify/planReminders.js")
     .then(({ startTelegramReminders }) => startTelegramReminders())
     .catch((e) => console.error("[TelegramReminders] start failed:", e.message));
+
+  // Knowledge-base ingestion: embeds documents left in `processing` (including any
+  // the previous process did not finish). Idempotent, skipped during a build;
+  // DISABLE_BIZ_INGEST_WORKER turns it off.
+  import("@/lib/biz/ingestWorker.js")
+    .then(({ startIngestWorker }) => startIngestWorker())
+    .catch((e) => console.error("[IngestWorker] start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

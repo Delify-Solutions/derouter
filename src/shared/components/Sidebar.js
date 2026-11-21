@@ -24,6 +24,9 @@ const navItems = [
   { href: "/dashboard/groups", label: "Groups", icon: "group_work" },
   { href: "/dashboard/pricing", label: "Pricing", icon: "sell" },
   { href: "/dashboard/plans", label: "Plans", icon: "sell" },
+  // The second product line: its models, guard and embedding settings, and every
+  // customer's bot (spec business-guard "Business settings").
+  { href: "/dashboard/business", label: "AI doanh nghiệp", icon: "smart_toy" },
   { href: "/dashboard/orders", label: "Orders", icon: "receipt_long" },
   { href: "/dashboard/providers", label: "Providers", icon: "dns" },
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden

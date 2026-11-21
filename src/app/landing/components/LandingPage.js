@@ -66,7 +66,13 @@ export default async function LandingPage({ copy }) {
 
   // Only visible plans: an admin can keep a plan as a draft by clearing
   // isActive, and it must not leak onto the public page.
-  const planRows = await listPlans({ onlyActive: true });
+  //
+  // And only the API line: business plans are sold on /doanh-nghiep, with their
+  // own bot and knowledge-base lines (spec public-landing "Plan cards come from
+  // plan data").
+  const planRows = (await listPlans({ onlyActive: true })).filter(
+    (row) => (row.productLine ?? "api") === "api"
+  );
 
   // The model list is what a NEWLY REGISTERED customer can actually call: the
   // default group's allow-list (spec public-landing "Sellable models"). Advertising

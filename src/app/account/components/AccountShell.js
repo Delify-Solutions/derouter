@@ -17,6 +17,9 @@ const NAV = [
   { href: "/account/ledger", label: "Nhật ký credit", icon: "receipt_long" },
   { href: "/account/gift", label: "Mã quà tặng", icon: "redeem" },
   { href: "/account/keys", label: "API key", icon: "key" },
+  // The second product line, between the keys a customer copies and the history
+  // of what they spent (spec customer-portal "Navigation and language").
+  { href: "/account/business", label: "AI doanh nghiệp", icon: "smart_toy" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
 ];
 

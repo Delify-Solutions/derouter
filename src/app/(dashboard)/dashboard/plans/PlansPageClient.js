@@ -50,6 +50,12 @@ const EMPTY_FORM = {
   limits: [],
   // Only meaningful while editing: rewrite the ACTIVE purchases too.
   applyToActive: false,
+  // Which shop this plan belongs to (spec plan-templates "Plan definition"). A
+  // business plan also carries its two limits; an api plan stores NULL for both.
+  productLine: "api",
+  maxBots: "",
+  // Entered in MB; converted to bytes on submit (the API stores bytes).
+  maxKbMb: "",
 };
 
 /**
@@ -126,6 +132,19 @@ function validateDraft(draft) {
     }
   }
 
+  // Product line: a business plan must state both limits, and an api plan keeps
+  // neither (the server stores NULL whatever is sent).
+  if (draft.productLine === "business") {
+    const bots = Number(draft.maxBots);
+    if (draft.maxBots === "" || !Number.isInteger(bots) || bots < 1 || bots > 1000) {
+      errors.maxBots = "Số bot tối đa là số nguyên từ 1 đến 1000";
+    }
+    const mb = Number(draft.maxKbMb);
+    if (draft.maxKbMb === "" || !Number.isFinite(mb) || mb < 1 || mb > 10240) {
+      errors.maxKbMb = "Dung lượng tài liệu từ 1 MB đến 10 GB (10240 MB)";
+    }
+  }
+
   // An unlimited plan must keep some other bound on spend.
   if (draft.unlimitedCredit && !limitsError) {
     const hasWindow = (draftToLimits(draft.limits) ?? []).length > 0;
@@ -162,7 +181,17 @@ function planToDraft(plan) {
     tpm: plan.tpm == null ? "" : String(plan.tpm),
     limits: limitsToDraft(plan.limits),
     applyToActive: false,
+    productLine: plan.productLine === "business" ? "business" : "api",
+    maxBots: plan.maxBots == null ? "" : String(plan.maxBots),
+    maxKbMb: plan.maxKbBytes == null ? "" : String(Math.round((plan.maxKbBytes / (1024 * 1024)) * 10) / 10),
   };
+}
+
+/** "20 MB" / "1.5 GB" — the unit a knowledge-base limit is sold in. */
+function formatDocSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1).replace(/\.0$/, "")} GB`;
+  return `${(value / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /** Whether the two limit lists differ — decides whether to offer apply-to-active. */
@@ -265,6 +294,10 @@ export default function PlansPageClient() {
       rpm: String(draft.rpm).trim() === "" ? null : Number(draft.rpm),
       tpm: String(draft.tpm).trim() === "" ? null : Number(draft.tpm),
       limits: draftToLimits(draft.limits) ?? [],
+      // The line and its two limits. MB → bytes here, so the UI never speaks bytes.
+      productLine: draft.productLine,
+      maxBots: draft.productLine === "business" ? Number(draft.maxBots) : null,
+      maxKbBytes: draft.productLine === "business" ? Math.round(Number(draft.maxKbMb) * 1024 * 1024) : null,
       // Only sent when the admin ticked the box; the API ignores it otherwise.
       ...(editing && draft.applyToActive ? { applyToActive: true } : {}),
     };
@@ -395,6 +428,14 @@ export default function PlansPageClient() {
                 </span>
               </div>
 
+              {/* Dòng sản phẩm as TEXT: colour alone must never carry it
+                  (openspec/ui-dna.md §4). */}
+              <p className="px-6 pt-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider border border-border bg-surface-2 px-2 py-0.5 text-text-muted">
+                  {plan.productLine === "business" ? "AI doanh nghiệp" : "API"}
+                </span>
+              </p>
+
               {plan.description && (
                 <p className="px-6 pt-3 text-sm text-text-muted">{plan.description}</p>
               )}
@@ -438,6 +479,14 @@ export default function PlansPageClient() {
                     {plan.purchaseLimitPerMonth ? `${plan.purchaseLimitPerMonth} lần` : "Không"}
                   </dd>
                 </div>
+                {plan.productLine === "business" && (
+                  <div className="col-span-full bg-surface px-4 py-3">
+                    <dt className="meta text-text-subtle">Giới hạn AI doanh nghiệp</dt>
+                    <dd className="font-mono text-sm text-text-main mt-1">
+                      Tối đa {plan.maxBots ?? 0} bot · Dung lượng tài liệu {formatDocSize(plan.maxKbBytes ?? 0)}
+                    </dd>
+                  </div>
+                )}
                 <div className="col-span-full bg-surface px-4 py-3">
                   <dt className="meta text-text-subtle">Kỳ hạn</dt>
                   <dd className="font-mono text-sm text-text-main mt-1">
@@ -607,6 +656,63 @@ export default function PlansPageClient() {
             onChange={(e) => setField("description", e.target.value)}
             placeholder="Credit for heavy months, expires after 30 days."
           />
+
+          {/* Dòng sản phẩm: two shops, two landing pages and two key lines. The
+              business inputs only exist for a business plan. */}
+          <fieldset className="flex flex-col gap-3 border border-border bg-surface px-4 py-3">
+            <legend className="meta text-text-subtle px-1">Dòng sản phẩm</legend>
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-4">
+              {[
+                { id: "api", label: "API", hint: "Bán ở trang chủ, trả cho API key thường." },
+                { id: "business", label: "AI doanh nghiệp", hint: "Bán ở /doanh-nghiep, trả cho key của chatbot." },
+              ].map((option) => (
+                <label key={option.id} className="flex flex-1 items-start gap-2 text-sm text-text-main">
+                  <input
+                    type="radio"
+                    name="productLine"
+                    value={option.id}
+                    checked={draft.productLine === option.id}
+                    onChange={() => setField("productLine", option.id)}
+                    className="mt-1 size-4"
+                  />
+                  <span>
+                    {option.label}
+                    <span className="block text-xs text-text-muted">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {draft.productLine === "business" && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Input
+                  label="Số bot tối đa"
+                  type="number"
+                  step="1"
+                  min="1"
+                  max="1000"
+                  value={draft.maxBots}
+                  onChange={(e) => setField("maxBots", e.target.value)}
+                  placeholder="3"
+                  error={touched ? errors.maxBots : ""}
+                  required
+                />
+                <Input
+                  label="Dung lượng tài liệu (MB)"
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  max="10240"
+                  value={draft.maxKbMb}
+                  onChange={(e) => setField("maxKbMb", e.target.value)}
+                  placeholder="20"
+                  hint="Nhập bằng MB; lưu thành bytes. Tối đa 10240 MB (10 GB)."
+                  error={touched ? errors.maxKbMb : ""}
+                  required
+                />
+              </div>
+            )}
+          </fieldset>
 
           {/* Two independent prices, no exchange rate between them: the admin
               decides what 250.000đ and what $10 buy (spec plan-dual-pricing). */}

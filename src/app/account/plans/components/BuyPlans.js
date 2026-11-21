@@ -36,6 +36,13 @@ const METHOD_ICON = {
   manual: "receipt_long",
 };
 
+/** "20 MB" / "1.5 GB" — the unit a knowledge-base limit is sold in. */
+function docSizeLabel(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1).replace(/\.0$/, "")} GB`;
+  return `${(value / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
 const SECTION_TITLE = "Mua thêm gói";
 const SECTION_HINT =
   "Chọn cách trả. Chuyển khoản và Binance tạo đơn có mã riêng, tự kích hoạt khi tiền vào đúng số; đơn thủ công do admin duyệt.";
@@ -78,12 +85,32 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
     );
   }
 
+  // Two shops in one page (spec customer-portal "Buying from the page"): the API
+  // line and the business line are paid from different credit, so they are listed
+  // apart. A heading without plans is omitted rather than rendered empty.
+  const groups = [
+    { title: "Gói API", plans: plans.filter((plan) => (plan.productLine ?? "api") !== "business") },
+    { title: "Gói AI doanh nghiệp", plans: plans.filter((plan) => plan.productLine === "business") },
+  ].filter((group) => group.plans.length > 0);
+
   return (
     <Section title={SECTION_TITLE} description={SECTION_HINT}>
+      <div className="flex flex-col gap-10">
+      {groups.map((group) => (
+      <div key={group.title} className="flex flex-col gap-4">
+        <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">{group.title}</h3>
       <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {plans.map((plan) => {
+        {group.plans.map((plan) => {
           const highlighted = highlightCode && String(plan.code).toLowerCase() === highlightCode;
-          const limits = Array.isArray(plan.limitsText) ? plan.limitsText : [];
+          // A business plan states what it allows besides the money: bots and
+          // knowledge-base size (spec customer-portal "Buying from the page").
+          const limits = Array.isArray(plan.limitsText) ? [...plan.limitsText] : [];
+          if (plan.productLine === "business") {
+            limits.unshift(
+              `Tối đa ${plan.maxBots ?? 0} bot`,
+              `Dung lượng tài liệu ${docSizeLabel(plan.maxKbBytes)}`
+            );
+          }
           const methods = Array.isArray(plan.offeredMethods) ? plan.offeredMethods : [];
           const terms = planTerms(plan);
           const term = terms.find((entry) => entry.periods === chosen[plan.id]) ?? terms[0];
@@ -272,6 +299,9 @@ export default function BuyPlans({ plans = [], loading = false, buyingId = null,
           );
         })}
       </ul>
+      </div>
+      ))}
+      </div>
     </Section>
   );
 }

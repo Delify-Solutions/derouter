@@ -4,12 +4,18 @@ import { useState } from "react";
 import Link from "next/link";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 
+// The main landing's anchors, plus the second product line. A section page
+// (/doanh-nghiep) passes its own list through `items` — an anchor that does not
+// exist on that page would scroll nowhere.
 const PRODUCT_LINKS = [
   { href: "#plans", label: "Gói" },
   { href: "#models", label: "Model" },
   { href: "#pricing", label: "Bảng giá" },
   { href: "#get-started", label: "Bắt đầu" },
   { href: "#faq", label: "Hỏi đáp" },
+  // The business product is a separate shop (spec public-landing "Plan cards come
+  // from plan data"): its plans are never on this page.
+  { href: "/doanh-nghiep", label: "Doanh nghiệp" },
 ];
 
 const DOCS_URL = "/docs";
@@ -23,8 +29,9 @@ const SIGNUP_URL = "/register?next=/account/plans";
  *   null          → Đăng nhập + Mua gói
  *   "customer"    → Tài khoản của tôi
  */
-export default function Navigation({ session = null }) {
+export default function Navigation({ session = null, items = null }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const links = Array.isArray(items) && items.length > 0 ? items : PRODUCT_LINKS;
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-bg">
@@ -34,7 +41,7 @@ export default function Navigation({ session = null }) {
         </Link>
 
         <nav aria-label="Menu chính" className="hidden items-center gap-6 md:flex">
-          {PRODUCT_LINKS.map((item) => (
+          {links.map((item) => (
             <a
               key={item.href}
               href={item.href}
@@ -93,7 +100,7 @@ export default function Navigation({ session = null }) {
       {mobileMenuOpen && (
         <div className="border-t border-border bg-bg md:hidden">
           <nav aria-label="Menu trên di động" className="shell flex flex-col py-2">
-            {PRODUCT_LINKS.map((item) => (
+            {links.map((item) => (
               <a
                 key={item.href}
                 href={item.href}

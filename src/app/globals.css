@@ -463,6 +463,20 @@ button:disabled,
 }
 
 /* Page shell: 1280px content column with 2rem gutters */
+/* Visually hidden but announced: used where a decorative graphic carries the only
+   copy of a sentence (the business pipeline diagram). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .shell {
   max-width: 1280px;
   padding-inline: 2rem;

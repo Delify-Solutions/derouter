@@ -1,0 +1,173 @@
+/* The hero pipeline animation (spec business-landing "Animated pipeline", design
+   D12). One 7-second linear cycle drives everything: the comet dash runs along the
+   connector, each chip lights up as the comet reaches it, and a ping dot pulses on
+   the last chip.
+
+   Rules this file keeps:
+   - no gradient, no shadow, no rounded corner — chips are 1px squares;
+   - colours come from the theme tokens, so light and dark both meet AA;
+   - `prefers-reduced-motion` turns every animation off, scoped to this diagram
+     only (a global `*` rule would silence the rest of the site). */
+
+.biz-pipeline {
+  --biz-chip: var(--color-surface);
+  --biz-line: var(--color-border);
+  --biz-accent: var(--color-brand-600);
+  --biz-text: var(--color-text-main);
+  --biz-muted: var(--color-text-muted);
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .biz-pipeline {
+    --biz-accent: var(--color-brand-400);
+  }
+}
+
+[data-theme="dark"] .biz-pipeline {
+  --biz-accent: var(--color-brand-400);
+}
+
+.biz-pipeline__chip {
+  fill: var(--biz-chip);
+  stroke: var(--biz-line);
+  stroke-width: 1;
+}
+
+.biz-pipeline__label {
+  fill: var(--biz-text);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.biz-pipeline__step {
+  fill: var(--biz-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.biz-pipeline__icon {
+  stroke: var(--biz-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.biz-pipeline__track {
+  fill: none;
+  stroke: var(--biz-line);
+  stroke-width: 1;
+}
+
+/* The comet: a short visible dash on a long invisible gap. Animating the offset
+   moves it from the first chip to the last. */
+.biz-pipeline__comet {
+  fill: none;
+  stroke: var(--biz-accent);
+  stroke-width: 2;
+  stroke-linecap: square;
+  stroke-dasharray: 28 800;
+  animation: biz-comet 7s linear infinite;
+}
+
+@keyframes biz-comet {
+  from { stroke-dashoffset: 828; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Per-chip highlight: each chip owns its own keyframe block, its lit window at the
+   point in the 7 s cycle where the comet passes it. 5 chips → 20 % each. */
+.biz-pipeline__chip--1 { animation: biz-chip-1 7s linear infinite; }
+.biz-pipeline__chip--2 { animation: biz-chip-2 7s linear infinite; }
+.biz-pipeline__chip--3 { animation: biz-chip-3 7s linear infinite; }
+.biz-pipeline__chip--4 { animation: biz-chip-4 7s linear infinite; }
+.biz-pipeline__chip--5 { animation: biz-chip-5 7s linear infinite; }
+
+@keyframes biz-chip-1 {
+  0%, 18% { stroke: var(--biz-accent); }
+  20%, 100% { stroke: var(--biz-line); }
+}
+@keyframes biz-chip-2 {
+  0%, 18% { stroke: var(--biz-line); }
+  20%, 38% { stroke: var(--biz-accent); }
+  40%, 100% { stroke: var(--biz-line); }
+}
+@keyframes biz-chip-3 {
+  0%, 38% { stroke: var(--biz-line); }
+  40%, 58% { stroke: var(--biz-accent); }
+  60%, 100% { stroke: var(--biz-line); }
+}
+@keyframes biz-chip-4 {
+  0%, 58% { stroke: var(--biz-line); }
+  60%, 78% { stroke: var(--biz-accent); }
+  80%, 100% { stroke: var(--biz-line); }
+}
+@keyframes biz-chip-5 {
+  0%, 78% { stroke: var(--biz-line); }
+  80%, 98% { stroke: var(--biz-accent); }
+  100% { stroke: var(--biz-line); }
+}
+
+.biz-pipeline__icon--1 { animation: biz-icon-1 7s linear infinite; }
+.biz-pipeline__icon--2 { animation: biz-icon-2 7s linear infinite; }
+.biz-pipeline__icon--3 { animation: biz-icon-3 7s linear infinite; }
+.biz-pipeline__icon--4 { animation: biz-icon-4 7s linear infinite; }
+.biz-pipeline__icon--5 { animation: biz-icon-5 7s linear infinite; }
+
+@keyframes biz-icon-1 {
+  0%, 18% { stroke: var(--biz-accent); }
+  20%, 100% { stroke: var(--biz-muted); }
+}
+@keyframes biz-icon-2 {
+  0%, 18% { stroke: var(--biz-muted); }
+  20%, 38% { stroke: var(--biz-accent); }
+  40%, 100% { stroke: var(--biz-muted); }
+}
+@keyframes biz-icon-3 {
+  0%, 38% { stroke: var(--biz-muted); }
+  40%, 58% { stroke: var(--biz-accent); }
+  60%, 100% { stroke: var(--biz-muted); }
+}
+@keyframes biz-icon-4 {
+  0%, 58% { stroke: var(--biz-muted); }
+  60%, 78% { stroke: var(--biz-accent); }
+  80%, 100% { stroke: var(--biz-muted); }
+}
+@keyframes biz-icon-5 {
+  0%, 78% { stroke: var(--biz-muted); }
+  80%, 98% { stroke: var(--biz-accent); }
+  100% { stroke: var(--biz-muted); }
+}
+
+/* The ping dot on the last chip: scales up from the centre and fades out, in the
+   tail of the same cycle. */
+.biz-pipeline__ping {
+  fill: var(--biz-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: biz-ping 7s linear infinite;
+}
+
+@keyframes biz-ping {
+  0%, 78% { opacity: 0; transform: scale(0.6); }
+  84% { opacity: 1; transform: scale(1); }
+  96% { opacity: 0; transform: scale(2.4); }
+  100% { opacity: 0; transform: scale(0.6); }
+}
+
+/* Everything rests, nothing moves. Scoped to this diagram so the rest of the page
+   keeps its own (150ms colour) transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .biz-pipeline,
+  .biz-pipeline * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .biz-pipeline__ping {
+    opacity: 0;
+  }
+}
