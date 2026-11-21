@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 45;
+export const SCHEMA_VERSION = 46;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1226,9 +1226,14 @@ export const TABLES = {
       // Markdown body written into the downloaded file.
       body: "TEXT NOT NULL",
       fileName: "TEXT NOT NULL", // 'SKILL.md' | '<slug>.md'
-      // 'claude' | 'codex' | 'cursor' | 'generic' — the runtime the layout is for.
+      // Legacy single runtime (the first of `targets`); kept so older rows and
+      // readers still work. `targets` is the source of truth.
       target: "TEXT",
-      // Installation line shown above the file ("~/.claude/skills/<slug>/").
+      // JSON array of runtime ids the skill is installed into
+      // (src/lib/skills/runtimes.js); NULL on a v45 row means [target].
+      targets: "TEXT",
+      // Deprecated since v46: the install directory is derived per runtime. Nothing
+      // reads or writes it; the column stays because dropping needs a migration.
       installPath: "TEXT",
       // 'customer' | 'internal' — internal rows never reach the account area.
       audience: "TEXT NOT NULL DEFAULT 'customer'",

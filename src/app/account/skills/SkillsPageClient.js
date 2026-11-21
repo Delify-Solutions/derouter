@@ -3,15 +3,9 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Heading, Eyebrow, Panel, Tag, buttonClass } from "../components/ui";
 import { Modal } from "@/shared/components";
+import { runtimeInstallDir, runtimeLabel } from "@/lib/skills/runtimes.js";
 import { cn } from "@/shared/utils/cn";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-
-const TARGET_LABELS = {
-  claude: "Claude Code",
-  codex: "Codex",
-  cursor: "Cursor",
-  generic: "Khác",
-};
 
 const noopSubscribe = () => () => {};
 
@@ -34,15 +28,6 @@ function fmtDate(value) {
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) return "—";
   return new Date(ms).toLocaleDateString("vi-VN", { year: "numeric", month: "2-digit", day: "2-digit" });
-}
-
-/** The install line for a skill, derived from the row when the admin left it blank. */
-function installLine(skill) {
-  if (skill.installPath) return skill.installPath;
-  if (skill.target === "claude") return `~/.claude/skills/${skill.slug}/`;
-  if (skill.target === "codex") return `~/.codex/skills/${skill.slug}/`;
-  if (skill.target === "cursor") return `~/.cursor/skills/${skill.slug}/`;
-  return `skills/${skill.slug}/`;
 }
 
 /**
@@ -93,14 +78,23 @@ function Step({ index, title, children }) {
   );
 }
 
-function SkillCard({ skill, onOpen, origin }) {
+function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
   return (
     <li className="flex flex-col gap-4 border border-border bg-surface p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => onToggle(skill.slug)}
+              aria-label={`Chọn ${skill.name} để tải`}
+              className="size-4"
+            />
             <h3 className="font-mono text-sm font-semibold text-text-main">{skill.name}</h3>
-            <Tag tone="neutral">{TARGET_LABELS[skill.target] || skill.target}</Tag>
+            {(skill.targets || []).map((id) => (
+              <Tag key={id} tone="neutral">{runtimeLabel(id)}</Tag>
+            ))}
             {skill.version && <Tag tone="neutral">v{skill.version}</Tag>}
           </div>
           {skill.summary && (
@@ -117,7 +111,14 @@ function SkillCard({ skill, onOpen, origin }) {
 
       <div className="flex flex-col gap-1.5">
         <Eyebrow>Đặt file vào</Eyebrow>
-        <CopyLine value={installLine(skill)} label="đường dẫn cài đặt" />
+        {(skill.targets || []).map((id) => (
+          <div key={id} className="flex min-w-0 items-center gap-2">
+            <span className="w-24 shrink-0 font-mono text-[11px] text-text-subtle">{runtimeLabel(id)}</span>
+            <div className="min-w-0 flex-1">
+              <CopyLine value={runtimeInstallDir(id, skill.slug)} label={`đường dẫn ${runtimeLabel(id)}`} />
+            </div>
+          </div>
+        ))}
       </div>
 
       {origin && (
@@ -173,6 +174,7 @@ export default function SkillsPageClient() {
   const [category, setCategory] = useState("");
   const [opening, setOpening] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,10 +194,30 @@ export default function SkillsPageClient() {
 
   useEffect(() => { load(); }, [load]);
 
+  const togglePicked = (slug) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+
   const visible = useMemo(
     () => (category ? skills.filter((s) => s.category === category) : skills),
     [skills, category]
   );
+
+  // What the zip and the one-line command act on: picked skills that still exist.
+  const pickedSlugs = skills.filter((skill) => picked.has(skill.slug)).map((skill) => skill.slug);
+  const selectable = visible.slice(0, 100).map((skill) => skill.slug); // one archive carries at most 100
+  const allShownPicked = selectable.length > 0 && selectable.every((slug) => picked.has(slug));
+  const togglePage = () =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (allShownPicked) selectable.forEach((slug) => next.delete(slug));
+      else selectable.forEach((slug) => next.add(slug));
+      return next;
+    });
 
   const openDetail = async (skill) => {
     setOpening(skill.slug);
@@ -280,7 +302,28 @@ export default function SkillsPageClient() {
                 <a href="/account/keys" className="underline">API key</a>.
               </p>
               <CopyLine value={installCommand(origin, "--all")} label="lệnh cài tất cả skill" wrap />
+              {pickedSlugs.length > 0 && (
+                <>
+                  <p className="text-sm leading-6 text-text-muted">Chỉ {pickedSlugs.length} skill bạn đã chọn:</p>
+                  <CopyLine value={installCommand(origin, pickedSlugs.join(" "))} label="lệnh cài các skill đã chọn" wrap />
+                </>
+              )}
             </Panel>
+          )}
+
+          {skills.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border border-border bg-surface px-4 py-3">
+              <label className="flex items-center gap-2 text-sm text-text-main">
+                <input type="checkbox" checked={allShownPicked} onChange={togglePage} className="size-4" />
+                Chọn tất cả {selectable.length} skill đang hiện
+              </label>
+              <span className="font-mono text-xs text-text-muted" role="status">{pickedSlugs.length} đã chọn</span>
+              <span className="ml-auto text-xs text-text-muted">
+                {pickedSlugs.length > 0
+                  ? "Lệnh cài riêng các skill đã chọn nằm ở khung \"Cài nhanh\" phía trên."
+                  : "Tick skill để lấy lệnh cài riêng, hoặc dùng lệnh cài tất cả."}
+              </span>
+            </div>
           )}
 
           {categories.length > 0 && (
@@ -331,7 +374,7 @@ export default function SkillsPageClient() {
           ) : (
             <ul className="flex flex-col gap-3">
               {visible.map((skill) => (
-                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} />
+                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} checked={picked.has(skill.slug)} onToggle={togglePicked} />
               ))}
             </ul>
           )}
@@ -348,7 +391,9 @@ export default function SkillsPageClient() {
             <p className="mt-2 text-sm leading-6 text-text-muted">
               Chạy lệnh dưới đây trong terminal (macOS, Linux, hoặc WSL / Git Bash trên Windows). Lệnh tải
               skill, tạo thư mục đúng tên và ghi <code>SKILL.md</code> cho bạn; chạy lại là cập nhật lên bản mới.
-              Key được đọc từ biến môi trường <code>DEROUTER_KEY</code>, không lưu vào máy.
+              Key được đọc từ biến môi trường <code>DEROUTER_KEY</code>, không lưu vào máy. Chạy lệnh
+              không kèm tên skill trong terminal thì script hiện danh sách đánh số để bạn chọn từng cái
+              hoặc nhập <code>a</code> để cài tất cả.
             </p>
             {origin && (
               <div className="mt-3 flex flex-col gap-2">
@@ -358,8 +403,9 @@ export default function SkillsPageClient() {
               </div>
             )}
             <p className="mt-3 text-sm leading-6 text-text-muted">
-              Mặc định mỗi skill vào thư mục của runtime nó dành cho. Thêm{" "}
-              <code>--target codex</code> hoặc <code>--target cursor</code> để cài sang runtime khác, hoặc{" "}
+              Mỗi skill được cài vào mọi agent mà nó hỗ trợ và máy bạn đang có (Claude Code, Codex,
+              Cursor); máy chưa có agent nào thì cài cho agent đầu tiên của skill. Thêm{" "}
+              <code>--target claude,codex</code> để chỉ định agent, hoặc{" "}
               <code>--dir &lt;đường dẫn&gt;</code> để chọn thư mục. Sau khi cài, mở lại phiên agent.
             </p>
           </Panel>
@@ -371,6 +417,7 @@ export default function SkillsPageClient() {
                 <p className="text-sm leading-6 text-text-muted">
                   Ở tab &quot;Danh sách&quot;, bấm <strong className="text-text-main">Tải SKILL.md</strong>.
                   Trình duyệt lưu file về máy — đó chính là skill, không có gì khác cần cài.
+                  Muốn cài nhiều skill một lúc, dùng lệnh ở mục &quot;Cách nhanh&quot; thay vì làm thủ công từng cái.
                 </p>
               </Step>
 

@@ -48,8 +48,8 @@ before(async () => {
   suspendedKey = (await createApiKey("susp", "m", { userId: "u2" })).key;
   adminKey = (await createApiKey("ops", "m")).key;
 
-  await skills.createSkill({ name: "Recon Pipeline", body: BODY_A, target: "claude", version: "1.2" });
-  await skills.createSkill({ name: "Data Sweep", body: BODY_B, target: "codex" });
+  await skills.createSkill({ name: "Recon Pipeline", body: BODY_A, targets: ["claude", "cursor"], version: "1.2" });
+  await skills.createSkill({ name: "Data Sweep", body: BODY_B, targets: ["codex"] });
   await skills.createSkill({ name: "Internal Only", body: BODY_B, audience: "internal" });
   await skills.createSkill({ name: "Draft One", body: BODY_B, isPublished: false });
 
@@ -99,6 +99,7 @@ function runInstaller(args, { key = customerKey, shell = "sh", env = {} } = {}) 
         HOME: home,
         TMPDIR: tmpDir,
         DEROUTER_URL: baseUrl,
+        DEROUTER_TTY: "/dev/null", // never read the developer's real terminal
         ...(key ? { DEROUTER_KEY: key } : {}),
         ...env,
       },
@@ -166,7 +167,7 @@ test("the catalogue lists published customer skills as tab-separated lines", asy
   const rows = (await res.text()).trim().split("\n").map((line) => line.split("\t"));
   assert.deepEqual(rows.map((r) => r[0]).sort(), ["data-sweep", "recon-pipeline"]);
   const recon = rows.find((r) => r[0] === "recon-pipeline");
-  assert.deepEqual(recon, ["recon-pipeline", "SKILL.md", "1.2", "claude", "Recon Pipeline"]);
+  assert.deepEqual(recon, ["recon-pipeline", "SKILL.md", "1.2", "claude,cursor", "Recon Pipeline"]);
   const sweep = rows.find((r) => r[0] === "data-sweep");
   assert.equal(sweep[2], "-"); // an empty version is "-", never an empty field
 });
@@ -188,23 +189,24 @@ for (const shell of ["sh", "dash"]) {
     const r = await runInstaller(["--all"], { shell });
     assert.equal(r.status, 0, r.err + r.out);
     assert.equal(fs.readFileSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md"), "utf8"), BODY_A);
+    // A fresh machine has no agent folder, so each skill goes to its first agent:
     // data-sweep is a codex skill, so it lands under .codex without any flag.
     assert.equal(fs.readFileSync(installed(".codex", "skills", "data-sweep", "SKILL.md"), "utf8"), BODY_B);
     assert.ok(!fs.existsSync(installed(".claude", "skills", "internal-only")));
     assert.ok(!fs.existsSync(installed(".claude", "skills", "draft-one")));
-    assert.match(r.out, /recon-pipeline: đã cài/);
+    assert.match(r.out, /recon-pipeline \[claude\]: đã cài/);
   });
 }
 
 test("installer: a second run is a no-op, a changed skill reports an update", async () => {
   fs.rmSync(home, { recursive: true, force: true });
   assert.equal((await runInstaller(["--all"])).status, 0);
-  assert.match((await runInstaller(["--all"])).out, /recon-pipeline: đã là bản mới nhất/);
+  assert.match((await runInstaller(["--all"])).out, /recon-pipeline \[claude\]: đã là bản mới nhất/);
 
   const row = (await skills.listSkills()).find((s) => s.slug === "recon-pipeline");
   await skills.updateSkill(row.id, { body: `${BODY_A}\nmore\n` });
   const r = await runInstaller(["--all"]);
-  assert.match(r.out, /recon-pipeline: đã cập nhật/);
+  assert.match(r.out, /recon-pipeline \[claude\]: đã cập nhật/);
   assert.equal(
     fs.readFileSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md"), "utf8"),
     `${BODY_A}\nmore\n`
@@ -217,6 +219,7 @@ test("installer: a named skill, --target and --dir", async () => {
   let r = await runInstaller(["recon-pipeline", "--target", "cursor"]);
   assert.equal(r.status, 0, r.err);
   assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".claude")), "--target cursor must not also write to claude");
   assert.ok(!fs.existsSync(installed(".codex")));
 
   const custom = path.join(tmpDir, "custom");
@@ -230,8 +233,9 @@ test("installer: --list and no arguments install nothing", async () => {
   for (const args of [["--list"], []]) {
     const r = await runInstaller(args);
     assert.equal(r.status, 0, r.err);
-    assert.match(r.out, /recon-pipeline/);
-    assert.ok(!r.out.includes("internal-only"));
+    // --list prints on stdout; the numbered list shown before asking goes to stderr.
+    assert.match(r.out + r.err, /recon-pipeline/);
+    assert.ok(!(r.out + r.err).includes("internal-only"));
     assert.ok(!fs.existsSync(home));
   }
 });
@@ -365,4 +369,163 @@ test("catalogue lines carry no control characters", async () => {
   // eslint-disable-next-line no-control-regex
   assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f]/.test(text));
   await skills.deleteSkill(row.id);
+});
+
+test("installer: one skill goes into every supported agent that is on the machine", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  fs.mkdirSync(installed(".codex"), { recursive: true });
+  const r = await runInstaller(["--all"]);
+  assert.equal(r.status, 0, r.err);
+  // recon-pipeline supports claude + cursor and both are here; codex is here but not supported.
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".codex", "skills", "recon-pipeline")));
+  // data-sweep supports only codex.
+  assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".claude", "skills", "data-sweep")));
+  assert.match(r.out, /recon-pipeline \[claude\]: đã cài/);
+  assert.match(r.out, /recon-pipeline \[cursor\]: đã cài/);
+  assert.match(r.out, /Xong: 3 bản cài/);
+});
+
+test("installer: only the agents that are present receive the skill", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  const r = await runInstaller(["recon-pipeline"]);
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".claude")), "claude is not on this machine");
+});
+
+test("installer: --target takes a comma list or repeats, and skips a skill that does not support it", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  let r = await runInstaller(["recon-pipeline", "--target", "claude,cursor"]);
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runInstaller(["recon-pipeline", "--target", "claude", "--target", "cursor"]);
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runInstaller(["recon-pipeline", "--target", "codex"]);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /bỏ qua/);
+  assert.ok(!fs.existsSync(installed(".codex")));
+
+  r = await runInstaller(["--all", "--target", "vim"]);
+  assert.notEqual(r.status, 0);
+  assert.match(r.err, /--target chỉ nhận/);
+});
+
+test("installer: an agent list from the server must name only known agents", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  try {
+    for (const agents of ["foo", "ssh", "claude,ssh", ",claude", "claude,", "claude,,codex", "../x", "CLAUDE"]) {
+      mockCatalog = `recon-pipeline\tSKILL.md\t-\t${agents}\tx\n`;
+      const r = await runInstaller(["--all"]);
+      assert.notEqual(r.status, 0, agents);
+      assert.match(r.err, /không hợp lệ/, agents);
+    }
+  } finally {
+    mockCatalog = null;
+  }
+  assert.ok(!fs.existsSync(home), "no agent home or skills directory may be created");
+});
+
+test("installer: --target must name an agent, and a server address cannot hide another host", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  let r = await runInstaller(["--all", "--target", ""]);
+  assert.notEqual(r.status, 0);
+  assert.match(r.err, /ít nhất một/);
+
+  // A space also separates agent names.
+  r = await runInstaller(["recon-pipeline", "--target", "claude cursor"]);
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+
+  fs.rmSync(home, { recursive: true, force: true });
+  for (const url of ["http://127.0.0.1:1@evil.example", "https://good.example@evil.example", "http://localhost:80@evil.example"]) {
+    r = await runInstaller(["--all"], { env: { DEROUTER_URL: url } });
+    assert.notEqual(r.status, 0, url);
+    assert.match(r.err, /@/, url);
+  }
+  assert.ok(!fs.existsSync(home));
+});
+
+test("installer: a machine with no supported agent says so and still installs", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const r = await runInstaller(["data-sweep"]);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /chưa thấy agent nào trên máy, cài cho codex/);
+  assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+});
+
+/** Run the installer with no skill named and `answer` typed at the (fake) terminal. */
+async function runPicker(answer, extra = {}) {
+  const tty = path.join(tmpDir, `tty-${Math.random().toString(36).slice(2)}`);
+  fs.writeFileSync(tty, answer);
+  return runInstaller([], { env: { DEROUTER_TTY: tty, ...extra } });
+}
+
+test("installer: with no skill named it lists them numbered and installs the ones typed", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const catalogue = (await (await get("/api/public/skills/catalog", customerKey)).text()).trim().split("\n").map((l) => l.split("\t")[0]);
+  const reconNumber = catalogue.indexOf("recon-pipeline") + 1;
+
+  let r = await runPicker(`${reconNumber}\n`);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.err, new RegExp(`${reconNumber}\\) recon-pipeline`));
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".codex", "skills", "data-sweep")), "only the chosen skill");
+
+  // Names work too, and so do several at once.
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker("data-sweep recon-pipeline\n");
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+
+  // "a" is everything; commas separate as well as spaces.
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker("a\n");
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Xong: 2 bản cài/);
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker(`${reconNumber},data-sweep\n`);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Xong: 2 bản cài/);
+});
+
+test("installer: an empty answer installs nothing, a wrong one stops before writing", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  let r = await runPicker("\n");
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.err, /Không chọn skill nào/);
+  assert.ok(!fs.existsSync(home));
+
+  for (const answer of ["99\n", "0\n", "no-such-skill\n", "1 99\n", "../x\n"]) {
+    r = await runPicker(answer);
+    assert.notEqual(r.status, 0, answer);
+    assert.match(r.err, /không có/, answer);
+  }
+  assert.ok(!fs.existsSync(home));
+});
+
+test("installer: naming skills or --list never asks anything", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  // The fake terminal holds an answer that would install everything; it must be ignored.
+  const tty = path.join(tmpDir, "tty-ignored");
+  fs.writeFileSync(tty, "a\n");
+  let r = await runInstaller(["--list"], { env: { DEROUTER_TTY: tty } });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(!fs.existsSync(home));
+  r = await runInstaller(["data-sweep"], { env: { DEROUTER_TTY: tty } });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(!fs.existsSync(installed(".claude", "skills", "recon-pipeline")));
 });

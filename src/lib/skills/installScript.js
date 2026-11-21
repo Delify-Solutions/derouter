@@ -18,25 +18,34 @@ export function isSafeOrigin(origin) {
 }
 
 const TEMPLATE = String.raw`#!/bin/sh
-# derouter skill installer. Installs the skills your account may use into the
-# directory your agent (Claude Code, Codex, Cursor) reads them from.
+# derouter skill installer. Installs the skills your account may use into the agents
+# on this machine (Claude Code, Codex, Cursor).
 #
 #   curl -fsSL __ORIGIN__/api/public/skills/install.sh | DEROUTER_KEY=<api key> sh -s -- --all
 #
 # Options:
 #   --all             install every skill in the catalogue
 #   --list            only list the catalogue
-#   --target <name>   claude | codex | cursor  (default: each skill's own runtime)
-#   --dir <path>      install under <path>/<slug>/ instead of the runtime default
+#   --target <names>  claude, codex, cursor (comma list or repeated); default: every
+#                     agent the skill supports that is installed on this machine
+#   --dir <path>      install under <path>/<slug>/ instead of an agent's directory
 #   --url <origin>    server address (default: the one this script came from)
 #   <slug> ...        install only these skills
+#   (nothing)         in a terminal: shows a numbered list and asks which to install
+#                     (numbers or names, or "a" for all)
 #
 # The key is read from DEROUTER_KEY, or asked for without echo. It is never
 # written to disk and never put on a command line.
 set -eu
+# No pathname expansion: every unquoted expansion below is a plain word list.
+set -f
 
 BASE="@{DEROUTER_URL:-__ORIGIN__}"
 KEY="@{DEROUTER_KEY:-}"
+RUNTIMES="claude codex cursor"
+# Where the choice is read from when no skill is named; the terminal, not stdin
+# (stdin is this script when it is piped into sh).
+TTY="@{DEROUTER_TTY:-/dev/tty}"
 
 die() { printf 'Lỗi: %s\n' "$1" >&2; exit 1; }
 
@@ -44,22 +53,19 @@ usage() {
   cat <<'USAGE'
 Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<api key> sh -s -- [tuỳ chọn] [slug ...]
 
-  --all             cài mọi skill trong danh sách
-  --list            chỉ liệt kê, không cài
-  --target <tên>    claude | codex | cursor (mặc định: theo từng skill)
-  --dir <đường dẫn> cài vào <đường dẫn>/<slug>/
-  --url <địa chỉ>   địa chỉ máy chủ
+  --all              cài mọi skill trong danh sách
+  --list             chỉ liệt kê, không cài
+  (không gì cả)      trong terminal: hiện danh sách đánh số và hỏi muốn cài cái nào
+                     (số hoặc tên, "a" để cài tất cả)
+  --target <tên>     claude, codex, cursor (nhiều tên cách nhau dấu phẩy)
+                     mặc định: mọi agent skill hỗ trợ mà máy này đang có
+  --dir <đường dẫn>  cài vào <đường dẫn>/<slug>/
+  --url <địa chỉ>    địa chỉ máy chủ
 USAGE
 }
 
-dir_for() {
-  # $1 = runtime. Anything unknown is treated as Claude Code.
-  case "$1" in
-    codex) printf '%s/.codex/skills' "$HOME" ;;
-    cursor) printf '%s/.cursor/skills' "$HOME" ;;
-    *) printf '%s/.claude/skills' "$HOME" ;;
-  esac
-}
+home_for() { printf '%s/.%s' "$HOME" "$1"; }
+dir_for() { printf '%s/.%s/skills' "$HOME" "$1"; }
 
 # curl reads the Authorization header from a config on stdin, so the key never
 # appears in the process list.
@@ -78,15 +84,31 @@ explain() {
   esac
 }
 
+# install_one <slug> <file> <runtime-or-dir-label> <destination root>
+install_one() {
+  i_slug="$1"; i_file="$2"; i_dest="$4/$1"
+  mkdir -p "$i_dest" || die "không tạo được $i_dest"
+  if [ -f "$i_dest/$i_file" ] && cmp -s "$WORK/$i_slug.md" "$i_dest/$i_file"; then
+    i_state="đã là bản mới nhất"
+  elif [ -f "$i_dest/$i_file" ]; then
+    i_state="đã cập nhật"
+  else
+    i_state="đã cài"
+  fi
+  cp "$WORK/$i_slug.md" "$i_dest/$i_file.tmp" && mv -f "$i_dest/$i_file.tmp" "$i_dest/$i_file" || die "không ghi được $i_dest/$i_file"
+  printf '%s [%s]: %s -> %s/%s\n' "$i_slug" "$3" "$i_state" "$i_dest" "$i_file"
+  installed=$((installed + 1))
+}
+
 main() {
   command -v curl >/dev/null 2>&1 || die "cần có curl"
 
-  ALL=0; LIST=0; TARGET=""; DIR=""; SLUGS=""
+  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --all) ALL=1 ;;
       --list) LIST=1 ;;
-      --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGET="$2"; shift ;;
+      --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
       --dir) [ $# -ge 2 ] || die "--dir cần một giá trị"; DIR="$2"; shift ;;
       --url) [ $# -ge 2 ] || die "--url cần một giá trị"; BASE="$2"; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -97,12 +119,23 @@ main() {
   done
 
   [ -n "$BASE" ] || die "không biết địa chỉ máy chủ, thêm --url https://..."
+  # "http://127.0.0.1:1@evil.example" looks like loopback but connects to evil.example.
+  case "$BASE" in *@*) die "địa chỉ máy chủ không được chứa @" ;; esac
   # The key travels in a header, so only HTTPS (or this machine) may receive it.
   case "$BASE" in
     https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|"http://[::1]"|"http://[::1]:"*) ;;
     *) die "địa chỉ máy chủ phải là https:// (không gửi key qua http)" ;;
   esac
-  case "$TARGET" in ""|claude|codex|cursor) ;; *) die "--target chỉ nhận claude, codex hoặc cursor" ;; esac
+  # --target: every name must be a known agent; keep a ",a,b," form for matching.
+  if [ -n "$TARGETS" ]; then
+    # Commas and spaces both separate names; "--target ''" is an error, not "everything".
+    TARGETS="$(printf '%s' "$TARGETS" | tr ' ' ',' | tr -s ',')"
+    [ -n "$(printf '%s' "$TARGETS" | tr -d ',')" ] || die "--target cần ít nhất một tên agent"
+    for name in $(printf '%s' "$TARGETS" | tr ',' ' '); do
+      case " $RUNTIMES " in *" $name "*) ;; *) die "--target chỉ nhận claude, codex hoặc cursor (nhận: $name)" ;; esac
+    done
+    TARGETS="$TARGETS,"
+  fi
 
   if [ -z "$KEY" ] && ( : </dev/tty ) 2>/dev/null; then
     printf 'API key: ' >/dev/tty
@@ -122,11 +155,42 @@ main() {
   [ "$code" = "200" ] || explain "$code"
   [ -s "$WORK/catalog" ] || die "chưa có skill nào được phát hành cho tài khoản này"
 
-  if [ "$LIST" = "1" ] || { [ "$ALL" = "0" ] && [ -z "$SLUGS" ]; }; then
-    printf '%-32s %-10s %-8s %s\n' SLUG RUNTIME VERSION TÊN
+  # Nothing named and a terminal to ask: show the catalogue numbered and let the
+  # customer pick some, or all.
+  if [ "$LIST" = "0" ] && [ "$ALL" = "0" ] && [ -z "$SLUGS" ] && ( : <"$TTY" ) 2>/dev/null; then
+    count=0
+    printf '%s\n' "Skill bạn có thể cài:" >&2
     while IFS="$(printf '\t')" read -r slug file version target name; do
       [ -n "$slug" ] || continue
-      printf '%-32s %-10s %-8s %s\n' "$slug" "$target" "$version" "$name"
+      count=$((count + 1))
+      printf '%4d) %-30s %-20s %s\n' "$count" "$slug" "$target" "$name" >&2
+    done <"$WORK/catalog"
+    printf '\nChọn số hoặc tên (cách nhau bằng dấu cách), "a" để cài tất cả, Enter để thoát: ' >&2
+    choice=""
+    IFS= read -r choice <"$TTY" || true
+    choice="$(printf '%s' "$choice" | tr ',' ' ')"
+    if [ -z "$(printf '%s' "$choice" | tr -d ' ')" ]; then
+      printf '%s\n' "Không chọn skill nào." >&2
+      return 0
+    fi
+    for token in $choice; do
+      case "$token" in
+        a|A|all|ALL) ALL=1 ;;
+        *[!0-9]*)
+          cut -f1 "$WORK/catalog" | grep -Fxq -- "$token" || die "không có skill \"$token\" trong danh sách"
+          SLUGS="$SLUGS $token" ;;
+        *)
+          [ "$token" -ge 1 ] 2>/dev/null && [ "$token" -le "$count" ] || die "không có số $token trong danh sách (1-$count)"
+          SLUGS="$SLUGS $(sed -n "@{token}p" "$WORK/catalog" | cut -f1)" ;;
+      esac
+    done
+  fi
+
+  if [ "$LIST" = "1" ] || { [ "$ALL" = "0" ] && [ -z "$SLUGS" ]; }; then
+    printf '%-32s %-22s %-8s %s\n' SLUG AGENT VERSION TÊN
+    while IFS="$(printf '\t')" read -r slug file version target name; do
+      [ -n "$slug" ] || continue
+      printf '%-32s %-22s %-8s %s\n' "$slug" "$target" "$version" "$name"
     done <"$WORK/catalog"
     if [ "$LIST" = "0" ]; then
       printf '\nChọn skill: thêm tên skill phía sau, hoặc --all để cài tất cả.\n'
@@ -140,6 +204,11 @@ main() {
     [ -n "$slug" ] || continue
     case "$slug" in ""|*[!a-z0-9-]*|-*|*-) die "slug không hợp lệ từ máy chủ: $slug" ;; esac
     case "$file" in ""|*[!A-Za-z0-9._-]*|.*) die "tên file không hợp lệ từ máy chủ: $file" ;; esac
+    case "$target" in ""|*[!a-z,]*|,*|*,|*,,*) die "danh sách agent không hợp lệ từ máy chủ: $target" ;; esac
+    # Every agent must be one this script knows: the name becomes "$HOME/.<name>/skills".
+    for name in $(printf '%s' "$target" | tr ',' ' '); do
+      case " $RUNTIMES " in *" $name "*) ;; *) die "agent không hợp lệ từ máy chủ: $name" ;; esac
+    done
   done <"$WORK/catalog"
 
   for want in $SLUGS; do
@@ -152,27 +221,42 @@ main() {
     if [ "$ALL" = "0" ]; then
       case " $SLUGS " in *" $slug "*) ;; *) continue ;; esac
     fi
-    if [ -n "$DIR" ]; then root="$DIR"; else root="$(dir_for "@{TARGET:-$target}")"; fi
-    dest="$root/$slug"
-    mkdir -p "$dest" || die "không tạo được $dest"
 
     code="$(fetch "$BASE/api/public/skills/file/$slug" "$WORK/$slug.md")" || die "không kết nối được $BASE"
     [ "$code" = "200" ] || explain "$code"
     [ -s "$WORK/$slug.md" ] || die "skill $slug rỗng"
 
-    if [ -f "$dest/$file" ] && cmp -s "$WORK/$slug.md" "$dest/$file"; then
-      state="đã là bản mới nhất"
-    elif [ -f "$dest/$file" ]; then
-      state="đã cập nhật"
-    else
-      state="đã cài"
+    if [ -n "$DIR" ]; then
+      install_one "$slug" "$file" "thư mục" "$DIR"
+      continue
     fi
-    cp "$WORK/$slug.md" "$dest/$file.tmp" && mv -f "$dest/$file.tmp" "$dest/$file" || die "không ghi được $dest/$file"
-    printf '%s: %s -> %s/%s\n' "$slug" "$state" "$dest" "$file"
-    installed=$((installed + 1))
+
+    # Agents this skill supports, narrowed to --target, or else to the ones that
+    # exist on this machine.
+    before="$installed"
+    for rt in $RUNTIMES; do
+      case ",$target," in *",$rt,"*) ;; *) continue ;; esac
+      if [ -n "$TARGETS" ]; then
+        case ",$TARGETS" in *",$rt,"*) ;; *) continue ;; esac
+      elif [ ! -d "$(home_for "$rt")" ]; then
+        continue
+      fi
+      install_one "$slug" "$file" "$rt" "$(dir_for "$rt")"
+    done
+
+    if [ "$installed" = "$before" ]; then
+      if [ -n "$TARGETS" ]; then
+        printf '%s: bỏ qua (skill dành cho %s, không có trong --target)\n' "$slug" "$target"
+      else
+        # No supported agent found here: put it where the skill's first agent will look.
+        first="$(printf '%s' "$target" | cut -d, -f1)"
+        printf '%s: chưa thấy agent nào trên máy, cài cho %s\n' "$slug" "$first"
+        install_one "$slug" "$file" "$first" "$(dir_for "$first")"
+      fi
+    fi
   done <"$WORK/catalog"
 
-  printf '\nXong: %s skill. Mở lại phiên Claude Code / Codex / Cursor để nạp skill mới.\n' "$installed"
+  printf '\nXong: %s bản cài. Mở lại phiên Claude Code / Codex / Cursor để nạp skill mới.\n' "$installed"
 }
 
 main "$@"
