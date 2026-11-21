@@ -40,6 +40,66 @@ test("a generic 400 is not a request error: it keeps the account fallback", () =
   assert.equal(r.cooldownMs, TRANSIENT_COOLDOWN_MS);
 });
 
+test("a provider's own validation error is a request error: no cooldown, no account lock", () => {
+  // The exact answer the openai-compatible deepseek node gave for a Responses-shaped tool_choice.
+  const toolChoice = wrap(400, '{"error":{"message":"Invalid input","type":"invalid_request_error","param":"tool_choice"}}');
+  const r = checkFallbackError(400, toolChoice);
+  assert.equal(r.requestError, true);
+  assert.equal(r.requestScoped, true);
+  assert.equal(r.cooldownMs, 0);
+  assert.equal(r.shouldFallback, true); // a combo still moves on to its next model
+
+  // A param alone, and the type alone, are enough; so is 422.
+  assert.equal(isRequestError(400, '{"error":{"message":"bad","param":"max_tokens"}}'), true);
+  assert.equal(isRequestError(400, '{"type":"invalid_request_error","message":"messages: field required"}'), true);
+  assert.equal(isRequestError(422, '{"error":{"type":"invalid_request_error","message":"extra inputs are not permitted"}}'), true);
+  // A null param names nothing.
+  assert.equal(isRequestError(400, '{"error":{"message":"bad","param":null}}'), false);
+});
+
+test("a validation-shaped 400 about a credential, permission or billing stays an account error", () => {
+  for (const body of [
+    '{"error":{"message":"Invalid API key provided","type":"invalid_request_error"}}',
+    '{"error":{"message":"Your organization does not have access","type":"invalid_request_error","param":null}}',
+    '{"error":{"message":"The account is suspended","type":"invalid_request_error","param":"account"}}',
+    '{"error":{"message":"Access token expired","type":"invalid_request_error"}}',
+  ]) {
+    const r = checkFallbackError(400, wrap(400, body));
+    assert.equal(r.requestError, undefined, body);
+    assert.ok(r.cooldownMs > 0, body);
+  }
+  // Anthropic's low-credit 400 is invalid_request_error too; the credit rule wins first.
+  const credit = checkFallbackError(400, wrap(400, '{"type":"invalid_request_error","message":"Your credit balance is too low"}'));
+  assert.equal(credit.requestError, undefined);
+  assert.ok(credit.newBackoffLevel >= 1);
+});
+
+test("a validation-shaped 400 about quota, region, access or a disabled key stays an account error", () => {
+  for (const message of [
+    "You exceeded your current quota",
+    "This service is not available in your country",
+    "The model does not have access for this project",
+    "Your key has been disabled",
+    "Access suspended by the provider",
+    "Terms acceptance required for this model",
+    "Invalid key",
+  ]) {
+    const body = JSON.stringify({ error: { message, type: "invalid_request_error", param: null } });
+    const r = checkFallbackError(400, wrap(400, body));
+    assert.equal(r.requestError, undefined, message);
+    assert.ok(r.cooldownMs > 0, message);
+  }
+  // A field name that merely contains "key" is still the request's.
+  assert.equal(isRequestError(400, '{"error":{"message":"bad","type":"invalid_request_error","param":"prompt_cache_key"}}'), true);
+});
+
+test("a validation-shaped status other than 400/422 is unchanged", () => {
+  for (const status of [401, 403, 429, 500]) {
+    const r = checkFallbackError(status, wrap(status, '{"error":{"type":"invalid_request_error","param":"x"}}'));
+    assert.equal(r.requestError, undefined, String(status));
+  }
+});
+
 test("Gemini answers a bad API key with 400: still falls back to another account", () => {
   const r = checkFallbackError(400, wrap(400, '{"error":{"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'));
   assert.equal(r.requestError, undefined);

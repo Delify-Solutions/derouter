@@ -8,6 +8,7 @@ import {
   refuseUnmeteredEndpoint,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { handleSearchCore } from "open-sse/handlers/search/index.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -35,7 +36,7 @@ async function handleSearchRequest(request) {
 
   const url = new URL(request.url);
   // Accept either `provider` or `model` (UI sends `model` since provider IS the model for webSearch)
-  const providerInput = body.provider || body.model;
+  const providerInput = await canonicalComboName(body.provider || body.model);
   const query = body.query;
 
   log.request("POST", `${url.pathname} | ${providerInput}`);

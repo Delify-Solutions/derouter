@@ -7,6 +7,7 @@ import {
   enforceKeyAccess,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleImageGenerationCore } from "open-sse/handlers/imageGenerationCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -225,13 +226,14 @@ async function handleImageGenerationRequestInner(request, ctx) {
   } catch {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
   }
-  ctx.publicName = typeof body?.model === "string" ? body.model : null;
-
   const url = new URL(request.url);
   const preferredConnectionId = request.headers.get("x-connection-id") || null;
   const wantsStream = (request.headers.get("accept") || "").includes("text/event-stream");
   const binaryOutput = url.searchParams.get("response_format") === "binary";
-  const modelStr = body.model;
+  const modelStr = await canonicalComboName(body.model);
+  // The response is masked with the combo's own name and members, so the name must be
+  // the canonical spelling: `pic-combo` has to find `Pic-Combo`'s members to hide.
+  ctx.publicName = typeof modelStr === "string" ? modelStr : null;
 
   const apiKey = extractApiKey(request);
   const settings = await getSettings();

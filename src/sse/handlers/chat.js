@@ -12,6 +12,7 @@ import {
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { getModelInfo, getComboInfo } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -68,8 +69,11 @@ async function handleChatRequestInner(request, clientRawRequest, ctx) {
   // Claude Code marks a 1M-context request as `<model>[1m]`; the marker matches
   // no combo, alias or provider/model pair, so it must not reach resolution.
   // The capability travels in the anthropic-beta header, forwarded as-is.
-  const { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
-  if (contextMarker) body.model = modelStr;
+  const { model: markerlessModel, contextMarker } = stripModelContextMarker(body.model);
+  // `glm-5` reaches the combo `GLM-5`: from here on every step (key enforcement,
+  // pricing, usage, the response) sees the combo's own spelling.
+  const modelStr = await canonicalComboName(markerlessModel);
+  if (contextMarker || modelStr !== body.model) body.model = modelStr;
 
   // What the customer asked for, and the upstream ids the engine will use
   // (recorded by chatCore into this set): the response is masked with both.

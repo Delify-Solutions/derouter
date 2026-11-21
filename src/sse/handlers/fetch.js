@@ -8,6 +8,7 @@ import {
   refuseUnmeteredEndpoint,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { handleFetchCore } from "open-sse/handlers/fetch/index.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -36,7 +37,7 @@ async function handleFetchRequest(request) {
 
   const reqUrl = new URL(request.url);
   // Accept either `provider` or `model` (UI sends `model` since provider IS the model for webFetch)
-  const providerInput = body.provider || body.model;
+  const providerInput = await canonicalComboName(body.provider || body.model);
   const targetUrl = body.url;
   const format = body.format;
   const maxCharacters = body.max_characters;

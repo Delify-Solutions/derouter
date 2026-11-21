@@ -3,6 +3,7 @@ import {
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -30,7 +31,7 @@ async function handleTtsRequest(request) {
   }
 
   const url = new URL(request.url);
-  const modelStr = body.model;
+  const modelStr = await canonicalComboName(body.model);
   const responseFormat = url.searchParams.get("response_format") || "mp3"; // mp3 (default) | json
   const language = body.language || ""; // Optional language hint (currently used by Gemini)
   const style = body.style || ""; // Optional style/voice instructions (e.g. Xiaomi MiMo)

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getComboById, updateCombo, deleteCombo, getComboByName } from "@/lib/localDb";
+import { getComboById, updateCombo, deleteCombo } from "@/lib/localDb";
+import { findComboByNameIgnoringCase } from "@/lib/db/repos/combosRepo.js";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { updateComboPricing, resetComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
 import { renameComboDiscounts, removeComboDiscounts } from "@/lib/db/repos/modelDiscountsRepo.js";
@@ -41,21 +42,24 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: MAINTENANCE_ERROR }, { status: 400 });
     }
 
+    // Capture previous name to invalidate rotation state on rename
+    const prev = await getComboById(id);
+
     // Validate name format if provided
     if (body.name) {
       if (!VALID_NAME_REGEX.test(body.name)) {
         return NextResponse.json({ error: "Name can only contain letters, numbers, -, _ and ." }, { status: 400 });
       }
 
-      // Check if name already exists (exclude current combo)
-      const existing = await getComboByName(body.name);
-      if (existing && existing.id !== id) {
-        return NextResponse.json({ error: "Combo name already exists" }, { status: 400 });
+      // Only a real rename can collide: re-sending the combo's own name (the edit form
+      // does) must stay possible even when legacy data holds two names that differ by case.
+      if (body.name !== prev?.name) {
+        const existing = await findComboByNameIgnoringCase(body.name, id);
+        if (existing) {
+          return NextResponse.json({ error: "Combo name already exists" }, { status: 400 });
+        }
       }
     }
-
-    // Capture previous name to invalidate rotation state on rename
-    const prev = await getComboById(id);
 
     // Merge capabilities into the combo's JSON meta blob. `capabilities: null`
     // explicitly clears stored capabilities (so /v1/models falls back to the

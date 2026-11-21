@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCombos, createCombo, getComboByName } from "@/lib/localDb";
+import { getCombos, createCombo } from "@/lib/localDb";
+import { findComboByNameIgnoringCase } from "@/lib/db/repos/combosRepo.js";
 import { updateComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
 import { CACHE_ESTIMATION_ERROR, isValidCacheEstimationInput, withCacheEstimation } from "@/lib/combos/cacheEstimation.js";
 
@@ -38,8 +39,9 @@ export async function POST(request) {
       return NextResponse.json({ error: CACHE_ESTIMATION_ERROR }, { status: 400 });
     }
 
-    // Check if name already exists
-    const existing = await getComboByName(name);
+    // Check if name already exists. Clients may spell a combo in any case, so two
+    // names that differ only by case would be ambiguous.
+    const existing = await findComboByNameIgnoringCase(name);
     if (existing) {
       return NextResponse.json({ error: "Combo name already exists" }, { status: 400 });
     }
