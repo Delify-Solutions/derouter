@@ -35,6 +35,35 @@ export async function getComboByName(name) {
   return rowToCombo(row);
 }
 
+/**
+ * The combo name a client's model string refers to, ignoring case: `glm-5` reaches
+ * the combo `GLM-5`. An exact match always wins, a case-insensitive match is used
+ * only when exactly one combo has that spelling, and anything else (a
+ * `provider/model` id, an unknown name, two combos that differ only by case) is
+ * returned unchanged so the caller's normal resolution decides.
+ *
+ * Callers canonicalise once, where the request's model is read, so key
+ * enforcement, pricing, usage and the response all see the combo's own name.
+ */
+export function canonicalComboNameSync(db, name) {
+  if (typeof name !== "string" || !name || name.includes("/")) return name;
+  if (db.get(`SELECT 1 AS x FROM combos WHERE name = ? LIMIT 1`, [name])) return name;
+  const rows = db.all(`SELECT name FROM combos WHERE name = ? COLLATE NOCASE LIMIT 2`, [name]);
+  return rows.length === 1 ? rows[0].name : name;
+}
+
+export async function canonicalComboName(name) {
+  if (typeof name !== "string" || !name || name.includes("/")) return name;
+  return canonicalComboNameSync(await getAdapter(), name);
+}
+
+/** Another combo whose name equals `name` ignoring case, or null; `exceptId` is the combo being renamed. */
+export async function findComboByNameIgnoringCase(name, exceptId = null) {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT * FROM combos WHERE name = ? COLLATE NOCASE`, [name]);
+  return rowToCombo(rows.find((row) => row.id !== exceptId) ?? null);
+}
+
 // Combo members must be "provider/model" strings. Bare names are how a combo
 // ends up referencing another combo (or itself), which is what the runtime cycle
 // guard has to clean up after — reject it at the data layer instead.

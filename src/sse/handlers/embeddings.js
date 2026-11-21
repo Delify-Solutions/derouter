@@ -8,6 +8,7 @@ import {
   refuseUnpricedModelResponse,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { getModelInfo } from "../services/model.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -39,7 +40,7 @@ async function handleEmbeddingsRequestInner(request, ctx) {
   }
 
   const url = new URL(request.url);
-  const modelStr = body.model;
+  const modelStr = await canonicalComboName(body.model);
 
   log.request("POST", `${url.pathname} | ${modelStr}`);
 

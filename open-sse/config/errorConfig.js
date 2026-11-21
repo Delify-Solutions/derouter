@@ -92,6 +92,14 @@ export const ERROR_RULES = [
  *   - statuses: rejected whatever the message says
  *   - textStatuses + texts: 400/422 are ambiguous (some providers answer a bad API
  *     key with 400), so they only count when the message names the size problem
+ *   - validation: a 400/422 that is the provider's own validation error — its body
+ *     carries `"type":"invalid_request_error"` or names the offending field in a
+ *     non-null `"param"` — describes the request, whichever field it is (a
+ *     `tool_choice` shape the provider does not accept, an unsupported parameter).
+ *     Locking the account for it let one client's malformed request cool down every
+ *     account of the model and answer other customers' valid requests with 503.
+ *     A message that names a credential, permission or billing problem is the
+ *     account's, so the markers below keep those on the account path.
  */
 export const REQUEST_ERROR_RULES = {
   statuses: [413],
@@ -109,6 +117,18 @@ export const REQUEST_ERROR_RULES = {
     "payload too large",
     "length limit exceeded",
   ],
+  validation: {
+    // Matched against the lower-cased error text.
+    patterns: [/invalid_request_error/, /"param"\s*:\s*"[^"]+"/],
+    accountMarkers: [
+      "api key", "api_key", "apikey", "unauthorized", "unauthenticated", "authenticat",
+      "credential", "access token", "invalid token", "token expired", "permission",
+      "forbidden", "organization", "billing", "subscription", "account", "expired",
+      "quota", "region", "country", "location", "does not have access", "no access",
+      "disabled", "suspend", "deactivat", "blocked", "restrict", "terms", "revoked",
+      "invalid key", "key has", "key is",
+    ],
+  },
 };
 
 // Backward compat: COOLDOWN_MS object (used by index.js re-export)

@@ -8,6 +8,7 @@ import {
   refuseUnmeteredEndpoint,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { canonicalComboName } from "@/lib/db/repos/combosRepo.js";
 import { getModelInfo } from "../services/model.js";
 import { handleVideoProxyCore, getVideoConfig, sanitizeSecrets } from "open-sse/handlers/videoCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -80,7 +81,7 @@ async function readForwardableBody(request) {
 async function resolveVideoProvider(parsedBody) {
   if (!parsedBody?.model) return { provider: DEFAULT_VIDEO_PROVIDER, model: null };
 
-  const modelStr = String(parsedBody.model);
+  const modelStr = await canonicalComboName(String(parsedBody.model));
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) {
     return { error: errorResponse(HTTP_STATUS.BAD_REQUEST, "Combos are not supported for video generation") };

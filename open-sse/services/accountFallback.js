@@ -2,16 +2,29 @@ import { ERROR_RULES, REQUEST_ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS
 
 /**
  * True when the upstream rejected the request itself (too large, over the context
- * window) rather than failing as an account. Text rules such as "rate limit" are
- * matched first by checkFallbackError, so a 429 "request too large ... tokens per
- * minute" stays a backoff; this only looks at 413 and at 400/422 with a size message.
+ * window, or a validation error naming a field of it) rather than failing as an account.
+ * Text rules such as "rate limit" are matched first by checkFallbackError, so a 429
+ * "request too large ... tokens per minute" stays a backoff; beyond 413 this only looks
+ * at 400/422 with a size message or the provider's own validation error.
  * @param {number} status
  * @param {string} lowerError - lower-cased error text
  */
 export function isRequestError(status, lowerError) {
   if (REQUEST_ERROR_RULES.statuses.includes(status)) return true;
   if (!REQUEST_ERROR_RULES.textStatuses.includes(status) || !lowerError) return false;
-  return REQUEST_ERROR_RULES.texts.some((t) => lowerError.includes(t));
+  if (REQUEST_ERROR_RULES.texts.some((t) => lowerError.includes(t))) return true;
+  return isValidationRejection(lowerError);
+}
+
+/**
+ * The provider's own validation error for this request (`invalid_request_error`, or a
+ * `param` naming the field it refused), unless the message is about a credential,
+ * permission or billing problem — those are the account's and keep their cooldown.
+ */
+function isValidationRejection(lowerError) {
+  const { patterns, accountMarkers } = REQUEST_ERROR_RULES.validation;
+  if (!patterns.some((re) => re.test(lowerError))) return false;
+  return !accountMarkers.some((m) => lowerError.includes(m));
 }
 
 /**
