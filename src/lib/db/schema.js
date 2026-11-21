@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1203,6 +1203,50 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_av_owner_ts ON affiliateVouchers(ownerUserId, createdAt DESC)",
       "CREATE INDEX IF NOT EXISTS idx_av_status_ts ON affiliateVouchers(status, createdAt DESC)",
+    ],
+  },
+  // Skills the operator publishes for customers to download and install into
+  // their own agent runtime (Claude Code, Codex, Cursor, …). One row per skill;
+  // `body` is the markdown the customer copies or downloads, `fileName` is the
+  // name it lands under (SKILL.md for a directory-form skill, `<id>.md` for a
+  // flat command). `audience` keeps an internal skill out of the customer tab
+  // without deleting it.
+  skills: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // URL-safe slug: the skill's directory name and the /api/skills/{slug} key.
+      slug: "TEXT NOT NULL UNIQUE",
+      name: "TEXT NOT NULL",
+      summary: "TEXT",
+      // What the skill does, in the customer's language, shown on the card.
+      description: "TEXT",
+      // Grouping label on the admin list and the customer tab ("Red team",
+      // "Data", …). Free text, like docsPages.section.
+      category: "TEXT",
+      // Markdown body written into the downloaded file.
+      body: "TEXT NOT NULL",
+      fileName: "TEXT NOT NULL", // 'SKILL.md' | '<slug>.md'
+      // 'claude' | 'codex' | 'cursor' | 'generic' — the runtime the layout is for.
+      target: "TEXT",
+      // Installation line shown above the file ("~/.claude/skills/<slug>/").
+      installPath: "TEXT",
+      // 'customer' | 'internal' — internal rows never reach the account area.
+      audience: "TEXT NOT NULL DEFAULT 'customer'",
+      // 1 = listed for customers; 0 = staged or retired.
+      isPublished: "INTEGER DEFAULT 1",
+      // Free-text usage note rendered under the install line.
+      usageNotes: "TEXT",
+      version: "TEXT",
+      downloadCount: "INTEGER DEFAULT 0",
+      sortOrder: "INTEGER DEFAULT 0",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_skills_slug ON skills(slug)",
+      "CREATE INDEX IF NOT EXISTS idx_skills_listed ON skills(isPublished, audience, sortOrder)",
+      "CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category)",
     ],
   },
 };
