@@ -11,8 +11,9 @@
 // to tell them where to put it.
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
+import { SKILL_RUNTIME_IDS, parseRuntimes } from "../../skills/runtimes.js";
+import { slugFromName } from "../../skills/frontmatter.js";
 
-export const SKILL_TARGETS = ["claude", "codex", "cursor", "generic"];
 export const SKILL_AUDIENCES = ["customer", "internal"];
 
 // A slug becomes a directory name and a URL path segment, so it is restricted to
@@ -28,7 +29,6 @@ const MAX_DESCRIPTION = 2000;
 const MAX_USAGE_NOTES = 4000;
 const MAX_VERSION = 40;
 const MAX_CATEGORY = 80;
-const MAX_INSTALL_PATH = 300;
 const MAX_BODY_BYTES = 512 * 1024; // 512 KB of UTF-8: plenty for a skill, small enough to inline.
 
 /**
@@ -41,6 +41,31 @@ function requestedSlug(input = {}) {
   return typed || slugifySkill(input.name);
 }
 
+/**
+ * The runtimes a payload asks for: `targets` (array or JSON string), or the legacy
+ * single `target`. `undefined` when the payload says nothing, so an update keeps
+ * what the row has.
+ */
+function requestedRuntimes(input = {}) {
+  if (input.targets !== undefined && input.targets !== null) return input.targets;
+  if (input.target !== undefined && input.target !== null && input.target !== "") return input.target;
+  return undefined;
+}
+
+/** True when every id in the request is a runtime we know ("generic" is the legacy "all"). */
+function runtimesAreKnown(value) {
+  let list = value;
+  if (typeof list === "string") {
+    try {
+      list = list.trim().startsWith("[") ? JSON.parse(list) : [list.trim()];
+    } catch {
+      return false;
+    }
+  }
+  if (!Array.isArray(list)) return false;
+  return list.every((id) => SKILL_RUNTIME_IDS.includes(id) || id === "generic");
+}
+
 /** 1/0 for a boolean-ish value, `fallback` when absent, null when unrecognisable. */
 function parseFlag(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -49,18 +74,12 @@ function parseFlag(value, fallback) {
   return null;
 }
 
-/** Lower-case, dash-separated form of arbitrary text; used to suggest a slug. */
-export function slugifySkill(input) {
-  return String(input ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // strip combining marks: "Kỹ năng" → "Ky nang"
-    .replace(/[đĐ]/g, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, MAX_SLUG)
-    .replace(/-+$/, ""); // the cut may land just after a dash
-}
+/**
+ * Lower-case, dash-separated form of arbitrary text; used to suggest a slug. One
+ * implementation (src/lib/skills/frontmatter.js) serves the server and the import
+ * preview, so what the admin sees is what gets stored.
+ */
+export const slugifySkill = slugFromName;
 
 /**
  * Vietnamese validation message for a slug, or null when acceptable.
@@ -90,8 +109,7 @@ function normalize(input = {}) {
     category: String(input.category ?? "").trim(),
     body: String(input.body ?? ""),
     fileName,
-    target: String(input.target ?? "").trim() || "generic",
-    installPath: String(input.installPath ?? "").trim(),
+    targets: parseRuntimes(requestedRuntimes(input)),
     audience: String(input.audience ?? "").trim() || "customer",
     isPublished: parseFlag(input.isPublished, 1),
     usageNotes: String(input.usageNotes ?? "").trim(),
@@ -123,8 +141,8 @@ export function skillInputError(input = {}) {
     return "Tên file chỉ gồm chữ không dấu, số, dấu chấm, gạch ngang, gạch dưới và phải kết thúc bằng .md";
   }
 
-  const target = String(input.target ?? "").trim();
-  if (target && !SKILL_TARGETS.includes(target)) return "Runtime không hợp lệ";
+  const runtimes = requestedRuntimes(input);
+  if (runtimes !== undefined && !runtimesAreKnown(runtimes)) return "Runtime không hợp lệ";
   const audience = String(input.audience ?? "").trim();
   if (audience && !SKILL_AUDIENCES.includes(audience)) return "Đối tượng không hợp lệ";
   if (parseFlag(input.isPublished, 1) === null) return "Trạng thái phát hành không hợp lệ";
@@ -144,9 +162,6 @@ export function skillInputError(input = {}) {
   if (String(input.category ?? "").trim().length > MAX_CATEGORY) {
     return `Nhóm tối đa ${MAX_CATEGORY} ký tự`;
   }
-  if (String(input.installPath ?? "").trim().length > MAX_INSTALL_PATH) {
-    return `Đường dẫn cài tối đa ${MAX_INSTALL_PATH} ký tự`;
-  }
 
   return null;
 }
@@ -161,8 +176,7 @@ function rowToSkill(row, { withBody = true } = {}) {
     description: row.description || "",
     category: row.category || "",
     fileName: row.fileName || "SKILL.md",
-    target: row.target || "generic",
-    installPath: row.installPath || "",
+    targets: parseRuntimes(row.targets ?? row.target),
     audience: row.audience || "customer",
     isPublished: row.isPublished === 1 || row.isPublished === true,
     usageNotes: row.usageNotes || "",
@@ -185,7 +199,7 @@ function nowIso() {
 
 /** Columns that are not the body — the projection the list endpoints use. */
 const LIST_COLUMNS =
-  "id, slug, name, summary, description, category, fileName, target, installPath, " +
+  "id, slug, name, summary, description, category, fileName, target, targets, " +
   "audience, isPublished, usageNotes, version, downloadCount, sortOrder, createdBy, createdAt, updatedAt";
 
 /**
@@ -276,12 +290,12 @@ export async function createSkill(input, { createdBy = null } = {}) {
   db.run(
     `INSERT INTO skills(
        id, slug, name, summary, description, category, body, fileName, target,
-       installPath, audience, isPublished, usageNotes, version, downloadCount,
+       targets, audience, isPublished, usageNotes, version, downloadCount,
        sortOrder, createdBy, createdAt, updatedAt
      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     [
       id, data.slug, data.name, data.summary, data.description, data.category,
-      data.body, data.fileName, data.target, data.installPath, data.audience,
+      data.body, data.fileName, data.targets[0], JSON.stringify(data.targets), data.audience,
       data.isPublished, data.usageNotes, data.version, data.sortOrder,
       createdBy, now, now,
     ]
@@ -298,6 +312,14 @@ export async function updateSkill(id, patch = {}) {
   const current = db.get(`SELECT * FROM skills WHERE id = ?`, [id]);
   if (!current) return null;
 
+  // `null` or "" is not "unchanged" and not a value: it would silently fall back to
+  // the create-time default (published, customer) and flip a skill's visibility.
+  for (const key of ["isPublished", "audience"]) {
+    if (patch[key] === null || patch[key] === "") {
+      throw new Error(key === "audience" ? "Đối tượng không hợp lệ" : "Trạng thái phát hành không hợp lệ");
+    }
+  }
+
   const merged = {
     name: patch.name !== undefined ? patch.name : current.name,
     summary: patch.summary !== undefined ? patch.summary : current.summary,
@@ -305,8 +327,7 @@ export async function updateSkill(id, patch = {}) {
     category: patch.category !== undefined ? patch.category : current.category,
     body: patch.body !== undefined ? patch.body : current.body,
     fileName: patch.fileName !== undefined ? patch.fileName : current.fileName,
-    target: patch.target !== undefined ? patch.target : current.target,
-    installPath: patch.installPath !== undefined ? patch.installPath : current.installPath,
+    targets: requestedRuntimes(patch) !== undefined ? requestedRuntimes(patch) : current.targets ?? current.target,
     audience: patch.audience !== undefined ? patch.audience : current.audience,
     isPublished: patch.isPublished !== undefined ? patch.isPublished : current.isPublished === 1,
     usageNotes: patch.usageNotes !== undefined ? patch.usageNotes : current.usageNotes,
@@ -327,12 +348,12 @@ export async function updateSkill(id, patch = {}) {
   db.run(
     `UPDATE skills SET
        slug = ?, name = ?, summary = ?, description = ?, category = ?, body = ?,
-       fileName = ?, target = ?, installPath = ?, audience = ?, isPublished = ?,
+       fileName = ?, target = ?, targets = ?, audience = ?, isPublished = ?,
        usageNotes = ?, version = ?, sortOrder = ?, updatedAt = ?
      WHERE id = ?`,
     [
       data.slug, data.name, data.summary, data.description, data.category, data.body,
-      data.fileName, data.target, data.installPath, data.audience, data.isPublished,
+      data.fileName, data.targets[0], JSON.stringify(data.targets), data.audience, data.isPublished,
       data.usageNotes, data.version, data.sortOrder, nowIso(), id,
     ]
   );
@@ -355,4 +376,83 @@ export async function deleteSkill(id) {
 export async function incrementSkillDownload(id) {
   const db = await getAdapter();
   db.run(`UPDATE skills SET downloadCount = COALESCE(downloadCount, 0) + 1 WHERE id = ?`, [id]);
+}
+
+export const MAX_IMPORT_ITEMS = 100;
+
+/**
+ * Create many skills in one call (the admin's "drop several files" flow). Each item
+ * is validated and written on its own, so one bad row never blocks the rest, and
+ * the result says what happened to each: `created`, `updated`, `skipped` (the slug
+ * exists and `mode` is "skip") or `error` with the Vietnamese reason.
+ *
+ * @param {object[]} items skill payloads, as createSkill takes them
+ * @param {{ mode?: "skip"|"update", createdBy?: string|null }} options
+ */
+export async function importSkills(items, { mode = "skip", createdBy = null } = {}) {
+  if (!Array.isArray(items) || items.length === 0) throw new Error("Chưa có skill nào để thêm");
+  if (items.length > MAX_IMPORT_ITEMS) throw new Error(`Mỗi lần thêm tối đa ${MAX_IMPORT_ITEMS} skill`);
+
+  const results = [];
+  for (const item of items) {
+    const slug = requestedSlug(item ?? {});
+    try {
+      const problem = skillInputError(item ?? {});
+      if (problem) {
+        results.push({ slug, name: item?.name ?? "", action: "error", error: problem });
+        continue;
+      }
+      const db = await getAdapter();
+      const existing = db.get(`SELECT id FROM skills WHERE slug = ?`, [slug]);
+      if (!existing) {
+        await createSkill(item, { createdBy });
+        results.push({ slug, name: item.name, action: "created" });
+      } else if (mode === "update") {
+        // "Update" replaces what the file carries — its content, name and description —
+        // and nothing else. Visibility, agents, category and the rest were set by the
+        // admin and are not the import form's to reset: re-importing an internal or
+        // draft skill must not publish it.
+        const content = { body: item.body };
+        if (String(item.name ?? "").trim()) content.name = item.name;
+        if (String(item.summary ?? "").trim()) content.summary = item.summary;
+        await updateSkill(existing.id, content);
+        results.push({ slug, name: item.name, action: "updated" });
+      } else {
+        results.push({ slug, name: item.name, action: "skipped", error: `Slug "${slug}" đã được dùng` });
+      }
+    } catch (error) {
+      results.push({ slug, name: item?.name ?? "", action: "error", error: error?.message || "Không lưu được skill" });
+    }
+  }
+  return results;
+}
+
+const BULK_PATCH_KEYS = ["targets", "isPublished", "audience", "category"];
+
+/**
+ * Change the same fields on several skills at once (select rows → set agents,
+ * publish, hide). Only the keys in BULK_PATCH_KEYS are applied: a bulk action
+ * never rewrites a body, slug or name. Each skill succeeds or fails on its own.
+ *
+ * @returns {Promise<{id: string, ok: boolean, error?: string}[]>}
+ */
+export async function patchSkills(ids, patch = {}) {
+  if (!Array.isArray(ids) || ids.length === 0) throw new Error("Chưa chọn skill nào");
+  if (ids.length > MAX_IMPORT_ITEMS) throw new Error(`Mỗi lần đổi tối đa ${MAX_IMPORT_ITEMS} skill`);
+  const clean = {};
+  for (const key of BULK_PATCH_KEYS) {
+    if (patch?.[key] !== undefined) clean[key] = patch[key];
+  }
+  if (Object.keys(clean).length === 0) throw new Error("Không có gì để đổi");
+
+  const results = [];
+  for (const id of ids) {
+    try {
+      const updated = await updateSkill(String(id), clean);
+      results.push(updated ? { id, ok: true } : { id, ok: false, error: "Không tìm thấy skill" });
+    } catch (error) {
+      results.push({ id, ok: false, error: error?.message || "Không cập nhật được skill" });
+    }
+  }
+  return results;
 }

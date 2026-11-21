@@ -3,15 +3,9 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Heading, Eyebrow, Panel, Tag, buttonClass } from "../components/ui";
 import { Modal } from "@/shared/components";
+import { runtimeInstallDir, runtimeLabel } from "@/lib/skills/runtimes.js";
 import { cn } from "@/shared/utils/cn";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-
-const TARGET_LABELS = {
-  claude: "Claude Code",
-  codex: "Codex",
-  cursor: "Cursor",
-  generic: "Khác",
-};
 
 const noopSubscribe = () => () => {};
 
@@ -34,15 +28,6 @@ function fmtDate(value) {
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) return "—";
   return new Date(ms).toLocaleDateString("vi-VN", { year: "numeric", month: "2-digit", day: "2-digit" });
-}
-
-/** The install line for a skill, derived from the row when the admin left it blank. */
-function installLine(skill) {
-  if (skill.installPath) return skill.installPath;
-  if (skill.target === "claude") return `~/.claude/skills/${skill.slug}/`;
-  if (skill.target === "codex") return `~/.codex/skills/${skill.slug}/`;
-  if (skill.target === "cursor") return `~/.cursor/skills/${skill.slug}/`;
-  return `skills/${skill.slug}/`;
 }
 
 /**
@@ -100,7 +85,9 @@ function SkillCard({ skill, onOpen, origin }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-mono text-sm font-semibold text-text-main">{skill.name}</h3>
-            <Tag tone="neutral">{TARGET_LABELS[skill.target] || skill.target}</Tag>
+            {(skill.targets || []).map((id) => (
+              <Tag key={id} tone="neutral">{runtimeLabel(id)}</Tag>
+            ))}
             {skill.version && <Tag tone="neutral">v{skill.version}</Tag>}
           </div>
           {skill.summary && (
@@ -117,7 +104,14 @@ function SkillCard({ skill, onOpen, origin }) {
 
       <div className="flex flex-col gap-1.5">
         <Eyebrow>Đặt file vào</Eyebrow>
-        <CopyLine value={installLine(skill)} label="đường dẫn cài đặt" />
+        {(skill.targets || []).map((id) => (
+          <div key={id} className="flex min-w-0 items-center gap-2">
+            <span className="w-24 shrink-0 font-mono text-[11px] text-text-subtle">{runtimeLabel(id)}</span>
+            <div className="min-w-0 flex-1">
+              <CopyLine value={runtimeInstallDir(id, skill.slug)} label={`đường dẫn ${runtimeLabel(id)}`} />
+            </div>
+          </div>
+        ))}
       </div>
 
       {origin && (
@@ -358,8 +352,9 @@ export default function SkillsPageClient() {
               </div>
             )}
             <p className="mt-3 text-sm leading-6 text-text-muted">
-              Mặc định mỗi skill vào thư mục của runtime nó dành cho. Thêm{" "}
-              <code>--target codex</code> hoặc <code>--target cursor</code> để cài sang runtime khác, hoặc{" "}
+              Mỗi skill được cài vào mọi agent mà nó hỗ trợ và máy bạn đang có (Claude Code, Codex,
+              Cursor); máy chưa có agent nào thì cài cho agent đầu tiên của skill. Thêm{" "}
+              <code>--target claude,codex</code> để chỉ định agent, hoặc{" "}
               <code>--dir &lt;đường dẫn&gt;</code> để chọn thư mục. Sau khi cài, mở lại phiên agent.
             </p>
           </Panel>
