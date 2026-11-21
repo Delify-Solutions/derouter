@@ -12,6 +12,9 @@ const storage = new AsyncLocalStorage();
 
 // Keep in step with MAX_COMPACT_INPUT_BYTES in src/lib/errorLog/compact.js.
 const MAX_CLIENT_TEXT = 8 * 1024 * 1024;
+// An error body is a short JSON document; the error log keeps at most 8 KB of one
+// (MAX_RESPONSE in src/lib/errorLog/record.js), so a bigger cap would only hold memory.
+const MAX_RAW_ERROR_TEXT = 16 * 1024;
 
 export function createTrace(endpoint = "") {
   return {
@@ -27,6 +30,13 @@ export function createTrace(endpoint = "") {
     // Body of the upstream call that just failed, as JSON text (a later combo attempt would otherwise
     // rewrite the shared objects); markAccountUnavailable() attaches it to the failure it reports.
     pendingUpstreamText: null,
+    // The error body exactly as the router produced it, BEFORE the customer-facing mask
+    // rewrote it (src/lib/models/publicModel.js). The mask replaces the upstream's own
+    // explanation with a generic Vietnamese sentence, which erases the one field that
+    // names the fault ("param":"tool_choice"). The log is admin-only and already runs
+    // maskSecrets over everything it stores, so the raw text is what makes an entry
+    // actionable. Null when nothing was masked.
+    rawErrorResponseText: null,
     attempts: [],
     // Set by the app layer: receives a failure that happens after the response started (mid-stream).
     onStreamError: null,
@@ -73,6 +83,23 @@ export function bodyText(body) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Remember an error response body before the customer-facing mask rewrites it.
+ *
+ * The mask is applied to the live response (src/lib/models/publicModel.js), so by the
+ * time the error log reads the body it holds the generic sentence the customer sees —
+ * `"Invalid input"` with no `param`, no upstream wording, nothing to debug from. The
+ * app layer calls this with the text it read BEFORE masking. Only the first call wins:
+ * a combo retries, but the masked body the client finally received describes the last
+ * failure, and that is the one worth keeping.
+ */
+export function noteRawErrorResponse(text) {
+  const t = getTrace();
+  if (!t || t.rawErrorResponseText != null) return;
+  if (typeof text !== "string" || !text) return;
+  t.rawErrorResponseText = text.length > MAX_RAW_ERROR_TEXT ? text.slice(0, MAX_RAW_ERROR_TEXT) : text;
 }
 
 /**

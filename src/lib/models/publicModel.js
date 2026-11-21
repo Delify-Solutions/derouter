@@ -34,6 +34,8 @@ import { PLATFORM_ERROR_HEADER } from "../auth/platformError.js";
 // The engine's own list of "request too large" texts: one source of truth.
 import { REQUEST_ERROR_RULES } from "../../../open-sse/config/errorConfig.js";
 import { createJsonPrefixParser, PREFIX } from "./jsonPrefix.js";
+// Notes the pre-mask error body for the admin error log (spec error-log "raw error response").
+import { noteRawErrorResponse } from "../../../open-sse/utils/errorTrace.js";
 
 /** Ids shorter than this are never scrubbed from text: too likely to be ordinary words. */
 const MIN_ID_LENGTH = 3;
@@ -1023,6 +1025,12 @@ export async function maskResponse(response, options) {
   }
   if (response.status >= 400 && (type.includes("json") || type.startsWith("text/") || !type)) {
     const text = await response.text();
+    // The error log (spec error-log) must show the raw error response, but this function
+    // replaces the upstream's own wording with a generic sentence. Note the text first,
+    // so the entry keeps the field that names the fault ("param":"tool_choice") while the
+    // customer still receives the masked one. Doing it here, at the single place every
+    // handler masks, means a new handler cannot forget it.
+    noteRawErrorResponse(text);
     let parsed = text;
     try { parsed = JSON.parse(text); } catch { /* plain text */ }
     const platform = response.headers.get(PLATFORM_ERROR_HEADER) === "platform";

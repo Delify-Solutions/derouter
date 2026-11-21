@@ -71,7 +71,15 @@ export function errorReportMarkdown(entry, { baseUrl = "" } = {}) {
   for (const [k, v] of fields) lines.push(`- **${k}:** ${v}`);
 
   lines.push("", "## Error", "", fence("", entry.message || "—"));
-  if (data.response) lines.push("", "### Raw error response", "", fence("json", json(data.response)));
+  if (data.rawResponse) {
+    lines.push("", "### Raw error response (before masking)", "", fence("json", json(data.rawResponse)));
+    if (data.response) {
+      lines.push("", "### What the customer received", "", fence("json", json(data.response)));
+    }
+  } else if (data.response) {
+    // Rows written before the raw body was kept, and admin keys (nothing masked).
+    lines.push("", "### Raw error response", "", fence("json", json(data.response)));
+  }
   if (entry.source === "stream" && data.stream) {
     lines.push("", `Stream broke after ${data.stream.chunks ?? "?"} chunks, ${data.stream.bytes ?? "?"} bytes (HTTP 200 already sent).`);
   }

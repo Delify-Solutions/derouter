@@ -161,7 +161,15 @@ export async function recordErrorLog(input, deps = {}) {
       data: {
         // A preview is prompt text too: it follows the same rule as the stored body.
         preview: keepBody ? facts.preview : "",
+        // What the client actually received (masked for a customer key).
         response: maskSecrets(String(input.responseText ?? "")).slice(0, MAX_RESPONSE),
+        // What the router produced before that mask (spec error-log: "raw error
+        // response"). The mask replaces the upstream's explanation with a generic
+        // sentence, so without this an entry cannot say which field or rule failed.
+        // Absent for admin keys (nothing is masked) and for older rows.
+        rawResponse: trace.rawErrorResponseText != null
+          ? maskSecrets(trace.rawErrorResponseText).slice(0, MAX_RESPONSE)
+          : null,
         attempts: attempts.map((a) => attemptRow(a, trace.startedAt)),
         request: request ? request.value : null,
         requestTruncated: request ? request.truncated : false,
