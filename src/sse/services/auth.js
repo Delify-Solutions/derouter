@@ -123,6 +123,22 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         // The message names the connection whose lock ends first, matching the retry time.
         const earliestConn = lockedConns.find((c) => getEarliestModelLockUntil(c) === earliest) || lockedConns[0];
         log.warn("AUTH", `${provider} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
+        // This request never reached an upstream, but the failure it reports IS an upstream
+        // failure recorded when that account got locked. Without this, the error log has no
+        // attempt to attribute: the row is classified "router" with a null provider and
+        // connection, so a 503 that is really "every account already returned 400
+        // param=tool_choice" is indistinguishable from a router bug. Replay the stored
+        // verdict as the attempt it was.
+        if (earliestConn) {
+          noteAttempt({
+            provider,
+            model,
+            connectionId: earliestConn.id || null,
+            connectionName: earliestConn.displayName || earliestConn.name || earliestConn.email || null,
+            status: Number(earliestConn.errorCode) || 0,
+            error: earliestConn.lastError || null,
+          });
+        }
         return {
           allRateLimited: true,
           retryAfter: earliest,
