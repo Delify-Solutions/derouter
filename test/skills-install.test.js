@@ -99,6 +99,7 @@ function runInstaller(args, { key = customerKey, shell = "sh", env = {} } = {}) 
         HOME: home,
         TMPDIR: tmpDir,
         DEROUTER_URL: baseUrl,
+        DEROUTER_TTY: "/dev/null", // never read the developer's real terminal
         ...(key ? { DEROUTER_KEY: key } : {}),
         ...env,
       },
@@ -232,8 +233,9 @@ test("installer: --list and no arguments install nothing", async () => {
   for (const args of [["--list"], []]) {
     const r = await runInstaller(args);
     assert.equal(r.status, 0, r.err);
-    assert.match(r.out, /recon-pipeline/);
-    assert.ok(!r.out.includes("internal-only"));
+    // --list prints on stdout; the numbered list shown before asking goes to stderr.
+    assert.match(r.out + r.err, /recon-pipeline/);
+    assert.ok(!(r.out + r.err).includes("internal-only"));
     assert.ok(!fs.existsSync(home));
   }
 });
@@ -462,4 +464,68 @@ test("installer: a machine with no supported agent says so and still installs", 
   assert.equal(r.status, 0, r.err);
   assert.match(r.out, /chưa thấy agent nào trên máy, cài cho codex/);
   assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+});
+
+/** Run the installer with no skill named and `answer` typed at the (fake) terminal. */
+async function runPicker(answer, extra = {}) {
+  const tty = path.join(tmpDir, `tty-${Math.random().toString(36).slice(2)}`);
+  fs.writeFileSync(tty, answer);
+  return runInstaller([], { env: { DEROUTER_TTY: tty, ...extra } });
+}
+
+test("installer: with no skill named it lists them numbered and installs the ones typed", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const catalogue = (await (await get("/api/public/skills/catalog", customerKey)).text()).trim().split("\n").map((l) => l.split("\t")[0]);
+  const reconNumber = catalogue.indexOf("recon-pipeline") + 1;
+
+  let r = await runPicker(`${reconNumber}\n`);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.err, new RegExp(`${reconNumber}\\) recon-pipeline`));
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(!fs.existsSync(installed(".codex", "skills", "data-sweep")), "only the chosen skill");
+
+  // Names work too, and so do several at once.
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker("data-sweep recon-pipeline\n");
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+
+  // "a" is everything; commas separate as well as spaces.
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker("a\n");
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Xong: 2 bản cài/);
+  fs.rmSync(home, { recursive: true, force: true });
+  r = await runPicker(`${reconNumber},data-sweep\n`);
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Xong: 2 bản cài/);
+});
+
+test("installer: an empty answer installs nothing, a wrong one stops before writing", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  let r = await runPicker("\n");
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.err, /Không chọn skill nào/);
+  assert.ok(!fs.existsSync(home));
+
+  for (const answer of ["99\n", "0\n", "no-such-skill\n", "1 99\n", "../x\n"]) {
+    r = await runPicker(answer);
+    assert.notEqual(r.status, 0, answer);
+    assert.match(r.err, /không có/, answer);
+  }
+  assert.ok(!fs.existsSync(home));
+});
+
+test("installer: naming skills or --list never asks anything", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  // The fake terminal holds an answer that would install everything; it must be ignored.
+  const tty = path.join(tmpDir, "tty-ignored");
+  fs.writeFileSync(tty, "a\n");
+  let r = await runInstaller(["--list"], { env: { DEROUTER_TTY: tty } });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(!fs.existsSync(home));
+  r = await runInstaller(["data-sweep"], { env: { DEROUTER_TTY: tty } });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(!fs.existsSync(installed(".claude", "skills", "recon-pipeline")));
 });

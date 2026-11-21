@@ -93,6 +93,38 @@ publish, hide and "set agents" for the selection.
 - **WHEN** an admin selects five skills and sets their agents to Codex only
 - **THEN** all five list only Codex, and none of their bodies, names or slugs changed
 
+### Requirement: A customer installs the skills they choose, or all of them
+
+On `/account/skills` each skill card SHALL have a checkbox, and the page SHALL offer
+"select all" for the skills currently shown (at most 100). The one-line install
+command SHALL be shown for all skills, and, when at least one skill is ticked, a
+second command naming exactly the ticked skills. A selection SHALL survive changing
+the category filter and SHALL ignore a skill that has since been retired.
+
+When the installer is run with no skill named, no `--all` and no `--list`, and a
+terminal is available, it SHALL print the catalogue as a numbered list and ask which
+to install: numbers and names (separated by spaces or commas) install those skills,
+`a` installs all, an empty answer exits without writing. A number outside the list or
+a name not in the catalogue SHALL stop the script before anything is written. Without
+a terminal it SHALL only list the catalogue and say how to choose. Naming a skill,
+`--all` or `--list` SHALL never ask a question.
+
+#### Scenario: Install only what I ticked
+- **WHEN** a customer ticks two skills
+- **THEN** the page shows a command ending in those two slugs, and running it installs those two and no other
+
+#### Scenario: Choosing in the terminal
+- **WHEN** a customer runs the command with no skill named and types `1 3`
+- **THEN** the first and third skills of the printed list are installed and nothing else
+
+#### Scenario: Choosing everything in the terminal
+- **WHEN** the customer types `a`
+- **THEN** every skill in the catalogue is installed
+
+#### Scenario: A wrong answer
+- **WHEN** the customer types `99` or a name that is not in the list
+- **THEN** the script stops with a message and writes nothing
+
 ### Requirement: One-line installer
 
 The server SHALL serve a POSIX shell script at `GET /api/public/skills/install.sh`

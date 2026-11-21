@@ -31,6 +31,8 @@ const TEMPLATE = String.raw`#!/bin/sh
 #   --dir <path>      install under <path>/<slug>/ instead of an agent's directory
 #   --url <origin>    server address (default: the one this script came from)
 #   <slug> ...        install only these skills
+#   (nothing)         in a terminal: shows a numbered list and asks which to install
+#                     (numbers or names, or "a" for all)
 #
 # The key is read from DEROUTER_KEY, or asked for without echo. It is never
 # written to disk and never put on a command line.
@@ -41,6 +43,9 @@ set -f
 BASE="@{DEROUTER_URL:-__ORIGIN__}"
 KEY="@{DEROUTER_KEY:-}"
 RUNTIMES="claude codex cursor"
+# Where the choice is read from when no skill is named; the terminal, not stdin
+# (stdin is this script when it is piped into sh).
+TTY="@{DEROUTER_TTY:-/dev/tty}"
 
 die() { printf 'Lỗi: %s\n' "$1" >&2; exit 1; }
 
@@ -50,6 +55,8 @@ Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<ap
 
   --all              cài mọi skill trong danh sách
   --list             chỉ liệt kê, không cài
+  (không gì cả)      trong terminal: hiện danh sách đánh số và hỏi muốn cài cái nào
+                     (số hoặc tên, "a" để cài tất cả)
   --target <tên>     claude, codex, cursor (nhiều tên cách nhau dấu phẩy)
                      mặc định: mọi agent skill hỗ trợ mà máy này đang có
   --dir <đường dẫn>  cài vào <đường dẫn>/<slug>/
@@ -147,6 +154,37 @@ main() {
   code="$(fetch "$BASE/api/public/skills/catalog" "$WORK/catalog")" || die "không kết nối được $BASE"
   [ "$code" = "200" ] || explain "$code"
   [ -s "$WORK/catalog" ] || die "chưa có skill nào được phát hành cho tài khoản này"
+
+  # Nothing named and a terminal to ask: show the catalogue numbered and let the
+  # customer pick some, or all.
+  if [ "$LIST" = "0" ] && [ "$ALL" = "0" ] && [ -z "$SLUGS" ] && ( : <"$TTY" ) 2>/dev/null; then
+    count=0
+    printf '%s\n' "Skill bạn có thể cài:" >&2
+    while IFS="$(printf '\t')" read -r slug file version target name; do
+      [ -n "$slug" ] || continue
+      count=$((count + 1))
+      printf '%4d) %-30s %-20s %s\n' "$count" "$slug" "$target" "$name" >&2
+    done <"$WORK/catalog"
+    printf '\nChọn số hoặc tên (cách nhau bằng dấu cách), "a" để cài tất cả, Enter để thoát: ' >&2
+    choice=""
+    IFS= read -r choice <"$TTY" || true
+    choice="$(printf '%s' "$choice" | tr ',' ' ')"
+    if [ -z "$(printf '%s' "$choice" | tr -d ' ')" ]; then
+      printf '%s\n' "Không chọn skill nào." >&2
+      return 0
+    fi
+    for token in $choice; do
+      case "$token" in
+        a|A|all|ALL) ALL=1 ;;
+        *[!0-9]*)
+          cut -f1 "$WORK/catalog" | grep -Fxq -- "$token" || die "không có skill \"$token\" trong danh sách"
+          SLUGS="$SLUGS $token" ;;
+        *)
+          [ "$token" -ge 1 ] 2>/dev/null && [ "$token" -le "$count" ] || die "không có số $token trong danh sách (1-$count)"
+          SLUGS="$SLUGS $(sed -n "@{token}p" "$WORK/catalog" | cut -f1)" ;;
+      esac
+    done
+  fi
 
   if [ "$LIST" = "1" ] || { [ "$ALL" = "0" ] && [ -z "$SLUGS" ]; }; then
     printf '%-32s %-22s %-8s %s\n' SLUG AGENT VERSION TÊN

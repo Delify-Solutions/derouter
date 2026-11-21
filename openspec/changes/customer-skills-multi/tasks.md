@@ -26,6 +26,11 @@
 - [x] 4.2 Script installs into each supported agent present on the machine, falls back to the first agent, `--target` comma list / repeat, skips unsupported with a message, validates the agent list before writing
 - [x] 4.3 Tests: both agents present, one present, none present, `--target` forms, unsupported target skipped, unknown target refused ← (verify: no stray directory for an agent the machine lacks)
 
+## 4b. Choosing what to install
+
+- [x] 4b.1 Customer page: checkbox per card, select-all for the shown skills, a second command for exactly the ticked skills
+- [x] 4b.2 Installer asks (numbers, names, `a`) when run in a terminal with nothing named; the terminal is `DEROUTER_TTY` or `/dev/tty` so tests can feed answers ← (verify: a wrong answer writes nothing; naming skills / `--all` / `--list` never prompt)
+
 ## 5. Checks
 
 - [x] 5.1 `npm test`, eslint on touched files, `next build`
