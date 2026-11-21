@@ -23,6 +23,9 @@ const NAV = [
   // disabled program must not hand out a link.
   { href: "/account/affiliate", label: "Giới thiệu", icon: "group_add", affiliateOnly: true },
   { href: "/account/keys", label: "API key", icon: "key" },
+  // Published skills the customer installs into their own agent runtime
+  // (change customer-skills).
+  { href: "/account/skills", label: "Skill", icon: "extension" },
   { href: "/account/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
   { href: "/account/notifications", label: "Thông báo", icon: "notifications", badge: "unread" },

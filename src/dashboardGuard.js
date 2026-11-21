@@ -178,7 +178,13 @@ function tooManyKeyLookups(retryAfterSec) {
 
 // The public usage page answers "does this key exist?" without a login, so it
 // is throttled like the LLM API. The route still does its own lookup and 404s.
-const KEY_LOOKUP_API_PREFIX = "/api/usage/key";
+// The skill installer's catalogue and file endpoints take a customer key the same
+// way; its install.sh is public and carries no key, so it is not throttled.
+const KEY_LOOKUP_API_PREFIXES = [
+  "/api/usage/key",
+  "/api/public/skills/catalog",
+  "/api/public/skills/file",
+];
 
 async function guardKeyLookupApi(request) {
   const limited = keyLookupLimited(request);
@@ -284,7 +290,7 @@ export async function proxy(request) {
 
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
-    if (pathname === KEY_LOOKUP_API_PREFIX || pathname.startsWith(`${KEY_LOOKUP_API_PREFIX}/`)) {
+    if (KEY_LOOKUP_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
       const refused = await guardKeyLookupApi(request);
       if (refused) return refused;
     }
