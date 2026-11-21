@@ -243,6 +243,13 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
   delete result.include;
   delete result.prompt_cache_key;
   delete result.store;
+  // `tool_choice` must be reshaped, never copied: the Responses flat `name` is not
+  // valid Chat Completions, and a strict gateway rejects the whole request.
+  if (body.tool_choice !== undefined) {
+    const converted = convertToolChoice(body.tool_choice, "openai");
+    if (converted !== undefined) result.tool_choice = converted;
+    else delete result.tool_choice;
+  }
   if (typeof result.reasoning?.effort === "string") {
     result.reasoning_effort = result.reasoning.effort;
   }
@@ -276,6 +283,43 @@ function normalizeToolParameters(params) {
   if (!params) return { type: "object", properties: {} };
   if (params.type === "object" && !params.properties) return { ...params, properties: {} };
   return params;
+}
+
+/**
+ * `tool_choice` names the same intent in two different shapes:
+ *
+ *   Responses API  { type: "function", name: "respond" }
+ *   Chat Completions { type: "function", function: { name: "respond" } }
+ *
+ * Copying the body across formats with a spread therefore hands the upstream a
+ * `tool_choice` it cannot parse. OpenAI-compatible gateways answer
+ *   400 {"message":"Invalid input","type":"invalid_request_error","param":"tool_choice"}
+ * on every attempt, so a Responses client talking to a Chat-completions node
+ * failed 100% of the time — the failure looked like a provider outage (all
+ * accounts 400 → combo 503) because the body was wrong, not the account.
+ *
+ * `to` is "openai" (nested `function.name`) or "responses" (flat `name`).
+ * Returns undefined when there is nothing the target can express, so the field
+ * is dropped rather than sent malformed.
+ */
+function convertToolChoice(choice, to) {
+  if (choice == null) return undefined;
+  // The plain string forms are identical in both APIs.
+  if (typeof choice === "string") {
+    return ["auto", "none", "required"].includes(choice) ? choice : undefined;
+  }
+  if (typeof choice !== "object") return undefined;
+  if (choice.type !== OPENAI_BLOCK.FUNCTION) {
+    // Responses-only forms ("allowed_tools", hosted tools) have no Chat equivalent.
+    return undefined;
+  }
+  const name = typeof choice.name === "string" ? choice.name
+    : typeof choice.function?.name === "string" ? choice.function.name
+    : "";
+  if (!name) return undefined;
+  return to === "openai"
+    ? { type: OPENAI_BLOCK.FUNCTION, function: { name } }
+    : { type: OPENAI_BLOCK.FUNCTION, name };
 }
 
 /**
@@ -458,6 +502,11 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
   if (body.reasoning_effort !== undefined) result.reasoning = { effort: body.reasoning_effort, summary: "auto" };
   if (body.service_tier !== undefined) result.service_tier = body.service_tier;
   if (body.prompt_cache_key !== undefined) result.prompt_cache_key = body.prompt_cache_key;
+  // Chat Completions `{type, function:{name}}` → Responses `{type, name}`.
+  if (body.tool_choice !== undefined) {
+    const converted = convertToolChoice(body.tool_choice, "responses");
+    if (converted !== undefined) result.tool_choice = converted;
+  }
 
   return result;
 }
