@@ -16,14 +16,32 @@ function snapshotKeyInfo(owner) {
   };
 }
 
+const SORTS = new Set(["time", "tokens", "latency"]);
+const ORDERS = new Set(["desc", "asc"]);
+
 /**
  * GET /api/usage/request-details
- * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate
+ * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate,
+ * modelView (requested | upstream; anything else = requested), q (free-text search),
+ * sort (time | tokens | latency), order (desc | asc). An invalid sort or order is HTTP 400.
+ * The response also carries `models` (the distinct models of the view, for the filter) and
+ * each row's `requestedModel` and `upstreamModel`.
  */
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    
+
+    const modelView = searchParams.get("modelView") === "upstream" ? "upstream" : "requested";
+    const sort = searchParams.get("sort") ?? "time";
+    const order = searchParams.get("order") ?? "desc";
+    if (!SORTS.has(sort)) {
+      return NextResponse.json({ error: "sort must be time, tokens or latency" }, { status: 400 });
+    }
+    if (!ORDERS.has(order)) {
+      return NextResponse.json({ error: "order must be desc or asc" }, { status: 400 });
+    }
+    const q = searchParams.get("q");
+
     const pageRaw = parseInt(searchParams.get("page"));
     const page = Number.isNaN(pageRaw) ? 1 : pageRaw;
     const pageSizeRaw = parseInt(searchParams.get("pageSize"));
@@ -58,8 +76,13 @@ export async function GET(request) {
 
     const filter = {
       page,
-      pageSize
+      pageSize,
+      modelView,
+      sort,
+      order,
+      includeModels: true,
     };
+    if (q && q.trim()) filter.q = q.trim().slice(0, 200);
 
     if (provider) filter.provider = provider;
     if (model) filter.model = model;
@@ -95,10 +118,13 @@ export async function GET(request) {
     // snapshotted on the row at request time still names the customer.
     const details = redactedDetails.map((d) => ({
       ...d,
+      // Both model names, whichever view is shown: the Details panel lists them side by side.
+      requestedModel: d.requestedModel || null,
+      upstreamModel: d.model ?? null,
       keyInfo: d.apiKey ? owners[d.apiKey] ?? snapshotKeyInfo(d.owner) ?? { kind: "unknown" } : null,
     }));
 
-    return NextResponse.json({ ...result, details });
+    return NextResponse.json({ ...result, details, modelView, sort, order });
   } catch (error) {
     console.error("[API] Failed to get request details:", error);
     return NextResponse.json(

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 43;
+export const SCHEMA_VERSION = 44;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -223,9 +223,17 @@ export const TABLES = {
       // live lookup) and for requests without a known key.
       userId: "TEXT",
       apiKeyId: "TEXT",
+      // The model the client asked for (a combo name), for the admin Details filter in the
+      // requested-model view (spec admin-usage-views). NULL when none was recorded; rows
+      // written before this column are filled once from data.requestedModel
+      // (requestDetailsRepo backfill).
+      requestedModel: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_rd_ts ON requestDetails(timestamp DESC)",
+      // The requested-view model filter and model list match this exact expression
+      // (requestDetailsRepo modelExprOf), so SQLite can use the index for both.
+      "CREATE INDEX IF NOT EXISTS idx_rd_effmodel ON requestDetails(COALESCE(NULLIF(requestedModel, ''), model))",
       "CREATE INDEX IF NOT EXISTS idx_rd_user_ts ON requestDetails(userId, timestamp DESC) WHERE userId IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS idx_rd_provider ON requestDetails(provider)",
       "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
@@ -712,6 +720,10 @@ export const TABLES = {
       peakTpm: "INTEGER NOT NULL DEFAULT 0",
       peakRpm: "INTEGER NOT NULL DEFAULT 0",
       peakTokS: "REAL NOT NULL DEFAULT 0",
+      // Newest request of the hour (ISO), for the Providers tab's "last used". NULL only in
+      // hours rolled before this column existed; those are filled in place, in the
+      // background (usageRollup.scheduleProviderLastTsBackfill).
+      lastTs: "TEXT",
     },
     primaryKey: "PRIMARY KEY (hour, provider)",
     indexes: [],

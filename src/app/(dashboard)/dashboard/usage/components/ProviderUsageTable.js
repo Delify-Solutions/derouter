@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Select from "@/shared/components/Select";
+import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
+import { TableStateRow } from "@/shared/components/TableState";
+import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
 
 const PERIOD_PRESETS = [
   { value: "today", label: "Today" },
@@ -13,13 +16,96 @@ const PERIOD_PRESETS = [
   { value: "60d", label: "60D" },
 ];
 
+// Shared toolbar (spec admin-usage-views): default order is requests, most first. The
+// columns that were sortable before the toolbar keep their header sort through it.
+const PROVIDER_SORTS = [
+  { value: "requests", label: "Requests" },
+  { value: "tokens", label: "Tokens" },
+  { value: "cost", label: "Chi phí" },
+  { value: "lastUsed", label: "Lần dùng cuối" },
+  { value: "name", label: "Tên" },
+  { value: "input", label: "Input" },
+  { value: "output", label: "Output" },
+  { value: "liveRpm", label: "RPM" },
+  { value: "liveTpm", label: "TPM" },
+];
+const PROVIDER_DEFAULTS = { sort: "requests", dir: "desc", top: 0 };
+const PROVIDER_QUERY_OPTIONS = { sortFields: PROVIDER_SORTS.map((s) => s.value) };
+const COLS = 12;
+
+const providerName = (it) => it.name || it.provider || "";
+// Integer nanoUSD (money rule): the authoritative figure, the legacy float only as fallback.
+const costNanoOf = (it) => (it.costNanoUsd != null ? Math.round(it.costNanoUsd) : Math.round(Number(it.cost || 0) * 1e9));
+
+function providerSortValue(it, field) {
+  switch (field) {
+    case "name": return providerName(it) || null;
+    case "tokens": return (it.input || 0) + (it.output || 0);
+    case "cost": return costNanoOf(it);
+    case "lastUsed": {
+      // No request in the period: sorts after every provider that has one.
+      const ms = it.lastUsed ? Date.parse(it.lastUsed) : NaN;
+      return Number.isFinite(ms) ? ms : null;
+    }
+    default: return Object.hasOwn(it, field) ? (it[field] ?? 0) : 0;
+  }
+}
+
+function fmtWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+// Sums over a list of provider rows: requests, tokens, cost and live rates add up; peaks
+// are the maximum.
+function sumProviders(list) {
+  return list.reduce(
+    (acc, it) => {
+      acc.requests += it.requests || 0;
+      acc.input += it.input || 0;
+      acc.output += it.output || 0;
+      acc.costNanoUsd += costNanoOf(it);
+      acc.liveRpm += it.liveRpm || 0;
+      acc.liveTpm += it.liveTpm || 0;
+      acc.peakRpm = Math.max(acc.peakRpm, it.peakRpm || 0);
+      acc.peakTpm = Math.max(acc.peakTpm, it.peakTpm || 0);
+      acc.peakTokS = Math.max(acc.peakTokS, it.peakTokS || 0);
+      if (it.lastUsed && (!acc.lastUsed || it.lastUsed > acc.lastUsed)) acc.lastUsed = it.lastUsed;
+      return acc;
+    },
+    { requests: 0, input: 0, output: 0, costNanoUsd: 0, liveRpm: 0, liveTpm: 0, peakRpm: 0, peakTpm: 0, peakTokS: 0, lastUsed: null }
+  );
+}
+
+function TotalsRow({ label, count, t }) {
+  return (
+    <tr className="border-t-2 border-border-subtle font-medium bg-surface-2/30">
+      <td className="px-3 py-2"></td>
+      <td className="px-3 py-2">{label} (<span className="font-mono tabular-nums">{count}</span>)</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.requests)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.input)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.output)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(t.costNanoUsd)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums" title="Sum of live RPM across providers">{fmtCompact(t.liveRpm)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums" title="Sum of live TPM across providers">{fmtCompact(t.liveTpm)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakRpm)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakTpm)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakTokS)}</td>
+      <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(t.lastUsed)}</td>
+    </tr>
+  );
+}
+
 function fmtCompact(v) {
   if (v == null) return "—";
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 }).format(v);
 }
-function fmtCost(v) {
-  if (v == null) return "—";
-  return `$${Number(v).toFixed(4)}`;
+// Summed as integer nanoUSD; converted to dollars once, for display only.
+function fmtCostNano(nano) {
+  if (nano == null) return "—";
+  return `$${(nano / 1e9).toFixed(4)}`;
 }
 
 export default function ProviderUsageTable() {
@@ -27,8 +113,7 @@ export default function ProviderUsageTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState("30d");
-  const [sortKey, setSortKey] = useState("requests");
-  const [sortDir, setSortDir] = useState("desc");
+  const [query, setQuery] = useTableQuery("providers", PROVIDER_DEFAULTS, PROVIDER_QUERY_OPTIONS);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,8 +121,9 @@ export default function ProviderUsageTable() {
     try {
       const params = new URLSearchParams({ period });
       const res = await fetch(`/api/usage/provider-summary?${params}`);
-      const data = await res.json();
-      setItems(data.items || []);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load provider usage");
+      setItems(Array.isArray(data.items) ? data.items : []);
     } catch (e) {
       setError(e.message || "Failed to load provider usage");
     } finally {
@@ -47,49 +133,33 @@ export default function ProviderUsageTable() {
 
   useEffect(() => { load(); }, [load]);
 
-  const sorted = useMemo(() => {
-    const arr = [...items];
-    arr.sort((a, b) => {
-      const av = a[sortKey] ?? 0;
-      const bv = b[sortKey] ?? 0;
-      const cmp = (typeof av === "number" && typeof bv === "number")
-        ? av - bv
-        : String(av).localeCompare(String(bv));
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [items, sortKey, sortDir]);
+  const providerOptions = useMemo(
+    () => [...new Set(items.map(providerName))].filter(Boolean).sort((a, b) => a.localeCompare(b)).map((v) => ({ value: v, label: v })),
+    [items]
+  );
 
-  const onSort = (key) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  };
+  const result = useMemo(() => applyTableQuery(items, {
+    search: query.q,
+    searchFields: ["name", "provider"],
+    filters: query.filters,
+    filterFields: { provider: providerName },
+    sortField: query.sort,
+    sortDir: query.dir,
+    top: query.top,
+    valueOf: providerSortValue,
+    nameOf: providerName,
+  }), [items, query]);
+  const sorted = result.rows;
 
-  const sortIcon = (key) =>
-    sortKey === key ? (sortDir === "asc" ? "arrow_upward" : "arrow_downward") : "unfold_more";
+  const tableState = tableStateOf({ loading, error, total: items.length, matched: result.matched, filtersActive: hasActiveQuery(query) });
+  const onSort = (field) => setQuery((s) => nextSortState(s, field, { ascFirst: ["name"] }));
+  const headerProps = { state: query, onSort, className: "font-medium px-3 py-2" };
 
-  // Totals row
-  const totals = useMemo(() => {
-    return items.reduce(
-      (acc, it) => {
-        acc.requests += it.requests || 0;
-        acc.input += it.input || 0;
-        acc.output += it.output || 0;
-        acc.cost += it.cost || 0;
-        acc.liveRpm += it.liveRpm || 0;
-        acc.liveTpm += it.liveTpm || 0;
-        acc.peakRpm = Math.max(acc.peakRpm, it.peakRpm || 0);
-        acc.peakTpm = Math.max(acc.peakTpm, it.peakTpm || 0);
-        acc.peakTokS = Math.max(acc.peakTokS, it.peakTokS || 0);
-        return acc;
-      },
-      { requests: 0, input: 0, output: 0, cost: 0, liveRpm: 0, liveTpm: 0, peakRpm: 0, peakTpm: 0, peakTokS: 0 }
-    );
-  }, [items]);
+  // "Tổng kỳ" is the whole period whatever the search, filters or Top N; when those hide
+  // providers, "Tổng đang hiển thị" adds the shown rows alone.
+  const periodTotals = useMemo(() => sumProviders(items), [items]);
+  const shownTotals = useMemo(() => sumProviders(sorted), [sorted]);
+  const partial = sorted.length !== items.length;
 
   const periodLabel = PERIOD_PRESETS.find((p) => p.value === period)?.label || period;
 
@@ -99,7 +169,7 @@ export default function ProviderUsageTable() {
         <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
           <div>
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">dns</span>
+              <span className="material-symbols-outlined text-primary" aria-hidden="true">dns</span>
               Provider Usage
             </h2>
             <p className="text-sm text-text-muted mt-1">
@@ -107,127 +177,78 @@ export default function ProviderUsageTable() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={period} onChange={(e) => setPeriod(e.target.value)} options={PERIOD_PRESETS} className="w-32" />
+            <Select value={period} onChange={(e) => setPeriod(e.target.value)} options={PERIOD_PRESETS} className="w-32" aria-label="Period" />
             <Button variant="ghost" icon="refresh" onClick={load} disabled={loading}>Refresh</Button>
           </div>
         </div>
 
-        <div className="text-xs text-text-muted mb-3 flex items-center gap-3">
-          <span><span className="font-medium text-text-main">{items.length}</span> providers</span>
-        </div>
+        <TableToolbar
+          state={query}
+          onChange={setQuery}
+          searchPlaceholder="Provider…"
+          filters={[{ name: "provider", label: "Provider", options: providerOptions }]}
+          sortOptions={PROVIDER_SORTS}
+          shown={sorted.length}
+          total={items.length}
+        />
       </Card>
 
       <Card padding="none">
-        {error ? (
-          <div className="p-6 text-sm text-red-500 flex items-center gap-2">
-            <span className="material-symbols-outlined">error</span>{error}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
-              <thead>
-                <tr className="border-b border-border-subtle text-text-muted">
-                  <th className="text-left font-medium px-3 py-2 w-8">#</th>
-                  <th className="text-left font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("name")}>
-                      Provider
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("name")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("requests")}>
-                      Requests
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("requests")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("input")}>
-                      Input
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("input")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("output")}>
-                      Output
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("output")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("cost")}>
-                      Cost
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("cost")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("liveRpm")}>
-                      RPM
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("liveRpm")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">
-                    <button className="inline-flex items-center gap-1 hover:text-text-main" onClick={() => onSort("liveTpm")}>
-                      TPM
-                      <span className="material-symbols-outlined text-[14px]">{sortIcon("liveTpm")}</span>
-                    </button>
-                  </th>
-                  <th className="text-right font-medium px-3 py-2">Peak RPM</th>
-                  <th className="text-right font-medium px-3 py-2">Peak TPM</th>
-                  <th className="text-right font-medium px-3 py-2">Peak Tok/s</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={11} className="p-8 text-center text-text-muted">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
-                        Loading…
-                      </div>
-                    </td>
-                  </tr>
-                ) : sorted.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="p-8 text-center text-text-muted">No provider usage in this period.</td>
-                  </tr>
-                ) : (
-                  <>
-                    {sorted.map((it, idx) => (
-                      <tr key={it.provider} className="border-b border-border-subtle/50 hover:bg-surface-2/50">
-                        <td className="px-3 py-2 text-text-muted">{idx + 1}</td>
-                        <td className="px-3 py-2">
-                          <div className="font-medium text-text-main">{it.name || it.provider}</div>
-                          <div className="font-mono text-xs text-text-muted">{it.provider}</div>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.requests)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.input)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.output)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCost(it.cost)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.liveRpm)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.liveTpm)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakRpm)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakTpm)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(it.peakTokS)}</td>
-                      </tr>
-                    ))}
-                    <tr className="border-t-2 border-border-subtle font-medium bg-surface-2/30">
-                      <td className="px-3 py-2"></td>
-                      <td className="px-3 py-2">Total ({items.length})</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(totals.requests)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(totals.input)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtCompact(totals.output)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtCost(totals.cost)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums" title="Sum of live RPM across providers">{fmtCompact(totals.liveRpm)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums" title="Sum of live TPM across providers">{fmtCompact(totals.liveTpm)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums" title="Max peak across providers">{fmtCompact(totals.peakRpm)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums" title="Max peak across providers">{fmtCompact(totals.peakTpm)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums" title="Max peak across providers">{fmtCompact(totals.peakTokS)}</td>
+        <div className="overflow-x-auto" aria-busy={loading}>
+          <table className="w-full min-w-[1100px] text-sm">
+            <thead>
+              <tr className="border-b border-border-subtle text-text-muted">
+                <th className="text-left font-medium px-3 py-2 w-8">#</th>
+                <SortableHeader label="Provider" field="name" {...headerProps} />
+                <SortableHeader label="Requests" field="requests" align="right" {...headerProps} />
+                <SortableHeader label="Input" field="input" align="right" {...headerProps} />
+                <SortableHeader label="Output" field="output" align="right" {...headerProps} />
+                <SortableHeader label="Cost" field="cost" align="right" {...headerProps} />
+                <SortableHeader label="RPM" field="liveRpm" align="right" {...headerProps} />
+                <SortableHeader label="TPM" field="liveTpm" align="right" {...headerProps} />
+                <th className="text-right font-medium px-3 py-2">Peak RPM</th>
+                <th className="text-right font-medium px-3 py-2">Peak TPM</th>
+                <th className="text-right font-medium px-3 py-2">Peak Tok/s</th>
+                <SortableHeader label="Last used" field="lastUsed" {...headerProps} />
+              </tr>
+            </thead>
+            <tbody>
+              {tableState !== "ready" ? (
+                <TableStateRow
+                  state={tableState}
+                  colSpan={COLS}
+                  emptyMessage="No provider usage in this period."
+                  onRetry={load}
+                  onClearFilters={() => setQuery(clearQueryFilters)}
+                />
+              ) : (
+                <>
+                  {sorted.map((it, idx) => (
+                    <tr key={it.provider} className="border-b border-border-subtle/50 hover:bg-surface-2/50">
+                      <td className="px-3 py-2 text-text-muted">{idx + 1}</td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-text-main">{providerName(it)}</div>
+                        <div className="font-mono text-xs text-text-muted">{it.provider}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.requests)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.input)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.output)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(it))}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveRpm)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveTpm)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakRpm)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTpm)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTokS)}</td>
+                      <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(it.lastUsed)}</td>
                     </tr>
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  ))}
+                  {partial && <TotalsRow label="Tổng đang hiển thị" count={sorted.length} t={shownTotals} />}
+                  <TotalsRow label="Tổng kỳ" count={items.length} t={periodTotals} />
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

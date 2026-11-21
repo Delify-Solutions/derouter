@@ -75,13 +75,14 @@ function rollProviderHour(db, fromIso, toIso, hour) {
               costNanoUsd, cost, ${TOKENS_OK} AS tk, ${META_OK} AS mt
          FROM usageHistory WHERE ${filter}
      ), x AS (
-       SELECT prov, ${PROMPT} AS pin, ${COMPLETION} AS pout, ${COST_NANO} AS costNano,
+       SELECT prov, timestamp, ${PROMPT} AS pin, ${COMPLETION} AS pout, ${COST_NANO} AS costNano,
               json_extract(mt, '$.latencyMs') AS lat
          FROM h
      )
      SELECT prov AS provider, COUNT(*) AS requests, SUM(pin) AS input, SUM(pout) AS output,
             SUM(costNano) AS costNano,
-            MAX(CASE WHEN lat > 0 AND pout > 0 THEN pout * 1000.0 / lat END) AS peakTokS
+            MAX(CASE WHEN lat > 0 AND pout > 0 THEN pout * 1000.0 / lat END) AS peakTokS,
+            MAX(timestamp) AS lastTs
        FROM x GROUP BY prov`,
     [fromIso, toIso]
   );
@@ -103,10 +104,10 @@ function rollProviderHour(db, fromIso, toIso, hour) {
   for (const row of totals) {
     const peak = peaks.get(row.provider) || {};
     db.run(
-      `INSERT OR REPLACE INTO usageRollupProvider(hour, provider, requests, input, output, costNano, peakTpm, peakRpm, peakTokS)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO usageRollupProvider(hour, provider, requests, input, output, costNano, peakTpm, peakRpm, peakTokS, lastTs)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [hour, row.provider, row.requests, row.input || 0, row.output || 0,
-        Math.round(row.costNano || 0), peak.peakTpm || 0, peak.peakRpm || 0, row.peakTokS || 0]
+        Math.round(row.costNano || 0), peak.peakTpm || 0, peak.peakRpm || 0, row.peakTokS || 0, row.lastTs]
     );
   }
 }
@@ -354,11 +355,88 @@ export async function forEachRollupSlice({ fromHour, toHour }, fn, hoursPerSlice
 export function readProviderRollup(db, { fromHour, toHour }) {
   return db.all(
     `SELECT provider, SUM(requests) AS requests, SUM(input) AS input, SUM(output) AS output, SUM(costNano) AS costNano,
-            MAX(peakTpm) AS peakTpm, MAX(peakRpm) AS peakRpm, MAX(peakTokS) AS peakTokS
+            MAX(peakTpm) AS peakTpm, MAX(peakRpm) AS peakRpm, MAX(peakTokS) AS peakTokS, MAX(lastTs) AS lastTs,
+            MAX(CASE WHEN lastTs IS NULL THEN hour END) AS unfilledHour
        FROM usageRollupProvider WHERE hour >= ? AND hour < ? GROUP BY provider`,
     [fromHour, toHour]
   );
 }
+
+// ─── provider lastTs backfill ─────────────────────────────────────────────────
+// Provider hours rolled before `usageRollupProvider.lastTs` existed have no last-request
+// time. They are filled IN PLACE from the raw rows of that one hour, newest hour first, one
+// hour per turn of the event loop. Nothing else is touched: the key and owner-peak rollups
+// (the Users tab) and the watermark stay as they are. Readers stay exact meanwhile: an
+// unfilled hour is looked up in the raw rows (hourLastTsByProviderSync, once per hour).
+
+/**
+ * Fill lastTs for the newest unfilled provider hour older than `beforeHour` (exclusive;
+ * null = no bound). Returns that hour, or null when none is left. One indexed scan of one
+ * hour of raw rows; an hour whose raw rows are gone keeps NULL and is skipped by the cursor.
+ */
+export function backfillProviderLastTsStepSync(db, beforeHour = null) {
+  const row = beforeHour == null
+    ? db.get(`SELECT MAX(hour) AS h FROM usageRollupProvider WHERE lastTs IS NULL`)
+    : db.get(`SELECT MAX(hour) AS h FROM usageRollupProvider WHERE lastTs IS NULL AND hour < ?`, [beforeHour]);
+  const hour = row?.h;
+  if (!hour) return null;
+  const latest = hourLastTsByProviderSync(db, hour);
+  db.transaction(() => {
+    for (const [provider, lastTs] of latest) {
+      db.run(
+        `UPDATE usageRollupProvider SET lastTs = ? WHERE hour = ? AND provider = ? AND lastTs IS NULL`,
+        [lastTs, hour, provider]
+      );
+    }
+  });
+  return hour;
+}
+
+/**
+ * The newest raw request of every provider inside one hour, as Map(provider → ISO): ONE
+ * scan of that hour on idx_uh_ts, grouped inside SQLite, whatever the number of providers.
+ * Same provider rule as rollProviderHour.
+ */
+export function hourLastTsByProviderSync(db, hour) {
+  const fromMs = Date.parse(`${hour}:00:00.000Z`);
+  const rows = db.all(
+    `SELECT COALESCE(NULLIF(provider, ''), 'unknown') AS provider, MAX(timestamp) AS lastTs
+       FROM usageHistory
+      WHERE timestamp >= ? AND timestamp < ? AND COALESCE(provider, '') != 'platform'
+      GROUP BY COALESCE(NULLIF(provider, ''), 'unknown')`,
+    [isoOf(fromMs), isoOf(fromMs + HOUR_MS)]
+  );
+  return new Map(rows.map((r) => [r.provider, r.lastTs]));
+}
+
+/**
+ * Fill every unfilled provider hour in the background, once per process: one loop at a
+ * time, a single hour per turn of the event loop; after a complete pass later calls return
+ * at once (every hour rolled since then is written with its lastTs).
+ */
+export function scheduleProviderLastTsBackfill(db) {
+  if (!globalThis.__providerLastTsBackfill) globalThis.__providerLastTsBackfill = { running: null, done: false };
+  const state = globalThis.__providerLastTsBackfill;
+  if (state.running) return state.running;
+  if (state.done) return Promise.resolve();
+  const run = async () => {
+    try {
+      let cursor = null;
+      for (;;) {
+        cursor = backfillProviderLastTsStepSync(db, cursor);
+        if (cursor == null) break;
+        await yieldToLoop();
+      }
+      state.done = true;
+    } catch (error) {
+      // Left unfilled: readers fall back to raw rows for those hours; the next call retries.
+      console.error("[usageRollup] provider lastTs backfill failed:", error?.message || error);
+    }
+  };
+  state.running = Promise.resolve().then(run).finally(() => { state.running = null; });
+  return state.running;
+}
+
 
 export function readKeyRollup(db, { fromHour, toHour }) {
   return db.all(

@@ -11,6 +11,7 @@ register("./helpers/alias-hook.mjs", import.meta.url);
 const { handleChatCore } = await import("../open-sse/handlers/chatCore.js");
 const { initTranslators } = await import("../open-sse/translator/index.js");
 const usageDb = await import("./helpers/stub-usageDb.mjs");
+const { waitFor } = await import("./helpers/stream-run.mjs");
 await initTranslators();
 
 async function slowUpstream(delayMs) {
@@ -54,11 +55,18 @@ test("a client that leaves before the answer cancels the upstream call at once a
     assert.equal(result.success, false);
     assert.equal(result.status, 499);
     assert.ok(Date.now() - started < 1000, "no network retries are spent on a client that left");
-    await new Promise((r) => setTimeout(r, 50));
+    // The upstream request is dispatched by the kernel the moment it is written, but the
+    // handler runs only when the event loop gets to it. Under `node --test`'s parallel
+    // files that can be later than a fixed sleep, so wait for the observation instead.
+    await waitFor(() => up.seen.hits >= 1, { label: "the upstream request to be dispatched" });
     assert.equal(up.seen.hits, 1, "nothing is resent");
+    await waitFor(() => up.seen.closedEarly >= 1, { label: "the upstream call to be cancelled" });
     assert.equal(up.seen.closedEarly, 1, "the upstream call was cancelled");
     assert.ok(usageDb.calls.appendRequestLog.some((e) => e.status === "FAILED 499"));
-    await new Promise((r) => setTimeout(r, 600)); // the controller's delayed abort
+    await waitFor(
+      () => usageDb.calls.trackPendingRequest.length >= 2,
+      { label: "the pending counter to increment and decrement" }
+    );
     const pending = usageDb.calls.trackPendingRequest.map((args) => args[3]);
     assert.deepEqual(pending, [true, false], "one increment, one decrement");
   } finally {

@@ -149,7 +149,12 @@ test("an upstream that never answers is tried once, not resent three more times"
     server.closeAllConnections();
     server.close();
   }
-  assert.equal(hits, 1, "a connect timeout must not be retried");
+  // The guard is against a resend storm (the old behaviour re-sent three more times,
+  // i.e. 4 hits). It must not be `=== 1`: `node --test` runs files in parallel, and a
+  // CPU-starved event loop can spend the whole 200 ms connect budget before the
+  // loopback server even dispatches the request (observed: hits 0, same duration).
+  // Only 4 hits prove a retry, so the assertion is `<= 1`.
+  assert.ok(hits <= 1, `a connect timeout must not be retried (got ${hits} upstream hits)`);
   assert.ok(Date.now() - t0 < 2000, "no retry delay (3s each) may be spent");
 });
 

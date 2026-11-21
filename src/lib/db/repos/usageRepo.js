@@ -9,7 +9,7 @@ import { applyRequestDiscountSync } from "../../billing/discounts.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 import {
   scheduleRollup, planRollupRange, forEachRollupSlice, rollupEpoch, readProviderRollup, readKeyRollup, readOwnerPeakRollup,
-  invalidateRollupFromSync, pruneRollupSync, sha256Hex,
+  invalidateRollupFromSync, pruneRollupSync, sha256Hex, scheduleProviderLastTsBackfill, hourLastTsByProviderSync,
 } from "./usageRollup.js";
 
 // Money is stored as integer nanoUSD. `costNanoUsd` is authoritative; the legacy
@@ -124,8 +124,24 @@ function pruneOldUsage(db) {
   pruneRollupSync(db, cutoff);
 }
 
+// ─── Maps keyed by names that come from outside ─────────────────────────────────
+// Model names are sent by the client (a combo name, or anything a denied request asked
+// for), so they can be "__proto__", "constructor", "toString"… On a plain object,
+// `map[name]` then reads an inherited member and `map[name] = v` can replace the prototype
+// or write onto Object.prototype for the whole process. Every such map is either created
+// without a prototype (in-memory maps) or read and written through own-property helpers
+// (maps parsed back from a stored JSON blob are plain objects).
+const newMap = () => Object.create(null);
+function ownGet(map, key) {
+  return map != null && Object.hasOwn(map, key) ? map[key] : undefined;
+}
+function ownSet(map, key, value) {
+  Object.defineProperty(map, key, { value, writable: true, enumerable: true, configurable: true });
+  return value;
+}
+
 // In-memory state shared across Next.js modules
-if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
+if (!global._pendingRequests) global._pendingRequests = { byModel: newMap(), byAccount: newMap() };
 if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
 if (!global._statsEmitter) {
   global._statsEmitter = new EventEmitter();
@@ -160,18 +176,21 @@ function getLocalDateKey(timestamp) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// `target` is a day-blob map, possibly parsed from JSON: own-property access only.
 function addToCounter(target, key, values) {
-  if (!target[key]) target[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
+  const c = ownGet(target, key)
+    || ownSet(target, key, { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 });
   // Seed from the legacy float once, for rollup blobs written before nano existed.
-  if (target[key].costNanoUsd == null) target[key].costNanoUsd = Math.round((target[key].cost || 0) * 1e9);
-  target[key].requests += values.requests || 1;
-  target[key].promptTokens += values.promptTokens || 0;
-  target[key].completionTokens += values.completionTokens || 0;
-  target[key].cachedTokens += values.cachedTokens || 0;
+  if (c.costNanoUsd == null) c.costNanoUsd = Math.round((c.cost || 0) * 1e9);
+  c.requests += values.requests || 1;
+  c.promptTokens += values.promptTokens || 0;
+  c.completionTokens += values.completionTokens || 0;
+  c.cachedTokens += values.cachedTokens || 0;
   // Integer accumulates; the float mirror is re-derived so it never drifts.
-  target[key].costNanoUsd = (target[key].costNanoUsd || 0) + (values.costNanoUsd || 0);
-  target[key].cost = nanoToUsd(target[key].costNanoUsd);
-  if (values.meta) Object.assign(target[key], values.meta);
+  c.costNanoUsd = (c.costNanoUsd || 0) + (values.costNanoUsd || 0);
+  c.cost = nanoToUsd(c.costNanoUsd);
+  if (values.meta) Object.assign(c, values.meta);
+  return c;
 }
 
 function aggregateEntryToDay(day, entry) {
@@ -192,11 +211,11 @@ function aggregateEntryToDay(day, entry) {
   day.costNanoUsd = (day.costNanoUsd || 0) + costNano;
   day.cost = nanoToUsd(day.costNanoUsd);
 
-  day.byProvider ||= {};
-  day.byModel ||= {};
-  day.byAccount ||= {};
-  day.byApiKey ||= {};
-  day.byEndpoint ||= {};
+  day.byProvider ||= newMap();
+  day.byModel ||= newMap();
+  day.byAccount ||= newMap();
+  day.byApiKey ||= newMap();
+  day.byEndpoint ||= newMap();
 
   if (entry.provider) addToCounter(day.byProvider, entry.provider, vals);
 
@@ -222,6 +241,75 @@ function aggregateEntryToDay(day, entry) {
   const endpoint = entry.endpoint || "Unknown";
   const epKey = `${endpoint}|${entry.model}|${entry.provider || "unknown"}`;
   addToCounter(day.byEndpoint, epKey, { ...vals, meta: { endpoint, rawModel: entry.model, provider: entry.provider } });
+
+  // Requested-model maps (spec admin-usage-views): written only into a COMPLETE `req`.
+  // A day whose `req` is not complete yet (the deploy day, older days) is rebuilt from
+  // its raw rows by scheduleRequestedBackfill, which then counts this request itself —
+  // writing it here as well would count it twice.
+  if (day.req?.complete === true) {
+    addRequestedGroup(day.req, {
+      reqModel: entry.requestedModel || entry.model || "unknown",
+      provider: entry.provider || null,
+      connectionId: entry.connectionId || null,
+      apiKeyId: entry.apiKeyId || null,
+      apiKey: entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : null,
+      endpoint: entry.endpoint || null,
+    }, vals);
+  }
+}
+
+// ─── Requested-model day maps (`day.req`) ───────────────────────────────────────
+// The admin Overview can group by the model the client asked for (a combo name) instead
+// of the upstream model that answered. Each usageDaily blob therefore carries
+//   req: { complete, byModel, byAccount, byApiKey, byEndpoint }
+// keyed by the effective requested model (requestedModel, else model, else "unknown" —
+// the rule usageRollup.js uses for the Users tab) with exactly the counter values of the
+// upstream maps. Cost is only re-aggregated from the recorded cost; billing never reads
+// these maps.
+
+function emptyRequestedMaps() {
+  return { complete: true, byModel: newMap(), byAccount: newMap(), byApiKey: newMap(), byEndpoint: newMap() };
+}
+
+// `target` is a counter (fixed keys); its `providers` map is keyed by provider id.
+function tallyProvider(target, provider, n) {
+  if (!provider) return;
+  target.providers ||= newMap();
+  ownSet(target.providers, provider, (ownGet(target.providers, provider) || 0) + n);
+}
+
+/**
+ * Add `n` requests of one (requested model, provider, account, key, endpoint) group to a
+ * `req` object. `vals` carries the summed counters of those requests (same shape as the
+ * upstream maps' addToCounter values). Used by the per-request writer (n = 1) and by the
+ * rebuild (n = the group's row count), so both produce identical maps.
+ */
+function addRequestedGroup(req, g, vals, n = 1) {
+  req.byModel ||= newMap();
+  req.byAccount ||= newMap();
+  req.byApiKey ||= newMap();
+  req.byEndpoint ||= newMap();
+  const counted = { ...vals, requests: n };
+
+  tallyProvider(addToCounter(req.byModel, g.reqModel, { ...counted, meta: { rawModel: g.reqModel } }), g.provider, n);
+
+  if (g.connectionId) {
+    const accKey = `${g.reqModel}|${g.connectionId}`;
+    addToCounter(req.byAccount, accKey, { ...counted, meta: { rawModel: g.reqModel, provider: g.provider, connectionId: g.connectionId } });
+  }
+
+  // Same key identity as the upstream byApiKey map: the apiKeys id when known, else the
+  // raw string of a key nothing else can attribute, else no key at all.
+  const keyIdent = g.apiKeyId ? `id:${g.apiKeyId}` : (g.apiKey || "local-no-key");
+  const akKey = `${keyIdent}|${g.reqModel}`;
+  tallyProvider(
+    addToCounter(req.byApiKey, akKey, { ...counted, meta: { rawModel: g.reqModel, apiKey: g.apiKeyId ? null : (g.apiKey || null), apiKeyId: g.apiKeyId || null } }),
+    g.provider, n
+  );
+
+  const endpoint = g.endpoint || "Unknown";
+  const epKey = `${endpoint}|${g.reqModel}`;
+  tallyProvider(addToCounter(req.byEndpoint, epKey, { ...counted, meta: { endpoint, rawModel: g.reqModel } }), g.provider, n);
 }
 
 function pushToRing(entry) {
@@ -282,19 +370,20 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;
 
-  if (!pendingRequests.byModel[modelKey]) pendingRequests.byModel[modelKey] = 0;
-  pendingRequests.byModel[modelKey] = Math.max(0, pendingRequests.byModel[modelKey] + (started ? 1 : -1));
-  if (pendingRequests.byModel[modelKey] === 0) delete pendingRequests.byModel[modelKey];
+  // Own-property access: the model name may be anything (see ownGet / ownSet).
+  const byModel = pendingRequests.byModel;
+  const nextModel = Math.max(0, (ownGet(byModel, modelKey) || 0) + (started ? 1 : -1));
+  if (nextModel === 0) delete byModel[modelKey];
+  else ownSet(byModel, modelKey, nextModel);
 
   if (connectionId) {
-    if (!pendingRequests.byAccount[connectionId]) pendingRequests.byAccount[connectionId] = {};
-    if (!pendingRequests.byAccount[connectionId][modelKey]) pendingRequests.byAccount[connectionId][modelKey] = 0;
-    pendingRequests.byAccount[connectionId][modelKey] = Math.max(0, pendingRequests.byAccount[connectionId][modelKey] + (started ? 1 : -1));
-    if (pendingRequests.byAccount[connectionId][modelKey] === 0) {
-      delete pendingRequests.byAccount[connectionId][modelKey];
-      if (Object.keys(pendingRequests.byAccount[connectionId]).length === 0) {
-        delete pendingRequests.byAccount[connectionId];
-      }
+    const perAccount = ownGet(pendingRequests.byAccount, connectionId) || ownSet(pendingRequests.byAccount, connectionId, newMap());
+    const nextAccount = Math.max(0, (ownGet(perAccount, modelKey) || 0) + (started ? 1 : -1));
+    if (nextAccount === 0) {
+      delete perAccount[modelKey];
+      if (Object.keys(perAccount).length === 0) delete pendingRequests.byAccount[connectionId];
+    } else {
+      ownSet(perAccount, modelKey, nextAccount);
     }
   }
 
@@ -302,10 +391,9 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
     clearTimeout(pendingTimers[timerKey]);
     pendingTimers[timerKey] = setTimeout(() => {
       delete pendingTimers[timerKey];
-      if (pendingRequests.byModel[modelKey] > 0) pendingRequests.byModel[modelKey] = 0;
-      if (connectionId && pendingRequests.byAccount[connectionId]?.[modelKey] > 0) {
-        pendingRequests.byAccount[connectionId][modelKey] = 0;
-      }
+      if (ownGet(pendingRequests.byModel, modelKey) > 0) ownSet(pendingRequests.byModel, modelKey, 0);
+      const perAccount = connectionId ? ownGet(pendingRequests.byAccount, connectionId) : undefined;
+      if (ownGet(perAccount, modelKey) > 0) ownSet(perAccount, modelKey, 0);
       scheduleStatsEvent("pending");
     }, PENDING_TIMEOUT_MS);
   } else {
@@ -556,9 +644,13 @@ export async function saveRequestUsage(entry) {
 
       const dateKey = getLocalDateKey(entry.timestamp);
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+      // A day created by this write has every one of its requests counted here, so its
+      // requested-model maps start complete. An existing day without a complete `req`
+      // gets only its upstream maps updated; the rebuild fills `req` (design D2).
       const day = row ? parseJson(row.data, {}) : {
         requests: 0, promptTokens: 0, completionTokens: 0, cost: 0, costNanoUsd: 0,
-        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+        byProvider: newMap(), byModel: newMap(), byAccount: newMap(), byApiKey: newMap(), byEndpoint: newMap(),
+        req: emptyRequestedMaps(),
       };
       aggregateEntryToDay(day, entry);
       db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
@@ -697,8 +789,295 @@ async function forEachUsageSlice(db, { startDate, endDate, conds = [], select, t
   }
 }
 
-export async function getUsageStats(period = "all") {
+// ─── Requested-model rebuild (design D3) ────────────────────────────────────────
+// Days recorded before `day.req` existed (or the deploy day, whose blob predates it) are
+// rebuilt from their raw usageHistory rows, in the background and in slices:
+//   1. snapshot MAX(id);
+//   2. scan the day's rows with id <= snapshot, slice by slice, grouping inside SQLite;
+//   3. in ONE synchronous transaction: re-read the blob, stop if `req` is already complete
+//      (another loop or an earlier run finished it), add the rows with id > snapshot
+//      written during the scan, and store `req` as complete.
+// The writer never touches an incomplete `req` (aggregateEntryToDay), so every row of the
+// day is counted exactly once: by the scan, by the delta, or — after completion — by the
+// writer. Only days whose raw rows are all still kept are rebuilt; older days keep using
+// their upstream maps in the requested view.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const REQ_META_JSON = "CASE WHEN json_valid(meta) THEN meta END";
+const REQ_TOKENS_JSON = "CASE WHEN json_valid(tokens) THEN tokens END";
+// The effective requested model; same rule as usageRollup.js and aggregateEntryToDay.
+const REQ_MODEL_SQL = `COALESCE(NULLIF(json_extract(${REQ_META_JSON}, '$.requestedModel'), ''), NULLIF(model, ''), 'unknown')`;
+// Group sums mirroring aggregateEntryToDay exactly: JS `a || b || 0`, so a 0 or a missing
+// value falls through to the next field; cost is the recorded integer, else the legacy float.
+const REQ_GROUP_SELECT = `SELECT ${REQ_MODEL_SQL} AS rm, provider, connectionId, apiKey, apiKeyId, endpoint,
+        COUNT(*) AS n,
+        SUM(COALESCE(NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.prompt_tokens'), 0),
+                     NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.input_tokens'), 0), 0)) AS pt,
+        SUM(COALESCE(NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.completion_tokens'), 0),
+                     NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.output_tokens'), 0), 0)) AS ct,
+        SUM(COALESCE(NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.cached_tokens'), 0),
+                     NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.cache_read_input_tokens'), 0), 0)) AS cached,
+        SUM(CASE WHEN COALESCE(costNanoUsd, 0) != 0 THEN ROUND(costNanoUsd)
+                 ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano
+   FROM usageHistory`;
+const REQ_GROUP_TAIL = "GROUP BY rm, provider, connectionId, apiKey, apiKeyId, endpoint";
+
+function emptyRequestedAccumulator() {
+  return { byModel: newMap(), byAccount: newMap(), byApiKey: newMap(), byEndpoint: newMap() };
+}
+
+function addRequestedRows(req, rows) {
+  for (const r of rows) {
+    addRequestedGroup(req, {
+      reqModel: r.rm,
+      provider: r.provider || null,
+      connectionId: r.connectionId || null,
+      apiKeyId: r.apiKeyId || null,
+      apiKey: r.apiKey || null,
+      endpoint: r.endpoint || null,
+    }, {
+      // Token sums exactly as the writer adds them (it never rounds a token count, even a
+      // fractional one); cost is an integer per row on both sides already.
+      promptTokens: r.pt || 0,
+      completionTokens: r.ct || 0,
+      cachedTokens: r.cached || 0,
+      costNanoUsd: Math.round(r.costNano || 0),
+    }, r.n);
+  }
+}
+
+/** [start, end] (ms, end inclusive) of a local "YYYY-MM-DD" day — the key getLocalDateKey writes. */
+function localDayBounds(dateKey) {
+  const [y, m, d] = String(dateKey).split("-").map(Number);
+  const startMs = new Date(y, m - 1, d).getTime();
+  const nextMs = new Date(y, m - 1, d + 1).getTime();
+  return { startMs, endMs: nextMs - 1 };
+}
+
+const retentionCutoffMs = (nowMs) => nowMs - LOG_RETENTION_DAYS * DAY_MS;
+
+/**
+ * Days whose `req` is neither complete nor known to be unrecoverable, and whose raw rows
+ * are all still kept by retention, newest first. The extra day of margin covers the
+ * probabilistic prune moving the cut-off while the rebuild runs.
+ */
+export function listRequestedPendingDaysSync(db, nowMs = Date.now()) {
+  const minStartMs = retentionCutoffMs(nowMs) + DAY_MS;
+  // dateKey prefilter first, so only the days in retention have their blob parsed.
+  const rows = db.all(
+    `SELECT dateKey FROM usageDaily
+      WHERE dateKey >= ?
+        AND COALESCE(json_extract(CASE WHEN json_valid(data) THEN data END, '$.req.complete'), 0) != 1
+        AND COALESCE(json_extract(CASE WHEN json_valid(data) THEN data END, '$.req.unrecoverable'), 0) != 1
+      ORDER BY dateKey DESC`,
+    [getLocalDateKey(minStartMs)]
+  );
+  return rows.map((r) => r.dateKey).filter((key) => {
+    const { startMs } = localDayBounds(key);
+    return Number.isFinite(startMs) && startMs >= minStartMs;
+  });
+}
+
+/** Steps 1–2: snapshot MAX(id) and aggregate the day's rows up to it, slice by slice. */
+export async function scanRequestedDay(db, dateKey, { sliceMs } = {}) {
+  const { startMs, endMs } = localDayBounds(dateKey);
+  if (!Number.isFinite(startMs)) throw new RangeError(`Invalid day: ${dateKey}`);
+  const maxRow = db.get(`SELECT MAX(id) AS m FROM usageHistory`);
+  const maxId = Number.isSafeInteger(maxRow?.m) ? maxRow.m : 0;
+  const req = emptyRequestedAccumulator();
+  await forEachUsageSlice(db, {
+    startDate: new Date(startMs).toISOString(),
+    endDate: new Date(endMs).toISOString(),
+    // An integer read from the database above, inlined because the slice conds take no params.
+    conds: [`id <= ${maxId}`],
+    select: REQ_GROUP_SELECT,
+    tail: REQ_GROUP_TAIL,
+    ...(sliceMs ? { sliceMs } : {}),
+  }, (rows) => addRequestedRows(req, rows));
+  return { dateKey, maxId, req };
+}
+
+// The day totals a rebuilt `req` must reproduce. Every row adds to exactly one byModel
+// counter, so the byModel sums are the rows counted. Cost is not compared: blobs written
+// before integer cost existed seeded `costNanoUsd` from a rounded float total, so their
+// integer can differ from the sum of the rows without any row missing; the request count
+// already moves when a row is missing.
+const RECONCILED_FIELDS = ["requests", "promptTokens", "completionTokens", "cachedTokens"];
+
+function countedTotals(req) {
+  const out = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0 };
+  for (const c of Object.values(req.byModel || {})) {
+    for (const f of RECONCILED_FIELDS) out[f] += c[f] || 0;
+  }
+  return out;
+}
+
+/**
+ * Step 3, synchronous: completes the day's `req` from a scan plus the rows written since
+ * its snapshot. Returns
+ *   "complete"          this call completed the day;
+ *   "unrecoverable"     the raw rows no longer add up to the day's upstream totals (part of
+ *                       them was deleted — a customer's "Clear history", the legacy import,
+ *                       a time-zone change); the day is marked so and keeps its upstream
+ *                       maps in the requested view, and is never scanned again;
+ *   "already"           the day was already complete or marked unrecoverable;
+ *   "no-day"            there is no blob for the day;
+ *   "out-of-retention"  the day fell behind the retention cut-off (rows may be pruned).
+ */
+export function commitRequestedDaySync(db, scan, nowMs = Date.now()) {
+  const { startMs, endMs } = localDayBounds(scan.dateKey);
+  // The prune deletes rows older than its own cut-off, which is never later than ours: a
+  // day starting at or after our cut-off has not lost a single row to the prune.
+  if (!(startMs >= retentionCutoffMs(nowMs))) return "out-of-retention";
+  let status = "no-day";
+  db.transaction(() => {
+    const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [scan.dateKey]);
+    if (!row) return;
+    const day = parseJson(row.data, null);
+    if (!day || typeof day !== "object") return;
+    if (day.req?.complete === true || day.req?.unrecoverable === true) {
+      status = "already";
+      return;
+    }
+    // A copy: the same scan must never be merged twice into one object.
+    const req = JSON.parse(JSON.stringify(scan.req));
+    const delta = db.all(
+      `${REQ_GROUP_SELECT} WHERE timestamp >= ? AND timestamp <= ? AND id > ? ${REQ_GROUP_TAIL}`,
+      [new Date(startMs).toISOString(), new Date(endMs).toISOString(), scan.maxId]
+    );
+    addRequestedRows(req, delta);
+
+    // Rows other than the prune's can disappear (a wipe) or never have existed (an import):
+    // a `req` that does not add up to the day's totals would undercount silently.
+    const counted = countedTotals(req);
+    // Requests are integers and must match exactly. Token sums are compared within the
+    // rounding error of adding n doubles, n × 2^-52 × |total| per side (so twice that), with
+    // a tiny floor: a fractional count (3.5) is summed by SQLite here and by JS in the writer,
+    // possibly in a different order. Integer sums below 2^53 are exact on both sides, so an
+    // integer-only day matches exactly and any real difference (≥ 1 token) is far above it.
+    const rows = Math.max(1, counted.requests, day.requests || 0);
+    const tolerance = (total) => Math.max(1e-9, 2 * rows * Number.EPSILON * Math.abs(total));
+    const differs = (f) => (f === "requests"
+      ? counted[f] !== (day[f] || 0)
+      : Math.abs(counted[f] - (day[f] || 0)) > tolerance(day[f] || 0));
+    const mismatch = RECONCILED_FIELDS.filter(differs);
+    if (mismatch.length > 0) {
+      day.req = {
+        complete: false,
+        unrecoverable: true,
+        at: new Date(nowMs).toISOString(),
+        counted: counted.requests,
+        expected: day.requests || 0,
+      };
+      status = "unrecoverable";
+    } else {
+      day.req = { complete: true, ...req };
+      status = "complete";
+    }
+    db.run(`UPDATE usageDaily SET data = ? WHERE dateKey = ?`, [stringifyJson(day), scan.dateKey]);
+  });
+  return status;
+}
+
+/** Rebuild one day's `req` (scan + commit); returns the commit status. */
+export async function rebuildRequestedDay(db, dateKey, { now = Date.now, sliceMs } = {}) {
+  const scan = await scanRequestedDay(db, dateKey, { sliceMs });
+  return commitRequestedDaySync(db, scan, now());
+}
+
+function requestedBackfillState() {
+  if (!globalThis.__usageRequestedBackfill) {
+    globalThis.__usageRequestedBackfill = { running: null, pendingDays: 0, generation: 0, started: false, allDone: false };
+  }
+  return globalThis.__usageRequestedBackfill;
+}
+
+/**
+ * Progress of the requested-model rebuild, for the Overview's "recalculating" note.
+ * `generation` grows each time a day is resolved (completed or found unrecoverable), so a
+ * cache of requested figures can key on it and never serve figures from before a change.
+ */
+export function getRequestedBackfillProgress() {
+  const state = requestedBackfillState();
+  return { running: Boolean(state.running) && state.pendingDays > 0, pendingDays: state.pendingDays, generation: state.generation };
+}
+
+/**
+ * Forget that every day is resolved, so the next trigger lists the pending days again.
+ * Only needed after writing a day blob without a complete `req` outside the request
+ * writer (which always creates complete days): an import, or a test.
+ */
+export function invalidateRequestedBackfill() {
+  requestedBackfillState().allDone = false;
+}
+
+/**
+ * Rebuild every pending day in the background, newest first, one slice per turn of the
+ * event loop. One loop per process; calling again while it runs returns the same promise.
+ * A failing day logs one line and stays incomplete; the next trigger retries it. Once a
+ * loop has resolved every day, later triggers return at once without listing the days
+ * again: the writer only ever creates complete days, so none can become pending.
+ */
+export function scheduleRequestedBackfill(db, { now = Date.now, sliceMs } = {}) {
+  const state = requestedBackfillState();
+  state.started = true;
+  if (state.running) return state.running;
+  if (state.allDone) return Promise.resolve();
+  const run = async () => {
+    let days;
+    try {
+      days = listRequestedPendingDaysSync(db, now());
+    } catch (error) {
+      console.error("[usageRepo] requested-model rebuild could not list days:", error?.message || error);
+      return;
+    }
+    state.pendingDays = days.length;
+    let failed = false;
+    for (const dateKey of days) {
+      try {
+        const status = await rebuildRequestedDay(db, dateKey, { now, sliceMs });
+        if (status === "complete" || status === "unrecoverable") state.generation += 1;
+      } catch (error) {
+        failed = true;
+        console.error(`[usageRepo] requested-model rebuild failed for ${dateKey}:`, error?.message || error);
+      }
+      state.pendingDays = Math.max(0, state.pendingDays - 1);
+      await yieldToLoop();
+    }
+    if (!failed) state.allDone = true;
+  };
+  // Started from a microtask, AFTER the assignment (same reason as scheduleRollup).
+  state.running = Promise.resolve().then(run).finally(() => {
+    state.running = null;
+    state.pendingDays = 0;
+  });
+  return state.running;
+}
+
+/**
+ * Usage summary for the admin Overview.
+ *
+ * `modelView` decides what the Model / Account / Key / Endpoint maps are grouped by:
+ *   - "upstream": the upstream model that served each request (the historical output,
+ *     unchanged);
+ *   - "requested": the model the client asked for (a combo name), falling back to the
+ *     upstream model for a request with no recorded requested model and for a day whose
+ *     requested-model figures are missing (raw rows pruned or partly deleted, or not
+ *     rebuilt yet). The result then also carries `modelView`, `requestedPartial` (some day
+ *     in range used the fallback), `upstreamOnlyDays` (those days, oldest first) and
+ *     `requestedSince` (the first day of the newest unbroken run of days with requested
+ *     figures; null when the newest day in range has none) — daily periods only.
+ * Totals, byProvider, last10Minutes, recentRequests and pending are the same in both.
+ * The default stays "upstream" so callers that do not choose keep their output; the admin
+ * route defaults to "requested".
+ */
+export async function getUsageStats(period = "all", { modelView = "upstream" } = {}) {
   const db = await getAdapter();
+  const reqView = modelView === "requested";
+
+  // Rebuild the requested-model day figures in the background: whenever they are asked
+  // for, and once per process on first use. Fire and forget; reads never wait for it.
+  if (reqView || !requestedBackfillState().started) scheduleRequestedBackfill(db);
 
   const [{ getProviderConnections }, { getApiKeys }, { getProviderNodes }] = await Promise.all([
     import("./connectionsRepo.js"),
@@ -708,10 +1087,10 @@ export async function getUsageStats(period = "all") {
 
   let allConnections = [];
   try { allConnections = await getProviderConnections(); } catch {}
-  const connectionMap = {};
+  const connectionMap = newMap();
   for (const c of allConnections) connectionMap[c.id] = c.name || c.email || c.id;
 
-  const providerNodeNameMap = {};
+  const providerNodeNameMap = newMap();
   try {
     const nodes = await getProviderNodes();
     for (const n of nodes) if (n.id && n.name) providerNodeNameMap[n.id] = n.name;
@@ -719,8 +1098,8 @@ export async function getUsageStats(period = "all") {
 
   let allApiKeys = [];
   try { allApiKeys = await getApiKeys(); } catch {}
-  const apiKeyMap = {};
-  const apiKeyMapById = {};
+  const apiKeyMap = newMap();
+  const apiKeyMapById = newMap();
   for (const k of allApiKeys) {
     // `masked` is the only key-derived value that leaves this function for display:
     // usage views must never receive the secret itself.
@@ -755,6 +1134,115 @@ export async function getUsageStats(period = "all") {
     return (id ? apiKeyMapById[id] : null) || (apiKey ? apiKeyMap[apiKey] : null) || null;
   };
 
+  // ── Requested view: buckets keyed by the requested model ──
+  // byModel[model], byAccount["model (provider - account)"], byApiKey["keyIdent|model"],
+  // byEndpoint["endpoint|model"]. Row fields keep the names the UI reads (`rawModel` is the
+  // displayed model). Model, key and endpoint rows also list the providers that served
+  // them (`providers`, most requests first; `provider` = their display names joined).
+  const requestedDays = [];
+  const upstreamOnlyDays = [];
+  const providerTallies = new Map();
+  const reqBucket = (map, key, init, lastUsed) => {
+    if (!map[key]) map[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, ...init, lastUsed };
+    return map[key];
+  };
+  const addCounts = (b, c, costNano, ts) => {
+    b.requests += c.requests || 0;
+    b.promptTokens += c.promptTokens || 0;
+    b.completionTokens += c.completionTokens || 0;
+    b.cachedTokens += c.cachedTokens || 0;
+    addCostTo(b, costNano);
+    if (ts && (!b.lastUsed || new Date(ts) > new Date(b.lastUsed))) b.lastUsed = ts;
+  };
+  const tally = (b, provider, n) => {
+    if (!provider || !n) return;
+    let t = providerTallies.get(b);
+    if (!t) { t = newMap(); providerTallies.set(b, t); }
+    t[provider] = (t[provider] || 0) + n;
+  };
+  const tallyAll = (b, providers) => {
+    for (const [p, n] of Object.entries(providers || {})) tally(b, p, n);
+  };
+  const reqModelRow = (model, c, costNano, ts) => {
+    const b = reqBucket(stats.byModel, model, { rawModel: model }, ts);
+    addCounts(b, c, costNano, ts);
+    return b;
+  };
+  const reqAccountRow = (model, provider, connectionId, c, costNano, ts) => {
+    const accountName = connectionMap[connectionId] || `Account ${connectionId.slice(0, 8)}...`;
+    const key = `${model} (${provider} - ${accountName})`;
+    const b = reqBucket(stats.byAccount, key, {
+      rawModel: model, provider: providerNodeNameMap[provider] || provider, connectionId, accountName,
+    }, ts);
+    addCounts(b, c, costNano, ts);
+    return b;
+  };
+  const reqKeyRow = (model, apiKeyId, apiKey, c, costNano, ts) => {
+    const info = keyInfoOf(apiKeyId, apiKey);
+    const keyName = info?.name || (apiKeyId ? "Key " + String(apiKeyId).slice(0, 8) + "..." : (apiKey ? apiKey.slice(0, 8) + "..." : "Local (No API Key)"));
+    const apiKeyKey = keyIdent(apiKeyId, apiKey);
+    const b = reqBucket(stats.byApiKey, `${apiKeyKey}|${model}`, {
+      rawModel: model, apiKeyMasked: info?.masked ?? maskApiKey(apiKey), keyName, apiKeyKey,
+    }, ts);
+    addCounts(b, c, costNano, ts);
+    return b;
+  };
+  const reqEndpointRow = (endpoint, model, c, costNano, ts) => {
+    const b = reqBucket(stats.byEndpoint, `${endpoint}|${model}`, { endpoint, rawModel: model }, ts);
+    addCounts(b, c, costNano, ts);
+    return b;
+  };
+
+  // One usageDaily blob into the requested buckets: its `req` maps when complete, else
+  // its upstream maps under the upstream model name (the fallback).
+  const mergeRequestedDay = (day, dateKey) => {
+    if (day.req?.complete === true) {
+      requestedDays.push(dateKey);
+      for (const [k, m] of Object.entries(day.req.byModel || {})) {
+        tallyAll(reqModelRow(m.rawModel || k, m, blobCostNano(m), dateKey), m.providers);
+      }
+      for (const a of Object.values(day.req.byAccount || {})) {
+        if (a.connectionId) reqAccountRow(a.rawModel || "unknown", a.provider || "", a.connectionId, a, blobCostNano(a), dateKey);
+      }
+      for (const ak of Object.values(day.req.byApiKey || {})) {
+        tallyAll(reqKeyRow(ak.rawModel || "unknown", ak.apiKeyId || null, ak.apiKey || null, ak, blobCostNano(ak), dateKey), ak.providers);
+      }
+      for (const ep of Object.values(day.req.byEndpoint || {})) {
+        tallyAll(reqEndpointRow(ep.endpoint || "Unknown", ep.rawModel || "unknown", ep, blobCostNano(ep), dateKey), ep.providers);
+      }
+      return;
+    }
+    upstreamOnlyDays.push(dateKey);
+    for (const [mk, m] of Object.entries(day.byModel || {})) {
+      const model = m.rawModel || mk.split("|")[0] || "unknown";
+      const provider = m.provider || mk.split("|")[1] || "";
+      tally(reqModelRow(model, m, blobCostNano(m), dateKey), provider, m.requests || 0);
+    }
+    for (const [connId, a] of Object.entries(day.byAccount || {})) {
+      reqAccountRow(a.rawModel || "unknown", a.provider || "", connId, a, blobCostNano(a), dateKey);
+    }
+    for (const ak of Object.values(day.byApiKey || {})) {
+      tally(reqKeyRow(ak.rawModel || "unknown", ak.apiKeyId || null, ak.apiKey || null, ak, blobCostNano(ak), dateKey), ak.provider, ak.requests || 0);
+    }
+    for (const [epKey, ep] of Object.entries(day.byEndpoint || {})) {
+      const endpoint = ep.endpoint || epKey.split("|")[0] || "Unknown";
+      tally(reqEndpointRow(endpoint, ep.rawModel || "unknown", ep, blobCostNano(ep), dateKey), ep.provider, ep.requests || 0);
+    }
+  };
+
+  // Providers list + display string on the requested Model / Key / Endpoint rows.
+  const finalizeRequested = () => {
+    for (const map of [stats.byModel, stats.byApiKey, stats.byEndpoint]) {
+      for (const b of Object.values(map)) {
+        const providers = Object.entries(providerTallies.get(b) || {})
+          .map(([id, requests]) => ({ id, name: providerNodeNameMap[id] || id, requests }))
+          .sort((x, y) => y.requests - x.requests || x.name.localeCompare(y.name));
+        b.providers = providers;
+        b.provider = providers.map((p) => p.name).join(", ");
+      }
+    }
+  };
+
   // recentRequests from live history (last 100 entries enough for 20 deduped)
   const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
   const seen = new Set();
@@ -784,7 +1272,8 @@ export async function getUsageStats(period = "all") {
     totalPromptTokens: 0, totalCompletionTokens: 0, totalCachedTokens: 0, totalCost: 0,
     // Integer nanoUSD total — authoritative. `totalCost` is the legacy float mirror.
     totalCostNanoUsd: 0,
-    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+    // Prototype-less: keyed by model names a client can choose (see ownGet / ownSet).
+    byProvider: newMap(), byModel: newMap(), byAccount: newMap(), byApiKey: newMap(), byEndpoint: newMap(),
     last10Minutes: [],
     pending: pendingRequests,
     activeRequests: [],
@@ -855,6 +1344,11 @@ export async function getUsageStats(period = "all") {
         stats.byProvider[prov].completionTokens += p.completionTokens || 0;
         stats.byProvider[prov].cachedTokens += p.cachedTokens || 0;
         addCostTo(stats.byProvider[prov], blobCostNano(p));
+      }
+
+      if (reqView) {
+        mergeRequestedDay(day, dateKey);
+        continue;
       }
 
       for (const [mk, m] of Object.entries(day.byModel || {})) {
@@ -941,7 +1435,26 @@ export async function getUsageStats(period = "all") {
     // inside SQLite instead of materialising the whole period in JS.
     // Per slice, so a long range never holds the event loop for one big scan; a group that
     // recurs in several slices just keeps its newest timestamp.
-    await forEachUsageSlice(db, {
+    if (reqView) {
+      // Same overlay, matched against the requested-model buckets.
+      const newer = (b, ts) => { if (b && new Date(ts) > new Date(b.lastUsed)) b.lastUsed = ts; };
+      await forEachUsageSlice(db, {
+        startDate: new Date(overlayCutoff).toISOString(),
+        select: `SELECT MAX(timestamp) AS timestamp, ${REQ_MODEL_SQL} AS rm, provider, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory`,
+        tail: "GROUP BY rm, provider, connectionId, apiKey, apiKeyId, endpoint",
+      }, (histRows) => {
+        for (const e of histRows) {
+          const ts = e.timestamp;
+          newer(stats.byModel[e.rm], ts);
+          if (e.connectionId) {
+            const accountName = connectionMap[e.connectionId] || `Account ${e.connectionId.slice(0, 8)}...`;
+            newer(stats.byAccount[`${e.rm} (${e.provider || ""} - ${accountName})`], ts);
+          }
+          newer(stats.byApiKey[`${keyIdent(e.apiKeyId, e.apiKey && typeof e.apiKey === "string" ? e.apiKey : null)}|${e.rm}`], ts);
+          newer(stats.byEndpoint[`${e.endpoint || "Unknown"}|${e.rm}`], ts);
+        }
+      });
+    } else await forEachUsageSlice(db, {
       startDate: new Date(overlayCutoff).toISOString(),
       select: "SELECT MAX(timestamp) AS timestamp, provider, model, connectionId, apiKey, apiKeyId, endpoint FROM usageHistory",
       tail: "GROUP BY provider, model, connectionId, apiKey, apiKeyId, endpoint",
@@ -988,9 +1501,11 @@ export async function getUsageStats(period = "all") {
     // Per slice (see forEachUsageSlice): the loop below adds each group's counts, so a
     // group that appears in two slices simply accumulates.
     const filtered = [];
+    // The requested view also groups by the effective requested model (`rm`); the sums
+    // are the same expressions, so totals and byProvider are identical in both views.
     await forEachUsageSlice(db, {
       startDate: cutoff,
-      select: `SELECT provider, model, connectionId, apiKey, apiKeyId, endpoint,
+      select: `SELECT ${reqView ? `${REQ_MODEL_SQL} AS rm, ` : ""}provider, model, connectionId, apiKey, apiKeyId, endpoint,
               COUNT(*) AS n,
               MAX(timestamp) AS ts,
               SUM(COALESCE(json_extract(${TK}, '$.prompt_tokens'), 0)) AS pt,
@@ -1000,7 +1515,7 @@ export async function getUsageStats(period = "all") {
               SUM(CASE WHEN COALESCE(costNanoUsd, 0) != 0 THEN ROUND(costNanoUsd)
                        ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano
          FROM usageHistory`,
-      tail: "GROUP BY provider, model, connectionId, apiKey, apiKeyId, endpoint",
+      tail: `GROUP BY ${reqView ? "rm, " : ""}provider, model, connectionId, apiKey, apiKeyId, endpoint`,
     }, (rows) => { for (const row of rows) filtered.push(row); });
 
     for (const r of filtered) {
@@ -1022,6 +1537,15 @@ export async function getUsageStats(period = "all") {
       stats.byProvider[r.provider].completionTokens += completionTokens;
       stats.byProvider[r.provider].cachedTokens += cachedTokens;
       addCostTo(stats.byProvider[r.provider], entryCostNano);
+
+      if (reqView) {
+        const counts = { requests: r.n, promptTokens, completionTokens, cachedTokens };
+        tally(reqModelRow(r.rm, counts, entryCostNano, r.ts), r.provider, r.n);
+        if (r.connectionId) reqAccountRow(r.rm, r.provider || "", r.connectionId, counts, entryCostNano, r.ts);
+        tally(reqKeyRow(r.rm, r.apiKeyId || null, r.apiKey || null, counts, entryCostNano, r.ts), r.provider, r.n);
+        tally(reqEndpointRow(r.endpoint || "Unknown", r.rm, counts, entryCostNano, r.ts), r.provider, r.n);
+        continue;
+      }
 
       const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
       if (!stats.byModel[modelKey]) {
@@ -1084,6 +1608,21 @@ export async function getUsageStats(period = "all") {
   }
 
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
+  if (reqView) {
+    finalizeRequested();
+    stats.modelView = "requested";
+    upstreamOnlyDays.sort();
+    const newestFallback = upstreamOnlyDays[upstreamOnlyDays.length - 1] ?? null;
+    // The newest unbroken run of days with requested figures starts after the newest
+    // fallback day; "Trước ngày <requestedSince> chỉ có model gốc" is then exact.
+    const run = requestedDays.filter((d) => newestFallback == null || d > newestFallback).sort();
+    stats.requestedSince = run[0] ?? null;
+    stats.requestedPartial = upstreamOnlyDays.length > 0;
+    stats.upstreamOnlyDays = upstreamOnlyDays;
+    // True when the days without requested figures are exactly the days before
+    // requestedSince; otherwise the page names them one by one.
+    stats.upstreamOnlyIsPrefix = stats.requestedSince != null && requestedDays.every((d) => d >= stats.requestedSince);
+  }
   return stats;
 }
 
@@ -1270,7 +1809,7 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs, useRollup =
       group: user?.groupId ? groupName.get(user.groupId) ?? null : null,
       status: user?.status ?? null,
       keys: new Map(),
-      byModel: {},
+      byModel: newMap(), // keyed by the requested model: prototype-less
       totals: emptyUsageTotals(),
       perMinuteTok: {},
       perMinuteReq: {},
@@ -1476,7 +2015,7 @@ export async function getKeyUsageSummary(apiKey, { startDate, endDate } = {}) {
     params
   );
 
-  const byModel = {};
+  const byModel = newMap(); // keyed by the requested model: prototype-less
   const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 };
 
   // Peak buckets: per-minute tokens (TPM), per-minute requests (RPM), and the
@@ -1557,14 +2096,19 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
   const startMs = parseRangeBound(startDate);
   const endMs = parseRangeBound(endDate);
 
-  const byProvider = {};
+  const byProvider = newMap();
   const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0 };
   const ensure = (provider) => byProvider[provider]
-    || (byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, _minTok: {}, _minReq: {}, _peakTokS: 0, _rollTpm: 0, _rollRpm: 0 });
+    || (byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, lastUsed: null, _minTok: {}, _minReq: {}, _peakTokS: 0, _rollTpm: 0, _rollRpm: 0 });
+  const touch = (p, ts) => { if (ts && (!p.lastUsed || ts > p.lastUsed)) p.lastUsed = ts; };
 
   // Whole hours come from the hourly rollup, the partial edges (and anything not rolled yet)
   // from the raw rows (see repos/usageRollup.js: the result equals a raw read).
-  if (useRollup) void scheduleRollup(db);
+  if (useRollup) {
+    void scheduleRollup(db);
+    // Hours rolled before the last-request column existed get it filled in place.
+    void scheduleProviderLastTsBackfill(db);
+  }
   const plan = planRollupRange(db, startMs, endMs, { useRollup });
   const epoch = rollupEpoch();
   if (plan.rollup) {
@@ -1584,11 +2128,31 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
       p._rollTpm = Math.max(p._rollTpm, r.peakTpm || 0);
       p._rollRpm = Math.max(p._rollRpm, r.peakRpm || 0);
       p._peakTokS = Math.max(p._peakTokS, r.peakTokS || 0);
+      touch(p, r.lastTs);
+      if (r.unfilledHour && (!p._unfilledHour || r.unfilledHour > p._unfilledHour)) p._unfilledHour = r.unfilledHour;
     }
     }, rollupSliceHours);
     // Someone deleted history while this read yielded between slices: rolled rows it had not
     // read yet may be gone, so answer from the raw rows instead of undercounting.
     if (rollupEpoch() !== epoch) return getProviderUsageSummary({ startDate, endDate, sliceMs, useRollup: false });
+    // Hours whose lastTs is not filled yet (rolled before the column existed): only a
+    // provider's newest such hour can hold a later request than its filled ones. Providers
+    // are grouped by that hour, and each distinct hour is read from the raw rows ONCE for all
+    // of them (one grouped scan on idx_uh_ts), yielding between hours.
+    const byHour = new Map();
+    for (const p of Object.values(byProvider)) {
+      if (p._unfilledHour && (!p.lastUsed || `${p._unfilledHour}:59:59.999Z` > p.lastUsed)) {
+        if (!byHour.has(p._unfilledHour)) byHour.set(p._unfilledHour, []);
+        byHour.get(p._unfilledHour).push(p);
+      }
+    }
+    let first = true;
+    for (const [hour, providers] of byHour) {
+      if (!first) await yieldToLoop();
+      first = false;
+      const latest = hourLastTsByProviderSync(db, hour);
+      for (const p of providers) touch(p, latest.get(p.provider) ?? null);
+    }
   }
 
   for (const range of plan.raw) {
@@ -1619,6 +2183,7 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
     addCostTo(totals, rowCostNano(r.costNanoUsd, r.cost));
 
     const ts = r.timestamp || "";
+    touch(p, ts);
     const minute = ts.slice(0, 16);
     if (minute) {
       p._minTok[minute] = (p._minTok[minute] || 0) + tokSum;
@@ -1642,8 +2207,8 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
     for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
     for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
     peakTokS = Math.round((p._peakTokS || 0) * 10) / 10;
-    const { provider, input, output, requests, cost, costNanoUsd } = p;
-    return { provider, input, output, requests, cost, costNanoUsd, peakTpm, peakRpm, peakTokS };
+    const { provider, input, output, requests, cost, costNanoUsd, lastUsed } = p;
+    return { provider, input, output, requests, cost, costNanoUsd, peakTpm, peakRpm, peakTokS, lastUsed };
   }).sort((a, b) => (b.requests || 0) - (a.requests || 0) || String(a.provider).localeCompare(String(b.provider)));
 
   return { items, totals };

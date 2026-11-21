@@ -4,11 +4,13 @@ import { Fragment, useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
-import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import Pagination from "@/shared/components/Pagination";
+import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
+import { TableStateRow } from "@/shared/components/TableState";
 import { cn } from "@/shared/utils/cn";
 import { fmtUsd } from "@/shared/utils/money";
+import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
 
 // Usage grouped by the customer who owns the key: one customer may hold many
 // keys, so their traffic is summed into one row, with the keys and models
@@ -25,10 +27,33 @@ const PERIOD_PRESETS = [
   { value: "60d", label: "60D" },
 ];
 
-const SHOW_OPTIONS = [
-  { value: "all", label: "All users" },
-  { value: "active", label: "With requests" },
+// Shared toolbar (spec admin-usage-views): default order is cost, highest first.
+const USER_SORTS = [
+  { value: "requests", label: "Requests" },
+  { value: "tokens", label: "Tokens" },
+  { value: "cost", label: "Chi phí" },
+  { value: "lastUsed", label: "Lần dùng cuối" },
 ];
+const USER_DEFAULTS = { sort: "cost", dir: "desc", top: 0 };
+const USER_QUERY_OPTIONS = { sortFields: USER_SORTS.map((s) => s.value) };
+const ACTIVITY_OPTIONS = [{ value: "active", label: "With requests" }];
+
+function userSortValue(o, field) {
+  const t = o.totals || {};
+  switch (field) {
+    case "requests": return t.requests || 0;
+    case "tokens": return (t.input || 0) + (t.output || 0);
+    case "cost": return t.costNanoUsd != null ? t.costNanoUsd : Math.round(Number(t.cost || 0) * 1e9);
+    case "lastUsed": {
+      // No last request in the period: sorts after every customer who has one.
+      const ms = o.lastUsedAt ? Date.parse(o.lastUsedAt) : NaN;
+      return Number.isFinite(ms) ? ms : null;
+    }
+    default: return null;
+  }
+}
+
+const userSearchText = (o) => [o.email, o.displayName, o.group, ownerTitle(o), ...(o.keys || []).flatMap((k) => [k.name, k.maskedKey])];
 
 function periodToRange(period) {
   const now = new Date();
@@ -75,10 +100,11 @@ export default function UserUsageTable() {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [search, setSearch] = useState("");
   const [period, setPeriod] = useState("30d");
-  const [show, setShow] = useState("all");
   const [expanded, setExpanded] = useState(null);
+  const [query, setQueryRaw] = useTableQuery("users", USER_DEFAULTS, USER_QUERY_OPTIONS);
+  // Any change of search, filter, sort or Top N starts again from the first page.
+  const setQuery = useCallback((patch) => { setQueryRaw(patch); setPage(1); }, [setQueryRaw]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,27 +124,44 @@ export default function UserUsageTable() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((o) => {
-      if (show === "active" && !(o.totals?.requests > 0)) return false;
-      if (!q) return true;
-      const hay = [o.email, o.displayName, o.group, ownerTitle(o), ...(o.keys || []).flatMap((k) => [k.name, k.maskedKey])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [items, search, show]);
+  const userOptions = useMemo(
+    () => [...new Set(items.map(ownerTitle))].sort((a, b) => a.localeCompare(b)).map((v) => ({ value: v, label: v })),
+    [items]
+  );
 
-  const totals = useMemo(() => filtered.reduce(
+  const result = useMemo(() => applyTableQuery(items, {
+    search: query.q,
+    searchFields: [userSearchText],
+    filters: query.filters,
+    filterFields: {
+      user: ownerTitle,
+      // "With requests" hides customers with no request in the period.
+      activity: (o) => (o.totals?.requests > 0 ? "active" : ""),
+    },
+    sortField: query.sort,
+    sortDir: query.dir,
+    top: query.top,
+    valueOf: userSortValue,
+    nameOf: ownerTitle,
+  }), [items, query]);
+  const filtered = result.rows;
+
+  const tableState = tableStateOf({ loading, error, total: items.length, matched: result.matched, filtersActive: hasActiveQuery(query) });
+  const onHeaderSort = (field) => setQuery((s) => nextSortState(s, field));
+
+  // "Tổng kỳ" is every customer of the period whatever the search, filters or Top N;
+  // "Tổng đang hiển thị" is the rows shown, when those hide some.
+  const sumOwners = (list) => list.reduce(
     (acc, o) => {
       acc.requests += o.totals?.requests || 0;
       acc.costNanoUsd += o.totals?.costNanoUsd || 0;
       return acc;
     },
     { requests: 0, costNanoUsd: 0 }
-  ), [filtered]);
+  );
+  const periodTotals = useMemo(() => sumOwners(items), [items]);
+  const shownTotals = useMemo(() => sumOwners(filtered), [filtered]);
+  const partial = filtered.length !== items.length;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -144,82 +187,80 @@ export default function UserUsageTable() {
           </div>
         </div>
 
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-          <Input
-            placeholder="Search email, name, group, key name or masked key…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            icon="search"
-            className="sm:flex-1"
-            aria-label="Search users"
-          />
-          <Select value={show} onChange={(e) => { setShow(e.target.value); setPage(1); }} options={SHOW_OPTIONS} className="sm:w-44" aria-label="Show" />
-        </div>
+        <TableToolbar
+          className="mb-4"
+          state={query}
+          onChange={setQuery}
+          searchPlaceholder="Email, name, group, key name or masked key…"
+          filters={[
+            { name: "user", label: "Người dùng", options: userOptions },
+            { name: "activity", label: "Hoạt động", options: ACTIVITY_OPTIONS },
+          ]}
+          sortOptions={USER_SORTS}
+          shown={filtered.length}
+          total={items.length}
+        />
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
-          <span><span className="font-medium text-text-main">{filtered.length}</span> of {items.length} users</span>
-          <span><span className="font-mono font-medium text-text-main">{fmtCompact(totals.requests)}</span> requests</span>
-          <span><span className="font-mono font-medium text-text-main">{fmtCost(totals)}</span> cost</span>
+        <div className="flex flex-col gap-1 text-xs text-text-muted">
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="font-medium text-text-main">Tổng kỳ</span>
+            <span><span className="font-mono font-medium text-text-main">{fmtCompact(periodTotals.requests)}</span> requests</span>
+            <span><span className="font-mono font-medium text-text-main">{fmtCost(periodTotals)}</span> cost</span>
+          </p>
+          {partial && (
+            <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span className="font-medium text-text-main">Tổng đang hiển thị</span>
+              <span><span className="font-mono font-medium text-text-main">{fmtCompact(shownTotals.requests)}</span> requests</span>
+              <span><span className="font-mono font-medium text-text-main">{fmtCost(shownTotals)}</span> cost</span>
+            </p>
+          )}
         </div>
       </Card>
 
       <Card padding="none">
-        {error ? (
-          <div role="alert" className="flex items-center gap-2 p-6 text-sm text-danger">
-            <span className="material-symbols-outlined" aria-hidden="true">error</span>{error}
-          </div>
-        ) : (
-          <div className="overflow-x-auto" aria-busy={loading}>
-            <table className="w-full min-w-[1100px] text-sm">
-              <thead>
-                <tr className="border-b border-border-subtle text-text-muted">
-                  <th className="w-8 px-3 py-2 text-left font-medium">#</th>
-                  <th className="px-3 py-2 text-left font-medium">User</th>
-                  <th className="px-3 py-2 text-right font-medium">Keys</th>
-                  <th className="px-3 py-2 text-right font-medium">Requests</th>
-                  <th className="px-3 py-2 text-right font-medium">Input</th>
-                  <th className="px-3 py-2 text-right font-medium">Output</th>
-                  <th className="px-3 py-2 text-right font-medium">Input cache</th>
-                  <th className="px-3 py-2 text-right font-medium">Cost</th>
-                  <th className="px-3 py-2 text-right font-medium">Peak RPM</th>
-                  <th className="px-3 py-2 text-right font-medium">Peak TPM</th>
-                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Last used</th>
-                  <th className="w-10 px-3 py-2"><span className="sr-only">Details</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={COLS} className="p-8 text-center text-text-muted">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="material-symbols-outlined animate-spin text-[20px]" aria-hidden="true">progress_activity</span>
-                        Loading…
-                      </span>
-                    </td>
-                  </tr>
-                ) : pageRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={COLS} className="p-8 text-center text-text-muted">
-                      {items.length === 0 ? "No keys yet." : "No users match the current filters."}
-                    </td>
-                  </tr>
-                ) : (
-                  pageRows.map((o, idx) => (
-                    <OwnerRow
-                      key={o.ownerId}
-                      o={o}
-                      rowIdx={(currentPage - 1) * pageSize + idx + 1}
-                      isOpen={expanded === o.ownerId}
-                      onToggle={() => setExpanded(expanded === o.ownerId ? null : o.ownerId)}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="overflow-x-auto" aria-busy={loading}>
+          <table className="w-full min-w-[1100px] text-sm">
+            <thead>
+              <tr className="border-b border-border-subtle text-text-muted">
+                <th className="w-8 px-3 py-2 text-left font-medium">#</th>
+                <th className="px-3 py-2 text-left font-medium">User</th>
+                <th className="px-3 py-2 text-right font-medium">Keys</th>
+                <SortableHeader label="Requests" field="requests" state={query} onSort={onHeaderSort} align="right" className="px-3 py-2 font-medium" />
+                <th className="px-3 py-2 text-right font-medium">Input</th>
+                <th className="px-3 py-2 text-right font-medium">Output</th>
+                <th className="px-3 py-2 text-right font-medium">Input cache</th>
+                <SortableHeader label="Cost" field="cost" state={query} onSort={onHeaderSort} align="right" className="px-3 py-2 font-medium" />
+                <th className="px-3 py-2 text-right font-medium">Peak RPM</th>
+                <th className="px-3 py-2 text-right font-medium">Peak TPM</th>
+                <SortableHeader label="Last used" field="lastUsed" state={query} onSort={onHeaderSort} className="px-3 py-2 font-medium whitespace-nowrap" />
+                <th className="w-10 px-3 py-2"><span className="sr-only">Details</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableState !== "ready" ? (
+                <TableStateRow
+                  state={tableState}
+                  colSpan={COLS}
+                  emptyMessage="No keys yet."
+                  onRetry={load}
+                  onClearFilters={() => setQuery(clearQueryFilters)}
+                />
+              ) : (
+                pageRows.map((o, idx) => (
+                  <OwnerRow
+                    key={o.ownerId}
+                    o={o}
+                    rowIdx={(currentPage - 1) * pageSize + idx + 1}
+                    isOpen={expanded === o.ownerId}
+                    onToggle={() => setExpanded(expanded === o.ownerId ? null : o.ownerId)}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        {!loading && filtered.length > 0 && (
+        {tableState === "ready" && filtered.length > 0 && (
           <div className="border-t border-border-subtle">
             <Pagination
               currentPage={currentPage}
