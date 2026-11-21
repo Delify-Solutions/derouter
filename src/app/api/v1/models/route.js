@@ -572,10 +572,15 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
   }
 
+  // Non-bot customer keys: the business models are reserved for bots and must not
+  // be advertised to them, whatever the group allows.
+  const excludedIds = new Set(Array.isArray(options.excludedModels) ? options.excludedModels : []);
+
   const dedupedModels = [];
   const seenModelIds = new Set();
   for (const model of models) {
     if (!model?.id || seenModelIds.has(model.id)) continue;
+    if (excludedIds.has(model.id)) continue;
     // Key allow-list filter: drop any model whose id isn't permitted for the
     // calling key. Unrestricted (no allowedModels) → isAllowed always true.
     if (!isAllowed(model.id)) continue;
@@ -650,12 +655,17 @@ export async function resolveKeyScopeForModels(request) {
   // model eligibility, and advertising fewer models than the group allows would
   // make a paying customer believe a model is unavailable.
   let allowedModels = null;
+  // Business models are outside every customer key's allow-list except a bot's
+  // (spec api-access-enforcement "Model listing reflects the owner's group"), so
+  // the listing filters them by name. `botKey` turns the listing into exactly the
+  // business models.
+  let businessModels = null;
+  let botKey = false;
   if (apiKey) {
     const auth = await getApiKeyForAuth(apiKey);
     if (auth?.key?.userId) {
-      // A customer whose account may not call, or whose group is missing, gets the
-      // same platform denial here as on the LLM endpoints (spec: the same rejection
-      // applies to /v1/models).
+      // A customer whose account may not call gets the same platform denial here
+      // as on the LLM endpoints (spec: the same rejection applies to /v1/models).
       const { platformErrorResponse, PLATFORM_MESSAGES } = await import("@/lib/auth/platformError.js");
       const owner = auth.owner;
       if (owner && owner.status !== "active") {
@@ -668,7 +678,20 @@ export async function resolveKeyScopeForModels(request) {
           }),
         };
       }
-      if (!auth.group) {
+      // A bot key ignores the group allow-list entirely (spec api-access-
+      // enforcement): its listing is the business models, whether or not the owner
+      // still has a live group. A disabled bot still fails closed.
+      if (auth.key.botId) {
+        if (!auth.bot?.isActive) {
+          return {
+            response: platformErrorResponse({
+              status: 403,
+              code: "bot_disabled",
+              message: PLATFORM_MESSAGES.bot_disabled,
+            }),
+          };
+        }
+      } else if (!auth.group) {
         return {
           response: platformErrorResponse({
             status: 403,
@@ -678,12 +701,32 @@ export async function resolveKeyScopeForModels(request) {
         };
       }
     }
-    if (auth?.resolved?.allowedModels) {
-      allowedModels = auth.resolved.allowedModels;
+    if (auth?.key?.botId) {
+      // A bot sees exactly the business models, labelled by their setting.
+      botKey = true;
+      try {
+        const { getBusinessSettings, businessModelIds } = await import("@/lib/biz/settings.js");
+        const business = await getBusinessSettings();
+        businessModels = business.businessModels;
+        allowedModels = businessModelIds(business);
+      } catch {
+        allowedModels = [];
+        businessModels = [];
+      }
+    } else {
+      if (auth?.resolved?.allowedModels) {
+        allowedModels = auth.resolved.allowedModels;
+      }
+      try {
+        const { getBusinessSettings, businessModelIds } = await import("@/lib/biz/settings.js");
+        businessModels = businessModelIds(await getBusinessSettings());
+      } catch {
+        businessModels = [];
+      }
     }
   }
 
-  return { allowedModels, skipDynamicFetch: false };
+  return { allowedModels, businessModels, botKey, skipDynamicFetch: false };
 }
 
 /**
@@ -700,6 +743,9 @@ export async function GET(request) {
     const data = await buildModelsList([LLM_KIND], {
       skipDynamicFetch: scope.skipDynamicFetch,
       allowedModels: scope.allowedModels,
+      // A normal customer key never sees a business model; a bot key's
+      // allowedModels ARE the business models, so nothing is excluded for it.
+      excludedModels: scope.botKey ? [] : scope.businessModels ?? [],
     });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },

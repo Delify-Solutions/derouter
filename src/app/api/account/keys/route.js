@@ -25,7 +25,10 @@ export async function GET(request) {
     db.all(`SELECT id, name FROM plans`).map((plan) => [plan.id, plan.name])
   );
 
-  const owned = (await getApiKeys()).filter((key) => key.userId === session.userId);
+  // Bot keys belong to a bot and are managed in its Key API tab; listing them here
+  // would offer a pin/delete surface that does not apply (spec business-bots "Bot
+  // keys"). Filtered before the last-used lookup so the count matches the rows.
+  const owned = (await getApiKeys()).filter((key) => key.userId === session.userId && !key.botId);
   // Best effort: a failed lookup leaves "last used" blank instead of failing the list.
   let lastUsed = {};
   try {
@@ -68,6 +71,15 @@ export async function POST(request) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400, headers: NO_STORE });
+  }
+
+  // A bot key is created through the bot's own endpoint, never here: this route has
+  // no bot to bind it to and would produce a normal key that looks like a bot's.
+  if (body?.botId) {
+    return NextResponse.json(
+      { error: "Key của chatbot được tạo trong mục AI doanh nghiệp của bot" },
+      { status: 400, headers: NO_STORE }
+    );
   }
 
   const name = typeof body?.name === "string" ? body.name.trim() : "";

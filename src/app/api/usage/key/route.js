@@ -9,6 +9,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getQueueSync, getPlanHistorySync } from "@/lib/db/repos/accountPlansRepo.js";
 import { getUserRateUsage } from "@/lib/db/repos/usageRepo.js";
 import { payingRatesSync } from "@/lib/billing/rates.js";
+import { productLineOfKey } from "@/lib/billing/planQueue.js";
 import { getDebtNanoSync } from "@/lib/billing/ledger.js";
 
 /**
@@ -133,7 +134,11 @@ export async function GET(request) {
     let account = null;
     if (k.userId) {
       const accountDb = await getAdapter();
-      const rates = payingRatesSync(accountDb, k.userId, null, { planId: k.planId ?? null });
+      // The key's own product line: a bot key is paid by business purchases only.
+      const rates = payingRatesSync(accountDb, k.userId, null, {
+        planId: k.planId ?? null,
+        productLine: productLineOfKey(k),
+      });
       const used = rates.planId
         ? await getUserRateUsage(k.userId, 60_000, rates.planId)
         : { requests: 0, tokens: 0 };

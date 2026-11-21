@@ -54,9 +54,14 @@ export async function GET(request, { params }) {
     );
 
     if (kindFilter) {
+      // A bot key has no business on a non-chat kind: the listing is empty rather
+      // than misleading (spec "kind-specific listings for other kinds SHALL be
+      // empty").
+      if (scope.botKey) return json({ object: "list", data: [] });
       const data = await buildModelsList(kindFilter, {
         skipDynamicFetch: scope.skipDynamicFetch,
         allowedModels: scope.allowedModels,
+        excludedModels: scope.businessModels ?? [],
       });
       return json({ object: "list", data });
     }
@@ -66,6 +71,7 @@ export async function GET(request, { params }) {
     const models = await buildModelsList([LLM_KIND], {
       skipDynamicFetch: scope.skipDynamicFetch,
       allowedModels: scope.allowedModels,
+      excludedModels: scope.botKey ? [] : scope.businessModels ?? [],
     });
     const matchedModel = models.find((candidate) => candidate.id === identifier);
 

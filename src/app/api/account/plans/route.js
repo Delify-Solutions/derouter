@@ -30,7 +30,9 @@ export async function GET(request) {
     const db = await getAdapter();
     const queue = getQueueSync(db, session.userId);
     // The allowance is per (user, plan): count the paying plan's own usage.
-    const rates = payingRatesSync(db, session.userId);
+    // The page shows API-line rates: the account's plans page is the API shop, and
+    // a business purchase lives on its own page (/doanh-nghiep, /account/business).
+    const rates = payingRatesSync(db, session.userId, null, { productLine: "api" });
     const [plans, availableNanoUsd, used] = await Promise.all([
       listPlans({ onlyActive: true }),
       getAvailableNanoUsd(session.userId),

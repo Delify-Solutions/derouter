@@ -20,7 +20,8 @@ export async function PATCH(request, { params }) {
 
   const { id } = await params;
   const key = id ? await getApiKeyById(id) : null;
-  if (!key || key.userId !== session.userId) {
+  // A bot key is managed from its bot's page, never from the API key page.
+  if (!key || key.userId !== session.userId || key.botId) {
     return NextResponse.json({ error: "Key not found" }, { status: 404, headers: NO_STORE });
   }
 
@@ -65,8 +66,9 @@ export async function DELETE(request, { params }) {
 
   const key = await getApiKeyById(id);
   // A key that belongs to someone else is reported as missing, not forbidden:
-  // the id space is not a directory.
-  if (!key || key.userId !== session.userId) {
+  // the id space is not a directory. A bot key is reported the same way: it is
+  // deleted with its bot.
+  if (!key || key.userId !== session.userId || key.botId) {
     return NextResponse.json({ error: "Key not found" }, { status: 404, headers: NO_STORE });
   }
 
