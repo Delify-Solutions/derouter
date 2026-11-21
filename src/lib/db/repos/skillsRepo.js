@@ -1,11 +1,8 @@
 // Skills the operator publishes for customers to download and install into their
 // own agent runtime (Claude Code, Codex, Cursor, …).
 //
-// Why a table and not a static list like src/shared/constants/skills.js: that
-// file lists *derouter's own* API capability docs, which ship with the code and
-// only change when the API does. What this repo stores is operator content — a
-// markdown body the admin types or pastes, published and retired over time
-// without a deploy. Two different lifecycles, so two different homes.
+// Why a table: this is operator content — a markdown body the admin types or
+// pastes, published and retired over time without a deploy.
 //
 // The body is the artifact. Everything else exists to help a customer find it and
 // to tell them where to put it.

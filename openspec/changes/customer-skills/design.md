@@ -95,9 +95,7 @@ from the name.
   retires or edits the row. This is inherent to a file-on-disk distribution and is
   stated on the delete confirmation ("Khách đã tải bản sao vẫn giữ được file").
   `version` exists so a support conversation can ask "which version do you have".
-- **Two skill lists in the admin.** `/dashboard/skills` already lists derouter's
-  own API capability docs from a source constant; this change adds
-  `/dashboard/customer-skills` for operator-authored skills. They are kept apart
-  deliberately: one ships with the code and changes when the API does, the other
-  is content with its own lifecycle. Merging them would mean an admin edit could
-  silently diverge from the code that documents the API.
+- **The older `/dashboard/skills` page was removed.** It listed derouter's own API
+  capability docs from a source constant (`src/shared/constants/skills.js`, raw
+  GitHub URLs). The owner dropped it, so `/dashboard/customer-skills` is the only
+  skills page in the admin.

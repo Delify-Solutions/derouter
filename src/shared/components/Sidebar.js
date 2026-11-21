@@ -57,10 +57,7 @@ const debugItems = [
 
 const systemItems = [
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
-  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
-  // Skills the operator publishes for customers to download (change
-  // customer-skills). Separate from "Skills" above, which lists derouter's own
-  // API capability docs.
+  // Skills the operator publishes for customers to download (change customer-skills).
   { href: "/dashboard/customer-skills", label: "Skill khách hàng", icon: "download" },
 ];
 
