@@ -46,6 +46,7 @@ export default function SkillsAdminPageClient() {
   const [repoKey, setRepoKey] = useState(0);
   const [editor, setEditor] = useState(null); // { key, editing, initial }
   const [deleting, setDeleting] = useState(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async () => {
@@ -188,6 +189,33 @@ export default function SkillsAdminPageClient() {
     }
   };
 
+  const removeSelected = async () => {
+    setBulkDeleting(false);
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/skills/bulk", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Không xoá được skill.");
+        return;
+      }
+      const failed = (data.results || []).filter((r) => !r.ok);
+      // Only the skills that failed stay selected, so the admin can see which ones and retry.
+      setSelected(new Set(failed.map((r) => r.id)));
+      await load();
+      if (failed.length) setError(`${failed.length} skill không xoá được: ${failed[0].error || "lỗi không rõ"}`);
+    } catch {
+      setError("Không xoá được skill. Kiểm tra kết nối rồi thử lại.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -264,6 +292,7 @@ export default function SkillsAdminPageClient() {
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.allAgents ? [] : (selectedRows[0]?.targets || []))}>Đặt agent</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: true })}>Phát hành</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: false })}>Ẩn</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setBulkDeleting(true)} className="text-red-600 hover:bg-red-500/10">Xoá tất cả</Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSelected(new Set()); setBulkTargets(null); }}>Bỏ chọn</Button>
           </div>
           {bulkTargets && (
@@ -377,6 +406,16 @@ export default function SkillsAdminPageClient() {
         title="Xoá skill"
         message={deleting ? `Xoá "${deleting.name}"? Khách đã tải bản sao vẫn giữ được file, nhưng mục này biến mất khỏi danh sách.` : ""}
         confirmText="Xoá"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={bulkDeleting}
+        onClose={() => setBulkDeleting(false)}
+        onConfirm={removeSelected}
+        title="Xoá nhiều skill"
+        message={`Xoá ${selected.size} skill đã chọn? Khách đã tải bản sao vẫn giữ được file, nhưng các mục này biến mất khỏi danh sách. Không hoàn tác được.`}
+        confirmText={`Xoá ${selected.size} skill`}
         variant="danger"
       />
     </div>

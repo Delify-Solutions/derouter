@@ -371,6 +371,27 @@ test("a bulk patch changes only the allowed fields on every selected skill", asy
   assert.match(bad[0].error, /Runtime/);
 });
 
+test("a bulk delete removes every selected skill and reports a missing id on its own", async () => {
+  reset();
+  const a = await skills.createSkill({ name: "Del A", body: BODY, targets: ["claude"] });
+  const b = await skills.createSkill({ name: "Del B", body: BODY, targets: ["codex"] });
+  const untouched = await skills.createSkill({ name: "Del C", body: BODY, targets: ["cursor"] });
+
+  const results = await skills.deleteSkills([a.id, b.id, "missing"]);
+  assert.deepEqual(results.map((r) => r.ok), [true, true, false]);
+  assert.equal(results[2].error, "Không tìm thấy skill");
+
+  assert.equal(await skills.getSkillById(a.id), null);
+  assert.equal(await skills.getSkillById(b.id), null);
+  assert.ok(await skills.getSkillById(untouched.id));
+
+  await assert.rejects(() => skills.deleteSkills([]), /Chưa chọn/);
+  await assert.rejects(
+    () => skills.deleteSkills(Array.from({ length: 101 }, (_, i) => `id${i}`)),
+    /tối đa 100/
+  );
+});
+
 test("re-importing in update mode replaces content only and never changes visibility, agents or category", async () => {
   reset();
   const created = await skills.createSkill({

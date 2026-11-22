@@ -464,3 +464,25 @@ export async function patchSkills(ids, patch = {}) {
   }
   return results;
 }
+
+/**
+ * Delete several skills at once (select rows → xoá tất cả). Each row succeeds or
+ * fails on its own, so one already-deleted or missing id never blocks the rest.
+ *
+ * @returns {Promise<{id: string, ok: boolean, error?: string}[]>}
+ */
+export async function deleteSkills(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) throw new Error("Chưa chọn skill nào");
+  if (ids.length > MAX_IMPORT_ITEMS) throw new Error(`Mỗi lần xoá tối đa ${MAX_IMPORT_ITEMS} skill`);
+
+  const results = [];
+  for (const id of ids) {
+    try {
+      const ok = await deleteSkill(String(id));
+      results.push(ok ? { id, ok: true } : { id, ok: false, error: "Không tìm thấy skill" });
+    } catch (error) {
+      results.push({ id, ok: false, error: error?.message || "Không xoá được skill" });
+    }
+  }
+  return results;
+}
