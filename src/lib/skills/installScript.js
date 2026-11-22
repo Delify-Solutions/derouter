@@ -10,7 +10,13 @@
 // cut short never executes half a script.
 
 import { SKILL_RUNTIMES, SHARED_SKILLS_DIR, runtimeSkillsDir } from "./runtimes.js";
-import { ENGINE_TARGETS, ENGINE_TARBALL, ENGINE_BRIDGE_URL, ENGINE_HOME, NODE_MIN } from "./engineTargets.js";
+import {
+  ENGINE_TARGETS,
+  ENGINE_HOME_BASE,
+  bundleTarballUrl,
+  bundleRawFileUrl,
+  NODE_MIN,
+} from "./engineTargets.js";
 
 // Only a plain http(s) origin is ever written into the script, because the
 // value is placed inside single quotes.
@@ -52,8 +58,8 @@ ENGINE_TARGETS="__ENGINE_IDS__"
 ENGINE_MCP="__ENGINE_MCP_IDS__"
 ENGINE_BRIDGE="__ENGINE_BRIDGE_IDS__"
 ENGINE_NONE="__ENGINE_NONE_IDS__"
-ENGINE_TARBALL="__ENGINE_TARBALL__"
-ENGINE_HOME="__ENGINE_HOME__"
+ENGINE_HOME_BASE="__ENGINE_HOME_BASE__"
+BUNDLE_SLUGS="__BUNDLE_SLUGS__"
 NODE_MIN="__NODE_MIN__"
 CANON="$HOME/__SHARED_DIR__"
 COPY=0
@@ -139,12 +145,15 @@ link_one() {
 
 # --- engine ------------------------------------------------------------------
 #
-# The skills call 67 tools that live in a Node MCP server. Without it a skill loads,
-# reads a tool name, finds nothing, and stops. --engine fetches that server and
-# registers it with each agent that can take one.
+# The skills call tools that live in a Node MCP server — one per bundle a customer
+# has skills from. Without it a skill loads, reads a tool name, finds nothing, and
+# stops. --engine fetches every such bundle's engine and registers it with each
+# agent that can take one.
 #
 # omp has no MCP client, so it gets a bridge extension instead; dsh owns its own copy
 # and is skipped. Both facts live in ENGINE_MCP / ENGINE_BRIDGE / ENGINE_NONE above.
+# BUNDLE_SLUGS and the three bundle_*_for() tables below are rendered per bundle by
+# installScript.js — never hand-written, and empty when no bundle is published yet.
 
 engine_path_for() {
   case "$1" in
@@ -156,6 +165,29 @@ __ENGINE_PATH_CASES__
 engine_key_for() {
   case "$1" in
 __ENGINE_KEY_CASES__
+    *) printf '%s' "" ;;
+  esac
+}
+
+bundle_tarball_for() {
+  case "$1" in
+__BUNDLE_TARBALL_CASES__
+    *) printf '%s' "" ;;
+  esac
+}
+
+bundle_bridge_for() {
+  case "$1" in
+__BUNDLE_BRIDGE_CASES__
+    *) printf '%s' "" ;;
+  esac
+}
+
+# The bundle's own installer entrypoint, relative to its unpacked tree — "" when
+# the bundle has none.
+bundle_installer_for() {
+  case "$1" in
+__BUNDLE_INSTALLER_CASES__
     *) printf '%s' "" ;;
   esac
 }
@@ -176,14 +208,16 @@ node_for_engine() {
   return 1
 }
 
-# Write the MCP registration for one agent. Merges into an existing config rather
-# than replacing it: the customer's own servers must survive.
+# Write the MCP registration for one agent, for one bundle. Merges into an
+# existing config rather than replacing it: whatever else is already registered
+# there, including another bundle, must survive — each bundle gets its own key,
+# named after its slug.
 register_mcp() {
-  r_agent="$1"; r_key="$2"; r_config="$3"; r_node="$4"; r_server="$5"
+  r_agent="$1"; r_key="$2"; r_config="$3"; r_node="$4"; r_server="$5"; r_name="$6"
   mkdir -p "$(dirname "$r_config")" 2>/dev/null || true
   if "$r_node" -e '
 const fs = require("fs");
-const [configPath, agent, keyName, nodePath, serverPath] = process.argv.slice(1);
+const [configPath, agent, keyName, nodePath, serverPath, serverName] = process.argv.slice(1);
 let data = {};
 try { data = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { data = {}; }
 // amp nests its key ("amp.mcpServers"); everything else is top level.
@@ -195,56 +229,160 @@ for (const part of parts.slice(0, -1)) {
 }
 const leaf = parts[parts.length - 1];
 if (!holder[leaf] || typeof holder[leaf] !== "object") holder[leaf] = {};
-holder[leaf]["rt-claude"] = {
+holder[leaf][serverName] = {
   command: nodePath,
   args: [serverPath],
   env: { DSH_HOME: process.env.DSH_HOME || (process.env.HOME + "/.dsh") },
 };
 fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
-' "$r_config" "$r_agent" "$r_key" "$r_node" "$r_server" 2>/dev/null; then
-    printf 'engine [%s]: đã đăng ký MCP -> %s\n' "$r_agent" "$r_config"
+' "$r_config" "$r_agent" "$r_key" "$r_node" "$r_server" "$r_name" 2>/dev/null; then
+    printf 'engine %s [%s]: đã đăng ký MCP -> %s\n' "$r_name" "$r_agent" "$r_config"
   else
-    printf 'engine [%s]: KHÔNG ghi được %s\n' "$r_agent" "$r_config" >&2
+    printf 'engine %s [%s]: KHÔNG ghi được %s\n' "$r_name" "$r_agent" "$r_config" >&2
     return 1
   fi
 }
 
-# Fetch and unpack the engine, once. Returns its mcp-server.mjs path in ENGINE_SERVER.
+# Fetch and unpack one bundle's engine, once. Sets ENGINE_SERVER (its mcp-server.mjs
+# path) and ENGINE_ROOT (its unpack root) on success. A fetch problem is only a
+# warning, the script is never stopped over it: one bad bundle must not stop a
+# customer's other bundles, or the skills this run already installed, from working.
 install_engine_source() {
-  e_root="$HOME/$ENGINE_HOME"
+  b_slug="$1"
+  e_root="$HOME/$ENGINE_HOME_BASE/$b_slug"
   e_server="$e_root/lib/mcp-server.mjs"
+  ENGINE_SERVER=""; ENGINE_ROOT=""
   if [ -f "$e_server" ]; then
     # Update is how you refresh: the bundle is fetched fresh, so honour the flag
     # rather than asking the customer to guess a second switch.
     if [ "$UPDATE_ENGINE" = "1" ]; then
-      printf 'engine: cập nhật %s\n' "$e_root"
+      printf 'engine %s: cập nhật %s\n' "$b_slug" "$e_root"
     else
-      printf 'engine: đã có ở %s (--engine-update để làm mới)\n' "$e_root"
-      ENGINE_SERVER="$e_server"
+      printf 'engine %s: đã có ở %s (--engine-update để làm mới)\n' "$b_slug" "$e_root"
+      ENGINE_SERVER="$e_server"; ENGINE_ROOT="$e_root"
       return 0
     fi
   fi
-  e_tar="$WORK/engine.tar.gz"
-  printf 'engine: tải %s\n' "$ENGINE_TARBALL"
-  code="$(curl -sSL -o "$e_tar" -w '%{http_code}' "$ENGINE_TARBALL")" || die "không tải được engine"
-  [ "$code" = "200" ] || die "không tải được engine (HTTP $code)"
-  e_tmp="$WORK/engine-unpack"
-  mkdir -p "$e_tmp" || die "không tạo được thư mục giải nén"
+  e_tarball="$(bundle_tarball_for "$b_slug")"
+  if [ -z "$e_tarball" ]; then
+    printf 'engine %s: không xác định được nguồn, bỏ qua\n' "$b_slug" >&2
+    return 1
+  fi
+  e_tar="$WORK/engine-$b_slug.tar.gz"
+  printf 'engine %s: tải %s\n' "$b_slug" "$e_tarball"
+  code="$(curl -sSL -o "$e_tar" -w '%{http_code}' "$e_tarball")" || {
+    printf 'engine %s: không tải được engine\n' "$b_slug" >&2
+    return 1
+  }
+  if [ "$code" != "200" ]; then
+    printf 'engine %s: không tải được engine (HTTP %s)\n' "$b_slug" "$code" >&2
+    return 1
+  fi
+  e_tmp="$WORK/engine-unpack-$b_slug"
+  mkdir -p "$e_tmp" || { printf 'engine %s: không tạo được thư mục giải nén\n' "$b_slug" >&2; return 1; }
   # Strip the single top-level directory the tarball carries.
-  tar -xzf "$e_tar" -C "$e_tmp" --strip-components=1 2>/dev/null \
-    || die "không giải nén được engine (cần tar)"
-  [ -f "$e_tmp/lib/mcp-server.mjs" ] || die "gói engine thiếu lib/mcp-server.mjs"
-  mkdir -p "$e_root" || die "không tạo được $e_root"
-  cp -R "$e_tmp/." "$e_root/" || die "không chép được engine vào $e_root"
-  printf 'engine: đã cài vào %s\n' "$e_root"
-  ENGINE_SERVER="$e_root/lib/mcp-server.mjs"
+  if ! tar -xzf "$e_tar" -C "$e_tmp" --strip-components=1 2>/dev/null; then
+    printf 'engine %s: không giải nén được (cần tar)\n' "$b_slug" >&2
+    return 1
+  fi
+  if [ ! -f "$e_tmp/lib/mcp-server.mjs" ]; then
+    printf 'engine %s: gói engine thiếu lib/mcp-server.mjs\n' "$b_slug" >&2
+    return 1
+  fi
+  mkdir -p "$e_root" || { printf 'engine %s: không tạo được %s\n' "$b_slug" "$e_root" >&2; return 1; }
+  if ! cp -R "$e_tmp/." "$e_root/"; then
+    printf 'engine %s: không chép được vào %s\n' "$b_slug" "$e_root" >&2
+    return 1
+  fi
+  printf 'engine %s: đã cài vào %s\n' "$b_slug" "$e_root"
+  ENGINE_SERVER="$e_root/lib/mcp-server.mjs"; ENGINE_ROOT="$e_root"
+}
+
+# For Claude Code only: run a bundle's own installer entrypoint, if it has one and
+# it exists in the unpacked tree, so the agent presets and orchestrating command
+# that repository's own installer produces land next to the engine — never
+# re-derived here (design.md). A missing entrypoint is skipped silently; a failing
+# one is a warning, never a stopped install: the skills and MCP registration this
+# run already did must stand. Every other runtime only ever gets the engine and its
+# MCP/bridge registration — agents and slash commands are a Claude Code concept
+# that runtime has nowhere to receive.
+run_bundle_installer() {
+  rb_slug="$1"; rb_root="$2"; rb_node="$3"
+  rb_entry="$(bundle_installer_for "$rb_slug")"
+  [ -n "$rb_entry" ] || return 0
+
+  for rb_rt in $e_wanted; do
+    if [ "$rb_rt" != "claude" ]; then
+      printf 'engine %s [%s]: agent/lệnh là khái niệm riêng của Claude Code, bỏ qua cho agent này\n' "$rb_slug" "$rb_rt"
+    fi
+  done
+
+  case " $e_wanted " in
+    *" claude "*) ;;
+    *) return 0 ;;
+  esac
+
+  if [ -n "$DIR" ]; then
+    printf 'engine %s: bỏ qua cài agent/lệnh cho Claude Code (đang dùng --dir, không phải thư mục cài mặc định)\n' "$rb_slug"
+    return 0
+  fi
+
+  rb_file="$rb_root/$rb_entry"
+  [ -f "$rb_file" ] || return 0
+
+  if "$rb_node" "$rb_file" >/dev/null 2>&1; then
+    printf 'engine %s [claude]: đã chạy %s (agent + lệnh)\n' "$rb_slug" "$rb_entry"
+  else
+    printf 'engine %s [claude]: %s thoát lỗi, bỏ qua (skill + MCP vẫn hoạt động)\n' "$rb_slug" "$rb_entry" >&2
+  fi
+}
+
+# Install one bundle's engine: fetch + unpack, register with every wanted agent,
+# then (Claude Code only) run its own installer.
+install_one_bundle_engine() {
+  b_slug="$1"
+  install_engine_source "$b_slug" || return 0
+  [ -n "$ENGINE_SERVER" ] || return 0
+
+  for e_rt in $e_wanted; do
+    case " $ENGINE_MCP " in
+      *" $e_rt "*)
+        register_mcp "$e_rt" "$(engine_key_for "$e_rt")" "$(engine_path_for "$e_rt")" "$e_node" "$ENGINE_SERVER" "$b_slug" || true
+        ;;
+    esac
+    case " $ENGINE_BRIDGE " in
+      *" $e_rt "*)
+        e_bridge="$(home_for "$e_rt")/agent/extensions/$b_slug-rt-engine.ts"
+        mkdir -p "$(dirname "$e_bridge")" 2>/dev/null || true
+        e_src="$ENGINE_ROOT/omp/rt-engine.ts"
+        # The bundle normally carries the bridge. A tarball built before it existed
+        # (a host cache, say) does not, so fall back to fetching the one file
+        # rather than leaving omp with skills and no tools.
+        if [ ! -f "$e_src" ]; then
+          e_url="$(bundle_bridge_for "$b_slug")"
+          if [ -n "$e_url" ]; then
+            curl -sSL -o "$WORK/bridge-$b_slug.ts" "$e_url" 2>/dev/null && e_src="$WORK/bridge-$b_slug.ts"
+          fi
+        fi
+        if [ -f "$e_src" ]; then
+          cp "$e_src" "$e_bridge" && printf 'engine %s [%s]: đã cài bridge -> %s\n' "$b_slug" "$e_rt" "$e_bridge"
+        else
+          printf 'engine %s [%s]: không lấy được bridge (bỏ qua)\n' "$b_slug" "$e_rt" >&2
+        fi
+        ;;
+    esac
+  done
+
+  run_bundle_installer "$b_slug" "$ENGINE_ROOT" "$e_node"
 }
 
 install_engine() {
+  if [ -z "$(printf '%s' "$BUNDLE_SLUGS" | tr -d ' ')" ]; then
+    printf 'engine: chưa có bundle nào được phát hành, không có gì để cài\n' >&2
+    return 0
+  fi
   e_node="$(node_for_engine)" || die "cần Node >= $NODE_MIN cho engine (node:sqlite). Cài Node rồi thử lại, hoặc bỏ --engine."
   printf 'engine: node %s (%s)\n' "$("$e_node" -v 2>/dev/null)" "$e_node"
-  install_engine_source
-  [ -n "$ENGINE_SERVER" ] || die "không xác định được engine"
 
   # Which agents to register: those asked for by --target, else those installed here.
   e_wanted=""
@@ -260,39 +398,14 @@ install_engine() {
     return 0
   }
 
-  for e_rt in $e_wanted; do
-    case " $ENGINE_MCP " in
-      *" $e_rt "*)
-        register_mcp "$e_rt" "$(engine_key_for "$e_rt")" "$(engine_path_for "$e_rt")" "$e_node" "$ENGINE_SERVER" || true
-        ;;
-    esac
-    case " $ENGINE_BRIDGE " in
-      *" $e_rt "*)
-        e_bridge="$(home_for "$e_rt")/agent/extensions/rt-engine.ts"
-        mkdir -p "$(dirname "$e_bridge")" 2>/dev/null || true
-        e_src="$HOME/$ENGINE_HOME/omp/rt-engine.ts"
-        # The bundle normally carries the bridge. A tarball built before it existed
-        # (a GitHub codeload cache, say) does not, so fall back to fetching the one
-        # file rather than leaving omp with skills and no tools.
-        if [ ! -f "$e_src" ]; then
-          e_url="__ENGINE_BRIDGE_URL__"
-          if [ -n "$e_url" ]; then
-            curl -sSL -o "$WORK/bridge.ts" "$e_url" 2>/dev/null && e_src="$WORK/bridge.ts"
-          fi
-        fi
-        if [ -f "$e_src" ]; then
-          cp "$e_src" "$e_bridge" && printf 'engine [%s]: đã cài bridge -> %s\n' "$e_rt" "$e_bridge"
-        else
-          printf 'engine [%s]: không lấy được bridge (bỏ qua)\n' "$e_rt" >&2
-        fi
-        ;;
-    esac
-  done
-
   for e_rt in $ENGINE_NONE; do
     case " $e_wanted " in
       *" $e_rt "*) printf 'engine [%s]: agent này tự quản engine riêng, bỏ qua\n' "$e_rt" ;;
     esac
+  done
+
+  for b_slug in $BUNDLE_SLUGS; do
+    install_one_bundle_engine "$b_slug"
   done
 
   printf 'engine: xong. Mở lại phiên agent; kiểm tra bằng cách liệt kê tool redteam_*.\n'
@@ -560,11 +673,47 @@ export function engineShell() {
   };
 }
 
-/** The install script with this server's public origin filled in; "" origin leaves --url required. */
-export function buildInstallScript(origin) {
+// Same shape as a skill's slug (skillsRepo.js, skillBundlesRepo.js): lower-case,
+// digits, single dashes — it becomes a shell `case` label and an unpack directory.
+const SAFE_BUNDLE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// A double-quoted shell string: escape what could otherwise break out of it.
+const escDq = (value) => String(value ?? "").replace(/(["$`\\])/g, "\\$1");
+
+/**
+ * The shell for the bundle engine blocks: one `case` arm per published bundle for
+ * its tarball URL, its omp-bridge fallback URL, and its installer entrypoint path
+ * — the data-driven replacement for the former single hardcoded engine source
+ * (design.md). A bundle with an unsafe slug or entrypoint is left out rather than
+ * thrown on: skillBundlesRepo's own validation already refuses those at write
+ * time, so this is only a second line of defence for a script every customer runs.
+ */
+export function bundleShell(bundles = []) {
+  const safe = bundles.filter(
+    (b) => SAFE_BUNDLE_SLUG.test(b?.slug ?? "") && (!b.installerEntrypoint || SAFE_PATH.test(b.installerEntrypoint)),
+  );
+  return {
+    slugs: safe.map((b) => b.slug).join(" "),
+    tarballCases: safe.map((b) => `    ${b.slug}) printf '%s' "${escDq(bundleTarballUrl(b))}" ;;`).join("\n"),
+    bridgeCases: safe
+      .map((b) => `    ${b.slug}) printf '%s' "${escDq(bundleRawFileUrl(b, "omp/rt-engine.ts"))}" ;;`)
+      .join("\n"),
+    installerCases: safe.map((b) => `    ${b.slug}) printf '%s' "${escDq(b.installerEntrypoint || "")}" ;;`).join("\n"),
+  };
+}
+
+/**
+ * The install script with this server's public origin filled in ("" origin leaves
+ * --url required), and one engine block per published bundle.
+ *
+ * @param {string} origin
+ * @param {object[]} [bundles] published bundles (skillBundlesRepo.listPublishedBundles()),
+ *   each carrying slug, sourceHost/Owner/Repo/Ref and installerEntrypoint
+ */
+export function buildInstallScript(origin, bundles = []) {
   const safe = isSafeOrigin(origin) ? origin : "";
   const shell = runtimeShell();
   const engine = engineShell();
+  const bundle = bundleShell(bundles);
   // `${` cannot appear inside the template literal, so the script spells shell
   // parameter expansion as `@{` and it is restored here.
   return TEMPLATE
@@ -578,9 +727,11 @@ export function buildInstallScript(origin) {
     .replaceAll("__ENGINE_NONE_IDS__", engine.noneIds)
     .replaceAll("__ENGINE_PATH_CASES__", engine.pathCases)
     .replaceAll("__ENGINE_KEY_CASES__", engine.keyCases)
-    .replaceAll("__ENGINE_TARBALL__", ENGINE_TARBALL)
-    .replaceAll("__ENGINE_BRIDGE_URL__", ENGINE_BRIDGE_URL)
-    .replaceAll("__ENGINE_HOME__", ENGINE_HOME)
+    .replaceAll("__ENGINE_HOME_BASE__", ENGINE_HOME_BASE)
+    .replaceAll("__BUNDLE_SLUGS__", bundle.slugs)
+    .replaceAll("__BUNDLE_TARBALL_CASES__", bundle.tarballCases)
+    .replaceAll("__BUNDLE_BRIDGE_CASES__", bundle.bridgeCases)
+    .replaceAll("__BUNDLE_INSTALLER_CASES__", bundle.installerCases)
     .replaceAll("__NODE_MIN__", NODE_MIN.major + "." + NODE_MIN.minor)
     .replaceAll("@{", "$" + "{");
 }

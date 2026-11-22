@@ -112,6 +112,10 @@ function normalize(input = {}) {
     usageNotes: String(input.usageNotes ?? "").trim(),
     version: String(input.version ?? "").trim(),
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Math.trunc(Number(input.sortOrder)) : 0,
+    // The bundle this skill was imported as part of, if any — optional, never
+    // required, and untouched unless a caller explicitly names it (see merge in
+    // updateSkill). A blank value means "no bundle", same as a row that never had one.
+    bundleId: String(input.bundleId ?? "").trim() || null,
   };
 }
 
@@ -183,6 +187,7 @@ function rowToSkill(row, { withBody = true } = {}) {
     version: row.version || "",
     downloadCount: row.downloadCount ?? 0,
     sortOrder: row.sortOrder ?? 0,
+    bundleId: row.bundleId || null,
     createdBy: row.createdBy || null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
@@ -200,7 +205,7 @@ function nowIso() {
 /** Columns that are not the body — the projection the list endpoints use. */
 const LIST_COLUMNS =
   "id, slug, name, summary, description, category, fileName, target, targets, " +
-  "audience, isPublished, usageNotes, version, downloadCount, sortOrder, createdBy, createdAt, updatedAt";
+  "audience, isPublished, usageNotes, version, downloadCount, sortOrder, bundleId, createdBy, createdAt, updatedAt";
 
 /**
  * Admin list: every row, by sort order then name. `filter` may narrow by
@@ -291,13 +296,13 @@ export async function createSkill(input, { createdBy = null } = {}) {
     `INSERT INTO skills(
        id, slug, name, summary, description, category, body, fileName, target,
        targets, audience, isPublished, usageNotes, version, downloadCount,
-       sortOrder, createdBy, createdAt, updatedAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+       sortOrder, bundleId, createdBy, createdAt, updatedAt
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
     [
       id, data.slug, data.name, data.summary, data.description, data.category,
       data.body, data.fileName, data.targets[0] ?? "generic", JSON.stringify(data.targets), data.audience,
       data.isPublished, data.usageNotes, data.version, data.sortOrder,
-      createdBy, now, now,
+      data.bundleId, createdBy, now, now,
     ]
   );
   return { id, slug: data.slug };
@@ -333,6 +338,9 @@ export async function updateSkill(id, patch = {}) {
     usageNotes: patch.usageNotes !== undefined ? patch.usageNotes : current.usageNotes,
     version: patch.version !== undefined ? patch.version : current.version,
     sortOrder: patch.sortOrder !== undefined ? patch.sortOrder : current.sortOrder,
+    // Unmentioned in a patch means "keep it": a skill's bundle link is not
+    // something a rename or a publish toggle should ever touch.
+    bundleId: patch.bundleId !== undefined ? patch.bundleId : current.bundleId,
     // A blank slug on an update means "keep it": renaming a skill renames the
     // directory customers installed it under, so it must be asked for explicitly.
     slug: patch.slug !== undefined && String(patch.slug).trim() ? patch.slug : current.slug,
@@ -349,12 +357,12 @@ export async function updateSkill(id, patch = {}) {
     `UPDATE skills SET
        slug = ?, name = ?, summary = ?, description = ?, category = ?, body = ?,
        fileName = ?, target = ?, targets = ?, audience = ?, isPublished = ?,
-       usageNotes = ?, version = ?, sortOrder = ?, updatedAt = ?
+       usageNotes = ?, version = ?, sortOrder = ?, bundleId = ?, updatedAt = ?
      WHERE id = ?`,
     [
       data.slug, data.name, data.summary, data.description, data.category, data.body,
       data.fileName, data.targets[0] ?? "generic", JSON.stringify(data.targets), data.audience, data.isPublished,
-      data.usageNotes, data.version, data.sortOrder, nowIso(), id,
+      data.usageNotes, data.version, data.sortOrder, data.bundleId, nowIso(), id,
     ]
   );
   return { id, slug: data.slug };

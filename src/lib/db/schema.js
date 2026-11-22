@@ -3,7 +3,9 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 47;
+// v48: skillBundles (one row per imported "repo that ships an engine") and the
+// nullable skills.bundleId link to it. Purely additive.
+export const SCHEMA_VERSION = 48;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1248,11 +1250,54 @@ export const TABLES = {
       createdBy: "TEXT",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
+      // Nullable link to skillBundles.id: the bundle this skill was imported as part
+      // of, if any. NULL means a standalone skill, behaving exactly as before this
+      // column existed. Detached (set to NULL), never cascaded, when its bundle is
+      // deleted — see skillBundlesRepo.deleteBundle.
+      bundleId: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_skills_slug ON skills(slug)",
       "CREATE INDEX IF NOT EXISTS idx_skills_listed ON skills(isPublished, audience, sortOrder)",
       "CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category)",
+      "CREATE INDEX IF NOT EXISTS idx_skills_bundle ON skills(bundleId)",
+    ],
+  },
+  // A skill bundle groups the skills, engine (MCP server) and install-time setup
+  // that came from one imported repository (see openspec capability skill-bundles).
+  // `slug` doubles as the engine's unpack directory name (~/.engines/<slug>) and the
+  // MCP server key registered for it, so two bundles never collide on either.
+  skillBundles: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      slug: "TEXT NOT NULL UNIQUE",
+      name: "TEXT NOT NULL",
+      // Admin-written, shown to the customer next to the bundle's skills.
+      description: "TEXT",
+      // Admin-written: which skill to use for which situation.
+      usageGuide: "TEXT",
+      // Where the engine (and, for Claude Code, the installer entrypoint) is
+      // fetched from: a release tarball of this repository at this ref.
+      sourceHost: "TEXT",
+      sourceOwner: "TEXT",
+      sourceRepo: "TEXT",
+      sourceRef: "TEXT",
+      // Relative path inside the unpacked repository to the bundle's own installer
+      // (e.g. 'install.mjs'); validated at write time to never escape the unpacked
+      // tree (no leading slash, no '..' segment).
+      installerEntrypoint: "TEXT",
+      // 'customer' | 'internal' — mirrors skills.audience.
+      audience: "TEXT NOT NULL DEFAULT 'customer'",
+      // 1 = listed for customers; 0 = staged or retired.
+      isPublished: "INTEGER DEFAULT 1",
+      sortOrder: "INTEGER DEFAULT 0",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_skill_bundles_slug ON skillBundles(slug)",
+      "CREATE INDEX IF NOT EXISTS idx_skill_bundles_listed ON skillBundles(isPublished, audience, sortOrder)",
     ],
   },
 };

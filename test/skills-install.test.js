@@ -19,7 +19,9 @@ const { getAdapter } = await import("../src/lib/db/driver.js");
 const { createApiKey } = await import("../src/lib/db/repos/apiKeysRepo.js");
 const { updateSettings } = await import("../src/lib/db/repos/settingsRepo.js");
 const skills = await import("../src/lib/db/repos/skillsRepo.js");
+const bundlesRepo = await import("../src/lib/db/repos/skillBundlesRepo.js");
 const { buildInstallScript, isSafeOrigin } = await import("../src/lib/skills/installScript.js");
+const { bundleTarballUrl, bundleRawFileUrl, ENGINE_HOME_BASE } = await import("../src/lib/skills/engineTargets.js");
 const installRoute = await import("../src/app/api/public/skills/install.sh/route.js");
 const catalogRoute = await import("../src/app/api/public/skills/catalog/route.js");
 const fileRoute = await import("../src/app/api/public/skills/file/[slug]/route.js");
@@ -734,4 +736,97 @@ test("installer: naming skills or --list never asks anything", async () => {
   r = await runInstaller(["data-sweep"], { env: { DEROUTER_TTY: tty } });
   assert.equal(r.status, 0, r.err);
   assert.ok(!fs.existsSync(installed(".claude", "skills", "recon-pipeline")));
+});
+
+/* ── --engine: bundle-driven rendering ──────────────────────────────────
+ *
+ * Running --engine to completion needs a real tarball over HTTPS from the
+ * bundle's own source host, which this suite does not fake (no test here ever
+ * exercised --engine's execution even before bundles existed). What these pin
+ * instead is that the *rendering* — the per-bundle shell this change makes
+ * data-driven — is correct: the right URLs, the right case arms, the
+ * conditional installer step, and the non-Claude-Code skip note.
+ */
+
+const BUNDLE_A = {
+  slug: "rea-policy",
+  name: "rea policy",
+  sourceHost: "github.com",
+  sourceOwner: "Delify-Solutions",
+  sourceRepo: "rea_policy",
+  sourceRef: "main",
+  installerEntrypoint: "install.mjs",
+};
+const BUNDLE_B = {
+  slug: "second-bundle",
+  name: "second bundle",
+  sourceHost: "gitlab.com",
+  sourceOwner: "acme",
+  sourceRepo: "toolkit",
+  sourceRef: "main",
+  installerEntrypoint: "", // no installer entrypoint at all
+};
+
+test("install.sh embeds every published bundle's engine data, and only those", async () => {
+  const created = await bundlesRepo.createBundle(BUNDLE_A);
+  const draft = await bundlesRepo.createBundle({ ...BUNDLE_B, isPublished: false });
+  try {
+    const res = await get("/api/public/skills/install.sh");
+    const text = await res.text();
+    assert.ok(text.includes(`BUNDLE_SLUGS="${BUNDLE_A.slug}"`), "only the published bundle is listed");
+    assert.ok(text.includes(bundleTarballUrl(BUNDLE_A)));
+    assert.ok(text.includes(bundleRawFileUrl(BUNDLE_A, "omp/rt-engine.ts")));
+    assert.ok(text.includes(`${BUNDLE_A.slug}) printf '%s' "install.mjs"`), "its installer entrypoint case is rendered");
+    assert.ok(!text.includes(BUNDLE_B.slug), "an unpublished bundle never reaches the public script");
+  } finally {
+    await bundlesRepo.deleteBundle(created.id);
+    await bundlesRepo.deleteBundle(draft.id);
+  }
+});
+
+test("the multi-bundle case: two bundles each get their own unpack dir and MCP key", () => {
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A, BUNDLE_B]);
+  assert.ok(script.includes(`BUNDLE_SLUGS="${BUNDLE_A.slug} ${BUNDLE_B.slug}"`));
+  assert.ok(script.includes(`e_root="$HOME/$ENGINE_HOME_BASE/$b_slug"`), "each bundle unpacks under its own slug");
+  assert.ok(script.includes("holder[leaf][serverName]"), "the MCP key is the bundle's own slug, not a fixed name");
+  assert.ok(script.includes(`${BUNDLE_A.slug}) printf '%s' "${bundleTarballUrl(BUNDLE_A)}" ;;`));
+  assert.ok(script.includes(`${BUNDLE_B.slug}) printf '%s' "${bundleTarballUrl(BUNDLE_B)}" ;;`));
+  assert.ok(ENGINE_HOME_BASE.length > 0);
+});
+
+test("the installer-entrypoint step is conditional: present, absent, and a failing run all handled", () => {
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A, BUNDLE_B]);
+  // Present (BUNDLE_A): its path is rendered as a real case arm.
+  assert.ok(script.includes(`${BUNDLE_A.slug}) printf '%s' "install.mjs" ;;`));
+  // Absent (BUNDLE_B): no entrypoint configured, so its case arm yields "" and
+  // run_bundle_installer returns immediately without attempting anything.
+  assert.ok(script.includes(`${BUNDLE_B.slug}) printf '%s' "" ;;`));
+  assert.ok(script.includes('[ -n "$rb_entry" ] || return 0'));
+  // A missing file on disk is skipped silently, never `die`.
+  assert.ok(script.includes('[ -f "$rb_file" ] || return 0'));
+  // A failing entrypoint (non-zero exit) is a warning, not an abort: the rest of
+  // the install (skills, MCP registration) already happened by this point.
+  assert.ok(script.includes("thoát lỗi, bỏ qua (skill + MCP vẫn hoạt động)"));
+  assert.ok(!/die "[^"]*thoát lỗi/.test(script));
+});
+
+test("non-Claude-Code runtimes never run the installer, and the script says why", () => {
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
+  assert.ok(script.includes("khái niệm riêng của Claude Code"));
+  // The note only fires for a runtime that is not claude — the loop explicitly
+  // excludes it, and running the entrypoint itself is gated on claude being wanted.
+  assert.ok(script.includes('if [ "$rb_rt" != "claude" ]'));
+  assert.ok(script.includes('*" claude "*) ;;'));
+});
+
+test("--dir skips the bundle installer step and says why", () => {
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
+  assert.ok(script.includes("đang dùng --dir, không phải thư mục cài mặc định"));
+  assert.ok(script.includes('if [ -n "$DIR" ]'));
+});
+
+test("a bundle with no published engine leaves --engine a documented no-op", () => {
+  const script = buildInstallScript("https://ai.example.com", []);
+  assert.ok(script.includes('BUNDLE_SLUGS=""'));
+  assert.ok(script.includes("chưa có bundle nào được phát hành"));
 });
