@@ -8,7 +8,7 @@
 // to tell them where to put it.
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
-import { SKILL_RUNTIME_IDS, parseRuntimes } from "../../skills/runtimes.js";
+import { SKILL_RUNTIME_IDS, parseRuntimes, storedRuntimes, isEveryRuntime } from "../../skills/runtimes.js";
 import { slugFromName } from "../../skills/frontmatter.js";
 
 export const SKILL_AUDIENCES = ["customer", "internal"];
@@ -106,7 +106,7 @@ function normalize(input = {}) {
     category: String(input.category ?? "").trim(),
     body: String(input.body ?? ""),
     fileName,
-    targets: parseRuntimes(requestedRuntimes(input)),
+    targets: storedRuntimes(requestedRuntimes(input)),
     audience: String(input.audience ?? "").trim() || "customer",
     isPublished: parseFlag(input.isPublished, 1),
     usageNotes: String(input.usageNotes ?? "").trim(),
@@ -165,6 +165,8 @@ export function skillInputError(input = {}) {
 
 function rowToSkill(row, { withBody = true } = {}) {
   if (!row) return null;
+  // Resolved ids: a row that stores "every agent" ([]) follows the registry.
+  const targets = parseRuntimes(row.targets ?? row.target);
   const skill = {
     id: row.id,
     slug: row.slug,
@@ -173,7 +175,8 @@ function rowToSkill(row, { withBody = true } = {}) {
     description: row.description || "",
     category: row.category || "",
     fileName: row.fileName || "SKILL.md",
-    targets: parseRuntimes(row.targets ?? row.target),
+    targets,
+    allAgents: isEveryRuntime(targets),
     audience: row.audience || "customer",
     isPublished: row.isPublished === 1 || row.isPublished === true,
     usageNotes: row.usageNotes || "",
@@ -292,7 +295,7 @@ export async function createSkill(input, { createdBy = null } = {}) {
      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     [
       id, data.slug, data.name, data.summary, data.description, data.category,
-      data.body, data.fileName, data.targets[0], JSON.stringify(data.targets), data.audience,
+      data.body, data.fileName, data.targets[0] ?? "generic", JSON.stringify(data.targets), data.audience,
       data.isPublished, data.usageNotes, data.version, data.sortOrder,
       createdBy, now, now,
     ]
@@ -350,7 +353,7 @@ export async function updateSkill(id, patch = {}) {
      WHERE id = ?`,
     [
       data.slug, data.name, data.summary, data.description, data.category, data.body,
-      data.fileName, data.targets[0], JSON.stringify(data.targets), data.audience, data.isPublished,
+      data.fileName, data.targets[0] ?? "generic", JSON.stringify(data.targets), data.audience, data.isPublished,
       data.usageNotes, data.version, data.sortOrder, nowIso(), id,
     ]
   );

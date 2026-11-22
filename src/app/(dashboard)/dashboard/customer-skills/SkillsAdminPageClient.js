@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, Button, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
-import { runtimeLabel, SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
+import { runtimeLabel } from "@/lib/skills/runtimes.js";
 import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
+import RepoImportModal from "./RepoImportModal";
 
 const FILTERS = [
   { value: "all", label: "Tất cả" },
@@ -40,6 +41,8 @@ export default function SkillsAdminPageClient() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [importKey, setImportKey] = useState(0);
+  const [repoOpen, setRepoOpen] = useState(false);
+  const [repoKey, setRepoKey] = useState(0);
   const [editor, setEditor] = useState(null); // { key, editing, initial }
   const [deleting, setDeleting] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -103,6 +106,7 @@ export default function SkillsAdminPageClient() {
     });
 
   const openImport = () => { setImportKey((k) => k + 1); setImportOpen(true); };
+  const openRepo = () => { setRepoKey((k) => k + 1); setRepoOpen(true); };
   const openCreate = () => setEditor({ key: Date.now(), editing: null, initial: formFromSkill(null) });
 
   const openEdit = async (row) => {
@@ -198,7 +202,8 @@ export default function SkillsAdminPageClient() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={openCreate}>Viết một skill</Button>
-          <Button onClick={openImport} icon="upload_file">Thêm nhiều skill</Button>
+          <Button variant="secondary" onClick={openImport} icon="upload_file">Thêm nhiều skill</Button>
+          <Button onClick={openRepo} icon="link">Nhập từ repo</Button>
         </div>
       </div>
 
@@ -253,7 +258,7 @@ export default function SkillsAdminPageClient() {
               Đã chọn {selected.size} skill
               {hiddenSelected > 0 && ` (${hiddenSelected} đang bị bộ lọc ẩn, vẫn được áp dụng)`}
             </span>
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.targets?.length ? selectedRows[0].targets : SKILL_RUNTIME_IDS)}>Đặt agent</Button>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.allAgents ? [] : (selectedRows[0]?.targets || []))}>Đặt agent</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: true })}>Phát hành</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: false })}>Ẩn</Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSelected(new Set()); setBulkTargets(null); }}>Bỏ chọn</Button>
@@ -303,9 +308,13 @@ export default function SkillsAdminPageClient() {
                   {row.version && <Badge variant="default" size="sm">v{row.version}</Badge>}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  {(row.targets || []).map((id) => (
-                    <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
-                  ))}
+                  {row.allAgents ? (
+                    <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">Mọi agent</span>
+                  ) : (
+                    (row.targets || []).map((id) => (
+                      <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
+                    ))
+                  )}
                 </div>
                 <p className="mt-1 font-mono text-[11px] text-text-subtle">
                   {row.slug} · {row.downloadCount ?? 0} lượt tải · cập nhật {fmtDate(row.updatedAt)}
@@ -331,6 +340,17 @@ export default function SkillsAdminPageClient() {
           existingSlugs={existingSlugs}
           categories={categories}
           onClose={() => setImportOpen(false)}
+          onDone={load}
+        />
+      )}
+
+      {repoOpen && (
+        <RepoImportModal
+          key={repoKey}
+          isOpen
+          existingSlugs={existingSlugs}
+          categories={categories}
+          onClose={() => setRepoOpen(false)}
           onDone={load}
         />
       )}

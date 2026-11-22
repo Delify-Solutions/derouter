@@ -378,16 +378,222 @@ test("installer: one skill goes into every supported agent that is on the machin
   fs.mkdirSync(installed(".codex"), { recursive: true });
   const r = await runInstaller(["--all"]);
   assert.equal(r.status, 0, r.err);
-  // recon-pipeline supports claude + cursor and both are here; codex is here but not supported.
-  assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
-  assert.ok(fs.existsSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md")));
+  // recon-pipeline supports claude + cursor and both are here; codex is here but not
+  // supported. Two folders means one canonical copy that both agents link to.
+  const canonical = installed(".agents", "skills", "recon-pipeline");
+  assert.equal(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8"), BODY_A);
+  for (const agent of [".claude", ".cursor"]) {
+    const dest = installed(agent, "skills", "recon-pipeline");
+    assert.ok(fs.lstatSync(dest).isSymbolicLink(), `${agent} links to the shared copy`);
+    assert.equal(fs.readFileSync(path.join(dest, "SKILL.md"), "utf8"), BODY_A);
+  }
   assert.ok(!fs.existsSync(installed(".codex", "skills", "recon-pipeline")));
-  // data-sweep supports only codex.
-  assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+  // data-sweep supports only codex: a single folder is written directly, no link.
+  assert.equal(fs.readFileSync(installed(".codex", "skills", "data-sweep", "SKILL.md"), "utf8"), BODY_B);
+  assert.ok(!fs.lstatSync(installed(".codex", "skills", "data-sweep")).isSymbolicLink());
   assert.ok(!fs.existsSync(installed(".claude", "skills", "data-sweep")));
+  assert.match(r.out, /recon-pipeline \[claude,cursor\]: đã liên kết|recon-pipeline \[cursor\]: đã liên kết/);
+  assert.match(r.out, /Xong: 4 bản cài/);
+
+  // A second run changes nothing and a changed skill updates the one shared copy.
+  const again = await runInstaller(["--all"]);
+  assert.equal(again.status, 0, again.err);
+  assert.match(again.out, /recon-pipeline \[[a-z,]+\]: đã là bản mới nhất/);
+});
+
+test("installer: linking to a shared copy works under dash as well", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  const r = await runInstaller(["recon-pipeline"], { shell: "dash" });
+  if (r.status === null || /spawn dash ENOENT/.test(r.err)) return;
+  assert.equal(r.status, 0, r.err);
+  assert.ok(fs.lstatSync(installed(".claude", "skills", "recon-pipeline")).isSymbolicLink());
+  assert.equal(fs.readFileSync(installed(".cursor", "skills", "recon-pipeline", "SKILL.md"), "utf8"), BODY_A);
+});
+
+test("installer: --copy writes each agent folder separately instead of linking", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  const r = await runInstaller(["recon-pipeline", "--copy"]);
+  assert.equal(r.status, 0, r.err);
+  for (const agent of [".claude", ".cursor"]) {
+    const dest = installed(agent, "skills", "recon-pipeline");
+    assert.ok(!fs.lstatSync(dest).isSymbolicLink());
+    assert.equal(fs.readFileSync(path.join(dest, "SKILL.md"), "utf8"), BODY_A);
+  }
+  assert.ok(!fs.existsSync(installed(".agents")), "no shared copy is made with --copy");
   assert.match(r.out, /recon-pipeline \[claude\]: đã cài/);
   assert.match(r.out, /recon-pipeline \[cursor\]: đã cài/);
-  assert.match(r.out, /Xong: 3 bản cài/);
+});
+
+test("installer: a real folder from an earlier install is updated in place, never swapped for a link", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude", "skills", "recon-pipeline"), { recursive: true });
+  fs.writeFileSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md"), "old body");
+  fs.writeFileSync(installed(".claude", "skills", "recon-pipeline", "my-notes.txt"), "keep me");
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  const r = await runInstaller(["recon-pipeline"]);
+  assert.equal(r.status, 0, r.err);
+  const dest = installed(".claude", "skills", "recon-pipeline");
+  assert.ok(!fs.lstatSync(dest).isSymbolicLink());
+  assert.equal(fs.readFileSync(path.join(dest, "SKILL.md"), "utf8"), BODY_A);
+  assert.equal(fs.readFileSync(path.join(dest, "my-notes.txt"), "utf8"), "keep me");
+  assert.ok(fs.lstatSync(installed(".cursor", "skills", "recon-pipeline")).isSymbolicLink());
+});
+
+test("installer: a link the customer made is never re-pointed, its target folder is updated instead", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const mine = path.join(tmpDir, "my-dotfiles-skill");
+  fs.rmSync(mine, { recursive: true, force: true });
+  fs.mkdirSync(mine, { recursive: true });
+  fs.writeFileSync(path.join(mine, "extra.txt"), "mine");
+  fs.mkdirSync(installed(".claude", "skills"), { recursive: true });
+  fs.symlinkSync(mine, installed(".claude", "skills", "recon-pipeline"));
+  fs.mkdirSync(installed(".cursor"), { recursive: true });
+  const r = await runInstaller(["recon-pipeline"]);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(fs.readlinkSync(installed(".claude", "skills", "recon-pipeline")), mine, "still points at their folder");
+  assert.equal(fs.readFileSync(path.join(mine, "SKILL.md"), "utf8"), BODY_A);
+  assert.equal(fs.readFileSync(path.join(mine, "extra.txt"), "utf8"), "mine");
+  // …while our own link is remade on the next run without complaint.
+  const again = await runInstaller(["recon-pipeline"]);
+  assert.equal(again.status, 0, again.err);
+});
+
+test("installer: XDG_CONFIG_HOME moves OpenCode, Goose and Amp", async () => {
+  const created = await skills.createSkill({ name: "Xdg Agents", body: BODY_B, targets: ["opencode", "amp"] });
+  try {
+    fs.rmSync(home, { recursive: true, force: true });
+    const xdg = path.join(tmpDir, "xdg-config");
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.mkdirSync(path.join(xdg, "opencode"), { recursive: true });
+    const r = await runInstaller(["xdg-agents"], { env: { XDG_CONFIG_HOME: xdg } });
+    assert.equal(r.status, 0, r.err);
+    assert.ok(fs.existsSync(path.join(xdg, "opencode", "skills", "xdg-agents", "SKILL.md")));
+    assert.ok(!fs.existsSync(installed(".config")), "nothing written under the default config home");
+
+    // Without it, the default is ~/.config.
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".config", "amp"), { recursive: true });
+    const d = await runInstaller(["xdg-agents"]);
+    assert.equal(d.status, 0, d.err);
+    assert.ok(fs.existsSync(installed(".config", "agents", "skills", "xdg-agents", "SKILL.md")));
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
+
+test("installer: omp and dsh get their own folders, and DSH_HOME moves dsh", async () => {
+  const created = await skills.createSkill({ name: "Agent Mix", body: BODY_B, targets: ["omp", "dsh"] });
+  try {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".omp"), { recursive: true });
+    fs.mkdirSync(installed(".dsh"), { recursive: true });
+    let r = await runInstaller(["agent-mix"]);
+    assert.equal(r.status, 0, r.err);
+    // omp keeps skills under .omp/agent/skills, not .omp/skills.
+    assert.equal(fs.readFileSync(installed(".agents", "skills", "agent-mix", "SKILL.md"), "utf8"), BODY_B);
+    assert.ok(fs.lstatSync(installed(".omp", "agent", "skills", "agent-mix")).isSymbolicLink());
+    assert.ok(fs.lstatSync(installed(".dsh", "skills", "agent-mix")).isSymbolicLink());
+
+    // DSH_HOME replaces ~/.dsh for both detection and the skills folder.
+    fs.rmSync(home, { recursive: true, force: true });
+    const elsewhere = path.join(tmpDir, "dsh-home");
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+    fs.mkdirSync(elsewhere, { recursive: true });
+    r = await runInstaller(["agent-mix", "--copy"], { env: { DSH_HOME: elsewhere } });
+    assert.equal(r.status, 0, r.err);
+    assert.equal(fs.readFileSync(path.join(elsewhere, "skills", "agent-mix", "SKILL.md"), "utf8"), BODY_B);
+    assert.ok(!fs.existsSync(installed(".omp")), "omp is not on this machine");
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
+
+test("installer: Antigravity, its CLI and ZCode land where each reads skills", async () => {
+  const created = await skills.createSkill({ name: "Newer Agents", body: BODY_B, targets: ["antigravity", "agy", "zcode"] });
+  try {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".gemini", "antigravity-cli"), { recursive: true }); // only the CLI is here
+    fs.mkdirSync(installed(".zcode"), { recursive: true });
+    const r = await runInstaller(["newer-agents"]);
+    assert.equal(r.status, 0, r.err);
+    // Antigravity and its CLI share ~/.gemini/config/skills; only the CLI is detected.
+    assert.ok(fs.existsSync(installed(".gemini", "config", "skills", "newer-agents", "SKILL.md")));
+    assert.ok(fs.existsSync(installed(".zcode", "skills", "newer-agents", "SKILL.md")));
+    assert.match(r.out, /newer-agents \[agy\]/);
+
+    // Both Antigravity ids on one machine write the shared folder once.
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".gemini", "antigravity"), { recursive: true });
+    fs.mkdirSync(installed(".gemini", "antigravity-cli"), { recursive: true });
+    const both = await runInstaller(["newer-agents", "--target", "antigravity,agy"]);
+    assert.equal(both.status, 0, both.err);
+    assert.match(both.out, /newer-agents \[antigravity,agy\]: đã cài/);
+    assert.match(both.out, /Xong: 1 bản cài/);
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
+
+test("installer: agents that read the same folder share one write", async () => {
+  const created = await skills.createSkill({ name: "Shared Dir", body: BODY_B, targets: ["cline", "pi", "warp"] });
+  try {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".cline"), { recursive: true });
+    fs.mkdirSync(installed(".pi", "agent"), { recursive: true });
+    const r = await runInstaller(["shared-dir"]);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(fs.readFileSync(installed(".agents", "skills", "shared-dir", "SKILL.md"), "utf8"), BODY_B);
+    assert.ok(!fs.lstatSync(installed(".agents", "skills", "shared-dir")).isSymbolicLink());
+    assert.match(r.out, /shared-dir \[cline,pi\]: đã cài/);
+    assert.match(r.out, /Xong: 1 bản cài/);
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
+
+test("installer: an 'all agents' skill follows the machine, and the catalogue says all", async () => {
+  const created = await skills.createSkill({ name: "Everywhere", body: BODY_B });
+  try {
+    const res = await get("/api/public/skills/catalog", customerKey);
+    const line = (await res.text()).split("\n").find((l) => l.startsWith("everywhere\t"));
+    assert.equal(line.split("\t")[3], "all");
+
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.mkdirSync(installed(".omp"), { recursive: true });
+    const r = await runInstaller(["everywhere"]);
+    assert.equal(r.status, 0, r.err);
+    assert.ok(fs.existsSync(installed(".omp", "agent", "skills", "everywhere", "SKILL.md")));
+    assert.ok(!fs.existsSync(installed(".claude")), "only the agents that are here");
+
+    // No agent at all: it goes to the first one in the table.
+    fs.rmSync(home, { recursive: true, force: true });
+    const none = await runInstaller(["everywhere"]);
+    assert.equal(none.status, 0, none.err);
+    assert.match(none.out, /chưa thấy agent nào trên máy, cài cho claude/);
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
+
+test("the agent table in the script comes from the registry and is shell-safe", async () => {
+  const { SKILL_RUNTIMES } = await import("../src/lib/skills/runtimes.js");
+  const { runtimeShell } = await import("../src/lib/skills/installScript.js");
+  const shell = runtimeShell();
+  assert.deepEqual(shell.ids.split(" "), SKILL_RUNTIMES.map((r) => r.id));
+  for (const r of SKILL_RUNTIMES) {
+    assert.match(r.id, /^[a-z]+$/);
+    for (const p of [r.home, r.skills, r.xdg, r.xdgSkills].filter(Boolean)) {
+      assert.match(p, /^[A-Za-z0-9._/-]+$/);
+      assert.ok(!p.includes("..") && !p.startsWith("/"), p);
+    }
+  }
+  const script = buildInstallScript("https://ai.example.com");
+  assert.ok(script.includes('dsh) printf \'%s\' "${DSH_HOME:-$HOME/.dsh}/skills"'));
+  assert.ok(script.includes('omp) printf \'%s\' "$HOME/.omp/agent/skills"'));
 });
 
 test("installer: only the agents that are present receive the skill", async () => {
@@ -419,7 +625,7 @@ test("installer: --target takes a comma list or repeats, and skips a skill that 
 
   r = await runInstaller(["--all", "--target", "vim"]);
   assert.notEqual(r.status, 0);
-  assert.match(r.err, /--target chỉ nhận/);
+  assert.match(r.err, /--target không có agent "vim"/);
 });
 
 test("installer: an agent list from the server must name only known agents", async () => {

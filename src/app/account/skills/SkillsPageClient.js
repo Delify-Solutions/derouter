@@ -78,6 +78,36 @@ function Step({ index, title, children }) {
   );
 }
 
+/**
+ * Where one skill's file goes, for one agent at a time: with two dozen agents a path
+ * per agent would bury the card, so the customer picks theirs.
+ */
+function InstallPath({ skill }) {
+  const agents = skill.targets || [];
+  const [agent, setAgent] = useState(agents[0] || "claude");
+  const current = agents.includes(agent) ? agent : agents[0];
+  if (!current) return null;
+  const id = `path-${skill.slug}`;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id}><Eyebrow>Đặt file vào, cho agent</Eyebrow></label>
+        <select
+          id={id}
+          value={current}
+          onChange={(e) => setAgent(e.target.value)}
+          className="h-8 border border-border bg-surface px-2 text-sm text-text-main focus:border-text-main focus:outline-none"
+        >
+          {agents.map((rid) => (
+            <option key={rid} value={rid}>{runtimeLabel(rid)}</option>
+          ))}
+        </select>
+      </div>
+      <CopyLine value={runtimeInstallDir(current, skill.slug)} label={`đường dẫn ${runtimeLabel(current)}`} />
+    </div>
+  );
+}
+
 function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
   return (
     <li className="flex flex-col gap-4 border border-border bg-surface p-5">
@@ -92,9 +122,13 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
               className="size-4"
             />
             <h3 className="font-mono text-sm font-semibold text-text-main">{skill.name}</h3>
-            {(skill.targets || []).map((id) => (
-              <Tag key={id} tone="neutral">{runtimeLabel(id)}</Tag>
-            ))}
+            {skill.allAgents ? (
+              <Tag tone="neutral">Mọi agent</Tag>
+            ) : (
+              (skill.targets || []).map((id) => (
+                <Tag key={id} tone="neutral">{runtimeLabel(id)}</Tag>
+              ))
+            )}
             {skill.version && <Tag tone="neutral">v{skill.version}</Tag>}
           </div>
           {skill.summary && (
@@ -109,17 +143,7 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
         </span>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Eyebrow>Đặt file vào</Eyebrow>
-        {(skill.targets || []).map((id) => (
-          <div key={id} className="flex min-w-0 items-center gap-2">
-            <span className="w-24 shrink-0 font-mono text-[11px] text-text-subtle">{runtimeLabel(id)}</span>
-            <div className="min-w-0 flex-1">
-              <CopyLine value={runtimeInstallDir(id, skill.slug)} label={`đường dẫn ${runtimeLabel(id)}`} />
-            </div>
-          </div>
-        ))}
-      </div>
+      <InstallPath skill={skill} />
 
       {origin && (
         <div className="flex flex-col gap-1.5">
@@ -244,7 +268,7 @@ export default function SkillsPageClient() {
       <div className="flex flex-col gap-2">
         <Heading>Skill</Heading>
         <p className="max-w-2xl text-sm leading-6 text-text-muted">
-          Skill markdown cài vào agent của bạn (Claude Code, Codex, Cursor…) để agent biết
+          Skill markdown cài vào agent của bạn (Claude Code, Codex, Cursor, omp, dsh…) để agent biết
           cách dùng derouter và các quy trình kèm theo. Tải file, đặt đúng thư mục, rồi gọi
           skill trong phiên làm việc.
         </p>
@@ -404,8 +428,10 @@ export default function SkillsPageClient() {
             )}
             <p className="mt-3 text-sm leading-6 text-text-muted">
               Mỗi skill được cài vào mọi agent mà nó hỗ trợ và máy bạn đang có (Claude Code, Codex,
-              Cursor); máy chưa có agent nào thì cài cho agent đầu tiên của skill. Thêm{" "}
-              <code>--target claude,codex</code> để chỉ định agent, hoặc{" "}
+              Cursor, omp, dsh và nhiều agent khác); máy chưa có agent nào thì cài cho agent đầu tiên.
+              Cài cho nhiều agent thì skill được ghi một bản ở <code>~/.agents/skills</code> rồi liên
+              kết sang từng agent, cập nhật một chỗ là đủ — thêm <code>--copy</code> nếu muốn chép riêng.
+              Thêm <code>--target claude,omp,dsh</code> để chỉ định agent, hoặc{" "}
               <code>--dir &lt;đường dẫn&gt;</code> để chọn thư mục. Sau khi cài, mở lại phiên agent.
             </p>
           </Panel>
@@ -434,16 +460,20 @@ export default function SkillsPageClient() {
                   label="lệnh chép file"
                 />
                 <p className="text-sm leading-6 text-text-muted">
-                  Với Codex dùng <code>~/.codex/skills/&lt;slug&gt;/SKILL.md</code>; Cursor dùng{" "}
-                  <code>~/.cursor/skills/&lt;slug&gt;/SKILL.md</code>. Mỗi skill là một thư mục,
-                  mỗi thư mục đúng một <code>SKILL.md</code>.
+                  Mỗi agent đọc skill ở một thư mục riêng: Codex dùng{" "}
+                  <code>~/.codex/skills/&lt;slug&gt;/SKILL.md</code>, Cursor dùng{" "}
+                  <code>~/.cursor/skills/&lt;slug&gt;/SKILL.md</code>, omp dùng{" "}
+                  <code>~/.omp/agent/skills/&lt;slug&gt;/SKILL.md</code>, dsh dùng{" "}
+                  <code>~/.dsh/skills/&lt;slug&gt;/SKILL.md</code>. Ở tab &quot;Danh sách&quot; mỗi skill
+                  có ô chọn agent để hiện đúng đường dẫn. Mỗi skill là một thư mục, mỗi thư mục đúng
+                  một <code>SKILL.md</code>.
                 </p>
               </Step>
 
               <Step index="4" title="Mở lại phiên agent">
                 <p className="text-sm leading-6 text-text-muted">
-                  Skill chỉ được nạp lúc phiên khởi động. Thoát hẳn Claude Code (hoặc Codex,
-                  Cursor) rồi mở lại — không cần khởi động lại máy.
+                  Skill chỉ được nạp lúc phiên khởi động. Thoát hẳn agent (Claude Code, Codex,
+                  Cursor, omp, dsh…) rồi mở lại — không cần khởi động lại máy.
                 </p>
               </Step>
 

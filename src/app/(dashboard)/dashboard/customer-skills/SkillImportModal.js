@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { Button, Modal } from "@/shared/components";
-import { SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
 import { readSkillFrontmatter, slugFromName } from "@/lib/skills/frontmatter.js";
 import { pickSkillFiles, draftFields, draftProblem } from "@/lib/skills/importDrafts.js";
 import RuntimePicker from "./RuntimePicker";
@@ -55,7 +54,7 @@ export default function SkillImportModal({ isOpen, existingSlugs, categories, on
   const countRef = useRef(0);
   const [items, setItems] = useState([]);
   const [pasted, setPasted] = useState("");
-  const [targets, setTargets] = useState(SKILL_RUNTIME_IDS);
+  const [targets, setTargets] = useState([]); // [] = every agent
   const [category, setCategory] = useState("");
   const [audience, setAudience] = useState("customer");
   const [isPublished, setIsPublished] = useState(true);
