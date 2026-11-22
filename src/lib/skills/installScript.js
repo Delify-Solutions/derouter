@@ -10,6 +10,7 @@
 // cut short never executes half a script.
 
 import { SKILL_RUNTIMES, SHARED_SKILLS_DIR, runtimeSkillsDir } from "./runtimes.js";
+import { ENGINE_TARGETS, ENGINE_TARBALL, ENGINE_BRIDGE_URL, ENGINE_HOME, NODE_MIN } from "./engineTargets.js";
 
 // Only a plain http(s) origin is ever written into the script, because the
 // value is placed inside single quotes.
@@ -47,6 +48,13 @@ set -f
 BASE="@{DEROUTER_URL:-__ORIGIN__}"
 KEY="@{DEROUTER_KEY:-}"
 RUNTIMES="__RUNTIME_IDS__"
+ENGINE_TARGETS="__ENGINE_IDS__"
+ENGINE_MCP="__ENGINE_MCP_IDS__"
+ENGINE_BRIDGE="__ENGINE_BRIDGE_IDS__"
+ENGINE_NONE="__ENGINE_NONE_IDS__"
+ENGINE_TARBALL="__ENGINE_TARBALL__"
+ENGINE_HOME="__ENGINE_HOME__"
+NODE_MIN="__NODE_MIN__"
 CANON="$HOME/__SHARED_DIR__"
 COPY=0
 # Where the choice is read from when no skill is named; the terminal, not stdin
@@ -129,6 +137,167 @@ link_one() {
   fi
 }
 
+# --- engine ------------------------------------------------------------------
+#
+# The skills call 67 tools that live in a Node MCP server. Without it a skill loads,
+# reads a tool name, finds nothing, and stops. --engine fetches that server and
+# registers it with each agent that can take one.
+#
+# omp has no MCP client, so it gets a bridge extension instead; dsh owns its own copy
+# and is skipped. Both facts live in ENGINE_MCP / ENGINE_BRIDGE / ENGINE_NONE above.
+
+engine_path_for() {
+  case "$1" in
+__ENGINE_PATH_CASES__
+    *) printf '%s' "" ;;
+  esac
+}
+
+engine_key_for() {
+  case "$1" in
+__ENGINE_KEY_CASES__
+    *) printf '%s' "" ;;
+  esac
+}
+
+# A node that has node:sqlite. The engine cannot run on anything older, and an
+# agent's bundled runtime (Bun, Electron) is not a substitute.
+node_for_engine() {
+  # set -u: REDTEAM_NODE and the rest may be unset, so default them here.
+  for candidate in "@{REDTEAM_NODE:-}" "$(command -v node 2>/dev/null || true)" \
+                   /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+    [ -n "$candidate" ] || continue
+    [ -x "$candidate" ] || continue
+    if "$candidate" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>Number(process.argv[1].split(".")[0])||(a===Number(process.argv[1].split(".")[0])&&b>=Number(process.argv[1].split(".")[1]))?0:1)' "$NODE_MIN" 2>/dev/null; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Write the MCP registration for one agent. Merges into an existing config rather
+# than replacing it: the customer's own servers must survive.
+register_mcp() {
+  r_agent="$1"; r_key="$2"; r_config="$3"; r_node="$4"; r_server="$5"
+  mkdir -p "$(dirname "$r_config")" 2>/dev/null || true
+  if "$r_node" -e '
+const fs = require("fs");
+const [configPath, agent, keyName, nodePath, serverPath] = process.argv.slice(1);
+let data = {};
+try { data = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { data = {}; }
+// amp nests its key ("amp.mcpServers"); everything else is top level.
+const parts = keyName.split(".");
+let holder = data;
+for (const part of parts.slice(0, -1)) {
+  if (!holder[part] || typeof holder[part] !== "object") holder[part] = {};
+  holder = holder[part];
+}
+const leaf = parts[parts.length - 1];
+if (!holder[leaf] || typeof holder[leaf] !== "object") holder[leaf] = {};
+holder[leaf]["rt-claude"] = {
+  command: nodePath,
+  args: [serverPath],
+  env: { DSH_HOME: process.env.DSH_HOME || (process.env.HOME + "/.dsh") },
+};
+fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
+' "$r_config" "$r_agent" "$r_key" "$r_node" "$r_server" 2>/dev/null; then
+    printf 'engine [%s]: đã đăng ký MCP -> %s\n' "$r_agent" "$r_config"
+  else
+    printf 'engine [%s]: KHÔNG ghi được %s\n' "$r_agent" "$r_config" >&2
+    return 1
+  fi
+}
+
+# Fetch and unpack the engine, once. Returns its mcp-server.mjs path in ENGINE_SERVER.
+install_engine_source() {
+  e_root="$HOME/$ENGINE_HOME"
+  e_server="$e_root/lib/mcp-server.mjs"
+  if [ -f "$e_server" ]; then
+    # Update is how you refresh: the bundle is fetched fresh, so honour the flag
+    # rather than asking the customer to guess a second switch.
+    if [ "$UPDATE_ENGINE" = "1" ]; then
+      printf 'engine: cập nhật %s\n' "$e_root"
+    else
+      printf 'engine: đã có ở %s (--engine-update để làm mới)\n' "$e_root"
+      ENGINE_SERVER="$e_server"
+      return 0
+    fi
+  fi
+  e_tar="$WORK/engine.tar.gz"
+  printf 'engine: tải %s\n' "$ENGINE_TARBALL"
+  code="$(curl -sSL -o "$e_tar" -w '%{http_code}' "$ENGINE_TARBALL")" || die "không tải được engine"
+  [ "$code" = "200" ] || die "không tải được engine (HTTP $code)"
+  e_tmp="$WORK/engine-unpack"
+  mkdir -p "$e_tmp" || die "không tạo được thư mục giải nén"
+  # Strip the single top-level directory the tarball carries.
+  tar -xzf "$e_tar" -C "$e_tmp" --strip-components=1 2>/dev/null \
+    || die "không giải nén được engine (cần tar)"
+  [ -f "$e_tmp/lib/mcp-server.mjs" ] || die "gói engine thiếu lib/mcp-server.mjs"
+  mkdir -p "$e_root" || die "không tạo được $e_root"
+  cp -R "$e_tmp/." "$e_root/" || die "không chép được engine vào $e_root"
+  printf 'engine: đã cài vào %s\n' "$e_root"
+  ENGINE_SERVER="$e_root/lib/mcp-server.mjs"
+}
+
+install_engine() {
+  e_node="$(node_for_engine)" || die "cần Node >= $NODE_MIN cho engine (node:sqlite). Cài Node rồi thử lại, hoặc bỏ --engine."
+  printf 'engine: node %s (%s)\n' "$("$e_node" -v 2>/dev/null)" "$e_node"
+  install_engine_source
+  [ -n "$ENGINE_SERVER" ] || die "không xác định được engine"
+
+  # Which agents to register: those asked for by --target, else those installed here.
+  e_wanted=""
+  for e_rt in $ENGINE_MCP $ENGINE_BRIDGE; do
+    if [ -n "$TARGETS" ]; then
+      case ",$TARGETS" in *",$e_rt,"*) e_wanted="$e_wanted $e_rt" ;; esac
+    else
+      [ -d "$(home_for "$e_rt")" ] && e_wanted="$e_wanted $e_rt"
+    fi
+  done
+  [ -n "$(printf '%s' "$e_wanted" | tr -d ' ')" ] || {
+    printf 'engine: chưa thấy agent nào trên máy. Đăng ký xong rồi chạy lại với --target claude (hoặc codex, omp…).\n' >&2
+    return 0
+  }
+
+  for e_rt in $e_wanted; do
+    case " $ENGINE_MCP " in
+      *" $e_rt "*)
+        register_mcp "$e_rt" "$(engine_key_for "$e_rt")" "$(engine_path_for "$e_rt")" "$e_node" "$ENGINE_SERVER" || true
+        ;;
+    esac
+    case " $ENGINE_BRIDGE " in
+      *" $e_rt "*)
+        e_bridge="$(home_for "$e_rt")/agent/extensions/rt-engine.ts"
+        mkdir -p "$(dirname "$e_bridge")" 2>/dev/null || true
+        e_src="$HOME/$ENGINE_HOME/omp/rt-engine.ts"
+        # The bundle normally carries the bridge. A tarball built before it existed
+        # (a GitHub codeload cache, say) does not, so fall back to fetching the one
+        # file rather than leaving omp with skills and no tools.
+        if [ ! -f "$e_src" ]; then
+          e_url="__ENGINE_BRIDGE_URL__"
+          if [ -n "$e_url" ]; then
+            curl -sSL -o "$WORK/bridge.ts" "$e_url" 2>/dev/null && e_src="$WORK/bridge.ts"
+          fi
+        fi
+        if [ -f "$e_src" ]; then
+          cp "$e_src" "$e_bridge" && printf 'engine [%s]: đã cài bridge -> %s\n' "$e_rt" "$e_bridge"
+        else
+          printf 'engine [%s]: không lấy được bridge (bỏ qua)\n' "$e_rt" >&2
+        fi
+        ;;
+    esac
+  done
+
+  for e_rt in $ENGINE_NONE; do
+    case " $e_wanted " in
+      *" $e_rt "*) printf 'engine [%s]: agent này tự quản engine riêng, bỏ qua\n' "$e_rt" ;;
+    esac
+  done
+
+  printf 'engine: xong. Mở lại phiên agent; kiểm tra bằng cách liệt kê tool redteam_*.\n'
+}
+
 # place_skill <slug> <file>: write the skill to every place in $WORK/places (one
 # "folder<TAB>agent" per line). Agents that read the same folder share one write. With
 # several different folders, one canonical copy is written and the others link to it,
@@ -153,13 +322,16 @@ place_skill() {
 main() {
   command -v curl >/dev/null 2>&1 || die "cần có curl"
 
-  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""
+  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --all) ALL=1 ;;
       --list) LIST=1 ;;
       --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
       --copy) COPY=1 ;;
+      --engine) WITH_ENGINE=1 ;;
+      --engine-only) WITH_ENGINE=1; ENGINE_ONLY=1 ;;
+      --engine-update) WITH_ENGINE=1; UPDATE_ENGINE=1 ;;
       --dir) [ $# -ge 2 ] || die "--dir cần một giá trị"; DIR="$2"; shift ;;
       --url) [ $# -ge 2 ] || die "--url cần một giá trị"; BASE="$2"; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -201,6 +373,12 @@ main() {
 
   WORK="$(mktemp -d "@{TMPDIR:-/tmp}/derouter-skills.XXXXXX")" || die "không tạo được thư mục tạm"
   trap 'rm -rf "$WORK"' EXIT INT TERM
+
+  # --engine-only means exactly that: no catalogue fetch, no skill writes.
+  if [ "$ENGINE_ONLY" = "1" ]; then
+    install_engine
+    return 0
+  fi
 
   code="$(fetch "$BASE/api/public/skills/catalog" "$WORK/catalog")" || die "không kết nối được $BASE"
   [ "$code" = "200" ] || explain "$code"
@@ -313,6 +491,10 @@ main() {
     place_skill "$slug" "$file"
   done <"$WORK/catalog"
 
+  if [ "$WITH_ENGINE" = "1" ]; then
+    install_engine
+  fi
+
   printf '\nXong: %s bản cài. Mở lại phiên của agent (Claude Code, Codex, omp, dsh…) để nạp skill mới.\n' "$installed"
 }
 
@@ -360,10 +542,29 @@ export function runtimeShell() {
   };
 }
 
+/**
+ * The shell for `--engine`: which agents take a registration and what each one needs.
+ * Rendered from ENGINE_TARGETS so adding an agent is one line there.
+ */
+export function engineShell() {
+  const mcp = ENGINE_TARGETS.filter((t) => t.mode === "mcp");
+  const bridge = ENGINE_TARGETS.filter((t) => t.mode === "bridge");
+  const none = ENGINE_TARGETS.filter((t) => t.mode === "none");
+  return {
+    ids: ENGINE_TARGETS.map((t) => t.id).join(" "),
+    mcpIds: mcp.map((t) => t.id).join(" "),
+    bridgeIds: bridge.map((t) => t.id).join(" "),
+    noneIds: none.map((t) => t.id).join(" "),
+    pathCases: mcp.map((t) => `    ${t.id}) printf '%s' "$HOME/${t.path}" ;;`).join("\n"),
+    keyCases: mcp.map((t) => `    ${t.id}) printf '%s' "${t.key}" ;;`).join("\n"),
+  };
+}
+
 /** The install script with this server's public origin filled in; "" origin leaves --url required. */
 export function buildInstallScript(origin) {
   const safe = isSafeOrigin(origin) ? origin : "";
   const shell = runtimeShell();
+  const engine = engineShell();
   // `${` cannot appear inside the template literal, so the script spells shell
   // parameter expansion as `@{` and it is restored here.
   return TEMPLATE
@@ -371,5 +572,15 @@ export function buildInstallScript(origin) {
     .replaceAll("__RUNTIME_IDS__", shell.ids)
     .replaceAll("__SHARED_DIR__", SHARED_SKILLS_DIR)
     .replaceAll("__RUNTIME_FUNCS__", shell.functions)
+    .replaceAll("__ENGINE_IDS__", engine.ids)
+    .replaceAll("__ENGINE_MCP_IDS__", engine.mcpIds)
+    .replaceAll("__ENGINE_BRIDGE_IDS__", engine.bridgeIds)
+    .replaceAll("__ENGINE_NONE_IDS__", engine.noneIds)
+    .replaceAll("__ENGINE_PATH_CASES__", engine.pathCases)
+    .replaceAll("__ENGINE_KEY_CASES__", engine.keyCases)
+    .replaceAll("__ENGINE_TARBALL__", ENGINE_TARBALL)
+    .replaceAll("__ENGINE_BRIDGE_URL__", ENGINE_BRIDGE_URL)
+    .replaceAll("__ENGINE_HOME__", ENGINE_HOME)
+    .replaceAll("__NODE_MIN__", NODE_MIN.major + "." + NODE_MIN.minor)
     .replaceAll("@{", "$" + "{");
 }

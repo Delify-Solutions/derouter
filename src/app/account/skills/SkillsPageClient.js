@@ -426,6 +426,29 @@ export default function SkillsPageClient() {
                 <CopyLine value={installCommand(origin, "<slug> <slug>")} label="lệnh cài một số skill" wrap />
               </div>
             )}
+            <div className="mt-4 border-t border-border pt-4">
+              <Eyebrow>Cần tool, không chỉ tài liệu?</Eyebrow>
+              <p className="mt-2 text-sm leading-6 text-text-muted">
+                Skill là <strong className="text-text-main">hướng dẫn</strong>: nó mô tả quy trình và gọi
+                các tool như <code>redteam_asset_add</code>. Những tool đó nằm trong engine (MCP server,
+                67 tool) — không có engine thì skill vẫn mở được nhưng tới bước gọi tool là dừng. Thêm{" "}
+                <code>--engine</code> để cài luôn engine:
+              </p>
+              {origin && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <CopyLine value={installCommand(origin, "--all --engine")} label="lệnh cài skill + engine" wrap />
+                  <CopyLine value={installCommand(origin, "--engine-only")} label="lệnh chỉ cài engine" wrap />
+                </div>
+              )}
+              <p className="mt-2 text-sm leading-6 text-text-muted">
+                Engine cần <strong className="text-text-main">Node &gt;= 22.5</strong> (dùng{" "}
+                <code>node:sqlite</code>) và được đăng ký tự động cho Claude Code, Codex, Cursor,
+                Windsurf, Amp, Cline. <strong className="text-text-main">omp</strong> không có MCP client
+                nên installer cài một bridge extension thay thế. <strong className="text-text-main">dsh</strong>{" "}
+                tự quản engine riêng nên được bỏ qua. Engine nằm ở <code>~/rt-claude</code>;{" "}
+                <code>--engine-update</code> để làm mới.
+              </p>
+            </div>
             <p className="mt-3 text-sm leading-6 text-text-muted">
               Mỗi skill được cài vào mọi agent mà nó hỗ trợ và máy bạn đang có (Claude Code, Codex,
               Cursor, omp, dsh và nhiều agent khác); máy chưa có agent nào thì cài cho agent đầu tiên.
