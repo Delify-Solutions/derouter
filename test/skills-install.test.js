@@ -169,7 +169,7 @@ test("the catalogue lists published customer skills as tab-separated lines", asy
   const rows = (await res.text()).trim().split("\n").map((line) => line.split("\t"));
   assert.deepEqual(rows.map((r) => r[0]).sort(), ["data-sweep", "recon-pipeline"]);
   const recon = rows.find((r) => r[0] === "recon-pipeline");
-  assert.deepEqual(recon, ["recon-pipeline", "SKILL.md", "1.2", "claude,cursor", "Recon Pipeline"]);
+  assert.deepEqual(recon, ["recon-pipeline", "SKILL.md", "1.2", "claude,cursor", "Recon Pipeline", "-"]);
   const sweep = rows.find((r) => r[0] === "data-sweep");
   assert.equal(sweep[2], "-"); // an empty version is "-", never an empty field
 });
@@ -353,6 +353,42 @@ test("installer: a bad entry anywhere in the catalogue stops everything, even af
     mockCatalog = null;
   }
   assert.ok(!fs.existsSync(home), "the good first line must not have been written");
+});
+
+test("installer: --bundle expands to every skill the catalogue tags with it, and implies --engine", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  fs.mkdirSync(installed(".codex"), { recursive: true });
+  mockCatalog =
+    "recon-pipeline\tSKILL.md\t-\tclaude\tRecon\tredteam-pack\n" +
+    "data-sweep\tSKILL.md\t-\tcodex\tSweep\tredteam-pack\n" +
+    "lone\tSKILL.md\t-\tclaude\tLone\t-\n";
+  try {
+    const r = await runInstaller(["--bundle", "redteam-pack"]);
+    assert.equal(r.status, 0, r.err);
+    assert.match(r.out, /Xong: 2 bản cài/);
+    assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+    assert.ok(fs.existsSync(installed(".codex", "skills", "data-sweep", "SKILL.md")));
+    assert.ok(!fs.existsSync(installed(".claude", "skills", "lone")), "a skill outside the bundle is not pulled in");
+    // --bundle implies --engine; with no bundle actually published server-side,
+    // the engine step is a harmless no-op, never a network fetch.
+    assert.match(r.err, /chưa có bundle nào được phát hành/);
+  } finally {
+    mockCatalog = null;
+  }
+});
+
+test("installer: an unknown --bundle name is refused before anything is written", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  mockCatalog = "recon-pipeline\tSKILL.md\t-\tclaude\tRecon\t-\n";
+  try {
+    const r = await runInstaller(["--bundle", "no-such-bundle"]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.err, /không có bundle/);
+  } finally {
+    mockCatalog = null;
+  }
+  assert.ok(!fs.existsSync(home));
 });
 
 test("installer: the key is only sent over https or to this machine", async () => {
