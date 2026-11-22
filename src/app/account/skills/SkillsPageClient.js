@@ -223,7 +223,6 @@ export default function SkillsPageClient() {
   const origin = useOrigin();
   const [tab, setTab] = useState("catalogue");
   const [skills, setSkills] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [bundles, setBundles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -240,7 +239,6 @@ export default function SkillsPageClient() {
       if (!res.ok) throw new Error("fetch failed");
       const data = await res.json();
       setSkills(data.skills || []);
-      setCategories(data.categories || []);
       setBundles(data.bundles || []);
     } catch {
       setError("Không tải được danh sách skill. Tải lại trang để thử lại.");
@@ -259,13 +257,31 @@ export default function SkillsPageClient() {
       return next;
     });
 
+  // A bundle's skills are browsed and installed as that one bundle (see the bundle
+  // cards below), not listed individually here — the catalogue is the skills nobody
+  // grouped.
+  const standaloneSkills = useMemo(() => skills.filter((s) => !s.bundleId), [skills]);
+
+  // Category pills are derived from the same standalone set, so a pill never leads
+  // to an empty page because its only skills are now shown inside a bundle instead.
+  const visibleCategories = useMemo(() => {
+    const counts = new Map();
+    for (const s of standaloneSkills) {
+      if (!s.category) continue;
+      counts.set(s.category, (counts.get(s.category) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([cat, count]) => ({ category: cat, count }))
+      .sort((a, b) => a.category.localeCompare(b.category));
+  }, [standaloneSkills]);
+
   const visible = useMemo(
-    () => (category ? skills.filter((s) => s.category === category) : skills),
-    [skills, category]
+    () => (category ? standaloneSkills.filter((s) => s.category === category) : standaloneSkills),
+    [standaloneSkills, category]
   );
 
   // What the zip and the one-line command act on: picked skills that still exist.
-  const pickedSlugs = skills.filter((skill) => picked.has(skill.slug)).map((skill) => skill.slug);
+  const pickedSlugs = standaloneSkills.filter((skill) => picked.has(skill.slug)).map((skill) => skill.slug);
   const selectable = visible.slice(0, 100).map((skill) => skill.slug); // one archive carries at most 100
   const allShownPicked = selectable.length > 0 && selectable.every((slug) => picked.has(slug));
   const togglePage = () =>
@@ -292,7 +308,7 @@ export default function SkillsPageClient() {
   };
 
   const tabs = [
-    { id: "catalogue", label: "Danh sách", count: skills.length },
+    { id: "catalogue", label: "Danh sách", count: standaloneSkills.length + bundles.length },
     { id: "guide", label: "Hướng dẫn cài", count: null },
   ];
 
@@ -368,7 +384,16 @@ export default function SkillsPageClient() {
             </Panel>
           )}
 
-          {skills.length > 0 && (
+          {bundles.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <Eyebrow>Bundle (skill + engine)</Eyebrow>
+              {bundles.map((bundle) => (
+                <BundleGuide key={bundle.id} bundle={bundle} skills={skills} origin={origin} />
+              ))}
+            </div>
+          )}
+
+          {standaloneSkills.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 border border-border bg-surface px-4 py-3">
               <label className="flex items-center gap-2 text-sm text-text-main">
                 <input type="checkbox" checked={allShownPicked} onChange={togglePage} className="size-4" />
@@ -383,7 +408,7 @@ export default function SkillsPageClient() {
             </div>
           )}
 
-          {categories.length > 0 && (
+          {visibleCategories.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -398,7 +423,7 @@ export default function SkillsPageClient() {
               >
                 Tất cả
               </button>
-              {categories.map((c) => (
+              {visibleCategories.map((c) => (
                 <button
                   key={c.category}
                   type="button"
@@ -422,9 +447,9 @@ export default function SkillsPageClient() {
             <p className="border border-dashed border-border px-6 py-12 text-center text-sm text-text-muted">
               Đang tải…
             </p>
-          ) : visible.length === 0 ? (
+          ) : visible.length === 0 && standaloneSkills.length === 0 && bundles.length > 0 ? null : visible.length === 0 ? (
             <p className="border border-dashed border-border px-6 py-12 text-center text-sm text-text-muted">
-              {skills.length === 0
+              {standaloneSkills.length === 0
                 ? "Chưa có skill nào được phát hành. Quay lại sau nhé."
                 : "Nhóm này chưa có skill."}
             </p>
@@ -472,11 +497,13 @@ export default function SkillsPageClient() {
                   Hiện chưa có skill nào của bạn cần engine riêng.
                 </p>
               ) : (
-                <div className="mt-3 flex flex-col gap-3">
-                  {bundles.map((bundle) => (
-                    <BundleGuide key={bundle.id} bundle={bundle} skills={skills} origin={origin} />
-                  ))}
-                </div>
+                <p className="mt-2 text-sm leading-6 text-text-muted">
+                  Bạn có {bundles.length} bundle đi kèm engine — xem mô tả, hướng dẫn dùng và lệnh cài
+                  riêng của từng bundle ở tab{" "}
+                  <button type="button" onClick={() => setTab("catalogue")} className="underline">
+                    Danh sách
+                  </button>.
+                </p>
               )}
               <p className="mt-2 text-sm leading-6 text-text-muted">
                 Engine cần <strong className="text-text-main">Node &gt;= 22.5</strong> (dùng{" "}

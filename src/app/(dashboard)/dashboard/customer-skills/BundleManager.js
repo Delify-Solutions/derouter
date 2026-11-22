@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Modal, ConfirmModal, Badge, Card } from "@/shared/components";
+import SkillRow from "./SkillRow";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
 const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
@@ -160,17 +161,44 @@ function BundleEditorModal({ bundle, onClose, onSaved }) {
 
 /**
  * Admin bundle console: the repositories imported as a bundle (skills + engine +,
- * for Claude Code, an installer entrypoint). Sits beside the skill list so an admin
- * can see, edit and delete a bundle without losing the skills it groups — deleting
- * one only detaches its skills, never removes them (skillBundlesRepo.deleteBundle).
+ * for Claude Code, an installer entrypoint). Sits above the skill list — a bundle's
+ * own skills are managed here, expanded on demand, and never duplicated in the flat
+ * list below. Deleting a bundle only detaches its skills, never removes them
+ * (skillBundlesRepo.deleteBundle).
+ *
+ * @param {object[]} skills every skill (standalone and bundled); only rows whose
+ *   `bundleId` matches a bundle here are shown, under that bundle
+ * @param {string|null} busyId the skill row currently mid-request, from the parent
+ * @param {(skill: object) => void} onTogglePublished
+ * @param {(skill: object) => void} onEditSkill
+ * @param {(skill: object) => void} onDeleteSkill
  */
-export default function BundleManager() {
+export default function BundleManager({ skills = [], busyId, onTogglePublished, onEditSkill, onDeleteSkill }) {
   const [bundles, setBundles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
-  const [busyId, setBusyId] = useState(null);
+  const [bundleBusyId, setBusyId] = useState(null);
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const byBundle = useMemo(() => {
+    const map = new Map();
+    for (const skill of skills) {
+      if (!skill.bundleId) continue;
+      if (!map.has(skill.bundleId)) map.set(skill.bundleId, []);
+      map.get(skill.bundleId).push(skill);
+    }
+    return map;
+  }, [skills]);
+
+  const toggleExpanded = (id) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -241,29 +269,66 @@ export default function BundleManager() {
       )}
 
       <div className="flex flex-col gap-2">
-        {bundles.map((bundle) => (
-          <Card key={bundle.id} padding="md" className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-mono text-sm font-semibold text-text-main">{bundle.name}</h3>
-                {bundle.isPublished ? <Badge variant="success" size="sm" dot>Đang phát hành</Badge> : <Badge variant="default" size="sm" dot>Bản nháp</Badge>}
-                {bundle.audience === "internal" && <Badge variant="warning" size="sm">Nội bộ</Badge>}
+        {bundles.map((bundle) => {
+          const linked = byBundle.get(bundle.id) || [];
+          const isOpen = expanded.has(bundle.id);
+          return (
+            <Card key={bundle.id} padding="md" className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-mono text-sm font-semibold text-text-main">{bundle.name}</h3>
+                    {bundle.isPublished ? <Badge variant="success" size="sm" dot>Đang phát hành</Badge> : <Badge variant="default" size="sm" dot>Bản nháp</Badge>}
+                    {bundle.audience === "internal" && <Badge variant="warning" size="sm">Nội bộ</Badge>}
+                  </div>
+                  <p className="mt-1 font-mono text-[11px] text-text-subtle">
+                    {bundle.slug} · {bundle.sourceHost}/{bundle.sourceOwner}/{bundle.sourceRepo}@{bundle.sourceRef} ·
+                    installer: {bundle.installerEntrypoint} · cập nhật {fmtDate(bundle.updatedAt)}
+                  </p>
+                  {bundle.description && <p className="mt-1 text-xs leading-5 text-text-muted">{bundle.description}</p>}
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => togglePublished(bundle)} disabled={bundleBusyId === bundle.id}>
+                    {bundle.isPublished ? "Ẩn" : "Phát hành"}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setEditing(bundle)} disabled={bundleBusyId === bundle.id}>Sửa</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setDeleting(bundle)} disabled={bundleBusyId === bundle.id} className="text-red-600 hover:bg-red-500/10">Xoá</Button>
+                </div>
               </div>
-              <p className="mt-1 font-mono text-[11px] text-text-subtle">
-                {bundle.slug} · {bundle.sourceHost}/{bundle.sourceOwner}/{bundle.sourceRepo}@{bundle.sourceRef} ·
-                installer: {bundle.installerEntrypoint} · cập nhật {fmtDate(bundle.updatedAt)}
-              </p>
-              {bundle.description && <p className="mt-1 text-xs leading-5 text-text-muted">{bundle.description}</p>}
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => togglePublished(bundle)} disabled={busyId === bundle.id}>
-                {bundle.isPublished ? "Ẩn" : "Phát hành"}
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setEditing(bundle)} disabled={busyId === bundle.id}>Sửa</Button>
-              <Button variant="ghost" size="sm" onClick={() => setDeleting(bundle)} disabled={busyId === bundle.id} className="text-red-600 hover:bg-red-500/10">Xoá</Button>
-            </div>
-          </Card>
-        ))}
+
+              <button
+                type="button"
+                onClick={() => toggleExpanded(bundle.id)}
+                aria-expanded={isOpen}
+                className="flex w-fit items-center gap-1.5 border-t border-border pt-2 font-mono text-xs text-text-muted hover:text-text-main"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                  {isOpen ? "expand_less" : "expand_more"}
+                </span>
+                {isOpen ? "Ẩn" : "Xem"} {linked.length} skill trong bundle này
+              </button>
+
+              {isOpen && (
+                <div className="flex flex-col gap-2 border-t border-border pt-3">
+                  {linked.length === 0 ? (
+                    <p className="text-sm text-text-muted">Bundle này chưa có skill nào.</p>
+                  ) : (
+                    linked.map((skill) => (
+                      <SkillRow
+                        key={skill.id}
+                        row={skill}
+                        busy={busyId === skill.id}
+                        onTogglePublished={onTogglePublished}
+                        onEdit={onEditSkill}
+                        onDelete={onDeleteSkill}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
       </div>
 
       {editing && (
