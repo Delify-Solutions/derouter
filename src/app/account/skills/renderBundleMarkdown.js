@@ -53,9 +53,40 @@ function sanitizeHtml(html) {
   return doc.body.innerHTML;
 }
 
+// A README's own top-level heading usually just repeats the bundle's name, which
+// the modal already shows in its title bar — rendered as-is, that is one heading
+// twice in a row. Dropped only when it is the very first node, so a document that
+// opens with prose is untouched.
+function stripLeadingHeading(html) {
+  if (typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const first = doc.body.firstElementChild;
+  if (first && /^h[12]$/i.test(first.tagName)) first.remove();
+  return doc.body.innerHTML;
+}
+
 /** Markdown to sanitised HTML, or "" for empty input. */
 export function renderBundleMarkdown(md) {
   const text = typeof md === "string" ? md.trim() : "";
   if (!text) return "";
-  return sanitizeHtml(marked.parse(text));
+  return stripLeadingHeading(sanitizeHtml(marked.parse(text)));
+}
+
+/**
+ * A one-line plain-text excerpt of Markdown, for a list row that only has room
+ * for a glance — a bundle's description can be a whole README, and an admin list
+ * is not the place to read all of it (editing opens the full text).
+ */
+export function excerptFromMarkdown(md, maxLen = 160) {
+  const text = String(md || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/[*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen).trimEnd()}…`;
 }
