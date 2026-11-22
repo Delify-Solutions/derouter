@@ -359,14 +359,16 @@ export function describeSkillFile(path, text, { failed = false } = {}) {
   const slugSource = dirSlug || fm.name || path;
   const problems = [];
   if (!text.trim()) problems.push("File rỗng");
-  // A loose markdown file at the repository root with no frontmatter is the
-  // repository's own documentation (notices, a changelog the name rule missed).
-  // It is still listed so nothing is hidden, but flagged and unticked.
-  // (dirSlug is the file stem for a loose file, so it cannot tell the two apart.)
-  const segments = path.split("/").filter(Boolean);
-  const looseAtRoot = segments.length === 1 && !/^skill\.md$/i.test(segments[0]);
-  if (looseAtRoot && !fm.name && !fm.description) {
-    problems.push("Trông như tài liệu của repo, không phải skill");
+  // A directory's SKILL.md is a skill because of where it sits. A loose markdown
+  // file has to earn it: without frontmatter naming or describing the skill, no
+  // runtime can decide when to load it, so the file is documentation. Testing the
+  // path depth alone would only catch the repository root and let `docs/design.md`
+  // through; `dirSlug` cannot help here because it is the file stem for a loose
+  // file. Still listed — nothing is hidden from the admin — but flagged, so the
+  // modal opens with the row unticked.
+  const isDirectorySkill = /^skill\.md$/i.test(path.split("/").pop() || "");
+  if (!isDirectorySkill && !hasSkillFrontmatter(text)) {
+    problems.push("Không có frontmatter (name/description) — là tài liệu, không phải skill");
   }
   return {
     path,
@@ -377,4 +379,22 @@ export function describeSkillFile(path, text, { failed = false } = {}) {
     bytes,
     problem: problems.join(" · "),
   };
+}
+
+/**
+ * True when a markdown file carries the YAML frontmatter a skill needs.
+ *
+ * This is the signal that separates a skill from documentation: every agent runtime
+ * (Claude Code, Codex, Cursor) reads `name` and `description` from that block to
+ * decide when to load the file, so a file without it cannot function as a skill. A
+ * loose `.md` anywhere in a repository that has no frontmatter is documentation, not
+ * a skill — which is what keeps `docs/architecture.md` out of the catalogue.
+ *
+ * A `SKILL.md` inside a skill directory is accepted regardless: its path already
+ * says what it is, and the admin can fill in a name in the preview.
+ */
+export function hasSkillFrontmatter(text) {
+  const match = String(text ?? "").match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return false;
+  return /^(name|description)\s*:/im.test(match[1]);
 }

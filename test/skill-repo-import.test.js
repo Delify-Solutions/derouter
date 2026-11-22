@@ -14,6 +14,7 @@ const {
   pickSkillPaths,
   slugFromRepoPath,
   describeSkillFile,
+  hasSkillFrontmatter,
   MAX_REPO_FILES,
 } = await import("../src/lib/skills/repoImport.js");
 
@@ -223,4 +224,56 @@ test("a front-matter-less note at the repository root looks like documentation",
 test("a very long summary is cut to the 200 characters the catalogue stores", () => {
   const row = describeSkillFile("a/SKILL.md", `---\ndescription: ${"x".repeat(400)}\n---\nb`);
   assert.equal(row.summary.length, 200);
+});
+
+/* ── skill vs documentation ────────────────────────────────── */
+
+
+test("frontmatter with a name marks a skill", () => {
+  assert.equal(hasSkillFrontmatter("---\nname: rt-x\ndescription: y\n---\n\n# X\n"), true);
+});
+
+test("frontmatter with only a description still marks a skill", () => {
+  assert.equal(hasSkillFrontmatter("---\ndescription: y\n---\n\n# X\n"), true);
+});
+
+test("a plain document is not a skill", () => {
+  // The shape of every docs/*.md in a repository: a heading and prose, no block.
+  assert.equal(hasSkillFrontmatter("# Architecture\n\nSome prose.\n"), false);
+});
+
+test("an unrelated frontmatter block is not a skill header", () => {
+  assert.equal(hasSkillFrontmatter("---\ntitle: Notes\ntags: [a]\n---\n\n# Notes\n"), false);
+});
+
+test("an empty file is not a skill", () => {
+  assert.equal(hasSkillFrontmatter(""), false);
+  assert.equal(hasSkillFrontmatter(null), false);
+});
+
+/* ── the row a file becomes ─────────────────────────────────── */
+
+test("a loose document deep in the tree is flagged, not silently offered", () => {
+  // The bug this pins: testing only the repository root let every docs/*.md through,
+  // so importing a real repo put seven architecture notes in the customer catalogue.
+  const row = describeSkillFile("docs/architecture.md", "# Architecture\n\nProse.\n");
+  assert.equal(row.problem, "Không có frontmatter (name/description) — là tài liệu, không phải skill");
+});
+
+test("a loose markdown file with frontmatter is a skill", () => {
+  const row = describeSkillFile("active-scan.md", "---\nname: active-scan\ndescription: x\n---\n\n# X\n");
+  assert.equal(row.problem, "");
+  assert.equal(row.slug, "active-scan");
+});
+
+test("a SKILL.md in a directory is trusted without a frontmatter block", () => {
+  // Its path already says what it is, and the admin can fill in a name in the preview.
+  const row = describeSkillFile("skills/alpha/SKILL.md", "# Alpha\n\nDo the thing.\n");
+  assert.equal(row.problem, "");
+  assert.equal(row.slug, "alpha");
+});
+
+test("an unreadable file is reported as such", () => {
+  assert.match(describeSkillFile("x.md", null).problem, /Không tải được|512/);
+  assert.match(describeSkillFile("x.md", "", { failed: true }).problem, /Không tải được file/);
 });
