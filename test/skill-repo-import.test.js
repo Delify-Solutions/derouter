@@ -15,6 +15,9 @@ const {
   slugFromRepoPath,
   describeSkillFile,
   hasSkillFrontmatter,
+  detectEngine,
+  findRootReadme,
+  rawFileUrl,
   MAX_REPO_FILES,
 } = await import("../src/lib/skills/repoImport.js");
 
@@ -276,4 +279,53 @@ test("a SKILL.md in a directory is trusted without a frontmatter block", () => {
 test("an unreadable file is reported as such", () => {
   assert.match(describeSkillFile("x.md", null).problem, /Không tải được|512/);
   assert.match(describeSkillFile("x.md", "", { failed: true }).problem, /Không tải được file/);
+});
+
+/* ── engine detection (skill-bundles) ──────────────────────────────────── */
+
+test("a repository with lib/mcp-server.mjs and a root install.mjs is detected as an engine, with its entrypoint", () => {
+  const info = detectEngine(["lib/mcp-server.mjs", "install.mjs", "skills/alpha/SKILL.md", "README.md"]);
+  assert.deepEqual(info, { detected: true, installerEntrypoint: "install.mjs" });
+});
+
+test("an engine repository without install.mjs is still detected, with no entrypoint offered", () => {
+  const info = detectEngine(["lib/mcp-server.mjs", "lib/store-core.js", "skills/alpha/SKILL.md"]);
+  assert.deepEqual(info, { detected: true, installerEntrypoint: null });
+});
+
+test("a plain skill repository (no lib/mcp-server.mjs) is not detected as an engine", () => {
+  const info = detectEngine(["skills/alpha/SKILL.md", "install.mjs", "README.md"]);
+  assert.deepEqual(info, { detected: false, installerEntrypoint: null });
+});
+
+test("a bare mcp-server.mjs elsewhere in the tree does not count — the path must be exact", () => {
+  // design.md: the literal `lib/mcp-server.mjs` check is deliberate, not a
+  // heuristic — a server file under a different path is not offered as a bundle.
+  const info = detectEngine(["src/lib/mcp-server.mjs", "lib/mcp-server.js"]);
+  assert.equal(info.detected, false);
+});
+
+test("detectEngine and findRootReadme tolerate an empty or missing file list", () => {
+  assert.deepEqual(detectEngine(), { detected: false, installerEntrypoint: null });
+  assert.deepEqual(detectEngine([]), { detected: false, installerEntrypoint: null });
+  assert.equal(findRootReadme(), null);
+  assert.equal(findRootReadme([]), null);
+});
+
+test("the root README is found regardless of case or .markdown extension, but a nested one is not it", () => {
+  assert.equal(findRootReadme(["Readme.md", "lib/mcp-server.mjs"]), "Readme.md");
+  assert.equal(findRootReadme(["README.markdown"]), "README.markdown");
+  assert.equal(findRootReadme(["docs/README.md"]), null);
+  assert.equal(findRootReadme(["readme.txt"]), null);
+});
+
+test("rawFileUrl builds the right raw-content URL per host", () => {
+  const github = { kind: "github", owner: "o", repo: "r" };
+  assert.equal(rawFileUrl(github, "main", "README.md"), "https://raw.githubusercontent.com/o/r/main/README.md");
+
+  const gitlab = { kind: "gitlab", owner: "o", repo: "r" };
+  assert.equal(rawFileUrl(gitlab, "main", "README.md"), "https://gitlab.com/o/r/-/raw/main/README.md");
+
+  const forgejo = { kind: "forgejo", host: "codeberg.org", owner: "o", repo: "r" };
+  assert.equal(rawFileUrl(forgejo, "main", "README.md"), "https://codeberg.org/o/r/raw/branch/main/README.md");
 });

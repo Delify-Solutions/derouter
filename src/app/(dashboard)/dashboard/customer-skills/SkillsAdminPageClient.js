@@ -7,6 +7,7 @@ import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
 import RepoImportModal from "./RepoImportModal";
+import BundleManager from "./BundleManager";
 
 const FILTERS = [
   { value: "all", label: "Tất cả" },
@@ -213,6 +214,8 @@ export default function SkillsAdminPageClient() {
           <button type="button" onClick={load} className="underline">Thử lại</button>
         </p>
       )}
+
+      <BundleManager />
 
       <div className="flex flex-wrap items-center gap-2">
         <input

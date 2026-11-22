@@ -163,7 +163,11 @@ async function getText(url, timeout) {
  * `incomplete` is true when the host cut the listing short (a very large repository),
  * so the caller can say the list may be missing skills instead of hiding it.
  *
- * @returns {Promise<{ref:string, files:{path:string,url:string}[], incomplete:boolean}>}
+ * `allPaths` is every blob path in the (possibly scoped-by-pagination) listing,
+ * markdown or not — the raw material `detectEngine`/`findRootReadme` read to
+ * notice a repository ships an engine, without a second tree walk.
+ *
+ * @returns {Promise<{ref:string, files:{path:string,url:string}[], incomplete:boolean, allPaths:string[]}>}
  */
 export async function fetchTree(parsed) {
   if (parsed.kind === "github") {
@@ -172,13 +176,11 @@ export async function fetchTree(parsed) {
       `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
       TREE_TIMEOUT_MS,
     );
-    const files = (tree.tree || [])
-      .filter((node) => node.type === "blob" && /\.(md|markdown)$/i.test(node.path))
-      .map((node) => ({
-        path: node.path,
-        url: `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${encodePath(ref)}/${encodePath(node.path)}`,
-      }));
-    return { ref, files, incomplete: tree.truncated === true };
+    const blobs = (tree.tree || []).filter((node) => node.type === "blob");
+    const files = blobs
+      .filter((node) => /\.(md|markdown)$/i.test(node.path))
+      .map((node) => ({ path: node.path, url: rawFileUrl(parsed, ref, node.path) }));
+    return { ref, files, incomplete: tree.truncated === true, allPaths: blobs.map((node) => node.path) };
   }
 
   if (parsed.kind === "gitlab") {
@@ -187,6 +189,7 @@ export async function fetchTree(parsed) {
     const ref = parsed.ref || (await gitlabDefaultBranch(project));
     const perPage = 100;
     const files = [];
+    const allPaths = [];
     let incomplete = false;
     for (let page = 1; page <= 4; page += 1) {
       const batch = await getJson(
@@ -195,16 +198,15 @@ export async function fetchTree(parsed) {
       );
       if (!Array.isArray(batch) || batch.length === 0) break;
       for (const node of batch) {
-        if (node.type !== "blob" || !/\.(md|markdown)$/i.test(node.path)) continue;
-        files.push({
-          path: node.path,
-          url: `https://gitlab.com/${projectPath}/-/raw/${encodePath(ref)}/${encodePath(node.path)}`,
-        });
+        if (node.type !== "blob") continue;
+        allPaths.push(node.path);
+        if (!/\.(md|markdown)$/i.test(node.path)) continue;
+        files.push({ path: node.path, url: rawFileUrl(parsed, ref, node.path) });
       }
       if (batch.length < perPage) break;
       if (page === 4) incomplete = true;
     }
-    return { ref, files, incomplete };
+    return { ref, files, incomplete, allPaths };
   }
 
   // Forgejo / Codeberg
@@ -213,13 +215,43 @@ export async function fetchTree(parsed) {
     `https://${parsed.host}/api/v1/repos/${parsed.owner}/${parsed.repo}/git/trees/${encodeURIComponent(ref)}?recursive=true&per_page=200`,
     TREE_TIMEOUT_MS,
   );
-  const files = (tree.tree || [])
-    .filter((node) => node.type === "blob" && /\.(md|markdown)$/i.test(node.path))
-    .map((node) => ({
-      path: node.path,
-      url: `https://${parsed.host}/${parsed.owner}/${parsed.repo}/raw/branch/${encodePath(ref)}/${encodePath(node.path)}`,
-    }));
-  return { ref, files, incomplete: tree.truncated === true };
+  const blobs = (tree.tree || []).filter((node) => node.type === "blob");
+  const files = blobs
+    .filter((node) => /\.(md|markdown)$/i.test(node.path))
+    .map((node) => ({ path: node.path, url: rawFileUrl(parsed, ref, node.path) }));
+  return { ref, files, incomplete: tree.truncated === true, allPaths: blobs.map((node) => node.path) };
+}
+
+/** The raw-content URL for one file at `ref`, on whichever host `parsed` names. */
+export function rawFileUrl(parsed, ref, path) {
+  if (parsed.kind === "github") {
+    return `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${encodePath(ref)}/${encodePath(path)}`;
+  }
+  if (parsed.kind === "gitlab") {
+    return `https://gitlab.com/${parsed.owner}/${parsed.repo}/-/raw/${encodePath(ref)}/${encodePath(path)}`;
+  }
+  return `https://${parsed.host}/${parsed.owner}/${parsed.repo}/raw/branch/${encodePath(ref)}/${encodePath(path)}`;
+}
+
+/**
+ * Whether the repository's file listing shows it ships an engine: a skill's
+ * markdown calls tools that live in a Node MCP server, and `lib/mcp-server.mjs` is
+ * that server's fixed, literal location (design.md: a heuristic here would both
+ * false-positive and false-negative, and the admin always sees this preview before
+ * committing to anything).
+ *
+ * @param {string[]} allPaths every blob path fetchTree found
+ * @returns {{ detected: boolean, installerEntrypoint: string|null }}
+ */
+export function detectEngine(allPaths = []) {
+  const set = new Set(allPaths);
+  const detected = set.has("lib/mcp-server.mjs");
+  return { detected, installerEntrypoint: detected && set.has("install.mjs") ? "install.mjs" : null };
+}
+
+/** The root `README.md`'s exact path as the repository spells it, or null. */
+export function findRootReadme(allPaths = []) {
+  return allPaths.find((path) => /^readme\.(md|markdown)$/i.test(path)) || null;
 }
 
 async function githubDefaultBranch(parsed) {

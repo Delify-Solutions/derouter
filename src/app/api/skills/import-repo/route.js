@@ -5,6 +5,9 @@ import {
   fetchFile,
   pickSkillPaths,
   describeSkillFile,
+  detectEngine,
+  findRootReadme,
+  rawFileUrl,
   MAX_REPO_FILES,
 } from "@/lib/skills/repoImport.js";
 import { MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
@@ -91,6 +94,23 @@ export async function POST(request) {
     skills.push(describeSkillFile(wanted[i].path, read ? outcome.value : null, { failed: !read }));
   }
 
+  // Whether this repository is a bundle candidate — an engine (MCP server) with
+  // skills around it — read from the same tree walk, no second request. The
+  // README is read only when an engine was actually detected: a plain skill
+  // repository's own README is never a skill and never needed here.
+  const engineInfo = detectEngine(tree.allPaths || []);
+  let readme = null;
+  if (engineInfo.detected) {
+    const readmePath = findRootReadme(tree.allPaths || []);
+    if (readmePath) {
+      try {
+        readme = await fetchFile(rawFileUrl(parsed, tree.ref, readmePath));
+      } catch {
+        readme = null;
+      }
+    }
+  }
+
   return NextResponse.json({
     repo: `${parsed.owner}/${parsed.repo}`,
     host: parsed.host,
@@ -104,6 +124,7 @@ export async function POST(request) {
     failed,
     truncated: picked.length > wanted.length,
     incomplete: tree.incomplete === true,
+    engine: { detected: engineInfo.detected, installerEntrypoint: engineInfo.installerEntrypoint, readme },
     skills,
   }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -38,11 +38,24 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
   const [isPublished, setIsPublished] = useState(true);
   const [mode, setMode] = useState("skip");
 
+  // Bundle mode: the repository ships an engine (lib/mcp-server.mjs), so the admin
+  // may import it as one bundle instead of loose skill rows.
+  const [asBundle, setAsBundle] = useState(false);
+  const [bundleName, setBundleName] = useState("");
+  const [bundleDescription, setBundleDescription] = useState("");
+  const [bundleUsageGuide, setBundleUsageGuide] = useState("");
+  const [bundleEntrypoint, setBundleEntrypoint] = useState("install.mjs");
+
   const reset = () => {
     setRows([]);
     setMeta(null);
     setError("");
     setNotice("");
+    setAsBundle(false);
+    setBundleName("");
+    setBundleDescription("");
+    setBundleUsageGuide("");
+    setBundleEntrypoint("install.mjs");
   };
 
   const readRepo = async () => {
@@ -78,10 +91,23 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
       // Prefill the folder from what was actually read, so the field shows the scope
       // that produced these rows rather than what was typed.
       if (data.path) setPath(data.path);
+
+      // An engine (lib/mcp-server.mjs) was detected: offer bundle mode, checked by
+      // default, with everything prefilled from the repository itself so the admin
+      // only has to confirm or adjust it.
+      const engine = data.engine || {};
+      setAsBundle(Boolean(engine.detected));
+      if (engine.detected) {
+        setBundleName((prev) => prev || data.repo.split("/").pop());
+        setBundleDescription((engine.readme || "").trim().slice(0, 4000));
+        setBundleEntrypoint(engine.installerEntrypoint || "install.mjs");
+      }
+
       const notes = [];
       if (data.ignored) notes.push(`Bỏ qua ${data.ignored} file không phải skill.`);
       if (data.scoped) notes.push(`${data.scoped} file ngoài thư mục đã chọn không xét.`);
       if (data.failed) notes.push(`${data.failed} file không tải được.`);
+      if (engine.detected) notes.push("Repo có engine (lib/mcp-server.mjs) — có thể nhập dạng bundle.");
       if (data.truncated) notes.push(`Chỉ lấy ${data.imported}/${data.matched} skill đầu tiên.`);
       if (data.incomplete) notes.push("Repo quá lớn, danh sách file có thể thiếu — dùng ô thư mục để thu hẹp.");
       setNotice(notes.join(" "));
@@ -117,6 +143,38 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
     setError("");
     setNotice("");
     try {
+      // Bundle mode creates the bundle first, then every imported skill from this
+      // repository is linked to it in the same action. Declining bundle mode (even
+      // on a detected-engine repo) imports exactly as before this feature existed.
+      let bundleId;
+      if (asBundle) {
+        const slashIndex = meta.repo.lastIndexOf("/");
+        const sourceOwner = meta.repo.slice(0, slashIndex);
+        const sourceRepo = meta.repo.slice(slashIndex + 1);
+        const bundleRes = await fetch("/api/skills/bundles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: bundleName.trim() || sourceRepo,
+            description: bundleDescription,
+            usageGuide: bundleUsageGuide,
+            sourceHost: meta.host,
+            sourceOwner,
+            sourceRepo,
+            sourceRef: meta.ref,
+            installerEntrypoint: bundleEntrypoint,
+            audience,
+            isPublished,
+          }),
+        });
+        const bundleData = await bundleRes.json().catch(() => ({}));
+        if (!bundleRes.ok) {
+          setError(bundleData.error || "Không tạo được bundle");
+          return;
+        }
+        bundleId = bundleData.id;
+      }
+
       const payload = chosen.slice(0, MAX_ITEMS).map((row) => ({
         name: row.name.trim() || slugOf(row),
         slug: slugOf(row),
@@ -127,6 +185,7 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
         category,
         audience,
         isPublished,
+        ...(bundleId ? { bundleId } : {}),
       }));
       const res = await fetch("/api/skills/bulk", {
         method: "POST",
@@ -236,6 +295,67 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
           </p>
           {summaryLine && <p className="font-mono text-[11px] text-text-subtle">{summaryLine}</p>}
         </div>
+
+        {meta && (
+          <div className="flex flex-col gap-3 border border-border p-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={asBundle}
+                disabled={!meta.engine?.detected}
+                onChange={(e) => setAsBundle(e.target.checked)}
+                className="size-4"
+              />
+              <span className="text-sm text-text-main">Nhập dạng bundle (kèm engine)</span>
+            </label>
+            <p className="text-xs leading-5 text-text-muted">
+              {meta.engine?.detected
+                ? "Repo này có engine (lib/mcp-server.mjs). Nhập dạng bundle để gộp các skill dưới đây với engine và (nếu có) installer riêng của repo thành một khối, khách thấy chung mô tả và hướng dẫn sử dụng."
+                : "Không thấy lib/mcp-server.mjs trong repo này — nhập như skill rời như bình thường."}
+            </p>
+            {asBundle && (
+              <div className="flex flex-col gap-3">
+                <label className="flex flex-col gap-1.5">
+                  <span className={LABEL}>Tên bundle</span>
+                  <input
+                    value={bundleName}
+                    onChange={(e) => setBundleName(e.target.value)}
+                    className={INPUT}
+                    placeholder="rea-policy"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className={LABEL}>Mô tả (khách thấy)</span>
+                  <textarea
+                    value={bundleDescription}
+                    onChange={(e) => setBundleDescription(e.target.value)}
+                    rows={4}
+                    className="w-full border border-border bg-surface px-3 py-2 text-sm text-text-main focus:border-text-main focus:outline-none"
+                    placeholder="Prefilled từ README của repo — sửa lại cho khách dễ hiểu"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className={LABEL}>Hướng dẫn sử dụng (skill nào dùng khi nào)</span>
+                  <textarea
+                    value={bundleUsageGuide}
+                    onChange={(e) => setBundleUsageGuide(e.target.value)}
+                    rows={3}
+                    className="w-full border border-border bg-surface px-3 py-2 text-sm text-text-main focus:border-text-main focus:outline-none"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className={LABEL}>Installer entrypoint (trong repo, chạy sau khi giải nén engine)</span>
+                  <input
+                    value={bundleEntrypoint}
+                    onChange={(e) => setBundleEntrypoint(e.target.value)}
+                    className={`${INPUT} font-mono`}
+                    placeholder="install.mjs"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+        )}
 
         {rows.length > 0 && (
           <div className="flex flex-col gap-2">

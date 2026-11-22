@@ -64,26 +64,57 @@ export function engineTargetSummary() {
 }
 
 /**
- * Where the engine comes from. A release tarball of the public repository: no
- * per-customer hosting, no build step, and the customer can read every byte they
- * are about to run.
+ * Where an engine is unpacked under `$HOME`: one subdirectory per bundle, keyed by
+ * its slug, so a customer who has skills from two different bundles gets two
+ * independent engines instead of one overwriting the other.
  *
- * Pinned to a tag rather than `main` so a fetch is reproducible; bump it when the
- * engine is republished.
+ * `~/rt-claude` (the former fixed, single-bundle location) never shipped to
+ * production, so there is no migration to carry forward (design.md).
  */
-export const ENGINE_REPO = "Delify-Solutions/rea_policy";
-export const ENGINE_TAG = "main";
-export const ENGINE_TARBALL = `https://codeload.github.com/${ENGINE_REPO}/tar.gz/refs/heads/${ENGINE_TAG}`;
+export const ENGINE_HOME_BASE = ".engines";
+
+/** Where a bundle is unpacked under `$HOME`, given its slug. */
+export function engineHomeFor(slug) {
+  return `${ENGINE_HOME_BASE}/${slug}`;
+}
 
 /**
- * The omp bridge as a single file. The tarball normally carries it; a codeload cache
- * built before the bridge existed does not, and one missing file should not leave an
+ * Where a bundle's engine comes from: a release tarball of its own source
+ * repository, at its own ref. No per-customer hosting, no build step, and the
+ * customer can read every byte they are about to run.
+ *
+ * @param {{sourceHost:string, sourceOwner:string, sourceRepo:string, sourceRef:string}} bundle
+ */
+export function bundleTarballUrl(bundle) {
+  const { sourceHost, sourceOwner, sourceRepo, sourceRef } = bundle;
+  const ref = sourceRef || "main";
+  if (sourceHost === "gitlab.com") {
+    return `https://gitlab.com/${sourceOwner}/${sourceRepo}/-/archive/${encodeURIComponent(ref)}/${sourceRepo}-${ref}.tar.gz`;
+  }
+  if (sourceHost && sourceHost !== "github.com" && sourceHost !== "www.github.com") {
+    // Forgejo / Codeberg.
+    return `https://${sourceHost}/${sourceOwner}/${sourceRepo}/archive/${encodeURIComponent(ref)}.tar.gz`;
+  }
+  return `https://codeload.github.com/${sourceOwner}/${sourceRepo}/tar.gz/refs/heads/${ref}`;
+}
+
+/**
+ * A single raw file from a bundle's own source repository — the omp bridge
+ * fallback (`omp/rt-engine.ts`) when the tarball itself does not carry it, same
+ * reasoning as before: a cache built before the bridge existed should not leave an
  * omp customer with skills whose tools cannot run.
  */
-export const ENGINE_BRIDGE_URL = `https://raw.githubusercontent.com/${ENGINE_REPO}/${ENGINE_TAG}/omp/rt-engine.ts`;
-
-/** Where the engine is unpacked under `$HOME`. */
-export const ENGINE_HOME = "rt-claude";
+export function bundleRawFileUrl(bundle, path) {
+  const { sourceHost, sourceOwner, sourceRepo, sourceRef } = bundle;
+  const ref = sourceRef || "main";
+  if (sourceHost === "gitlab.com") {
+    return `https://gitlab.com/${sourceOwner}/${sourceRepo}/-/raw/${encodeURIComponent(ref)}/${path}`;
+  }
+  if (sourceHost && sourceHost !== "github.com" && sourceHost !== "www.github.com") {
+    return `https://${sourceHost}/${sourceOwner}/${sourceRepo}/raw/branch/${encodeURIComponent(ref)}/${path}`;
+  }
+  return `https://raw.githubusercontent.com/${sourceOwner}/${sourceRepo}/${ref}/${path}`;
+}
 
 /**
  * The minimum Node the engine runs on: `node:sqlite` appeared in 22.5 and the

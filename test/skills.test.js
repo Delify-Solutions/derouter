@@ -441,6 +441,27 @@ test("every agent is stored as an empty list, so a skill keeps following the reg
   assert.equal((await skills.getSkillById(every.id)).allAgents, true);
 });
 
+test("bundleId defaults to null, round-trips when set, and a patch that never mentions it leaves it alone (skill-bundles)", async () => {
+  reset();
+  const standalone = await skills.createSkill({ name: "Standalone", body: BODY });
+  assert.equal((await skills.getSkillById(standalone.id)).bundleId, null);
+
+  const linked = await skills.createSkill({ name: "Linked", body: BODY, bundleId: "bundle-1" });
+  assert.equal((await skills.getSkillById(linked.id)).bundleId, "bundle-1");
+
+  // The admin list (which a bundle-aware UI reads) carries it too.
+  const listed = (await skills.listSkills()).find((s) => s.id === linked.id);
+  assert.equal(listed.bundleId, "bundle-1");
+
+  // A patch that says nothing about bundleId keeps it, same as any other field.
+  await skills.updateSkill(linked.id, { summary: "x" });
+  assert.equal((await skills.getSkillById(linked.id)).bundleId, "bundle-1");
+
+  // Explicitly clearing it (what skillBundlesRepo.deleteBundle does) works too.
+  await skills.updateSkill(linked.id, { bundleId: null });
+  assert.equal((await skills.getSkillById(linked.id)).bundleId, null);
+});
+
 test("the newer agents are valid targets; an unknown one is still refused", () => {
   const base = { name: "X", body: BODY };
   for (const id of ["omp", "dsh", "opencode", "cline"]) {

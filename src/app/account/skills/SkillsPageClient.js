@@ -79,6 +79,37 @@ function Step({ index, title, children }) {
 }
 
 /**
+ * One bundle (skills + engine +, on Claude Code, agent presets/command), shown as
+ * one unit: its own description, its own usage guide, and a single command that
+ * installs exactly this bundle's skills together with its engine.
+ */
+function BundleGuide({ bundle, skills, origin }) {
+  const slugs = skills.filter((s) => s.bundleId === bundle.id).map((s) => s.slug);
+  return (
+    <div className="border border-border bg-surface p-4">
+      <h4 className="font-mono text-sm font-semibold text-text-main">{bundle.name}</h4>
+      {bundle.description && (
+        <p className="mt-1 text-sm leading-6 text-text-muted">{bundle.description}</p>
+      )}
+      {bundle.usageGuide && (
+        <p className="mt-2 border-l-2 border-border pl-3 text-sm leading-6 text-text-muted">
+          {bundle.usageGuide}
+        </p>
+      )}
+      {origin && slugs.length > 0 && (
+        <div className="mt-2">
+          <CopyLine
+            value={installCommand(origin, `${slugs.join(" ")} --engine`)}
+            label={`lệnh cài bundle ${bundle.name}`}
+            wrap
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Where one skill's file goes, for one agent at a time: with two dozen agents a path
  * per agent would bury the card, so the customer picks theirs.
  */
@@ -193,6 +224,7 @@ export default function SkillsPageClient() {
   const [tab, setTab] = useState("catalogue");
   const [skills, setSkills] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [bundles, setBundles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [category, setCategory] = useState("");
@@ -209,6 +241,7 @@ export default function SkillsPageClient() {
       const data = await res.json();
       setSkills(data.skills || []);
       setCategories(data.categories || []);
+      setBundles(data.bundles || []);
     } catch {
       setError("Không tải được danh sách skill. Tải lại trang để thử lại.");
     } finally {
@@ -429,15 +462,20 @@ export default function SkillsPageClient() {
             <div className="mt-4 border-t border-border pt-4">
               <Eyebrow>Cần tool, không chỉ tài liệu?</Eyebrow>
               <p className="mt-2 text-sm leading-6 text-text-muted">
-                Skill là <strong className="text-text-main">hướng dẫn</strong>: nó mô tả quy trình và gọi
-                các tool như <code>redteam_asset_add</code>. Những tool đó nằm trong engine (MCP server,
-                67 tool) — không có engine thì skill vẫn mở được nhưng tới bước gọi tool là dừng. Thêm{" "}
-                <code>--engine</code> để cài luôn engine:
+                Một số skill là <strong className="text-text-main">hướng dẫn</strong>: chúng mô tả quy
+                trình và gọi tool sống trong một engine (MCP server) riêng. Không có engine thì skill
+                vẫn mở được nhưng tới bước gọi tool là dừng. Thêm <code>--engine</code> vào lệnh cài để
+                cài luôn mọi engine mà tài khoản của bạn có skill đi kèm.
               </p>
-              {origin && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <CopyLine value={installCommand(origin, "--all --engine")} label="lệnh cài skill + engine" wrap />
-                  <CopyLine value={installCommand(origin, "--engine-only")} label="lệnh chỉ cài engine" wrap />
+              {bundles.length === 0 ? (
+                <p className="mt-2 text-sm leading-6 text-text-muted">
+                  Hiện chưa có skill nào của bạn cần engine riêng.
+                </p>
+              ) : (
+                <div className="mt-3 flex flex-col gap-3">
+                  {bundles.map((bundle) => (
+                    <BundleGuide key={bundle.id} bundle={bundle} skills={skills} origin={origin} />
+                  ))}
                 </div>
               )}
               <p className="mt-2 text-sm leading-6 text-text-muted">
@@ -445,8 +483,10 @@ export default function SkillsPageClient() {
                 <code>node:sqlite</code>) và được đăng ký tự động cho Claude Code, Codex, Cursor,
                 Windsurf, Amp, Cline. <strong className="text-text-main">omp</strong> không có MCP client
                 nên installer cài một bridge extension thay thế. <strong className="text-text-main">dsh</strong>{" "}
-                tự quản engine riêng nên được bỏ qua. Engine nằm ở <code>~/rt-claude</code>;{" "}
-                <code>--engine-update</code> để làm mới.
+                tự quản engine riêng nên được bỏ qua. Mỗi engine nằm riêng ở{" "}
+                <code>~/.engines/&lt;tên-bundle&gt;</code>; <code>--engine-update</code> để làm mới.
+                Trên Claude Code, cài engine xong thì installer riêng của bundle (nếu có) sẽ tự chạy để
+                thêm agent preset và lệnh orchestrating của bundle đó; agent khác chỉ nhận skill + MCP.
               </p>
             </div>
             <p className="mt-3 text-sm leading-6 text-text-muted">
