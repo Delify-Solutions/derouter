@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, Button, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
-import { runtimeLabel } from "@/lib/skills/runtimes.js";
+import { Card, Button, ConfirmModal, CardSkeleton } from "@/shared/components";
 import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
 import RepoImportModal from "./RepoImportModal";
+import SkillRow from "./SkillRow";
 import BundleManager from "./BundleManager";
 
 const FILTERS = [
@@ -15,12 +15,6 @@ const FILTERS = [
   { value: "draft", label: "Bản nháp" },
   { value: "internal", label: "Nội bộ" },
 ];
-
-function fmtDate(value) {
-  const ms = Date.parse(value || "");
-  if (!Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleDateString("vi-VN", { year: "numeric", month: "2-digit", day: "2-digit" });
-}
 
 /**
  * Admin skills console. Add many skills at once from files or a folder, give each
@@ -74,9 +68,14 @@ export default function SkillsAdminPageClient() {
 
   useEffect(() => { load(); }, [load]);
 
+  // A skill that belongs to a bundle is managed from the bundle's own card (see
+  // BundleManager below), not duplicated here — the flat list is the skills nobody
+  // grouped.
+  const standalone = useMemo(() => skills.filter((s) => !s.bundleId), [skills]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return skills.filter((s) => {
+    return standalone.filter((s) => {
       if (filter === "published" && !s.isPublished) return false;
       if (filter === "draft" && s.isPublished) return false;
       if (filter === "internal" && s.audience !== "internal") return false;
@@ -84,7 +83,7 @@ export default function SkillsAdminPageClient() {
       if (q && !`${s.name} ${s.slug} ${s.summary} ${s.category}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [skills, filter, search, category]);
+  }, [standalone, filter, search, category]);
 
   const existingSlugs = useMemo(() => new Set(skills.map((s) => s.slug)), [skills]);
   const selectedRows = skills.filter((s) => selected.has(s.id));
@@ -243,7 +242,13 @@ export default function SkillsAdminPageClient() {
         </p>
       )}
 
-      <BundleManager />
+      <BundleManager
+        skills={skills}
+        busyId={busyId}
+        onTogglePublished={togglePublished}
+        onEditSkill={openEdit}
+        onDeleteSkill={setDeleting}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -279,7 +284,7 @@ export default function SkillsAdminPageClient() {
             {categories.map((c) => <option key={c.category} value={c.category}>{c.category} ({c.count})</option>)}
           </select>
         )}
-        <span className="ml-auto font-mono text-xs text-text-muted">{visible.length} / {skills.length} skill</span>
+        <span className="ml-auto font-mono text-xs text-text-muted">{visible.length} / {standalone.length} skill</span>
       </div>
 
       {selected.size > 0 && (
@@ -306,11 +311,15 @@ export default function SkillsAdminPageClient() {
 
       {loading ? (
         <CardSkeleton />
-      ) : visible.length === 0 && error && skills.length === 0 ? null : visible.length === 0 ? (
+      ) : visible.length === 0 && error && standalone.length === 0 ? null : visible.length === 0 ? (
         <Card padding="md">
           <p className="py-8 text-center text-sm text-text-muted">
-            {skills.length === 0 ? (
-              <>Chưa có skill nào. Bấm &quot;Thêm nhiều skill&quot; rồi kéo thả các file <code>SKILL.md</code> vào.</>
+            {standalone.length === 0 ? (
+              skills.length > 0 ? (
+                <>Mọi skill đang nằm trong một bundle ở trên. Quản lý từng skill ở đó, hoặc bấm &quot;Nhập từ repo&quot; để thêm skill đứng riêng.</>
+              ) : (
+                <>Chưa có skill nào. Bấm &quot;Thêm nhiều skill&quot; rồi kéo thả các file <code>SKILL.md</code> vào.</>
+              )
             ) : (
               <>Không có skill nào khớp bộ lọc. <button type="button" className="underline" onClick={() => { setFilter("all"); setSearch(""); setCategory(""); }}>Xoá bộ lọc</button></>
             )}
@@ -323,44 +332,16 @@ export default function SkillsAdminPageClient() {
             Chọn tất cả {Math.min(visible.length, 100)} skill đang hiện{visible.length > 100 ? " (tối đa 100 mỗi lần)" : ""}
           </label>
           {visible.map((row) => (
-            <div key={row.id} className="flex flex-wrap items-start gap-3 border border-border bg-surface p-4">
-              <input
-                type="checkbox"
-                checked={selected.has(row.id)}
-                onChange={() => toggleOne(row.id)}
-                aria-label={`Chọn ${row.name}`}
-                className="mt-1 size-4 shrink-0"
-              />
-              <div className="min-w-0 flex-1 basis-64">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-mono text-sm font-semibold text-text-main">{row.name}</h3>
-                  {row.isPublished ? <Badge variant="success" size="sm" dot>Đang phát hành</Badge> : <Badge variant="default" size="sm" dot>Bản nháp</Badge>}
-                  {row.audience === "internal" && <Badge variant="warning" size="sm">Nội bộ</Badge>}
-                  {row.category && <Badge variant="info" size="sm">{row.category}</Badge>}
-                  {row.version && <Badge variant="default" size="sm">v{row.version}</Badge>}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  {row.allAgents ? (
-                    <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">Mọi agent</span>
-                  ) : (
-                    (row.targets || []).map((id) => (
-                      <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
-                    ))
-                  )}
-                </div>
-                <p className="mt-1 font-mono text-[11px] text-text-subtle">
-                  {row.slug} · {row.downloadCount ?? 0} lượt tải · cập nhật {fmtDate(row.updatedAt)}
-                </p>
-                {row.summary && <p className="mt-1 text-xs leading-5 text-text-muted">{row.summary}</p>}
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => togglePublished(row)} disabled={busyId === row.id}>
-                  {row.isPublished ? "Ẩn" : "Phát hành"}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => openEdit(row)} disabled={busyId === row.id}>Sửa</Button>
-                <Button variant="ghost" size="sm" onClick={() => setDeleting(row)} disabled={busyId === row.id} className="text-red-600 hover:bg-red-500/10">Xoá</Button>
-              </div>
-            </div>
+            <SkillRow
+              key={row.id}
+              row={row}
+              busy={busyId === row.id}
+              checked={selected.has(row.id)}
+              onToggleChecked={toggleOne}
+              onTogglePublished={togglePublished}
+              onEdit={openEdit}
+              onDelete={setDeleting}
+            />
           ))}
         </div>
       )}
