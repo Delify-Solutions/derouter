@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { importSkills, patchSkills, MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
+import { importSkills, patchSkills, deleteSkills, MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 
 export const dynamic = "force-dynamic";
@@ -64,5 +64,30 @@ export async function PATCH(request) {
   } catch (error) {
     const message = error?.message || "Không cập nhật được skill";
     return NextResponse.json({ error: message }, { status: /Chưa chọn|Không có gì|tối đa/.test(message) ? 400 : 500 });
+  }
+}
+
+// DELETE /api/skills/bulk — delete several skills at once.
+// Body: { ids: [...] }.
+export async function DELETE(request) {
+  let body = null;
+  try {
+    body = await request.json();
+  } catch {
+    /* answered below */
+  }
+  if (!body || typeof body !== "object" || !Array.isArray(body.ids)) {
+    return NextResponse.json({ error: "Dữ liệu gửi lên không hợp lệ" }, { status: 400 });
+  }
+  try {
+    const results = await deleteSkills(body.ids);
+    return NextResponse.json({
+      results,
+      deleted: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+    });
+  } catch (error) {
+    const message = error?.message || "Không xoá được skill";
+    return NextResponse.json({ error: message }, { status: /Chưa chọn|tối đa/.test(message) ? 400 : 500 });
   }
 }
