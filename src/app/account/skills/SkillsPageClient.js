@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Heading, Eyebrow, Panel, Tag, buttonClass } from "../components/ui";
 import { Modal } from "@/shared/components";
-import { runtimeInstallDir, runtimeLabel } from "@/lib/skills/runtimes.js";
+import { runtimeInstallDir, runtimeLabel, SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
 import { cn } from "@/shared/utils/cn";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { renderBundleMarkdown } from "./renderBundleMarkdown";
@@ -20,12 +20,18 @@ function useOrigin() {
 }
 
 /**
- * The one-line installer for these arguments. `apiKey`, when the customer picked
- * one, is the real secret inlined straight into the command; otherwise the key
- * stays a placeholder they fill in by hand.
+ * The one-line installer for these arguments.
+ *
+ * `opts.apiKey`, when the customer picked one, is the real secret inlined
+ * straight into the command; otherwise the key stays a placeholder they fill in
+ * by hand. `opts.target`, when the customer narrowed it to specific agents, is
+ * appended as `--target <ids>`; left out (the default), the installer covers
+ * every agent it finds on the machine — "all agents" needs no flag at all.
  */
-function installCommand(origin, args, apiKey) {
-  return `curl -fsSL ${origin}/api/public/skills/install.sh | DEROUTER_KEY=${apiKey || "<API_KEY>"} sh -s -- ${args}`;
+function installCommand(origin, args, opts = {}) {
+  const { apiKey, target } = opts;
+  const targetArg = target && target.length > 0 ? ` --target ${target.join(",")}` : "";
+  return `curl -fsSL ${origin}/api/public/skills/install.sh | DEROUTER_KEY=${apiKey || "<API_KEY>"} sh -s -- ${args}${targetArg}`;
 }
 
 function fmtDate(value) {
@@ -111,6 +117,46 @@ function ApiKeySelect({ id, keys, selectedId, loading, onSelect }) {
 }
 
 /**
+ * Which agents the command installs into: every agent on the machine (the
+ * installer's own default — no flag needed), or a chosen few via `--target`.
+ */
+function AgentTargetSelect({ id, mode, onModeChange, picked, onTogglePicked }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-text-main">
+        <span>Cài cho agent nào:</span>
+        <label className="flex items-center gap-1.5">
+          <input type="radio" name={id} checked={mode === "all"} onChange={() => onModeChange("all")} className="size-4" />
+          Tất cả agent có trên máy
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="radio" name={id} checked={mode === "pick"} onChange={() => onModeChange("pick")} className="size-4" />
+          Chọn agent
+        </label>
+      </div>
+      {mode === "pick" && (
+        <div className="flex flex-wrap gap-1.5">
+          {SKILL_RUNTIME_IDS.map((rid) => (
+            <label
+              key={rid}
+              className="flex items-center gap-1 border border-border bg-surface px-2 py-1 font-mono text-[11px] text-text-main"
+            >
+              <input
+                type="checkbox"
+                checked={picked.has(rid)}
+                onChange={() => onTogglePicked(rid)}
+                className="size-3.5"
+              />
+              {runtimeLabel(rid)}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * One bundle, collapsed to what a list row needs: its name and how many skills it
  * groups. Everything else — description, usage guide, the install command — is a
  * click away in BundleDetailBody, not repeated for every bundle on the page.
@@ -133,11 +179,11 @@ function BundleListItem({ bundle, skillCount, onOpen }) {
 
 /**
  * A bundle's full detail: its description and usage guide rendered as Markdown,
- * an API key picker, and the one command that installs its skills together with
- * its engine.
+ * an API key picker, an agent-target picker, and the one short command — just the
+ * bundle's name — that installs its skills together with its engine.
  */
-function BundleDetailBody({ bundle, skills, origin, apiKeyProps }) {
-  const slugs = skills.filter((s) => s.bundleId === bundle.id).map((s) => s.slug);
+function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, installOpts }) {
+  const skillCount = skills.filter((s) => s.bundleId === bundle.id).length;
   const descriptionHtml = renderBundleMarkdown(bundle.description);
   const usageHtml = renderBundleMarkdown(bundle.usageGuide);
   return (
@@ -157,17 +203,18 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps }) {
           />
         </div>
       )}
-      {origin && slugs.length > 0 && (
-        <div className="flex flex-col gap-2 border-t border-border pt-4">
+      {origin && skillCount > 0 && (
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
           <Eyebrow>Cài đặt</Eyebrow>
           <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
+          <AgentTargetSelect id="bundle-target" {...targetProps} />
           <CopyLine
-            value={installCommand(origin, `${slugs.join(" ")} --engine`, apiKeyProps.apiKey)}
+            value={installCommand(origin, `--bundle ${bundle.slug}`, installOpts)}
             label={`lệnh cài bundle ${bundle.name}`}
             wrap
           />
           <p className="text-xs leading-5 text-text-muted">
-            Cài {slugs.length} skill của bundle này cùng với engine (MCP server). Trên Claude Code,
+            Cài {skillCount} skill của bundle này cùng với engine (MCP server). Trên Claude Code,
             installer riêng của bundle (nếu có) sẽ tự chạy sau đó để thêm agent preset và lệnh
             orchestrating.
           </p>
@@ -207,7 +254,7 @@ function InstallPath({ skill }) {
   );
 }
 
-function SkillCard({ skill, onOpen, origin, checked, onToggle, apiKey }) {
+function SkillCard({ skill, onOpen, origin, checked, onToggle, installOpts }) {
   return (
     <li className="flex flex-col gap-4 border border-border bg-surface p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -247,7 +294,7 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle, apiKey }) {
       {origin && (
         <div className="flex flex-col gap-1.5">
           <Eyebrow>Cài nhanh bằng một lệnh</Eyebrow>
-          <CopyLine value={installCommand(origin, skill.slug, apiKey)} label="lệnh cài nhanh" wrap />
+          <CopyLine value={installCommand(origin, skill.slug, installOpts)} label="lệnh cài nhanh" wrap />
         </div>
       )}
 
@@ -308,6 +355,12 @@ export default function SkillsPageClient() {
   const [selectedKeyId, setSelectedKeyId] = useState("");
   const [keyLoading, setKeyLoading] = useState(false);
 
+  // Which agents a command installs into: "all" (the installer's own default,
+  // every agent machine has) needs no flag; "pick" adds --target for the chosen
+  // ones.
+  const [targetMode, setTargetMode] = useState("all");
+  const [targetAgents, setTargetAgents] = useState(() => new Set());
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -350,6 +403,17 @@ export default function SkillsPageClient() {
 
   const apiKey = selectedKeyId ? keySecrets[selectedKeyId] || null : null;
   const apiKeyProps = { keys, selectedId: selectedKeyId, loading: keyLoading, onSelect: selectKey, apiKey };
+
+  const toggleTargetAgent = (id) =>
+    setTargetAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const target = targetMode === "pick" ? [...targetAgents] : null;
+  const targetProps = { mode: targetMode, onModeChange: setTargetMode, picked: targetAgents, onTogglePicked: toggleTargetAgent };
+  const installOpts = { apiKey, target };
 
   const togglePicked = (slug) =>
     setPicked((prev) => {
@@ -477,11 +541,12 @@ export default function SkillsPageClient() {
                 <a href="/account/keys" className="underline">API key</a>.
               </p>
               <ApiKeySelect id="catalogue-api-key" {...apiKeyProps} />
-              <CopyLine value={installCommand(origin, "--all", apiKey)} label="lệnh cài tất cả skill" wrap />
+              <AgentTargetSelect id="catalogue-target" {...targetProps} />
+              <CopyLine value={installCommand(origin, "--all", installOpts)} label="lệnh cài tất cả skill" wrap />
               {pickedSlugs.length > 0 && (
                 <>
                   <p className="text-sm leading-6 text-text-muted">Chỉ {pickedSlugs.length} skill bạn đã chọn:</p>
-                  <CopyLine value={installCommand(origin, pickedSlugs.join(" "), apiKey)} label="lệnh cài các skill đã chọn" wrap />
+                  <CopyLine value={installCommand(origin, pickedSlugs.join(" "), installOpts)} label="lệnh cài các skill đã chọn" wrap />
                 </>
               )}
             </Panel>
@@ -566,7 +631,7 @@ export default function SkillsPageClient() {
           ) : (
             <ul className="flex flex-col gap-3">
               {visible.map((skill) => (
-                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} checked={picked.has(skill.slug)} onToggle={togglePicked} apiKey={apiKey} />
+                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} checked={picked.has(skill.slug)} onToggle={togglePicked} installOpts={installOpts} />
               ))}
             </ul>
           )}
@@ -590,9 +655,10 @@ export default function SkillsPageClient() {
             {origin && (
               <div className="mt-3 flex flex-col gap-2">
                 <ApiKeySelect id="guide-api-key" {...apiKeyProps} />
-                <CopyLine value={installCommand(origin, "--list", apiKey)} label="lệnh xem danh sách" wrap />
-                <CopyLine value={installCommand(origin, "--all", apiKey)} label="lệnh cài tất cả" wrap />
-                <CopyLine value={installCommand(origin, "<slug> <slug>", apiKey)} label="lệnh cài một số skill" wrap />
+                <AgentTargetSelect id="guide-target" {...targetProps} />
+                <CopyLine value={installCommand(origin, "--list", installOpts)} label="lệnh xem danh sách" wrap />
+                <CopyLine value={installCommand(origin, "--all", installOpts)} label="lệnh cài tất cả" wrap />
+                <CopyLine value={installCommand(origin, "<slug> <slug>", installOpts)} label="lệnh cài một số skill" wrap />
               </div>
             )}
             <div className="mt-4 border-t border-border pt-4">
@@ -757,7 +823,7 @@ export default function SkillsPageClient() {
         size="full"
       >
         {bundleDetail && (
-          <BundleDetailBody bundle={bundleDetail} skills={skills} origin={origin} apiKeyProps={apiKeyProps} />
+          <BundleDetailBody bundle={bundleDetail} skills={skills} origin={origin} apiKeyProps={apiKeyProps} targetProps={targetProps} installOpts={installOpts} />
         )}
       </Modal>
 

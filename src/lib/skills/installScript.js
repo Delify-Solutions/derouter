@@ -35,6 +35,8 @@ const TEMPLATE = String.raw`#!/bin/sh
 # Options:
 #   --all             install every skill in the catalogue
 #   --list            only list the catalogue
+#   --bundle <slug>   install every skill in this bundle, plus its engine (implies
+#                     --engine; repeatable for several bundles)
 #   --target <names>  agent ids (comma list or repeated), e.g. claude,omp,dsh;
 #                     default: every agent the skill supports that is on this machine
 #   --copy            copy into each agent's folder instead of linking them to one
@@ -75,6 +77,8 @@ Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<ap
 
   --all              cài mọi skill trong danh sách
   --list             chỉ liệt kê, không cài
+  --bundle <slug>    cài mọi skill trong bundle này, kèm engine (tự bật --engine;
+                     dùng nhiều lần nếu muốn nhiều bundle)
   (không gì cả)      trong terminal: hiện danh sách đánh số và hỏi muốn cài cái nào
                      (số hoặc tên, "a" để cài tất cả)
   --target <tên>     id agent (nhiều tên cách nhau dấu phẩy), ví dụ claude,omp,dsh
@@ -435,11 +439,12 @@ place_skill() {
 main() {
   command -v curl >/dev/null 2>&1 || die "cần có curl"
 
-  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0
+  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; BUNDLES=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --all) ALL=1 ;;
       --list) LIST=1 ;;
+      --bundle) [ $# -ge 2 ] || die "--bundle cần một giá trị"; BUNDLES="$BUNDLES,$2"; WITH_ENGINE=1; shift ;;
       --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
       --copy) COPY=1 ;;
       --engine) WITH_ENGINE=1 ;;
@@ -497,12 +502,28 @@ main() {
   [ "$code" = "200" ] || explain "$code"
   [ -s "$WORK/catalog" ] || die "chưa có skill nào được phát hành cho tài khoản này"
 
+  # --bundle <slug>: every skill the catalogue tags with that bundle in its 6th
+  # column, instead of the customer naming each one. Unknown name (or an empty
+  # bundle) is an error, not a silent no-op.
+  if [ -n "$BUNDLES" ]; then
+    for b_want in $(printf '%s' "$BUNDLES" | tr ',' ' '); do
+      b_found=0
+      while IFS="$(printf '\t')" read -r slug file version target name bundle; do
+        [ -n "$slug" ] || continue
+        [ "$bundle" = "$b_want" ] || continue
+        b_found=1
+        case " $SLUGS " in *" $slug "*) ;; *) SLUGS="$SLUGS $slug" ;; esac
+      done <"$WORK/catalog"
+      [ "$b_found" = "1" ] || die "không có bundle \"$b_want\" (hoặc chưa có skill nào trong đó)"
+    done
+  fi
+
   # Nothing named and a terminal to ask: show the catalogue numbered and let the
   # customer pick some, or all.
   if [ "$LIST" = "0" ] && [ "$ALL" = "0" ] && [ -z "$SLUGS" ] && ( : <"$TTY" ) 2>/dev/null; then
     count=0
     printf '%s\n' "Skill bạn có thể cài:" >&2
-    while IFS="$(printf '\t')" read -r slug file version target name; do
+    while IFS="$(printf '\t')" read -r slug file version target name bundle; do
       [ -n "$slug" ] || continue
       count=$((count + 1))
       shown="$target"; [ "$shown" != "all" ] || shown="mọi agent"
@@ -531,7 +552,7 @@ main() {
 
   if [ "$LIST" = "1" ] || { [ "$ALL" = "0" ] && [ -z "$SLUGS" ]; }; then
     printf '%-32s %-22s %-8s %s\n' SLUG AGENT VERSION TÊN
-    while IFS="$(printf '\t')" read -r slug file version target name; do
+    while IFS="$(printf '\t')" read -r slug file version target name bundle; do
       [ -n "$slug" ] || continue
       shown="$target"; [ "$shown" != "all" ] || shown="mọi agent"
       printf '%-32s %-22s %-8s %s\n' "$slug" "$shown" "$version" "$name"
@@ -544,11 +565,12 @@ main() {
 
   # Check every line of the catalogue before writing anything: one bad entry
   # means the response cannot be trusted, so nothing is installed.
-  while IFS="$(printf '\t')" read -r slug file version target name; do
+  while IFS="$(printf '\t')" read -r slug file version target name bundle; do
     [ -n "$slug" ] || continue
     case "$slug" in ""|*[!a-z0-9-]*|-*|*-) die "slug không hợp lệ từ máy chủ: $slug" ;; esac
     case "$file" in ""|*[!A-Za-z0-9._-]*|.*) die "tên file không hợp lệ từ máy chủ: $file" ;; esac
     case "$target" in ""|*[!a-z,]*|,*|*,|*,,*) die "danh sách agent không hợp lệ từ máy chủ: $target" ;; esac
+    case "$bundle" in ""|-) ;; *[!a-z0-9-]*|-*|*-) die "bundle không hợp lệ từ máy chủ: $bundle" ;; esac
     # "all" or agents this script knows: the name picks a folder from the table above.
     if [ "$target" != "all" ]; then
       for name in $(printf '%s' "$target" | tr ',' ' '); do
@@ -562,7 +584,7 @@ main() {
   done
 
   installed=0
-  while IFS="$(printf '\t')" read -r slug file version target name; do
+  while IFS="$(printf '\t')" read -r slug file version target name bundle; do
     [ -n "$slug" ] || continue
     if [ "$ALL" = "0" ]; then
       case " $SLUGS " in *" $slug "*) ;; *) continue ;; esac
