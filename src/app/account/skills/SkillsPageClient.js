@@ -6,6 +6,7 @@ import { Modal } from "@/shared/components";
 import { runtimeInstallDir, runtimeLabel } from "@/lib/skills/runtimes.js";
 import { cn } from "@/shared/utils/cn";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { renderBundleMarkdown } from "./renderBundleMarkdown";
 
 const noopSubscribe = () => () => {};
 
@@ -18,9 +19,13 @@ function useOrigin() {
   );
 }
 
-/** The one-line installer for these arguments; the key stays a placeholder the customer fills in. */
-function installCommand(origin, args) {
-  return `curl -fsSL ${origin}/api/public/skills/install.sh | DEROUTER_KEY=<API_KEY> sh -s -- ${args}`;
+/**
+ * The one-line installer for these arguments. `apiKey`, when the customer picked
+ * one, is the real secret inlined straight into the command; otherwise the key
+ * stays a placeholder they fill in by hand.
+ */
+function installCommand(origin, args, apiKey) {
+  return `curl -fsSL ${origin}/api/public/skills/install.sh | DEROUTER_KEY=${apiKey || "<API_KEY>"} sh -s -- ${args}`;
 }
 
 function fmtDate(value) {
@@ -79,30 +84,93 @@ function Step({ index, title, children }) {
 }
 
 /**
- * One bundle (skills + engine +, on Claude Code, agent presets/command), shown as
- * one unit: its own description, its own usage guide, and a single command that
- * installs exactly this bundle's skills together with its engine.
+ * Picks one of the customer's own API keys and reveals it (POST .../secret, same
+ * action as the "Hiện key" button on /account/keys) so it can be inlined straight
+ * into a copy-pasteable install command instead of a placeholder the customer has
+ * to hand-edit.
  */
-function BundleGuide({ bundle, skills, origin }) {
-  const slugs = skills.filter((s) => s.bundleId === bundle.id).map((s) => s.slug);
+function ApiKeySelect({ id, keys, selectedId, loading, onSelect }) {
+  if (keys.length === 0) return null;
   return (
-    <div className="border border-border bg-surface p-4">
-      <h4 className="font-mono text-sm font-semibold text-text-main">{bundle.name}</h4>
-      {bundle.description && (
-        <p className="mt-1 text-sm leading-6 text-text-muted">{bundle.description}</p>
+    <label className="flex flex-wrap items-center gap-2 text-sm text-text-main">
+      <span>Điền sẵn API key vào lệnh:</span>
+      <select
+        id={id}
+        value={selectedId}
+        onChange={(e) => onSelect(e.target.value)}
+        className="h-8 border border-border bg-surface px-2 text-sm text-text-main focus:border-text-main focus:outline-none"
+      >
+        <option value="">— không, giữ &lt;API_KEY&gt; —</option>
+        {keys.map((k) => (
+          <option key={k.id} value={k.id}>{k.name || k.keyPrefix}</option>
+        ))}
+      </select>
+      {loading && <span className="text-xs text-text-muted">Đang lấy key…</span>}
+    </label>
+  );
+}
+
+/**
+ * One bundle, collapsed to what a list row needs: its name and how many skills it
+ * groups. Everything else — description, usage guide, the install command — is a
+ * click away in BundleDetailBody, not repeated for every bundle on the page.
+ */
+function BundleListItem({ bundle, skillCount, onOpen }) {
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 border border-border bg-surface p-4">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="material-symbols-outlined text-[18px] text-text-muted" aria-hidden="true">inventory_2</span>
+        <h3 className="truncate font-mono text-sm font-semibold text-text-main">{bundle.name}</h3>
+        <Tag tone="neutral">Bundle · {skillCount} skill</Tag>
+      </div>
+      <button type="button" onClick={() => onOpen(bundle)} className={buttonClass({ tone: "outline", size: "sm" })}>
+        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">menu_book</span>
+        Xem hướng dẫn &amp; cài
+      </button>
+    </li>
+  );
+}
+
+/**
+ * A bundle's full detail: its description and usage guide rendered as Markdown,
+ * an API key picker, and the one command that installs its skills together with
+ * its engine.
+ */
+function BundleDetailBody({ bundle, skills, origin, apiKeyProps }) {
+  const slugs = skills.filter((s) => s.bundleId === bundle.id).map((s) => s.slug);
+  const descriptionHtml = renderBundleMarkdown(bundle.description);
+  const usageHtml = renderBundleMarkdown(bundle.usageGuide);
+  return (
+    <div className="flex flex-col gap-4">
+      {descriptionHtml && (
+        <div
+          className="changelog-body text-sm text-text-muted"
+          dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+        />
       )}
-      {bundle.usageGuide && (
-        <p className="mt-2 border-l-2 border-border pl-3 text-sm leading-6 text-text-muted">
-          {bundle.usageGuide}
-        </p>
+      {usageHtml && (
+        <div className="border-l-2 border-border pl-3">
+          <Eyebrow>Hướng dẫn sử dụng</Eyebrow>
+          <div
+            className="changelog-body mt-1 text-sm text-text-muted"
+            dangerouslySetInnerHTML={{ __html: usageHtml }}
+          />
+        </div>
       )}
       {origin && slugs.length > 0 && (
-        <div className="mt-2">
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <Eyebrow>Cài đặt</Eyebrow>
+          <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
           <CopyLine
-            value={installCommand(origin, `${slugs.join(" ")} --engine`)}
+            value={installCommand(origin, `${slugs.join(" ")} --engine`, apiKeyProps.apiKey)}
             label={`lệnh cài bundle ${bundle.name}`}
             wrap
           />
+          <p className="text-xs leading-5 text-text-muted">
+            Cài {slugs.length} skill của bundle này cùng với engine (MCP server). Trên Claude Code,
+            installer riêng của bundle (nếu có) sẽ tự chạy sau đó để thêm agent preset và lệnh
+            orchestrating.
+          </p>
         </div>
       )}
     </div>
@@ -139,7 +207,7 @@ function InstallPath({ skill }) {
   );
 }
 
-function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
+function SkillCard({ skill, onOpen, origin, checked, onToggle, apiKey }) {
   return (
     <li className="flex flex-col gap-4 border border-border bg-surface p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -179,7 +247,7 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle }) {
       {origin && (
         <div className="flex flex-col gap-1.5">
           <Eyebrow>Cài nhanh bằng một lệnh</Eyebrow>
-          <CopyLine value={installCommand(origin, skill.slug)} label="lệnh cài nhanh" wrap />
+          <CopyLine value={installCommand(origin, skill.slug, apiKey)} label="lệnh cài nhanh" wrap />
         </div>
       )}
 
@@ -230,6 +298,15 @@ export default function SkillsPageClient() {
   const [opening, setOpening] = useState(null);
   const [detail, setDetail] = useState(null);
   const [picked, setPicked] = useState(() => new Set());
+  const [bundleDetail, setBundleDetail] = useState(null);
+
+  // The customer's own API keys, for inlining the real secret into a command
+  // instead of a placeholder. Secrets are fetched one at a time, on an explicit
+  // pick, and kept only in memory (same rule as /account/keys).
+  const [keys, setKeys] = useState([]);
+  const [keySecrets, setKeySecrets] = useState({});
+  const [selectedKeyId, setSelectedKeyId] = useState("");
+  const [keyLoading, setKeyLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -248,6 +325,31 @@ export default function SkillsPageClient() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    fetch("/api/account/keys", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : { keys: [] }))
+      .then((data) => setKeys(data.keys || []))
+      .catch(() => {});
+  }, []);
+
+  const selectKey = async (id) => {
+    setSelectedKeyId(id);
+    if (!id || keySecrets[id]) return;
+    setKeyLoading(true);
+    try {
+      const res = await fetch(`/api/account/keys/${encodeURIComponent(id)}/secret`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.secret) setKeySecrets((prev) => ({ ...prev, [id]: data.secret }));
+    } catch {
+      /* the command simply keeps the placeholder */
+    } finally {
+      setKeyLoading(false);
+    }
+  };
+
+  const apiKey = selectedKeyId ? keySecrets[selectedKeyId] || null : null;
+  const apiKeyProps = { keys, selectedId: selectedKeyId, loading: keyLoading, onSelect: selectKey, apiKey };
 
   const togglePicked = (slug) =>
     setPicked((prev) => {
@@ -374,11 +476,12 @@ export default function SkillsPageClient() {
                 <code>&lt;API_KEY&gt;</code> bằng key của bạn ở trang{" "}
                 <a href="/account/keys" className="underline">API key</a>.
               </p>
-              <CopyLine value={installCommand(origin, "--all")} label="lệnh cài tất cả skill" wrap />
+              <ApiKeySelect id="catalogue-api-key" {...apiKeyProps} />
+              <CopyLine value={installCommand(origin, "--all", apiKey)} label="lệnh cài tất cả skill" wrap />
               {pickedSlugs.length > 0 && (
                 <>
                   <p className="text-sm leading-6 text-text-muted">Chỉ {pickedSlugs.length} skill bạn đã chọn:</p>
-                  <CopyLine value={installCommand(origin, pickedSlugs.join(" "))} label="lệnh cài các skill đã chọn" wrap />
+                  <CopyLine value={installCommand(origin, pickedSlugs.join(" "), apiKey)} label="lệnh cài các skill đã chọn" wrap />
                 </>
               )}
             </Panel>
@@ -387,9 +490,16 @@ export default function SkillsPageClient() {
           {bundles.length > 0 && (
             <div className="flex flex-col gap-3">
               <Eyebrow>Bundle (skill + engine)</Eyebrow>
-              {bundles.map((bundle) => (
-                <BundleGuide key={bundle.id} bundle={bundle} skills={skills} origin={origin} />
-              ))}
+              <ul className="flex flex-col gap-3">
+                {bundles.map((bundle) => (
+                  <BundleListItem
+                    key={bundle.id}
+                    bundle={bundle}
+                    skillCount={skills.filter((s) => s.bundleId === bundle.id).length}
+                    onOpen={setBundleDetail}
+                  />
+                ))}
+              </ul>
             </div>
           )}
 
@@ -456,7 +566,7 @@ export default function SkillsPageClient() {
           ) : (
             <ul className="flex flex-col gap-3">
               {visible.map((skill) => (
-                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} checked={picked.has(skill.slug)} onToggle={togglePicked} />
+                <SkillCard key={skill.id} skill={skill} onOpen={openDetail} origin={origin} checked={picked.has(skill.slug)} onToggle={togglePicked} apiKey={apiKey} />
               ))}
             </ul>
           )}
@@ -479,9 +589,10 @@ export default function SkillsPageClient() {
             </p>
             {origin && (
               <div className="mt-3 flex flex-col gap-2">
-                <CopyLine value={installCommand(origin, "--list")} label="lệnh xem danh sách" wrap />
-                <CopyLine value={installCommand(origin, "--all")} label="lệnh cài tất cả" wrap />
-                <CopyLine value={installCommand(origin, "<slug> <slug>")} label="lệnh cài một số skill" wrap />
+                <ApiKeySelect id="guide-api-key" {...apiKeyProps} />
+                <CopyLine value={installCommand(origin, "--list", apiKey)} label="lệnh xem danh sách" wrap />
+                <CopyLine value={installCommand(origin, "--all", apiKey)} label="lệnh cài tất cả" wrap />
+                <CopyLine value={installCommand(origin, "<slug> <slug>", apiKey)} label="lệnh cài một số skill" wrap />
               </div>
             )}
             <div className="mt-4 border-t border-border pt-4">
@@ -637,6 +748,17 @@ export default function SkillsPageClient() {
         <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-text-main">
           {detail?.body}
         </pre>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(bundleDetail)}
+        onClose={() => setBundleDetail(null)}
+        title={bundleDetail?.name || ""}
+        size="full"
+      >
+        {bundleDetail && (
+          <BundleDetailBody bundle={bundleDetail} skills={skills} origin={origin} apiKeyProps={apiKeyProps} />
+        )}
       </Modal>
 
       {opening && (
