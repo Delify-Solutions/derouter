@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 46;
+export const SCHEMA_VERSION = 47;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1230,7 +1230,8 @@ export const TABLES = {
       // readers still work. `targets` is the source of truth.
       target: "TEXT",
       // JSON array of runtime ids the skill is installed into
-      // (src/lib/skills/runtimes.js); NULL on a v45 row means [target].
+      // (src/lib/skills/runtimes.js). `[]` means every agent, including ones added
+      // later; NULL on a v45 row means [target].
       targets: "TEXT",
       // Deprecated since v46: the install directory is derived per runtime. Nothing
       // reads or writes it; the column stays because dropping needs a migration.

@@ -9,6 +9,8 @@
 // It is POSIX sh with only curl as a dependency, wrapped in main() so a download
 // cut short never executes half a script.
 
+import { SKILL_RUNTIMES, SHARED_SKILLS_DIR, runtimeSkillsDir } from "./runtimes.js";
+
 // Only a plain http(s) origin is ever written into the script, because the
 // value is placed inside single quotes.
 const ORIGIN_RE = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$|^https?:\/\/\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/;
@@ -18,16 +20,18 @@ export function isSafeOrigin(origin) {
 }
 
 const TEMPLATE = String.raw`#!/bin/sh
-# derouter skill installer. Installs the skills your account may use into the agents
-# on this machine (Claude Code, Codex, Cursor).
+# derouter skill installer. Installs the skills your account may use into the coding
+# agents on this machine (Claude Code, Codex, Cursor, omp, dsh, …).
 #
 #   curl -fsSL __ORIGIN__/api/public/skills/install.sh | DEROUTER_KEY=<api key> sh -s -- --all
 #
 # Options:
 #   --all             install every skill in the catalogue
 #   --list            only list the catalogue
-#   --target <names>  claude, codex, cursor (comma list or repeated); default: every
-#                     agent the skill supports that is installed on this machine
+#   --target <names>  agent ids (comma list or repeated), e.g. claude,omp,dsh;
+#                     default: every agent the skill supports that is on this machine
+#   --copy            copy into each agent's folder instead of linking them to one
+#                     shared copy (when a skill goes to several agents)
 #   --dir <path>      install under <path>/<slug>/ instead of an agent's directory
 #   --url <origin>    server address (default: the one this script came from)
 #   <slug> ...        install only these skills
@@ -42,7 +46,9 @@ set -f
 
 BASE="@{DEROUTER_URL:-__ORIGIN__}"
 KEY="@{DEROUTER_KEY:-}"
-RUNTIMES="claude codex cursor"
+RUNTIMES="__RUNTIME_IDS__"
+CANON="$HOME/__SHARED_DIR__"
+COPY=0
 # Where the choice is read from when no skill is named; the terminal, not stdin
 # (stdin is this script when it is piped into sh).
 TTY="@{DEROUTER_TTY:-/dev/tty}"
@@ -57,15 +63,15 @@ Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<ap
   --list             chỉ liệt kê, không cài
   (không gì cả)      trong terminal: hiện danh sách đánh số và hỏi muốn cài cái nào
                      (số hoặc tên, "a" để cài tất cả)
-  --target <tên>     claude, codex, cursor (nhiều tên cách nhau dấu phẩy)
+  --target <tên>     id agent (nhiều tên cách nhau dấu phẩy), ví dụ claude,omp,dsh
                      mặc định: mọi agent skill hỗ trợ mà máy này đang có
+  --copy             chép riêng vào từng agent, không liên kết chung một bản
   --dir <đường dẫn>  cài vào <đường dẫn>/<slug>/
   --url <địa chỉ>    địa chỉ máy chủ
 USAGE
 }
 
-home_for() { printf '%s/.%s' "$HOME" "$1"; }
-dir_for() { printf '%s/.%s/skills' "$HOME" "$1"; }
+__RUNTIME_FUNCS__
 
 # curl reads the Authorization header from a config on stdin, so the key never
 # appears in the process list.
@@ -100,6 +106,50 @@ install_one() {
   installed=$((installed + 1))
 }
 
+# link_one <slug> <file> <agents> <destination root>: point <root>/<slug> at the shared
+# copy. A real folder already there (an earlier install) is updated in place rather
+# than replaced, and so is a link to somewhere else (the customer's own, say); only our
+# own link or a dangling one is (re)made. A filesystem that cannot link gets a copy.
+link_one() {
+  l_dest="$4/$1"
+  if [ -L "$l_dest" ]; then
+    if [ "$(readlink "$l_dest" 2>/dev/null)" != "$CANON/$1" ] && [ -e "$l_dest" ]; then
+      install_one "$1" "$2" "$3" "$4"
+      return 0
+    fi
+  elif [ -e "$l_dest" ]; then
+    install_one "$1" "$2" "$3" "$4"
+    return 0
+  fi
+  if mkdir -p "$4" 2>/dev/null && ln -sfn "$CANON/$1" "$l_dest" 2>/dev/null; then
+    printf '%s [%s]: đã liên kết -> %s\n' "$1" "$3" "$l_dest"
+    installed=$((installed + 1))
+  else
+    install_one "$1" "$2" "$3" "$4"
+  fi
+}
+
+# place_skill <slug> <file>: write the skill to every place in $WORK/places (one
+# "folder<TAB>agent" per line). Agents that read the same folder share one write. With
+# several different folders, one canonical copy is written and the others link to it,
+# so an update touches a single folder; --copy writes each folder separately.
+place_skill() {
+  awk -F '\t' '{ if (!($1 in names)) { order[++n] = $1; names[$1] = $2 } else { names[$1] = names[$1] "," $2 } }
+               END { for (i = 1; i <= n; i++) printf "%s\t%s\n", order[i], names[order[i]] }' "$WORK/places" >"$WORK/groups"
+  p_count="$(wc -l <"$WORK/groups" | tr -d ' ')"
+  if [ "$COPY" = "1" ] || [ "$p_count" -le 1 ]; then
+    while IFS="$(printf '\t')" read -r p_dir p_names; do
+      install_one "$1" "$2" "$p_names" "$p_dir"
+    done <"$WORK/groups"
+    return 0
+  fi
+  p_canon_names="$(awk -F '\t' -v c="$CANON" '$1 == c { print $2 }' "$WORK/groups")"
+  install_one "$1" "$2" "@{p_canon_names:-chung}" "$CANON"
+  while IFS="$(printf '\t')" read -r p_dir p_names; do
+    if [ "$p_dir" != "$CANON" ]; then link_one "$1" "$2" "$p_names" "$p_dir"; fi
+  done <"$WORK/groups"
+}
+
 main() {
   command -v curl >/dev/null 2>&1 || die "cần có curl"
 
@@ -109,6 +159,7 @@ main() {
       --all) ALL=1 ;;
       --list) LIST=1 ;;
       --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
+      --copy) COPY=1 ;;
       --dir) [ $# -ge 2 ] || die "--dir cần một giá trị"; DIR="$2"; shift ;;
       --url) [ $# -ge 2 ] || die "--url cần một giá trị"; BASE="$2"; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -132,7 +183,7 @@ main() {
     TARGETS="$(printf '%s' "$TARGETS" | tr ' ' ',' | tr -s ',')"
     [ -n "$(printf '%s' "$TARGETS" | tr -d ',')" ] || die "--target cần ít nhất một tên agent"
     for name in $(printf '%s' "$TARGETS" | tr ',' ' '); do
-      case " $RUNTIMES " in *" $name "*) ;; *) die "--target chỉ nhận claude, codex hoặc cursor (nhận: $name)" ;; esac
+      case " $RUNTIMES " in *" $name "*) ;; *) die "--target không có agent \"$name\" (có: $RUNTIMES)" ;; esac
     done
     TARGETS="$TARGETS,"
   fi
@@ -163,7 +214,8 @@ main() {
     while IFS="$(printf '\t')" read -r slug file version target name; do
       [ -n "$slug" ] || continue
       count=$((count + 1))
-      printf '%4d) %-30s %-20s %s\n' "$count" "$slug" "$target" "$name" >&2
+      shown="$target"; [ "$shown" != "all" ] || shown="mọi agent"
+      printf '%4d) %-30s %-20s %s\n' "$count" "$slug" "$shown" "$name" >&2
     done <"$WORK/catalog"
     printf '\nChọn số hoặc tên (cách nhau bằng dấu cách), "a" để cài tất cả, Enter để thoát: ' >&2
     choice=""
@@ -190,7 +242,8 @@ main() {
     printf '%-32s %-22s %-8s %s\n' SLUG AGENT VERSION TÊN
     while IFS="$(printf '\t')" read -r slug file version target name; do
       [ -n "$slug" ] || continue
-      printf '%-32s %-22s %-8s %s\n' "$slug" "$target" "$version" "$name"
+      shown="$target"; [ "$shown" != "all" ] || shown="mọi agent"
+      printf '%-32s %-22s %-8s %s\n' "$slug" "$shown" "$version" "$name"
     done <"$WORK/catalog"
     if [ "$LIST" = "0" ]; then
       printf '\nChọn skill: thêm tên skill phía sau, hoặc --all để cài tất cả.\n'
@@ -205,10 +258,12 @@ main() {
     case "$slug" in ""|*[!a-z0-9-]*|-*|*-) die "slug không hợp lệ từ máy chủ: $slug" ;; esac
     case "$file" in ""|*[!A-Za-z0-9._-]*|.*) die "tên file không hợp lệ từ máy chủ: $file" ;; esac
     case "$target" in ""|*[!a-z,]*|,*|*,|*,,*) die "danh sách agent không hợp lệ từ máy chủ: $target" ;; esac
-    # Every agent must be one this script knows: the name becomes "$HOME/.<name>/skills".
-    for name in $(printf '%s' "$target" | tr ',' ' '); do
-      case " $RUNTIMES " in *" $name "*) ;; *) die "agent không hợp lệ từ máy chủ: $name" ;; esac
-    done
+    # "all" or agents this script knows: the name picks a folder from the table above.
+    if [ "$target" != "all" ]; then
+      for name in $(printf '%s' "$target" | tr ',' ' '); do
+        case " $RUNTIMES " in *" $name "*) ;; *) die "agent không hợp lệ từ máy chủ: $name" ;; esac
+      done
+    fi
   done <"$WORK/catalog"
 
   for want in $SLUGS; do
@@ -233,39 +288,88 @@ main() {
 
     # Agents this skill supports, narrowed to --target, or else to the ones that
     # exist on this machine.
-    before="$installed"
+    if [ "$target" = "all" ]; then supported="$RUNTIMES"; else supported="$(printf '%s' "$target" | tr ',' ' ')"; fi
+    : >"$WORK/places"
     for rt in $RUNTIMES; do
-      case ",$target," in *",$rt,"*) ;; *) continue ;; esac
+      case " $supported " in *" $rt "*) ;; *) continue ;; esac
       if [ -n "$TARGETS" ]; then
         case ",$TARGETS" in *",$rt,"*) ;; *) continue ;; esac
       elif [ ! -d "$(home_for "$rt")" ]; then
         continue
       fi
-      install_one "$slug" "$file" "$rt" "$(dir_for "$rt")"
+      printf '%s\t%s\n' "$(dir_for "$rt")" "$rt" >>"$WORK/places"
     done
 
-    if [ "$installed" = "$before" ]; then
+    if [ ! -s "$WORK/places" ]; then
       if [ -n "$TARGETS" ]; then
         printf '%s: bỏ qua (skill dành cho %s, không có trong --target)\n' "$slug" "$target"
-      else
-        # No supported agent found here: put it where the skill's first agent will look.
-        first="$(printf '%s' "$target" | cut -d, -f1)"
-        printf '%s: chưa thấy agent nào trên máy, cài cho %s\n' "$slug" "$first"
-        install_one "$slug" "$file" "$first" "$(dir_for "$first")"
+        continue
       fi
+      # No supported agent found here: put it where the skill's first agent will look.
+      first="$(printf '%s' "$supported" | cut -d' ' -f1)"
+      printf '%s: chưa thấy agent nào trên máy, cài cho %s\n' "$slug" "$first"
+      printf '%s\t%s\n' "$(dir_for "$first")" "$first" >"$WORK/places"
     fi
+    place_skill "$slug" "$file"
   done <"$WORK/catalog"
 
-  printf '\nXong: %s bản cài. Mở lại phiên Claude Code / Codex / Cursor để nạp skill mới.\n' "$installed"
+  printf '\nXong: %s bản cài. Mở lại phiên của agent (Claude Code, Codex, omp, dsh…) để nạp skill mới.\n' "$installed"
 }
 
 main "$@"
 `;
 
+const SAFE_ID = /^[a-z]+$/;
+// A relative path of plain names: no leading slash, no empty or dot-dot segment.
+const SAFE_PATH = /^(?!\/)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._/-]+$/;
+const SAFE_ENV = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * The shell for the agent table: the id list and the two lookups that turn an id into
+ * the folder that marks the agent as installed and the folder it reads skills from.
+ * Everything comes from the registry and is checked against a strict pattern, because
+ * these values are written into a script customers run.
+ */
+export function runtimeShell() {
+  for (const runtime of SKILL_RUNTIMES) {
+    const ok =
+      SAFE_ID.test(runtime.id) &&
+      SAFE_PATH.test(runtime.home) &&
+      SAFE_PATH.test(runtimeSkillsDir(runtime)) &&
+      (!runtime.homeEnv || SAFE_ENV.test(runtime.homeEnv)) &&
+      (!runtime.xdg || SAFE_PATH.test(runtime.xdg)) &&
+      (!runtime.xdgSkills || SAFE_PATH.test(runtime.xdgSkills));
+    if (!ok) throw new Error(`runtime "${runtime.id}" cannot be written into the installer`);
+  }
+  // `@{` is `${` — see buildInstallScript.
+  const xdg = "@{XDG_CONFIG_HOME:-$HOME/.config}";
+  const homeOf = (r) => {
+    if (r.xdg) return xdg + "/" + r.xdg;
+    return r.homeEnv ? "@{" + r.homeEnv + ":-$HOME/" + r.home + "}" : "$HOME/" + r.home;
+  };
+  const dirOf = (r) => {
+    if (r.xdgSkills) return xdg + "/" + r.xdgSkills;
+    return r.skills ? "$HOME/" + r.skills : homeOf(r) + "/skills";
+  };
+  const cases = (expr) => SKILL_RUNTIMES.map((r) => `    ${r.id}) printf '%s' "${expr(r)}" ;;`).join("\n");
+  return {
+    ids: SKILL_RUNTIMES.map((r) => r.id).join(" "),
+    functions:
+      `home_for() {\n  case "$1" in\n${cases(homeOf)}\n  esac\n}\n` +
+      `dir_for() {\n  case "$1" in\n${cases(dirOf)}\n  esac\n}`,
+  };
+}
+
 /** The install script with this server's public origin filled in; "" origin leaves --url required. */
 export function buildInstallScript(origin) {
   const safe = isSafeOrigin(origin) ? origin : "";
+  const shell = runtimeShell();
   // `${` cannot appear inside the template literal, so the script spells shell
   // parameter expansion as `@{` and it is restored here.
-  return TEMPLATE.replaceAll("__ORIGIN__", safe).replaceAll("@{", "$" + "{");
+  return TEMPLATE
+    .replaceAll("__ORIGIN__", safe)
+    .replaceAll("__RUNTIME_IDS__", shell.ids)
+    .replaceAll("__SHARED_DIR__", SHARED_SKILLS_DIR)
+    .replaceAll("__RUNTIME_FUNCS__", shell.functions)
+    .replaceAll("@{", "$" + "{");
 }

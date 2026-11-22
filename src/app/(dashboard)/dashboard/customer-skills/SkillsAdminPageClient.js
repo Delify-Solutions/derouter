@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, Button, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
-import { runtimeLabel, SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
+import { runtimeLabel } from "@/lib/skills/runtimes.js";
 import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
@@ -258,7 +258,7 @@ export default function SkillsAdminPageClient() {
               Đã chọn {selected.size} skill
               {hiddenSelected > 0 && ` (${hiddenSelected} đang bị bộ lọc ẩn, vẫn được áp dụng)`}
             </span>
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.targets?.length ? selectedRows[0].targets : SKILL_RUNTIME_IDS)}>Đặt agent</Button>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.allAgents ? [] : (selectedRows[0]?.targets || []))}>Đặt agent</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: true })}>Phát hành</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: false })}>Ẩn</Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSelected(new Set()); setBulkTargets(null); }}>Bỏ chọn</Button>
@@ -308,9 +308,13 @@ export default function SkillsAdminPageClient() {
                   {row.version && <Badge variant="default" size="sm">v{row.version}</Badge>}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  {(row.targets || []).map((id) => (
-                    <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
-                  ))}
+                  {row.allAgents ? (
+                    <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">Mọi agent</span>
+                  ) : (
+                    (row.targets || []).map((id) => (
+                      <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
+                    ))
+                  )}
                 </div>
                 <p className="mt-1 font-mono text-[11px] text-text-subtle">
                   {row.slug} · {row.downloadCount ?? 0} lượt tải · cập nhật {fmtDate(row.updatedAt)}

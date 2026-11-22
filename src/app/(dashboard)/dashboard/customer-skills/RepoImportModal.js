@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Button, Modal } from "@/shared/components";
-import { SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
 import { slugFromName } from "@/lib/skills/frontmatter.js";
 import RuntimePicker from "./RuntimePicker";
 
@@ -33,7 +32,7 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const [targets, setTargets] = useState(SKILL_RUNTIME_IDS);
+  const [targets, setTargets] = useState([]); // [] = every agent
   const [category, setCategory] = useState("");
   const [audience, setAudience] = useState("customer");
   const [isPublished, setIsPublished] = useState(true);

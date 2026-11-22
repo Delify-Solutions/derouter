@@ -15,6 +15,8 @@ process.env.DATA_DIR = tmpDir;
 
 const { getAdapter } = await import("../src/lib/db/driver.js");
 const skills = await import("../src/lib/db/repos/skillsRepo.js");
+const { SKILL_RUNTIME_IDS } = await import("../src/lib/skills/runtimes.js");
+const allAgentsMigration = (await import("../src/lib/db/migrations/007-skills-all-agents.js")).default;
 
 let db;
 
@@ -275,7 +277,7 @@ test("a skill can target several runtimes at once", async () => {
 
 test("no runtime named means every runtime; legacy single target and 'generic' still read", async () => {
   reset();
-  const all = ["claude", "codex", "cursor"];
+  const all = SKILL_RUNTIME_IDS;
   const none = await skills.createSkill({ name: "None", body: BODY });
   assert.deepEqual((await skills.getSkillById(none.id)).targets, all);
 
@@ -415,4 +417,94 @@ test("a null or empty visibility value is refused, not read as the default", asy
   const row = await skills.getSkillById(draft.id);
   assert.equal(row.isPublished, false);
   assert.equal(row.audience, "internal");
+});
+
+test("every agent is stored as an empty list, so a skill keeps following the registry", async () => {
+  reset();
+  // Naming all of today's agents is "all": nothing else can be meant, and a list of
+  // today's ids would silently exclude any agent added tomorrow.
+  const every = await skills.createSkill({ name: "Every", body: BODY, targets: SKILL_RUNTIME_IDS });
+  assert.equal(db.get(`SELECT targets FROM skills WHERE id = ?`, [every.id]).targets, "[]");
+  const row = await skills.getSkillById(every.id);
+  assert.equal(row.allAgents, true);
+  assert.deepEqual(row.targets, SKILL_RUNTIME_IDS);
+
+  const some = await skills.createSkill({ name: "Some", body: BODY, targets: ["omp", "dsh"] });
+  const subset = await skills.getSkillById(some.id);
+  assert.equal(subset.allAgents, false);
+  assert.deepEqual(subset.targets, ["omp", "dsh"]);
+
+  // Narrowing an "all" skill, then widening it again, round-trips.
+  await skills.updateSkill(every.id, { targets: ["dsh"] });
+  assert.deepEqual((await skills.getSkillById(every.id)).targets, ["dsh"]);
+  await skills.updateSkill(every.id, { targets: SKILL_RUNTIME_IDS });
+  assert.equal((await skills.getSkillById(every.id)).allAgents, true);
+});
+
+test("the newer agents are valid targets; an unknown one is still refused", () => {
+  const base = { name: "X", body: BODY };
+  for (const id of ["omp", "dsh", "opencode", "cline"]) {
+    assert.equal(skills.skillInputError({ ...base, targets: [id] }), null, id);
+  }
+  assert.match(skills.skillInputError({ ...base, targets: ["omp", "vim"] }), /Runtime/);
+});
+
+test("migration 007 turns the original three agents into 'all' and leaves real subsets alone", async () => {
+  reset();
+  const legacy = await skills.createSkill({ name: "Legacy All", body: BODY });
+  const subset = await skills.createSkill({ name: "Legacy Subset", body: BODY, targets: ["claude", "codex"] });
+  const nulled = await skills.createSkill({ name: "Legacy Null", body: BODY, target: "cursor" });
+  db.run(`UPDATE skills SET targets = '["cursor","claude","codex"]' WHERE id = ?`, [legacy.id]);
+  db.run(`UPDATE skills SET targets = NULL WHERE id = ?`, [nulled.id]);
+
+  allAgentsMigration.up(db);
+  allAgentsMigration.up(db); // idempotent
+
+  assert.equal(db.get(`SELECT targets FROM skills WHERE id = ?`, [legacy.id]).targets, "[]");
+  assert.equal((await skills.getSkillById(legacy.id)).allAgents, true);
+  assert.deepEqual((await skills.getSkillById(subset.id)).targets, ["claude", "codex"]);
+  assert.deepEqual((await skills.getSkillById(nulled.id)).targets, ["cursor"]);
+});
+
+test("the admin form sends [] for 'every agent' and the repo keeps it as such", async () => {
+  reset();
+  // The picker never sends today's ids for "all" (a stale tab would drop a new agent).
+  const made = await skills.createSkill({ name: "Empty List", body: BODY, targets: [] });
+  assert.equal(db.get(`SELECT targets FROM skills WHERE id = ?`, [made.id]).targets, "[]");
+  assert.equal((await skills.getSkillById(made.id)).allAgents, true);
+
+  await skills.updateSkill(made.id, { targets: ["omp"] });
+  assert.equal((await skills.getSkillById(made.id)).allAgents, false);
+  await skills.updateSkill(made.id, { targets: [] });
+  assert.equal((await skills.getSkillById(made.id)).allAgents, true);
+
+  // Bulk "set agents" with [] widens every selected skill.
+  const other = await skills.createSkill({ name: "Other Narrow", body: BODY, targets: ["dsh"] });
+  const res = await skills.patchSkills([made.id, other.id], { targets: [] });
+  assert.equal(res.failed ?? 0, 0);
+  assert.equal((await skills.getSkillById(other.id)).allAgents, true);
+});
+
+test("migration 007 tolerates a database without the table or column, and garbage in targets", async () => {
+  // No `skills` table, then a table without `targets`: nothing to do, nothing thrown.
+  const fake = (tables) => ({
+    get: (sql) => (/sqlite_master/.test(sql) && tables.skills ? { name: "skills" } : undefined),
+    all: (sql) => (/table_info/.test(sql) ? tables.skills?.columns.map((name) => ({ name })) ?? [] : []),
+    run: () => { throw new Error("must not write"); },
+  });
+  assert.doesNotThrow(() => allAgentsMigration.up(fake({})));
+  assert.doesNotThrow(() => allAgentsMigration.up(fake({ skills: { columns: ["id", "target"] } })));
+
+  reset();
+  const junk = ["not json", '{"a":1}', "null", '"claude"', "7", '["claude","codex"]'];
+  const ids = [];
+  for (const [i, value] of junk.entries()) {
+    const row = await skills.createSkill({ name: `Junk ${i}`, body: BODY, targets: ["claude"] });
+    db.run(`UPDATE skills SET targets = ? WHERE id = ?`, [value, row.id]);
+    ids.push(row.id);
+  }
+  assert.doesNotThrow(() => allAgentsMigration.up(db));
+  junk.forEach((value, i) => {
+    assert.equal(db.get(`SELECT targets FROM skills WHERE id = ?`, [ids[i]]).targets, value, `row ${i} untouched`);
+  });
 });

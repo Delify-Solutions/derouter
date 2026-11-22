@@ -10,8 +10,8 @@ internal rows, and a filter by category. A load failure SHALL show an error with
 retry control, and an empty result SHALL say whether there are no skills or no skills
 matching the filters, with a control that clears the filters.
 
-A skill SHALL carry a non-empty list of agents it installs into, chosen from Claude
-Code, Codex and Cursor. A payload naming no agent, or the legacy value `generic`,
+A skill SHALL carry a non-empty list of agents it installs into, chosen from the
+agent registry (`skills-agent-registry`). A payload naming no agent, or the legacy value `generic`,
 SHALL mean every agent. An unknown agent SHALL be refused. The directory shown to the
 customer for each agent SHALL be derived from the agent and the slug; there SHALL be
 no free-text install path.

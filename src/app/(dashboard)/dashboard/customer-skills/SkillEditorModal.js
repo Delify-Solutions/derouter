@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Button, Modal } from "@/shared/components";
-import { SKILL_RUNTIME_IDS } from "@/lib/skills/runtimes.js";
 import { slugFromName } from "@/lib/skills/frontmatter.js";
 import RuntimePicker from "./RuntimePicker";
 
@@ -17,7 +16,7 @@ const EMPTY = {
   category: "",
   body: "",
   fileName: "SKILL.md",
-  targets: SKILL_RUNTIME_IDS,
+  targets: [], // [] = every agent
   audience: "customer",
   isPublished: true,
   usageNotes: "",
@@ -36,7 +35,7 @@ export function formFromSkill(skill) {
     category: skill.category || "",
     body: skill.body || "",
     fileName: skill.fileName || "SKILL.md",
-    targets: skill.targets?.length ? skill.targets : SKILL_RUNTIME_IDS,
+    targets: skill.allAgents ? [] : (skill.targets || []),
     audience: skill.audience || "customer",
     isPublished: skill.isPublished !== false,
     usageNotes: skill.usageNotes || "",
