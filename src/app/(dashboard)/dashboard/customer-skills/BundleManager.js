@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Modal, ConfirmModal, Badge, Card } from "@/shared/components";
+import { renderBundleMarkdown, excerptFromMarkdown } from "@/app/account/skills/renderBundleMarkdown";
 import SkillRow from "./SkillRow";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
@@ -285,7 +286,9 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
                     {bundle.slug} · {bundle.sourceHost}/{bundle.sourceOwner}/{bundle.sourceRepo}@{bundle.sourceRef} ·
                     installer: {bundle.installerEntrypoint} · cập nhật {fmtDate(bundle.updatedAt)}
                   </p>
-                  {bundle.description && <p className="mt-1 text-xs leading-5 text-text-muted">{bundle.description}</p>}
+                  {bundle.description && (
+                    <p className="mt-1 text-xs leading-5 text-text-muted">{excerptFromMarkdown(bundle.description)}</p>
+                  )}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <Button variant="ghost" size="sm" onClick={() => togglePublished(bundle)} disabled={bundleBusyId === bundle.id}>
@@ -305,11 +308,30 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                   {isOpen ? "expand_less" : "expand_more"}
                 </span>
-                {isOpen ? "Ẩn" : "Xem"} {linked.length} skill trong bundle này
+                {isOpen ? "Ẩn chi tiết" : "Xem chi tiết"} ({linked.length} skill)
               </button>
 
               {isOpen && (
-                <div className="flex flex-col gap-2 border-t border-border pt-3">
+                <div className="flex flex-col gap-4 border-t border-border pt-3">
+                  {(bundle.description || bundle.usageGuide) && (
+                    <div className="flex flex-col gap-3 border border-border bg-surface-2 p-4">
+                      {bundle.description && (
+                        <div
+                          className="docs-body text-sm text-text-main"
+                          dangerouslySetInnerHTML={{ __html: renderBundleMarkdown(bundle.description) }}
+                        />
+                      )}
+                      {bundle.usageGuide && (
+                        <div className="border-l-2 border-border pl-3">
+                          <span className={LABEL}>Hướng dẫn sử dụng</span>
+                          <div
+                            className="docs-body mt-1 text-sm text-text-main"
+                            dangerouslySetInnerHTML={{ __html: renderBundleMarkdown(bundle.usageGuide) }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {linked.length === 0 ? (
                     <p className="text-sm text-text-muted">Bundle này chưa có skill nào.</p>
                   ) : (

@@ -144,7 +144,7 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps }) {
     <div className="flex flex-col gap-4">
       {descriptionHtml && (
         <div
-          className="changelog-body text-sm text-text-muted"
+          className="docs-body text-sm text-text-main"
           dangerouslySetInnerHTML={{ __html: descriptionHtml }}
         />
       )}
@@ -152,7 +152,7 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps }) {
         <div className="border-l-2 border-border pl-3">
           <Eyebrow>Hướng dẫn sử dụng</Eyebrow>
           <div
-            className="changelog-body mt-1 text-sm text-text-muted"
+            className="docs-body mt-1 text-sm text-text-main"
             dangerouslySetInnerHTML={{ __html: usageHtml }}
           />
         </div>
