@@ -39,6 +39,14 @@ export const ENGINE_TARGETS = [
   { id: "amp", mode: "mcp", dir: ".config/amp", path: ".config/amp/settings.json", key: "amp.mcpServers" },
   { id: "cline", mode: "mcp", dir: ".cline", path: ".cline/mcp_settings.json", key: "mcpServers" },
   { id: "omp", mode: "bridge", dir: ".omp", path: ".omp/agent/extensions/rt-engine.ts", key: null },
+  // Antigravity and its CLI (agy) are two separate apps that read one shared
+  // config, same as the shared skills folder they already read (runtimes.js) —
+  // confirmed against the app's own shipped docs
+  // (~/.gemini/antigravity/builtin/skills/agy-customizations/docs/mcp_servers.md)
+  // and the real (if still empty) file at this path. Registering both just writes
+  // the same entry into the same file twice; harmless, not deduplicated here.
+  { id: "antigravity", mode: "mcp", dir: ".gemini/antigravity", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
+  { id: "agy", mode: "mcp", dir: ".gemini/antigravity-cli", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
   { id: "dsh", mode: "none", dir: ".dsh", path: null, key: null },
 ];
 
