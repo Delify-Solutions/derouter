@@ -415,10 +415,11 @@ function SettingsPanel({ config, onSaved }) {
 }
 
 export default function ErrorLogClient() {
-  const [filters, setFilters] = useState({ source: "", status: "", range: "24h", model: "", q: "" });
-  const [search, setSearch] = useState({ model: "", q: "" });
+  const [filters, setFilters] = useState({ source: "", status: "", statusMode: "", owner: "", range: "24h", model: "", q: "" });
+  const [search, setSearch] = useState({ model: "", q: "", owner: "" });
   const [items, setItems] = useState([]);
   const [nextBefore, setNextBefore] = useState(null);
+  const [count, setCount] = useState(0);
   const [summary, setSummary] = useState(null);
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -429,6 +430,8 @@ export default function ErrorLogClient() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [confirmFilterDelete, setConfirmFilterDelete] = useState(false);
+  const [filterDeleting, setFilterDeleting] = useState(false);
   const requestSeq = useRef(0);
 
   const query = useCallback((f, before) => {
@@ -450,6 +453,7 @@ export default function ErrorLogClient() {
       if (seq !== requestSeq.current) return; // a newer filter already answered
       setItems(data.items || []);
       setNextBefore(data.nextBefore || null);
+      setCount(Number(data.count) || 0);
       setSummary(data.summary || null);
       setConfig(data.config || null);
     } catch (e) {
@@ -547,14 +551,31 @@ export default function ErrorLogClient() {
     }
   };
 
+  // Deletes exactly what the current filters match (source/status(-mode)/owner/model/q/range)
+  // — the API refuses an empty filter, so this is never reachable with nothing selected.
+  const deleteByFilter = async () => {
+    setFilterDeleting(true);
+    try {
+      const res = await fetch(`/api/error-logs?${query(filters)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Không xóa được các mục khớp bộ lọc");
+      setConfirmFilterDelete(false);
+      load(filters);
+    } catch (e) {
+      setError(e.message || "Không xóa được các mục khớp bộ lọc");
+      setConfirmFilterDelete(false);
+    } finally {
+      setFilterDeleting(false);
+    }
+  };
+
   const applySearch = (e) => {
     e.preventDefault();
-    setFilters((f) => ({ ...f, model: search.model.trim(), q: search.q.trim() }));
+    setFilters((f) => ({ ...f, model: search.model.trim(), q: search.q.trim(), owner: search.owner.trim() }));
   };
 
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
   const empty = !loading && items.length === 0 && !error;
-  const filtered = !!(filters.source || filters.status || filters.model || filters.q);
+  const filtered = !!(filters.source || filters.status || filters.owner || filters.model || filters.q);
 
   return (
     <div className="flex flex-col gap-6">
@@ -578,13 +599,41 @@ export default function ErrorLogClient() {
       <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-3">
           <Select label="Nguồn lỗi" options={SOURCES} value={filters.source} onChange={setFilter("source")} />
-          <Select label="Mã trạng thái" options={STATUSES} value={filters.status} onChange={setFilter("status")} />
+          <div className="flex flex-col gap-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Mã trạng thái</span>
+            <div className="flex gap-1.5">
+              <div className="flex-1">
+                <Select options={STATUSES} value={filters.status} onChange={setFilter("status")} />
+              </div>
+              <div className="flex shrink-0 border border-border" role="group" aria-label="Bao gồm hay loại trừ mã đã chọn">
+                {[["", "Bao gồm"], ["exclude", "Loại trừ"]].map(([v, label]) => (
+                  <button
+                    key={v || "include"}
+                    type="button"
+                    onClick={() => setFilters((f) => ({ ...f, statusMode: v }))}
+                    aria-pressed={filters.statusMode === v}
+                    title={v ? "Hiện mọi lỗi KHÔNG thuộc mã đã chọn" : "Hiện lỗi thuộc mã đã chọn"}
+                    className={`h-10 px-2.5 font-mono text-xs transition-colors duration-150 ${
+                      filters.statusMode === v ? "bg-text-main text-bg" : "text-text-muted hover:bg-surface-2"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <Select label="Khoảng thời gian" options={RANGES} value={filters.range} onChange={setFilter("range")} />
         </div>
         <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           <label className="flex flex-col gap-1.5 sm:w-56">
             <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Model</span>
             <input value={search.model} onChange={(e) => setSearch((s) => ({ ...s, model: e.target.value }))} placeholder="vd. GLM-5.3"
+              className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
+          </label>
+          <label className="flex flex-col gap-1.5 sm:w-56">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Người dùng</span>
+            <input value={search.owner} onChange={(e) => setSearch((s) => ({ ...s, owner: e.target.value }))} placeholder="email hoặc tên key"
               className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
           </label>
           <label className="flex flex-col gap-1.5 flex-1">
@@ -606,6 +655,19 @@ export default function ErrorLogClient() {
               Tải lỗi đang lọc
             </a>
             <Button type="button" variant="ghost" icon="tune" onClick={() => setShowSettings((v) => !v)}>Cài đặt</Button>
+            {filtered && (
+              <Button
+                type="button"
+                variant="ghost"
+                icon="delete_sweep"
+                className="text-danger"
+                onClick={() => setConfirmFilterDelete(true)}
+                disabled={!count}
+                title="Xoá mọi mục khớp bộ lọc hiện tại (nguồn, mã trạng thái, người dùng, model, tìm kiếm, khoảng thời gian)"
+              >
+                Xóa theo bộ lọc ({count})
+              </Button>
+            )}
             <Button type="button" variant="ghost" icon="delete" onClick={() => setConfirmClear(true)} disabled={!summary?.total}>Xóa hết</Button>
           </div>
         </form>
@@ -639,7 +701,7 @@ export default function ErrorLogClient() {
             {filtered ? "Thử bỏ bớt bộ lọc hoặc mở rộng khoảng thời gian." : "Khi một request lỗi, nó sẽ hiện ở đây cùng báo lỗi và prompt đã gửi."}
           </p>
           {filtered && (
-            <Button size="sm" variant="secondary" onClick={() => { setSearch({ model: "", q: "" }); setFilters({ source: "", status: "", range: "", model: "", q: "" }); }}>
+            <Button size="sm" variant="secondary" onClick={() => { setSearch({ model: "", q: "", owner: "" }); setFilters({ source: "", status: "", statusMode: "", owner: "", range: "", model: "", q: "" }); }}>
               Bỏ bộ lọc
             </Button>
           )}
@@ -724,6 +786,17 @@ export default function ErrorLogClient() {
         title="Xóa toàn bộ nhật ký lỗi"
         message={`Xóa ${(summary?.total ?? 0).toLocaleString("vi-VN")} mục đang lưu, gồm cả prompt đã ghi? Không hoàn tác được.`}
         confirmText="Xóa hết"
+        cancelText="Hủy"
+      />
+
+      <ConfirmModal
+        isOpen={confirmFilterDelete}
+        onClose={() => setConfirmFilterDelete(false)}
+        onConfirm={deleteByFilter}
+        loading={filterDeleting}
+        title="Xóa các mục khớp bộ lọc"
+        message={`Xóa ${count.toLocaleString("vi-VN")} mục đang khớp bộ lọc hiện tại (nguồn, mã trạng thái, người dùng, model, tìm kiếm, khoảng thời gian)? Không hoàn tác được.`}
+        confirmText="Xóa"
         cancelText="Hủy"
       />
     </div>
