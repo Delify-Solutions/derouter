@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listPublishedSkills, listSkillCategories } from "@/lib/db/repos/skillsRepo.js";
 import { listPublishedBundles } from "@/lib/db/repos/skillBundlesRepo.js";
+import { checkBundleUpdate } from "@/lib/skills/bundleUpdateCheck.js";
 import { resolveAccountUser } from "@/lib/auth/userSession.js";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,12 @@ export async function GET(request) {
       listPublishedBundles(),
     ]);
     const bundleIdsInUse = new Set(skills.map((s) => s.bundleId).filter(Boolean));
-    const bundles = allBundles.filter((b) => bundleIdsInUse.has(b.id));
+    const inUse = allBundles.filter((b) => bundleIdsInUse.has(b.id));
+    // Cached per bundle (bundleUpdateCheck.js, 1h), so this never costs a live call
+    // on most page loads — only the first one in an hour per bundle does.
+    const bundles = await Promise.all(
+      inUse.map(async (bundle) => ({ ...bundle, ...(await checkBundleUpdate(bundle)) }))
+    );
     return NextResponse.json(
       { skills, categories, bundles },
       { headers: { "Cache-Control": "no-store" } }

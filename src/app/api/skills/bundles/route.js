@@ -4,6 +4,7 @@ import {
   createBundle,
   bundleInputError,
 } from "@/lib/db/repos/skillBundlesRepo.js";
+import { checkBundleUpdate } from "@/lib/skills/bundleUpdateCheck.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ export async function GET(request) {
     if (published === "1" || published === "true") filter.isPublished = true;
     if (published === "0" || published === "false") filter.isPublished = false;
 
-    const bundles = await listBundles(filter);
+    const rows = await listBundles(filter);
+    const bundles = await Promise.all(
+      rows.map(async (bundle) => ({ ...bundle, ...(await checkBundleUpdate(bundle)) }))
+    );
     return NextResponse.json({ bundles }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "Không tải được danh sách bundle" }, { status: 500 });

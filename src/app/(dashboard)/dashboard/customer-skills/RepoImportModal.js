@@ -45,6 +45,7 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
   const [bundleDescription, setBundleDescription] = useState("");
   const [bundleUsageGuide, setBundleUsageGuide] = useState("");
   const [bundleEntrypoint, setBundleEntrypoint] = useState("install.mjs");
+  const [bundleVersion, setBundleVersion] = useState("");
 
   const reset = () => {
     setRows([]);
@@ -56,6 +57,7 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
     setBundleDescription("");
     setBundleUsageGuide("");
     setBundleEntrypoint("install.mjs");
+    setBundleVersion("");
   };
 
   const readRepo = async () => {
@@ -165,6 +167,8 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
             installerEntrypoint: bundleEntrypoint,
             audience,
             isPublished,
+            version: bundleVersion.trim(),
+            importedSha: meta.sha || null,
           }),
         });
         const bundleData = await bundleRes.json().catch(() => ({}));
@@ -341,6 +345,16 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
                     onChange={(e) => setBundleUsageGuide(e.target.value)}
                     rows={3}
                     className="w-full border border-border bg-surface px-3 py-2 text-sm text-text-main focus:border-text-main focus:outline-none"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className={LABEL}>Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)</span>
+                  <input
+                    value={bundleVersion}
+                    onChange={(e) => setBundleVersion(e.target.value)}
+                    className={`${INPUT} font-mono`}
+                    placeholder="v1.0.0"
+                    maxLength={40}
                   />
                 </label>
                 <label className="flex flex-col gap-1.5">

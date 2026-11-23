@@ -29,6 +29,7 @@ function formFromBundle(bundle) {
     audience: bundle.audience || "customer",
     isPublished: bundle.isPublished !== false,
     sortOrder: bundle.sortOrder ?? 0,
+    version: bundle.version || "",
   };
 }
 
@@ -92,6 +93,17 @@ function BundleEditorModal({ bundle, onClose, onSaved }) {
             <input value={form.slug} onChange={(e) => set({ slug: e.target.value })} className={`${INPUT} font-mono`} />
           </label>
         </div>
+
+        <label className="flex flex-col gap-1.5">
+          <span className={LABEL}>Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)</span>
+          <input
+            value={form.version}
+            onChange={(e) => set({ version: e.target.value })}
+            className={`${INPUT} font-mono`}
+            placeholder="v1.0.0"
+            maxLength={40}
+          />
+        </label>
 
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Mô tả (khách thấy)</span>
@@ -235,6 +247,27 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
     }
   };
 
+  // Acknowledges the source has moved: not a re-import, just marks the latest
+  // commit as the one this bundle's content now reflects, so the banner clears.
+  // Re-importing the content itself is still the admin's own call in RepoImportModal.
+  const markSynced = async (bundle) => {
+    if (!bundle.latestSha) return;
+    setBusyId(bundle.id);
+    try {
+      const res = await fetch(`/api/skills/bundles/${bundle.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ importedSha: bundle.latestSha }),
+      });
+      if (res.ok) await load();
+      else setError("Không đánh dấu đồng bộ được.");
+    } catch {
+      setError("Không đánh dấu đồng bộ được.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const remove = async () => {
     if (!deleting) return;
     const target = deleting;
@@ -279,8 +312,10 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-mono text-sm font-semibold text-text-main">{bundle.name}</h3>
+                    {bundle.version && <Badge variant="default" size="sm">{bundle.version}</Badge>}
                     {bundle.isPublished ? <Badge variant="success" size="sm" dot>Đang phát hành</Badge> : <Badge variant="default" size="sm" dot>Bản nháp</Badge>}
                     {bundle.audience === "internal" && <Badge variant="warning" size="sm">Nội bộ</Badge>}
+                    {bundle.hasUpdate && <Badge variant="warning" size="sm" dot>Có bản cập nhật từ nguồn</Badge>}
                   </div>
                   <p className="mt-1 font-mono text-[11px] text-text-subtle">
                     {bundle.slug} · {bundle.sourceHost}/{bundle.sourceOwner}/{bundle.sourceRepo}@{bundle.sourceRef} ·
@@ -288,6 +323,19 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
                   </p>
                   {bundle.description && (
                     <p className="mt-1 text-xs leading-5 text-text-muted">{excerptFromMarkdown(bundle.description)}</p>
+                  )}
+                  {bundle.hasUpdate && (
+                    <div className="mt-2 flex flex-col gap-1.5 border border-amber-500/40 bg-amber-500/5 p-2.5">
+                      <p className="font-mono text-[11px] text-amber-700 dark:text-amber-400">
+                        Commit mới nhất trên {bundle.sourceRef}: {bundle.latestSha?.slice(0, 7)} (đã nhập: {bundle.importedSha?.slice(0, 7) || "—"})
+                      </p>
+                      <p className="text-xs leading-5 text-text-muted">
+                        Xem lại nội dung repo nguồn, nhập lại qua &quot;Nhập từ repo&quot; nếu cần, rồi bấm nút bên dưới để tắt cảnh báo này.
+                      </p>
+                      <Button variant="secondary" size="sm" className="w-fit" onClick={() => markSynced(bundle)} disabled={bundleBusyId === bundle.id}>
+                        Đã xem, đánh dấu đồng bộ
+                      </Button>
+                    </div>
                   )}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
