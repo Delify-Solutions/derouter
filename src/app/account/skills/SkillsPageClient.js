@@ -27,11 +27,18 @@ function useOrigin() {
  * by hand. `opts.target`, when the customer narrowed it to specific agents, is
  * appended as `--target <ids>`; left out (the default), the installer covers
  * every agent it finds on the machine — "all agents" needs no flag at all.
+ *
+ * `--uninstall` is a pure filesystem cleanup (installScript.js's own words: "no
+ * server, no API key needed") — it never reads DEROUTER_KEY, so the command
+ * leaves that part out entirely instead of showing a key/placeholder nothing
+ * ever uses.
  */
 function installCommand(origin, args, opts = {}) {
   const { apiKey, target } = opts;
   const targetArg = target && target.length > 0 ? ` --target ${target.join(",")}` : "";
-  return `curl -fsSL ${origin}/api/public/skills/install.sh | DEROUTER_KEY=${apiKey || "<API_KEY>"} sh -s -- ${args}${targetArg}`;
+  const base = `curl -fsSL ${origin}/api/public/skills/install.sh | `;
+  const keyPrefix = /(^|\s)--uninstall(\s|$)/.test(args) ? "" : `DEROUTER_KEY=${apiKey || "<API_KEY>"} `;
+  return `${base}${keyPrefix}sh -s -- ${args}${targetArg}`;
 }
 
 function fmtDate(value) {
