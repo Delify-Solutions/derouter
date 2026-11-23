@@ -519,8 +519,8 @@ test("installer: a link the customer made is never re-pointed, its target folder
   assert.equal(again.status, 0, again.err);
 });
 
-test("installer: XDG_CONFIG_HOME moves OpenCode, Goose and Amp", async () => {
-  const created = await skills.createSkill({ name: "Xdg Agents", body: BODY_B, targets: ["opencode", "amp"] });
+test("installer: XDG_CONFIG_HOME moves OpenCode's skills folder", async () => {
+  const created = await skills.createSkill({ name: "Xdg Agents", body: BODY_B, targets: ["opencode"] });
   try {
     fs.rmSync(home, { recursive: true, force: true });
     const xdg = path.join(tmpDir, "xdg-config");
@@ -530,13 +530,27 @@ test("installer: XDG_CONFIG_HOME moves OpenCode, Goose and Amp", async () => {
     assert.equal(r.status, 0, r.err);
     assert.ok(fs.existsSync(path.join(xdg, "opencode", "skills", "xdg-agents", "SKILL.md")));
     assert.ok(!fs.existsSync(installed(".config")), "nothing written under the default config home");
+  } finally {
+    await skills.deleteSkill(created.id);
+  }
+});
 
-    // Without it, the default is ~/.config.
+test("installer: Amp and Goose are detected via XDG_CONFIG_HOME, but their skills still land in the shared folder", async () => {
+  // ampcode.com and goose-docs.ai both write to the one shared folder every such
+  // agent reads (runtimes.js) -- unlike OpenCode, their skills do not move with
+  // XDG_CONFIG_HOME, only where each is *detected* does.
+  const created = await skills.createSkill({ name: "Xdg Shared Agents", body: BODY_B, targets: ["amp", "goose"] });
+  try {
     fs.rmSync(home, { recursive: true, force: true });
-    fs.mkdirSync(installed(".config", "amp"), { recursive: true });
-    const d = await runInstaller(["xdg-agents"]);
-    assert.equal(d.status, 0, d.err);
-    assert.ok(fs.existsSync(installed(".config", "agents", "skills", "xdg-agents", "SKILL.md")));
+    const xdg = path.join(tmpDir, "xdg-shared-config");
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.mkdirSync(path.join(xdg, "amp"), { recursive: true });
+    fs.mkdirSync(path.join(xdg, "goose"), { recursive: true });
+    const r = await runInstaller(["xdg-shared-agents"], { env: { XDG_CONFIG_HOME: xdg } });
+    assert.equal(r.status, 0, r.err);
+    assert.ok(!fs.existsSync(path.join(xdg, "amp", "skills")), "Amp's skills are not written under the moved XDG root");
+    assert.ok(!fs.existsSync(path.join(xdg, "goose", "skills")), "Goose's skills are not written under the moved XDG root");
+    assert.equal(fs.readFileSync(installed(".agents", "skills", "xdg-shared-agents", "SKILL.md"), "utf8"), BODY_B);
   } finally {
     await skills.deleteSkill(created.id);
   }
@@ -596,16 +610,16 @@ test("installer: Antigravity, its CLI and ZCode land where each reads skills", a
 });
 
 test("installer: agents that read the same folder share one write", async () => {
-  const created = await skills.createSkill({ name: "Shared Dir", body: BODY_B, targets: ["cline", "pi", "warp"] });
+  const created = await skills.createSkill({ name: "Shared Dir", body: BODY_B, targets: ["amp", "pi", "warp"] });
   try {
     fs.rmSync(home, { recursive: true, force: true });
-    fs.mkdirSync(installed(".cline"), { recursive: true });
+    fs.mkdirSync(installed(".config", "amp"), { recursive: true });
     fs.mkdirSync(installed(".pi", "agent"), { recursive: true });
     const r = await runInstaller(["shared-dir"]);
     assert.equal(r.status, 0, r.err);
     assert.equal(fs.readFileSync(installed(".agents", "skills", "shared-dir", "SKILL.md"), "utf8"), BODY_B);
     assert.ok(!fs.lstatSync(installed(".agents", "skills", "shared-dir")).isSymbolicLink());
-    assert.match(r.out, /shared-dir \[cline,pi\]: đã cài/);
+    assert.match(r.out, /shared-dir \[amp,pi\]: đã cài/);
     assert.match(r.out, /Xong: 1 bản cài/);
   } finally {
     await skills.deleteSkill(created.id);
@@ -917,13 +931,102 @@ test("the bundle installer is offered every wanted agent, not just claude", () =
 });
 
 /**
+ * Pull one shell function's definition out of the rendered script, brace-depth
+ * aware — a plain "first bare closing brace" regex cuts register_mcp off mid-way
+ * through its own embedded `node -e '...'` script, which has flush-left closing
+ * braces of its own (the for-loop and the `if (raw.trim() !== "")` block).
+ */
+function extractShellFn(script, name) {
+  const marker = `${name}() {`;
+  const start = script.indexOf(marker);
+  if (start === -1) throw new Error(`${name} not found in rendered script`);
+  let depth = 0;
+  let i = start + marker.length - 1; // the opening brace itself
+  for (; i < script.length; i++) {
+    if (script[i] === "{") depth++;
+    else if (script[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        i++;
+        break;
+      }
+    }
+  }
+  return script.slice(start, i);
+}
+
+/**
+ * Run the real register_mcp (extracted verbatim from the rendered script) against
+ * a throwaway config file, so Kiro's plain command/args/env shape is exercised
+ * for real, not just pattern-matched against the generator source.
+ */
+function runRegisterMcp({ agent, key, configName }) {
+  const script = buildInstallScript("https://ai.example.com");
+  const fn = (name) => extractShellFn(script, name);
+  const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-register-mcp-"));
+  const configPath = path.join(harnessDir, configName);
+  const serverPath = path.join(harnessDir, "lib", "mcp-server.mjs");
+  fs.mkdirSync(path.dirname(serverPath), { recursive: true });
+  fs.writeFileSync(serverPath, "// fake engine\n");
+  const harness = `#!/bin/sh
+set -eu
+${fn("engine_format_for")}
+${fn("register_mcp")}
+register_mcp "${agent}" "${key}" "${configPath}" "${process.execPath}" "${serverPath}" "test-bundle"
+`;
+  const file = path.join(harnessDir, "run.sh");
+  fs.writeFileSync(file, harness);
+  const r = spawnSync("sh", [file], { encoding: "utf8" });
+  let written = null;
+  try {
+    written = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    /* not written, or not valid JSON — r.status/r.stderr tell the test why */
+  }
+  fs.rmSync(harnessDir, { recursive: true, force: true });
+  return { ...r, written };
+}
+
+test("register_mcp writes Kiro's plain command/args/env entry", () => {
+  const kiro = runRegisterMcp({ agent: "kiro", key: "mcpServers", configName: "mcp.json" });
+  assert.equal(kiro.status, 0, kiro.stderr);
+  assert.equal(kiro.written.mcpServers["test-bundle"].command, process.execPath);
+  assert.equal(kiro.written.mcpServers["test-bundle"].type, undefined, "kiro needs no extra discriminator field");
+});
+
+test("register_mcp merges into Qoder's existing settings.json instead of overwriting it", () => {
+  const script = buildInstallScript("https://ai.example.com");
+  const fn = (name) => extractShellFn(script, name);
+  const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-register-mcp-qoder-"));
+  const configPath = path.join(harnessDir, "settings.json");
+  fs.writeFileSync(configPath, JSON.stringify({ enabledPlugins: { "qoder-context@qoderapp-bundler": true } }));
+  const serverPath = path.join(harnessDir, "lib", "mcp-server.mjs");
+  fs.mkdirSync(path.dirname(serverPath), { recursive: true });
+  fs.writeFileSync(serverPath, "// fake engine\n");
+  const harness = `#!/bin/sh
+set -eu
+${fn("engine_format_for")}
+${fn("register_mcp")}
+register_mcp "qoder" "mcpServers" "${configPath}" "${process.execPath}" "${serverPath}" "test-bundle"
+`;
+  const file = path.join(harnessDir, "run.sh");
+  fs.writeFileSync(file, harness);
+  const r = spawnSync("sh", [file], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const written = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  assert.equal(written.enabledPlugins["qoder-context@qoderapp-bundler"], true, "the plugin's own settings survive");
+  assert.equal(written.mcpServers["test-bundle"].command, process.execPath);
+  fs.rmSync(harnessDir, { recursive: true, force: true });
+});
+
+/**
  * Run the real run_bundle_installer (extracted verbatim from the rendered
  * script, same source as production) against a fake "bundle installer" so the
  * --agent / fallback control flow is exercised for real, not just pattern-matched.
  */
 function runBundleInstaller({ eWanted, dir = "", fakeInstaller }) {
   const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
-  const fn = (name) => script.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?\\n\\}`, "m"))[0];
+  const fn = (name) => extractShellFn(script, name);
   const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-rb-installer-"));
   const entry = path.join(harnessDir, "install.mjs");
   fs.writeFileSync(entry, fakeInstaller);

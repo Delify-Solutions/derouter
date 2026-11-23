@@ -12,10 +12,10 @@
 //   skills   where the agent reads skill folders from, relative to $HOME. Omitted when
 //            it is simply `<home>/skills`.
 //
-// Agents whose `skills` is the shared `.agents/skills` folder (Cline, Pi, Warp) read
-// the same directory, so a skill is written there once. Paths come from the agents'
-// own documentation; keep an entry only when its location is known, because a skill
-// written to a folder the agent never reads is silently useless.
+// Agents whose `skills` is the shared `.agents/skills` folder (Amp, Goose, Pi, Warp)
+// read the same directory, so a skill is written there once. Paths come from the
+// agents' own documentation; keep an entry only when its location is known, because a
+// skill written to a folder the agent never reads is silently useless.
 //
 // Dependency-free: imported by client components and rendered into the shell script.
 
@@ -37,17 +37,21 @@ export const SKILL_RUNTIMES = [
   { id: "roo", label: "Roo Code", home: ".roo" },
   { id: "trae", label: "Trae", home: ".trae" },
   { id: "qwen", label: "Qwen Code", home: ".qwen" },
-  { id: "goose", label: "Goose", home: ".config/goose", xdg: "goose" },
+  // goose.ai's own docs put skills under the shared folder, not a goose-specific one
+  // (goose-docs.ai, Skills Extension page) — `home`/`xdg` still mark it as installed.
+  { id: "goose", label: "Goose", home: ".config/goose", xdg: "goose", skills: SHARED_SKILLS_DIR },
   { id: "kiro", label: "Kiro CLI", home: ".kiro" },
   { id: "junie", label: "Junie", home: ".junie" },
   { id: "qoder", label: "Qoder", home: ".qoder" },
-  { id: "continue", label: "Continue", home: ".continue" },
   { id: "antigravity", label: "Antigravity", home: ".gemini/antigravity", skills: ".gemini/config/skills" },
   // The Antigravity CLI (`agy`) reads the same skills folder but is detected by its own folder.
   { id: "agy", label: "Antigravity CLI", home: ".gemini/antigravity-cli", skills: ".gemini/config/skills" },
   { id: "zcode", label: "ZCode", home: ".zcode" },
-  { id: "amp", label: "Amp", home: ".config/amp", skills: ".config/agents/skills", xdg: "amp", xdgSkills: "agents/skills" },
-  { id: "cline", label: "Cline", home: ".cline", skills: SHARED_SKILLS_DIR },
+  // ampcode.com's own worked example writes to the shared folder, not a
+  // per-agent one under .config (that path appeared nowhere in Amp's own docs).
+  { id: "amp", label: "Amp", home: ".config/amp", xdg: "amp", skills: SHARED_SKILLS_DIR },
+  // docs.cline.bot: Cline's own skills folder, never the shared one.
+  { id: "cline", label: "Cline", home: ".cline" },
   { id: "pi", label: "Pi", home: ".pi/agent", skills: SHARED_SKILLS_DIR },
   { id: "warp", label: "Warp", home: ".warp", skills: SHARED_SKILLS_DIR },
 ];

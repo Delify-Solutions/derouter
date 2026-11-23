@@ -47,6 +47,12 @@ export const ENGINE_TARGETS = [
   // the same entry into the same file twice; harmless, not deduplicated here.
   { id: "antigravity", mode: "mcp", dir: ".gemini/antigravity", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
   { id: "agy", mode: "mcp", dir: ".gemini/antigravity-cli", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
+  // kiro.dev/docs/mcp/configuration: the user-level file, confirmed against the
+  // tool's own docs (command/args/env, no extra required field).
+  { id: "kiro", mode: "mcp", dir: ".kiro", path: ".kiro/settings/mcp.json", key: "mcpServers" },
+  // docs.qoder.com/cli/mcp-reference: mcpServers lives inside the same settings.json
+  // every other Qoder setting already lives in (merged into, never overwritten).
+  { id: "qoder", mode: "mcp", dir: ".qoder", path: ".qoder/settings.json", key: "mcpServers" },
   { id: "dsh", mode: "none", dir: ".dsh", path: null, key: null },
 ];
 
