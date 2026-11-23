@@ -66,6 +66,23 @@ test("omp is a bridge target, because it has no MCP client", () => {
   assert.deepEqual(bridgeEngineTargets().map((t) => t.id), ["omp"]);
 });
 
+test("antigravity and its CLI are mcp targets sharing one config file", () => {
+  // ~/.gemini/antigravity/builtin/skills/agy-customizations/docs/mcp_servers.md
+  // (shipped with the app) documents mcpServers/command/args/env at this exact
+  // path — the same shared file and key every other json-format target uses.
+  const ids = mcpEngineTargets().map((t) => t.id);
+  for (const wanted of ["antigravity", "agy"]) {
+    assert.ok(ids.includes(wanted), `${wanted} should be an mcp target`);
+  }
+  const antigravity = ENGINE_TARGETS.find((t) => t.id === "antigravity");
+  const agy = ENGINE_TARGETS.find((t) => t.id === "agy");
+  assert.equal(antigravity.path, ".gemini/config/mcp_config.json");
+  assert.equal(antigravity.path, agy.path);
+  assert.equal(antigravity.key, "mcpServers");
+  assert.equal(agy.key, "mcpServers");
+  assert.equal(antigravity.format, undefined, "json is the default, not a declared format");
+});
+
 test("dsh is skipped: its plugin already owns an engine", () => {
   const summary = engineTargetSummary();
   assert.ok(summary.none.includes("dsh"));
