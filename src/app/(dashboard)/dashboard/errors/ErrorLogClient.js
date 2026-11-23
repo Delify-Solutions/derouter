@@ -22,11 +22,17 @@ const SOURCE_HINT = {
   platform: "Router chặn theo key, nhóm hoặc gói (hết quota, vượt rate limit)",
 };
 
-const STATUSES = [
-  { value: "", label: "Mọi mã" },
+// Toggle buttons for the status filter — chosen together, not one at a time, so
+// "loại trừ 503 và 429" is a single click each rather than needing free text.
+const STATUS_TOKENS = [
   { value: "4", label: "4xx" },
   { value: "5", label: "5xx" },
-  { value: "2", label: "200 (stream đứt)" },
+  { value: "2", label: "200 (đứt)" },
+  { value: "429", label: "429" },
+  { value: "500", label: "500" },
+  { value: "502", label: "502" },
+  { value: "503", label: "503" },
+  { value: "504", label: "504" },
 ];
 
 const RANGES = [
@@ -574,6 +580,14 @@ export default function ErrorLogClient() {
   };
 
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  const statusTokens = filters.status ? filters.status.split(",").filter(Boolean) : [];
+  const toggleStatusToken = (token) => {
+    setFilters((f) => {
+      const current = f.status ? f.status.split(",").filter(Boolean) : [];
+      const next = current.includes(token) ? current.filter((t) => t !== token) : [...current, token];
+      return { ...f, status: next.join(",") };
+    });
+  };
   const empty = !loading && items.length === 0 && !error;
   const filtered = !!(filters.source || filters.status || filters.owner || filters.model || filters.q);
 
@@ -597,33 +611,59 @@ export default function ErrorLogClient() {
       {summary && <p className="-mt-3 text-[11px] text-text-subtle">Các ô theo nguồn đếm trong khoảng thời gian đang chọn.</p>}
 
       <div className="flex flex-col gap-3">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Select label="Nguồn lỗi" options={SOURCES} value={filters.source} onChange={setFilter("source")} />
-          <div className="flex flex-col gap-1.5">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Mã trạng thái</span>
-            <div className="flex gap-1.5">
-              <div className="flex-1">
-                <Select options={STATUSES} value={filters.status} onChange={setFilter("status")} />
-              </div>
-              <div className="flex shrink-0 border border-border" role="group" aria-label="Bao gồm hay loại trừ mã đã chọn">
-                {[["", "Bao gồm"], ["exclude", "Loại trừ"]].map(([v, label]) => (
-                  <button
-                    key={v || "include"}
-                    type="button"
-                    onClick={() => setFilters((f) => ({ ...f, statusMode: v }))}
-                    aria-pressed={filters.statusMode === v}
-                    title={v ? "Hiện mọi lỗi KHÔNG thuộc mã đã chọn" : "Hiện lỗi thuộc mã đã chọn"}
-                    className={`h-10 px-2.5 font-mono text-xs transition-colors duration-150 ${
-                      filters.statusMode === v ? "bg-text-main text-bg" : "text-text-muted hover:bg-surface-2"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+          <Select label="Khoảng thời gian" options={RANGES} value={filters.range} onChange={setFilter("range")} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
+              Mã trạng thái {statusTokens.length > 0 && `(${statusTokens.length} đã chọn)`}
+            </span>
+            <div className="flex shrink-0 border border-border" role="group" aria-label="Bao gồm hay loại trừ các mã đã chọn">
+              {[["", "Bao gồm"], ["exclude", "Loại trừ"]].map(([v, label]) => (
+                <button
+                  key={v || "include"}
+                  type="button"
+                  onClick={() => setFilters((f) => ({ ...f, statusMode: v }))}
+                  aria-pressed={filters.statusMode === v}
+                  title={v ? "Hiện mọi lỗi KHÔNG thuộc các mã đã chọn" : "Hiện lỗi thuộc các mã đã chọn"}
+                  className={`h-8 px-2.5 font-mono text-xs transition-colors duration-150 ${
+                    filters.statusMode === v ? "bg-text-main text-bg" : "text-text-muted hover:bg-surface-2"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
-          <Select label="Khoảng thời gian" options={RANGES} value={filters.range} onChange={setFilter("range")} />
+          <div className="flex flex-wrap gap-1.5">
+            {STATUS_TOKENS.map((t) => {
+              const active = statusTokens.includes(t.value);
+              return (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => toggleStatusToken(t.value)}
+                  aria-pressed={active}
+                  className={`h-8 border px-2.5 font-mono text-xs font-medium transition-colors duration-150 ${
+                    active ? "border-text-main bg-text-main text-bg" : "border-border bg-surface text-text-muted hover:text-text-main"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+            {statusTokens.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilters((f) => ({ ...f, status: "" }))}
+                className="h-8 px-2.5 font-mono text-xs text-text-muted hover:text-text-main"
+              >
+                Bỏ chọn mã
+              </button>
+            )}
+          </div>
         </div>
         <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           <label className="flex flex-col gap-1.5 sm:w-56">

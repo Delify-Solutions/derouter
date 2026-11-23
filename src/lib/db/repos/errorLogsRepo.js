@@ -99,14 +99,20 @@ function where(filter) {
   const params = [];
   if (filter.source && ERROR_LOG_SOURCES.includes(filter.source)) { conds.push("source = ?"); params.push(filter.source); }
   if (filter.status) {
-    const s = String(filter.status);
-    let cond = null;
-    let vals = [];
-    if (/^\d$/.test(s)) { cond = "status >= ? AND status < ?"; vals = [Number(s) * 100, Number(s) * 100 + 100]; }
-    else if (/^\d{3}$/.test(s)) { cond = "status = ?"; vals = [Number(s)]; }
-    if (cond) {
-      // "loại trừ": the same class/code, inverted — everything that does NOT match.
-      conds.push(filter.statusMode === "exclude" ? `NOT (${cond})` : cond);
+    // One or more classes/codes, comma- or space-separated (e.g. "503,429" or "4 5").
+    // Each token ORs into one group; statusMode applies to the whole group at once —
+    // "loại trừ 503 và 429" means NOT (503 OR 429), not two separate exclusions.
+    const parts = [];
+    const vals = [];
+    for (const token of String(filter.status).split(/[,\s]+/)) {
+      const s = token.trim();
+      if (!s) continue;
+      if (/^\d$/.test(s)) { parts.push("(status >= ? AND status < ?)"); vals.push(Number(s) * 100, Number(s) * 100 + 100); }
+      else if (/^\d{3}$/.test(s)) { parts.push("status = ?"); vals.push(Number(s)); }
+    }
+    if (parts.length) {
+      const group = parts.join(" OR ");
+      conds.push(filter.statusMode === "exclude" ? `NOT (${group})` : `(${group})`);
       params.push(...vals);
     }
   }
