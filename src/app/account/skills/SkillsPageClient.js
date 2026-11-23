@@ -209,6 +209,34 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
         {bundle.version && <Tag tone="neutral">{bundle.version}</Tag>}
       </div>
 
+      {origin && skillCount > 0 && (
+        <div className="flex flex-col gap-3">
+          <Eyebrow>Cài đặt</Eyebrow>
+          <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
+          <AgentTargetSelect id="bundle-target" {...targetProps} />
+          <CopyLine
+            value={installCommand(origin, `--bundle ${bundle.slug}`, installOpts)}
+            label={`lệnh cài bundle ${bundle.name}`}
+            wrap
+          />
+          <p className="text-xs leading-5 text-text-muted">
+            Cài {skillCount} skill của bundle này cùng với engine (MCP server). Chạy lại đúng lệnh
+            trên là cập nhật lên bản mới nhất. Trên Claude Code, installer riêng của bundle (nếu có)
+            sẽ tự chạy sau đó để thêm agent preset và lệnh orchestrating.
+          </p>
+          <CopyLine
+            value={installCommand(origin, `--uninstall --bundle ${bundle.slug}`)}
+            label={`lệnh gỡ engine bundle ${bundle.name}`}
+            wrap
+          />
+          <p className="text-xs leading-5 text-text-muted">
+            Xoá engine đã giải nén và huỷ đăng ký MCP khỏi mọi agent (không cần key/máy chủ). Lệnh
+            này không xoá các skill riêng của bundle — muốn xoá luôn thì thêm <code>--uninstall</code>{" "}
+            với từng slug skill nữa.
+          </p>
+        </div>
+      )}
+
       {bundle.hasUpdate && (
         <div className="flex flex-col gap-1.5 border border-amber-500/40 bg-amber-500/5 p-3">
           <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-amber-700 dark:text-amber-400">
@@ -216,7 +244,7 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
           </p>
           <p className="text-xs leading-5 text-text-muted">
             Repo nguồn của bundle này đã có commit mới hơn lần nhập gần nhất. Chạy lại lệnh cài bên
-            dưới với <code>--engine-update</code> để lấy bản engine mới nhất.
+            trên với <code>--engine-update</code> để lấy bản engine mới nhất.
           </p>
           {origin && (
             <CopyLine
@@ -241,33 +269,6 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
             className="docs-body mt-1 text-sm text-text-main"
             dangerouslySetInnerHTML={{ __html: usageHtml }}
           />
-        </div>
-      )}
-      {origin && skillCount > 0 && (
-        <div className="flex flex-col gap-3 border-t border-border pt-4">
-          <Eyebrow>Cài đặt</Eyebrow>
-          <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
-          <AgentTargetSelect id="bundle-target" {...targetProps} />
-          <CopyLine
-            value={installCommand(origin, `--bundle ${bundle.slug}`, installOpts)}
-            label={`lệnh cài bundle ${bundle.name}`}
-            wrap
-          />
-          <p className="text-xs leading-5 text-text-muted">
-            Cài {skillCount} skill của bundle này cùng với engine (MCP server). Trên Claude Code,
-            installer riêng của bundle (nếu có) sẽ tự chạy sau đó để thêm agent preset và lệnh
-            orchestrating.
-          </p>
-          <CopyLine
-            value={installCommand(origin, `--uninstall --bundle ${bundle.slug}`)}
-            label={`lệnh gỡ engine bundle ${bundle.name}`}
-            wrap
-          />
-          <p className="text-xs leading-5 text-text-muted">
-            Xoá engine đã giải nén và huỷ đăng ký MCP khỏi mọi agent (không cần key/máy chủ). Lệnh
-            này không xoá các skill riêng của bundle — muốn xoá luôn thì thêm <code>--uninstall</code>{" "}
-            với từng slug skill nữa.
-          </p>
         </div>
       )}
     </div>
@@ -339,8 +340,6 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle, installOpts }) {
         </span>
       </div>
 
-      <InstallPath skill={skill} />
-
       {origin && (
         <div className="flex flex-col gap-1.5">
           <Eyebrow>Cài nhanh bằng một lệnh</Eyebrow>
@@ -351,6 +350,8 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle, installOpts }) {
           <CopyLine value={installCommand(origin, `--uninstall ${skill.slug}`)} label="lệnh gỡ cài" wrap />
         </div>
       )}
+
+      <InstallPath skill={skill} />
 
       {skill.usageNotes && (
         <p className="border-l-2 border-border pl-3 text-sm leading-6 text-text-muted">
