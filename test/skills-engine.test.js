@@ -83,6 +83,21 @@ test("antigravity and its CLI are mcp targets sharing one config file", () => {
   assert.equal(antigravity.format, undefined, "json is the default, not a declared format");
 });
 
+test("kiro and qoder are mcp targets with the plain command/args/env shape", () => {
+  const ids = mcpEngineTargets().map((t) => t.id);
+  for (const wanted of ["kiro", "qoder"]) {
+    assert.ok(ids.includes(wanted), `${wanted} should be an mcp target`);
+  }
+  const kiro = ENGINE_TARGETS.find((t) => t.id === "kiro");
+  const qoder = ENGINE_TARGETS.find((t) => t.id === "qoder");
+  // kiro.dev/docs/mcp/configuration — a nested settings/ folder, not just .kiro/.
+  assert.equal(kiro.path, ".kiro/settings/mcp.json");
+  assert.equal(kiro.key, "mcpServers");
+  // docs.qoder.com/cli/mcp-reference — merged into the shared settings.json.
+  assert.equal(qoder.path, ".qoder/settings.json");
+  assert.equal(qoder.key, "mcpServers");
+});
+
 test("dsh is skipped: its plugin already owns an engine", () => {
   const summary = engineTargetSummary();
   assert.ok(summary.none.includes("dsh"));

@@ -59,7 +59,7 @@ test("install directories and labels come from the one runtime list", () => {
   assert.equal(runtimeInstallDir("cursor", "rt-x"), "~/.cursor/skills/rt-x/");
   assert.equal(runtimeInstallDir("omp", "rt-x"), "~/.omp/agent/skills/rt-x/");
   assert.equal(runtimeInstallDir("dsh", "rt-x"), "~/.dsh/skills/rt-x/");
-  assert.equal(runtimeInstallDir("cline", "rt-x"), "~/.agents/skills/rt-x/");
+  assert.equal(runtimeInstallDir("cline", "rt-x"), "~/.cline/skills/rt-x/");
   assert.equal(runtimeInstallDir("antigravity", "rt-x"), "~/.gemini/config/skills/rt-x/");
   assert.equal(runtimeInstallDir("agy", "rt-x"), "~/.gemini/config/skills/rt-x/");
   assert.equal(runtimeInstallDir("zcode", "rt-x"), "~/.zcode/skills/rt-x/");
