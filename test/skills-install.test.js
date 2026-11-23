@@ -93,7 +93,7 @@ function get(pathname, key) {
  * Asynchronous on purpose: the server under test lives in this process, so a
  * blocking spawn would deadlock it.
  */
-function runInstaller(args, { key = customerKey, shell = "sh", env = {} } = {}) {
+function runInstaller(args, { key = customerKey, shell = "sh", env = {}, script = buildInstallScript("") } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-s", "--", ...args], {
       env: {
@@ -112,7 +112,7 @@ function runInstaller(args, { key = customerKey, shell = "sh", env = {} } = {}) 
     child.stderr.on("data", (d) => { err += d; });
     child.on("error", reject);
     child.on("close", (status) => resolve({ status, out, err }));
-    child.stdin.end(buildInstallScript(""));
+    child.stdin.end(script);
   });
 }
 
@@ -240,6 +240,64 @@ test("installer: --list and no arguments install nothing", async () => {
     assert.ok(!(r.out + r.err).includes("internal-only"));
     assert.ok(!fs.existsSync(home));
   }
+});
+
+test("installer: --uninstall removes a skill from every agent it reached, canonical copy included, no key or server needed", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  fs.mkdirSync(installed(".dsh"), { recursive: true });
+  // Two agents means a canonical shared copy plus a symlink from each real one.
+  const installR = await runInstaller(["recon-pipeline"]);
+  assert.equal(installR.status, 0, installR.err);
+  assert.ok(fs.existsSync(installed(".agents", "skills", "recon-pipeline", "SKILL.md")));
+  assert.ok(fs.lstatSync(installed(".claude", "skills", "recon-pipeline")).isSymbolicLink());
+  assert.ok(fs.lstatSync(installed(".dsh", "skills", "recon-pipeline")).isSymbolicLink());
+
+  // No DEROUTER_KEY and no DEROUTER_URL at all: a pure filesystem cleanup needs
+  // neither (buildInstallScript("") already renders with no baked-in origin).
+  const r = await runInstaller(["--uninstall", "recon-pipeline"], { key: null, env: { DEROUTER_URL: "" } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /recon-pipeline \[claude\]: đã gỡ/);
+  assert.match(r.out, /recon-pipeline \[dsh\]: đã gỡ/);
+  assert.match(r.out, /Xong: gỡ 1 skill/);
+  assert.ok(!fs.existsSync(installed(".claude", "skills", "recon-pipeline")));
+  assert.ok(!fs.existsSync(installed(".dsh", "skills", "recon-pipeline")));
+  assert.ok(!fs.existsSync(installed(".agents", "skills", "recon-pipeline")), "the canonical copy is gone too");
+});
+
+test("installer: --uninstall on a skill never installed says so, and still exits clean", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const r = await runInstaller(["--uninstall", "never-installed"], { key: null, env: { DEROUTER_URL: "" } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.err, /never-installed: không thấy đã cài ở đâu, bỏ qua/);
+  assert.match(r.out, /Xong: gỡ 0 skill/);
+});
+
+test("installer: --uninstall with no name is refused, not a silent no-op", async () => {
+  const r = await runInstaller(["--uninstall"], { key: null, env: { DEROUTER_URL: "" } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.err, /--uninstall cần tên skill/);
+});
+
+test("installer: --uninstall --dir only looks in that folder", async () => {
+  fs.rmSync(home, { recursive: true, force: true });
+  const dir = path.join(tmpDir, "uninstall-custom-dir");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const installR = await runInstaller(["recon-pipeline", "--dir", dir]);
+  assert.equal(installR.status, 0, installR.err);
+  assert.ok(fs.existsSync(path.join(dir, "recon-pipeline", "SKILL.md")));
+
+  const r = await runInstaller(["--uninstall", "recon-pipeline", "--dir", dir], { key: null, env: { DEROUTER_URL: "" } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, new RegExp(`recon-pipeline: đã gỡ khỏi ${dir.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}/recon-pipeline`));
+  assert.ok(!fs.existsSync(path.join(dir, "recon-pipeline")));
+});
+
+test("installer: a slug that could escape a directory is refused by --uninstall too", async () => {
+  const r = await runInstaller(["--uninstall", "../etc"], { key: null, env: { DEROUTER_URL: "" } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.err, /tên skill không hợp lệ/);
 });
 
 test("installer: refusals leave the disk untouched and say why", async () => {
@@ -1062,4 +1120,135 @@ test("a bundle with no published engine leaves --engine a documented no-op", () 
   const script = buildInstallScript("https://ai.example.com", []);
   assert.ok(script.includes('BUNDLE_SLUGS=""'));
   assert.ok(script.includes("chưa có bundle nào được phát hành"));
+});
+
+/**
+ * Run the real --uninstall --bundle path (run_uninstall, extracted verbatim from
+ * the rendered script, same as production) against a throwaway HOME pre-seeded
+ * with a fake unpacked engine and real agent config files — no server, no key,
+ * same guarantee the feature itself makes.
+ */
+function runUninstallBundle({ bundles = "rea-policy", target = "", home, scriptBundles = [BUNDLE_A] }) {
+  const script = buildInstallScript("https://ai.example.com", scriptBundles);
+  const fn = (name) => extractShellFn(script, name);
+  const varLine = (name) => {
+    const m = script.match(new RegExp(`^${name}=.*$`, "m"));
+    if (!m) throw new Error(`${name} not found in rendered script`);
+    return m[0];
+  };
+  const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-uninstall-bundle-"));
+  const harness = `#!/bin/sh
+set -eu
+set -f
+${varLine("ENGINE_MCP")}
+${varLine("ENGINE_BRIDGE")}
+${varLine("ENGINE_HOME_BASE")}
+${varLine("BUNDLE_SLUGS")}
+${varLine("NODE_MIN")}
+SLUGS=""
+DIR=""
+TARGETS="${target}"
+BUNDLES="${bundles}"
+die() { printf 'Lỗi: %s\\n' "$1" >&2; exit 1; }
+${fn("engine_path_for")}
+${fn("engine_key_for")}
+${fn("engine_format_for")}
+${fn("home_for")}
+${fn("node_for_engine")}
+${fn("unregister_mcp_json")}
+${fn("unregister_mcp_toml")}
+${fn("run_uninstall")}
+run_uninstall
+`;
+  const file = path.join(harnessDir, "run.sh");
+  fs.writeFileSync(file, harness);
+  const r = spawnSync("sh", [file], { encoding: "utf8", env: { ...process.env, HOME: home } });
+  fs.rmSync(harnessDir, { recursive: true, force: true });
+  return r;
+}
+
+test("--uninstall --bundle deletes the unpacked engine and un-registers it from every agent, unrelated entries untouched", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-uninstall-bundle-home-"));
+  fs.mkdirSync(path.join(home, ".engines", "rea-policy", "lib"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".engines", "rea-policy", "lib", "mcp-server.mjs"), "// fake\n");
+  fs.writeFileSync(
+    path.join(home, ".claude.json"),
+    JSON.stringify({
+      mcpServers: { "rea-policy": { command: "node", args: ["x"] }, "other-bundle": { command: "node", args: ["y"] } },
+      unrelatedTopLevel: true,
+    }),
+  );
+  fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".codex", "config.toml"),
+    '[mcp_servers."rea-policy"]\ncommand = "node"\n\n[mcp_servers."other-bundle"]\ncommand = "node"\n',
+  );
+  fs.mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".config", "opencode", "opencode.json"),
+    JSON.stringify({ mcp: { servers: { "rea-policy": { type: "local", command: ["node", "x"] } } } }),
+  );
+  fs.mkdirSync(path.join(home, ".omp", "agent", "extensions"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".omp", "agent", "extensions", "rea-policy-rt-engine.ts"), "// bridge\n");
+
+  try {
+    const r = runUninstallBundle({ home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Xong: gỡ 0 skill, 1 bundle/);
+    assert.ok(!fs.existsSync(path.join(home, ".engines", "rea-policy")), "the unpacked engine is gone");
+    assert.ok(!fs.existsSync(path.join(home, ".omp", "agent", "extensions", "rea-policy-rt-engine.ts")));
+
+    const claudeCfg = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
+    assert.equal(claudeCfg.mcpServers["rea-policy"], undefined);
+    assert.equal(claudeCfg.mcpServers["other-bundle"].command, "node", "a different bundle's registration survives");
+    assert.equal(claudeCfg.unrelatedTopLevel, true, "unrelated top-level content survives");
+
+    const codexCfg = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+    assert.ok(!codexCfg.includes('"rea-policy"'));
+    assert.ok(codexCfg.includes('"other-bundle"'), "a different bundle's table survives");
+
+    const opencodeCfg = JSON.parse(fs.readFileSync(path.join(home, ".config", "opencode", "opencode.json"), "utf8"));
+    assert.equal(opencodeCfg.mcp.servers["rea-policy"], undefined);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("--uninstall --bundle --target narrows which agent configs are touched", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-uninstall-bundle-home-"));
+  fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { "rea-policy": { command: "node" } } }));
+  fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".codex", "config.toml"), '[mcp_servers."rea-policy"]\ncommand = "node"\n');
+
+  try {
+    const r = runUninstallBundle({ home, target: "codex" });
+    assert.equal(r.status, 0, r.stderr);
+    const claudeCfg = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
+    assert.ok(claudeCfg.mcpServers["rea-policy"], "claude was not named in --target, so it is left alone");
+    const codexCfg = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8");
+    assert.ok(!codexCfg.includes('"rea-policy"'), "codex was named in --target, so it is cleaned up");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("--uninstall --bundle on an unpublished or unknown slug warns and exits clean, never touches disk", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-uninstall-bundle-home-"));
+  fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { "rea-policy": { command: "node" } } }));
+  try {
+    const r = runUninstallBundle({ bundles: "no-such-bundle", home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /no-such-bundle: không có bundle này/);
+    assert.match(r.stdout, /Xong: gỡ 0 skill, 0 bundle/);
+    const claudeCfg = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8"));
+    assert.ok(claudeCfg.mcpServers["rea-policy"], "an unknown bundle must never touch another bundle's registration");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("--uninstall with neither a skill slug nor --bundle is refused", () => {
+  const r = runUninstallBundle({ bundles: "", home: fs.mkdtempSync(path.join(os.tmpdir(), "derouter-uninstall-bundle-home-")) });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--uninstall cần tên skill hoặc --bundle/);
 });
