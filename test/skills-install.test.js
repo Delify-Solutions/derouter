@@ -852,19 +852,20 @@ test("the installer-entrypoint step is conditional: present, absent, and a faili
   assert.ok(!/die "[^"]*thoát lỗi/.test(script));
 });
 
-test("the bundle installer is offered every wanted agent, not just claude", () => {
+test("the bundle installer is offered every wanted agent, one at a time, not just claude", () => {
   // Agent presets and a slash command are not a Claude Code privilege (rea_policy's
   // own install.mjs writes them for omp and Codex too, given --agent) — this
   // installer does not know which ids a given bundle's own installer recognises,
-  // so it tries the full list first.
+  // so each wanted agent is tried on its own: an id the bundle has never heard of
+  // must not cost every OTHER agent its presets too.
   const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
-  assert.ok(script.includes('rb_agents="$(printf \'%s\' "$e_wanted" | tr -s \' \' \',\')"'));
-  assert.ok(script.includes('"$rb_node" "$rb_file" --agent "$rb_agents"'));
-  // An installer that rejects the full list (an unknown id, or no --agent support
-  // at all) is retried bare, but only when claude is one of the wanted agents —
-  // that is the one guaranteed-safe fallback.
+  assert.ok(script.includes('for rb_rt in $e_wanted; do'));
+  assert.ok(script.includes('"$rb_node" "$rb_file" --agent "$rb_rt"'));
+  // An installer that accepts none of them (no --agent support at all, say) is
+  // retried bare, but only when claude is one of the wanted agents — that is the
+  // one guaranteed-safe fallback.
   assert.ok(script.includes('*" claude "*) ;;'));
-  assert.ok(script.includes("không nhận các agent đã chọn, bỏ qua"));
+  assert.ok(script.includes("không hỗ trợ agent nào đã chọn, bỏ qua"));
 });
 
 /**
@@ -994,17 +995,22 @@ run_bundle_installer "${BUNDLE_A.slug}" "${harnessDir}" "${process.execPath}"
   return r;
 }
 
-test("run_bundle_installer: an installer that honours --agent gets every wanted agent in one call", () => {
+test("run_bundle_installer: an installer that honours --agent is tried once per agent, and lists only the ones it accepted", () => {
+  // Reproduces the real bug: rea_policy's install.mjs only knows claude/omp/codex
+  // (its own AGENT_LAYOUT) -- asking it for dsh too must not cost claude and omp
+  // their presets, the way one joined --agent list used to.
   const r = runBundleInstaller({
-    eWanted: "claude omp",
+    eWanted: "claude omp dsh",
     fakeInstaller: `
       const i = process.argv.indexOf("--agent");
-      if (i === -1 || process.argv[i + 1] !== "claude,omp") process.exit(1);
+      const agent = i === -1 ? null : process.argv[i + 1];
+      if (agent !== "claude" && agent !== "omp") process.exit(1);
     `,
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /đã chạy install\.mjs \(agent \+ lệnh\)/);
   assert.match(r.stdout, /\[claude,omp\]/);
+  assert.ok(!r.stdout.includes("dsh"));
 });
 
 test("run_bundle_installer: an installer that rejects --agent falls back to bare, for claude only", () => {
@@ -1025,7 +1031,7 @@ test("run_bundle_installer: no claude and the installer refuses --agent, nothing
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /install\.mjs không nhận các agent đã chọn, bỏ qua/);
+  assert.match(r.stderr, /install\.mjs không hỗ trợ agent nào đã chọn, bỏ qua/);
 });
 
 test("--dir skips the bundle installer step and says why", () => {
