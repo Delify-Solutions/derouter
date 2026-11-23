@@ -24,9 +24,17 @@
  * `path` is where that registration lives, relative to `$HOME`, and `dir` marks the
  * agent as installed on this machine.
  *
- * `format` says how that file is written: `json` (the default, for every agent but
- * one) or `toml`. It is not decoration — a TOML file handed to a JSON writer loses
- * its contents, because parsing it fails and the writer starts from `{}`.
+ * `format` says how that file is written: `json` (the default), `toml`, or
+ * `opencode`. Not decoration — a TOML file handed to a JSON writer loses its
+ * contents (parsing it fails and the writer starts from `{}`), and OpenCode's own
+ * schema (opencode.ai/config.json, additionalProperties: false throughout) rejects
+ * the plain command/args/env shape every other json target takes: it wants
+ * `{ type: "local", command: [exe, ...args], environment }` nested two levels
+ * under `mcp.servers.<name>`, not one.
+ *
+ * Owner's call (2026-11-23): only list an agent here once it also has a real
+ * skill-runtime entry (runtimes.js) and vice versa — a skill with nowhere to run
+ * its tools, or an engine registration no skill ever calls, serves no one.
  */
 export const ENGINE_TARGETS = [
   { id: "claude", mode: "mcp", dir: ".claude", path: ".claude.json", key: "mcpServers" },
@@ -34,25 +42,13 @@ export const ENGINE_TARGETS = [
   // installer never hands it to a JSON writer: doing that once replaced the whole
   // file with a JSON object and broke `codex` on startup.
   { id: "codex", mode: "mcp", dir: ".codex", path: ".codex/config.toml", key: "mcp_servers", format: "toml" },
-  { id: "cursor", mode: "mcp", dir: ".cursor", path: ".cursor/mcp.json", key: "mcpServers" },
-  { id: "windsurf", mode: "mcp", dir: ".codeium", path: ".codeium/windsurf/mcp_config.json", key: "mcpServers" },
-  { id: "amp", mode: "mcp", dir: ".config/amp", path: ".config/amp/settings.json", key: "amp.mcpServers" },
-  { id: "cline", mode: "mcp", dir: ".cline", path: ".cline/mcp_settings.json", key: "mcpServers" },
   { id: "omp", mode: "bridge", dir: ".omp", path: ".omp/agent/extensions/rt-engine.ts", key: null },
-  // Antigravity and its CLI (agy) are two separate apps that read one shared
-  // config, same as the shared skills folder they already read (runtimes.js) —
-  // confirmed against the app's own shipped docs
-  // (~/.gemini/antigravity/builtin/skills/agy-customizations/docs/mcp_servers.md)
-  // and the real (if still empty) file at this path. Registering both just writes
-  // the same entry into the same file twice; harmless, not deduplicated here.
-  { id: "antigravity", mode: "mcp", dir: ".gemini/antigravity", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
-  { id: "agy", mode: "mcp", dir: ".gemini/antigravity-cli", path: ".gemini/config/mcp_config.json", key: "mcpServers" },
-  // kiro.dev/docs/mcp/configuration: the user-level file, confirmed against the
-  // tool's own docs (command/args/env, no extra required field).
-  { id: "kiro", mode: "mcp", dir: ".kiro", path: ".kiro/settings/mcp.json", key: "mcpServers" },
-  // docs.qoder.com/cli/mcp-reference: mcpServers lives inside the same settings.json
-  // every other Qoder setting already lives in (merged into, never overwritten).
-  { id: "qoder", mode: "mcp", dir: ".qoder", path: ".qoder/settings.json", key: "mcpServers" },
+  // opencode.ai/config.json (OpenCode's own JSON Schema, additionalProperties:
+  // false): the global file is ~/.config/opencode/opencode.json, confirmed against
+  // the real one already on this machine. `format: "opencode"` routes to its own
+  // writer (register_mcp_opencode) — the shape differs too much from the generic
+  // one for `key`/`entry` fields alone to carry it.
+  { id: "opencode", mode: "mcp", dir: ".config/opencode", path: ".config/opencode/opencode.json", key: "mcp.servers", format: "opencode" },
   { id: "dsh", mode: "none", dir: ".dsh", path: null, key: null },
 ];
 

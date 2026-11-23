@@ -1,6 +1,12 @@
-// The agents (Claude Code, Codex, Cursor, omp, dsh, …) a skill can be installed
+// The agents (Claude Code, Codex, omp, dsh, OpenCode) a skill can be installed
 // into. One registry, shared by the repository, the installer script, the catalogue
 // and both pages, so supporting another agent is one line here.
+//
+// Only an agent that also has a matching entry in engineTargets.js (ENGINE_TARGETS)
+// belongs here. A skill's markdown calls tools that live in the engine; a skill with
+// nowhere to register that engine is a set of instructions for tools that will never
+// exist, which is worse than no skill at all — so the owner's call is to list an
+// agent only once it can run both halves, not skills alone (2026-11-23).
 //
 // Each entry says how to find the agent on a machine and where it reads skills:
 //   home     the folder the agent keeps under $HOME. Its presence is how the installer
@@ -12,48 +18,26 @@
 //   skills   where the agent reads skill folders from, relative to $HOME. Omitted when
 //            it is simply `<home>/skills`.
 //
-// Agents whose `skills` is the shared `.agents/skills` folder (Amp, Goose, Pi, Warp)
-// read the same directory, so a skill is written there once. Paths come from the
-// agents' own documentation; keep an entry only when its location is known, because a
-// skill written to a folder the agent never reads is silently useless.
+// Paths come from the agents' own documentation; keep an entry only when its location
+// is known, because a skill written to a folder the agent never reads is silently
+// useless.
 //
 // Dependency-free: imported by client components and rendered into the shell script.
 
-/** The folder several agents share; the installer keeps one canonical copy here. */
+/**
+ * Internal plumbing, not a runtime any agent reads directly: when a skill goes to
+ * two or more different folders, the installer writes one real copy here and links
+ * every actual destination to it (place_skill, installScript.js) — an update then
+ * touches one file instead of N.
+ */
 export const SHARED_SKILLS_DIR = ".agents/skills";
 
 export const SKILL_RUNTIMES = [
   { id: "claude", label: "Claude Code", home: ".claude", homeEnv: "CLAUDE_CONFIG_DIR" },
   { id: "codex", label: "Codex", home: ".codex" },
-  { id: "cursor", label: "Cursor", home: ".cursor" },
   { id: "omp", label: "omp (Oh My Pi)", home: ".omp", skills: ".omp/agent/skills" },
   { id: "dsh", label: "dsh (DeepSeek Harness)", home: ".dsh", homeEnv: "DSH_HOME" },
   { id: "opencode", label: "OpenCode", home: ".config/opencode", xdg: "opencode" },
-  { id: "gemini", label: "Gemini CLI", home: ".gemini" },
-  { id: "copilot", label: "GitHub Copilot", home: ".copilot" },
-  { id: "windsurf", label: "Windsurf", home: ".codeium/windsurf" },
-  { id: "droid", label: "Droid", home: ".factory" },
-  { id: "kilo", label: "Kilo Code", home: ".kilo" },
-  { id: "roo", label: "Roo Code", home: ".roo" },
-  { id: "trae", label: "Trae", home: ".trae" },
-  { id: "qwen", label: "Qwen Code", home: ".qwen" },
-  // goose.ai's own docs put skills under the shared folder, not a goose-specific one
-  // (goose-docs.ai, Skills Extension page) — `home`/`xdg` still mark it as installed.
-  { id: "goose", label: "Goose", home: ".config/goose", xdg: "goose", skills: SHARED_SKILLS_DIR },
-  { id: "kiro", label: "Kiro CLI", home: ".kiro" },
-  { id: "junie", label: "Junie", home: ".junie" },
-  { id: "qoder", label: "Qoder", home: ".qoder" },
-  { id: "antigravity", label: "Antigravity", home: ".gemini/antigravity", skills: ".gemini/config/skills" },
-  // The Antigravity CLI (`agy`) reads the same skills folder but is detected by its own folder.
-  { id: "agy", label: "Antigravity CLI", home: ".gemini/antigravity-cli", skills: ".gemini/config/skills" },
-  { id: "zcode", label: "ZCode", home: ".zcode" },
-  // ampcode.com's own worked example writes to the shared folder, not a
-  // per-agent one under .config (that path appeared nowhere in Amp's own docs).
-  { id: "amp", label: "Amp", home: ".config/amp", xdg: "amp", skills: SHARED_SKILLS_DIR },
-  // docs.cline.bot: Cline's own skills folder, never the shared one.
-  { id: "cline", label: "Cline", home: ".cline" },
-  { id: "pi", label: "Pi", home: ".pi/agent", skills: SHARED_SKILLS_DIR },
-  { id: "warp", label: "Warp", home: ".warp", skills: SHARED_SKILLS_DIR },
 ];
 
 export const SKILL_RUNTIME_IDS = SKILL_RUNTIMES.map((runtime) => runtime.id);

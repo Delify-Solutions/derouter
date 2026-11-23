@@ -5,7 +5,7 @@ import { SKILL_RUNTIMES, toggleRuntime } from "@/lib/skills/runtimes.js";
 
 // What "Chọn agent" starts from when the admin leaves "Mọi agent": the three most
 // common, so the grid is never empty.
-const STARTING_SUBSET = ["claude", "codex", "cursor"];
+const STARTING_SUBSET = ["claude", "codex", "opencode"];
 
 /**
  * Which agents a skill is for. The default is "Mọi agent" — a skill file is the same

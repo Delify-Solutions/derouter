@@ -65,10 +65,10 @@ test("the last agent cannot be switched off", () => {
   assert.deepEqual(r, { value: ["claude"], changed: true });
   r = toggleRuntime(["claude"], "claude");
   assert.deepEqual(r, { value: ["claude"], changed: false });
-  r = toggleRuntime(["claude"], "cursor");
-  assert.deepEqual(r.value, ["claude", "cursor"]);
+  r = toggleRuntime(["claude"], "opencode");
+  assert.deepEqual(r.value, ["claude", "opencode"]);
   // The result always follows the runtime list's order.
-  assert.deepEqual(toggleRuntime(["cursor"], "claude").value, ["claude", "cursor"]);
+  assert.deepEqual(toggleRuntime(["opencode"], "claude").value, ["claude", "opencode"]);
   assert.deepEqual(
     toggleRuntime(SKILL_RUNTIME_IDS, "codex").value,
     SKILL_RUNTIME_IDS.filter((id) => id !== "codex"),
