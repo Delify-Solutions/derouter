@@ -7,7 +7,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { register } from "node:module";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-skills-install-"));
@@ -372,6 +372,25 @@ test("installer: --bundle expands to every skill the catalogue tags with it, and
     assert.ok(!fs.existsSync(installed(".claude", "skills", "lone")), "a skill outside the bundle is not pulled in");
     // --bundle implies --engine; with no bundle actually published server-side,
     // the engine step is a harmless no-op, never a network fetch.
+    assert.match(r.err, /chưa có bundle nào được phát hành/);
+  } finally {
+    mockCatalog = null;
+  }
+});
+
+test("installer: --all implies --engine too, same as --bundle", async () => {
+  // Without this, "--all" left every bundle's engine uninstalled unless the
+  // customer also remembered --engine or --bundle — the skills were useless on
+  // their own. --all now means everything, engines included.
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(installed(".claude"), { recursive: true });
+  mockCatalog = "recon-pipeline\tSKILL.md\t-\tclaude\tRecon\t-\n";
+  try {
+    const r = await runInstaller(["--all"]);
+    assert.equal(r.status, 0, r.err);
+    assert.ok(fs.existsSync(installed(".claude", "skills", "recon-pipeline", "SKILL.md")));
+    // No bundle actually published server-side in this test, so the engine step is
+    // a harmless no-op rather than a network fetch — but it did run.
     assert.match(r.err, /chưa có bundle nào được phát hành/);
   } finally {
     mockCatalog = null;
@@ -828,6 +847,42 @@ test("the multi-bundle case: two bundles each get their own unpack dir and MCP k
   assert.ok(script.includes(`${BUNDLE_A.slug}) printf '%s' "${bundleTarballUrl(BUNDLE_A)}" ;;`));
   assert.ok(script.includes(`${BUNDLE_B.slug}) printf '%s' "${bundleTarballUrl(BUNDLE_B)}" ;;`));
   assert.ok(ENGINE_HOME_BASE.length > 0);
+});
+
+test("the engine step reports a --target agent it has no registration path for", () => {
+  // opencode is a real skill runtime (runtimes.js) but not an engine target
+  // (engineTargets.js) — before this, asking for it alongside --engine produced
+  // no feedback at all, which read as "it worked" when nothing happened.
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
+  assert.ok(script.includes('printf \'engine [%s]: agent này chưa có engine (chỉ cài được skill dạng văn bản)\\n\' "$t_req" >&2'));
+  assert.ok(script.includes('case " $ENGINE_TARGETS " in'));
+});
+
+test("the omp bridge is taught this bundle's real engine path, not left to guess ~/rt-claude", () => {
+  // omp/rt-engine.ts (the upstream bridge we copy verbatim) only looks for
+  // REDTEAM_MCP_SERVER or its own get.sh's single ~/rt-claude install — neither
+  // exists once a bundle is unpacked per-slug under ~/$ENGINE_HOME_BASE instead.
+  // The installer must override enginePath() itself after copying the file.
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
+  assert.ok(script.includes('if cp "$e_src" "$e_bridge"; then'));
+  assert.ok(script.includes("enginePath = function enginePath() { return"));
+  assert.ok(script.includes('>>"$e_bridge"'), "the override is appended, not a from-scratch rewrite");
+  assert.ok(script.includes("js_dq"), "the injected path must be escaped for a JS string literal");
+});
+
+test("js_dq escapes a path for a double-quoted JS string literal", () => {
+  // Extract the function as rendered and run it for real under sh — a wrong escape
+  // here corrupts the bridge file's JS syntax, not just a cosmetic string.
+  const script = buildInstallScript("https://ai.example.com");
+  const match = script.match(/^js_dq\(\) \{.*\}$/m);
+  assert.ok(match, "js_dq must be defined in the rendered script");
+  const tricky = String.raw`C:\Users\duogxaolin\pretend "evil" path` + "\\";
+  const out = execFileSync("sh", ["-c", `${match[0]}\njs_dq "$1"`, "sh", tricky], { encoding: "utf8" });
+  assert.equal(out, String.raw`C:\\Users\\duogxaolin\\pretend \"evil\" path\\`);
+  // What matters most: the result parses as a valid JS double-quoted string whose
+  // value is exactly the original path.
+  // eslint-disable-next-line no-new-func
+  assert.equal(new Function(`return "${out}"`)(), tricky);
 });
 
 test("the installer-entrypoint step is conditional: present, absent, and a failing run all handled", () => {
