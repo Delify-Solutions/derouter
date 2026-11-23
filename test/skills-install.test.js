@@ -860,12 +860,14 @@ test("the bundle installer is offered every wanted agent, one at a time, not jus
   // must not cost every OTHER agent its presets too.
   const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
   assert.ok(script.includes('for rb_rt in $e_wanted; do'));
-  assert.ok(script.includes('"$rb_node" "$rb_file" --agent "$rb_rt"'));
+  assert.ok(script.includes('"$rb_node" "$rb_file" --agent "$rb_rt" --server-name "$rb_slug"'));
   // An installer that accepts none of them (no --agent support at all, say) is
   // retried bare, but only when claude is one of the wanted agents — that is the
-  // one guaranteed-safe fallback.
+  // one guaranteed-safe fallback. --server-name goes along even then: whatever the
+  // engine was actually registered as must match, not that installer's own default.
   assert.ok(script.includes('*" claude "*) ;;'));
   assert.ok(script.includes("không hỗ trợ agent nào đã chọn, bỏ qua"));
+  assert.ok(script.includes('"$rb_node" "$rb_file" --server-name "$rb_slug"'));
 });
 
 /**
@@ -1011,6 +1013,22 @@ test("run_bundle_installer: an installer that honours --agent is tried once per 
   assert.match(r.stdout, /đã chạy install\.mjs \(agent \+ lệnh\)/);
   assert.match(r.stdout, /\[claude,omp\]/);
   assert.ok(!r.stdout.includes("dsh"));
+});
+
+test("run_bundle_installer: --server-name carries the bundle's own slug, on every attempt", () => {
+  // register_mcp registers the engine under the bundle's slug (BUNDLE_A.slug,
+  // "rea-policy"), not whatever name the bundle's own installer might otherwise
+  // assume — every tool reference it writes must match the server actually
+  // registered, or the model asks for a tool name nothing exposes.
+  const r = runBundleInstaller({
+    eWanted: "claude",
+    fakeInstaller: `
+      const i = process.argv.indexOf("--server-name");
+      if (i === -1 || process.argv[i + 1] !== "rea-policy") process.exit(1);
+    `,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\[claude\]: đã chạy install\.mjs \(agent \+ lệnh\)/);
 });
 
 test("run_bundle_installer: an installer that rejects --agent falls back to bare, for claude only", () => {
