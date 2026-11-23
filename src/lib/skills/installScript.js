@@ -245,6 +245,14 @@ register_mcp() {
     printf 'engine %s [%s]: KHÔNG ghi được %s\n' "$r_name" "$r_agent" "$r_config" >&2
     return 1
   fi
+  if [ "$r_format" = "opencode" ]; then
+    register_mcp_opencode "$r_key" "$r_config" "$r_node" "$r_server" "$r_name" && {
+      printf 'engine %s [%s]: đã đăng ký MCP -> %s\n' "$r_name" "$r_agent" "$r_config"
+      return 0
+    }
+    printf 'engine %s [%s]: KHÔNG ghi được %s\n' "$r_name" "$r_agent" "$r_config" >&2
+    return 1
+  fi
   if "$r_node" -e '
 const fs = require("fs");
 const [configPath, agent, keyName, nodePath, serverPath, serverName] = process.argv.slice(1);
@@ -305,6 +313,46 @@ register_mcp_toml() {
   } >>"$t_config"
 }
 
+# OpenCode's own schema (opencode.ai/config.json) rejects the plain command/args/env
+# shape every other json target takes — additionalProperties: false throughout, a
+# required "type" discriminator, command as one array (no separate args), and the env
+# field spelled "environment". Its own key nests two levels (mcp.servers.<name>), the
+# same split("." ) walk the generic writer uses, just with a different leaf shape.
+register_mcp_opencode() {
+  o_key="$1"; o_config="$2"; o_node="$3"; o_server="$4"; o_name="$5"
+  "$o_node" -e '
+const fs = require("fs");
+const [configPath, keyName, nodePath, serverPath, serverName] = process.argv.slice(1);
+let raw = "";
+try { raw = fs.readFileSync(configPath, "utf8"); } catch { raw = ""; }
+let data = {};
+if (raw.trim() !== "") {
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // opencode.json(c) allows comments/trailing commas the agent itself wrote;
+    // plain JSON.parse cannot tell a real syntax error from those, so either way
+    // this file is never ours to rewrite blind.
+    console.error("refusing to rewrite an unreadable config: " + configPath);
+    process.exit(1);
+  }
+}
+const parts = keyName.split(".");
+let holder = data;
+for (const part of parts.slice(0, -1)) {
+  if (!holder[part] || typeof holder[part] !== "object") holder[part] = {};
+  holder = holder[part];
+}
+const leaf = parts[parts.length - 1];
+if (!holder[leaf] || typeof holder[leaf] !== "object") holder[leaf] = {};
+holder[leaf][serverName] = {
+  type: "local",
+  command: [nodePath, serverPath],
+  environment: { DSH_HOME: process.env.DSH_HOME || (process.env.HOME + "/.dsh") },
+};
+fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
+' "$o_config" "$o_key" "$o_node" "$o_server" "$o_name" 2>/dev/null
+}
 
 # Fetch and unpack one bundle's engine, once. Sets ENGINE_SERVER (its mcp-server.mjs
 # path) and ENGINE_ROOT (its unpack root) on success. A fetch problem is only a

@@ -483,7 +483,7 @@ export default function SkillsPageClient() {
       <div className="flex flex-col gap-2">
         <Heading>Skill</Heading>
         <p className="max-w-2xl text-sm leading-6 text-text-muted">
-          Skill markdown cài vào agent của bạn (Claude Code, Codex, Cursor, omp, dsh…) để agent biết
+          Skill markdown cài vào agent của bạn (Claude Code, Codex, OpenCode, omp, dsh) để agent biết
           cách dùng derouter và các quy trình kèm theo. Tải file, đặt đúng thư mục, rồi gọi
           skill trong phiên làm việc.
         </p>
@@ -684,18 +684,18 @@ export default function SkillsPageClient() {
               )}
               <p className="mt-2 text-sm leading-6 text-text-muted">
                 Engine cần <strong className="text-text-main">Node &gt;= 22.5</strong> (dùng{" "}
-                <code>node:sqlite</code>) và được đăng ký tự động cho Claude Code, Codex, Cursor,
-                Windsurf, Amp, Cline. <strong className="text-text-main">omp</strong> không có MCP client
+                <code>node:sqlite</code>) và được đăng ký tự động cho Claude Code, Codex, OpenCode.{" "}
+                <strong className="text-text-main">omp</strong> không có MCP client
                 nên installer cài một bridge extension thay thế. <strong className="text-text-main">dsh</strong>{" "}
                 tự quản engine riêng nên được bỏ qua. Mỗi engine nằm riêng ở{" "}
                 <code>~/.engines/&lt;tên-bundle&gt;</code>; <code>--engine-update</code> để làm mới.
-                Trên Claude Code, cài engine xong thì installer riêng của bundle (nếu có) sẽ tự chạy để
-                thêm agent preset và lệnh orchestrating của bundle đó; agent khác chỉ nhận skill + MCP.
+                Cài engine xong thì installer riêng của bundle (nếu có) sẽ tự chạy cho mọi agent đã
+                chọn để thêm agent preset và lệnh orchestrating của bundle đó.
               </p>
             </div>
             <p className="mt-3 text-sm leading-6 text-text-muted">
               Mỗi skill được cài vào mọi agent mà nó hỗ trợ và máy bạn đang có (Claude Code, Codex,
-              Cursor, omp, dsh và nhiều agent khác); máy chưa có agent nào thì cài cho agent đầu tiên.
+              OpenCode, omp, dsh); máy chưa có agent nào thì cài cho agent đầu tiên.
               Cài cho nhiều agent thì skill được ghi một bản ở <code>~/.agents/skills</code> rồi liên
               kết sang từng agent, cập nhật một chỗ là đủ — thêm <code>--copy</code> nếu muốn chép riêng.
               Thêm <code>--target claude,omp,dsh</code> để chỉ định agent, hoặc{" "}
@@ -728,8 +728,8 @@ export default function SkillsPageClient() {
                 />
                 <p className="text-sm leading-6 text-text-muted">
                   Mỗi agent đọc skill ở một thư mục riêng: Codex dùng{" "}
-                  <code>~/.codex/skills/&lt;slug&gt;/SKILL.md</code>, Cursor dùng{" "}
-                  <code>~/.cursor/skills/&lt;slug&gt;/SKILL.md</code>, omp dùng{" "}
+                  <code>~/.codex/skills/&lt;slug&gt;/SKILL.md</code>, OpenCode dùng{" "}
+                  <code>~/.config/opencode/skills/&lt;slug&gt;/SKILL.md</code>, omp dùng{" "}
                   <code>~/.omp/agent/skills/&lt;slug&gt;/SKILL.md</code>, dsh dùng{" "}
                   <code>~/.dsh/skills/&lt;slug&gt;/SKILL.md</code>. Ở tab &quot;Danh sách&quot; mỗi skill
                   có ô chọn agent để hiện đúng đường dẫn. Mỗi skill là một thư mục, mỗi thư mục đúng
@@ -740,7 +740,7 @@ export default function SkillsPageClient() {
               <Step index="4" title="Mở lại phiên agent">
                 <p className="text-sm leading-6 text-text-muted">
                   Skill chỉ được nạp lúc phiên khởi động. Thoát hẳn agent (Claude Code, Codex,
-                  Cursor, omp, dsh…) rồi mở lại — không cần khởi động lại máy.
+                  OpenCode, omp, dsh) rồi mở lại — không cần khởi động lại máy.
                 </p>
               </Step>
 

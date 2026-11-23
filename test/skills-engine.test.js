@@ -55,9 +55,9 @@ test("an mcp target carries the config path and key it writes", () => {
   }
 });
 
-test("claude, codex and cursor are mcp targets", () => {
+test("claude and codex are mcp targets", () => {
   const ids = mcpEngineTargets().map((t) => t.id);
-  for (const wanted of ["claude", "codex", "cursor"]) {
+  for (const wanted of ["claude", "codex"]) {
     assert.ok(ids.includes(wanted), `${wanted} should be an mcp target`);
   }
 });
@@ -66,36 +66,26 @@ test("omp is a bridge target, because it has no MCP client", () => {
   assert.deepEqual(bridgeEngineTargets().map((t) => t.id), ["omp"]);
 });
 
-test("antigravity and its CLI are mcp targets sharing one config file", () => {
-  // ~/.gemini/antigravity/builtin/skills/agy-customizations/docs/mcp_servers.md
-  // (shipped with the app) documents mcpServers/command/args/env at this exact
-  // path — the same shared file and key every other json-format target uses.
+test("opencode is an mcp target with its own entry shape, not the plain one", () => {
+  // opencode.ai/config.json (OpenCode's own JSON Schema, additionalProperties:
+  // false throughout) rejects the plain command/args/env shape every other json
+  // target takes — it wants a "type" discriminator, command as one array, and the
+  // env field spelled "environment", nested two levels under mcp.servers.<name>.
   const ids = mcpEngineTargets().map((t) => t.id);
-  for (const wanted of ["antigravity", "agy"]) {
-    assert.ok(ids.includes(wanted), `${wanted} should be an mcp target`);
-  }
-  const antigravity = ENGINE_TARGETS.find((t) => t.id === "antigravity");
-  const agy = ENGINE_TARGETS.find((t) => t.id === "agy");
-  assert.equal(antigravity.path, ".gemini/config/mcp_config.json");
-  assert.equal(antigravity.path, agy.path);
-  assert.equal(antigravity.key, "mcpServers");
-  assert.equal(agy.key, "mcpServers");
-  assert.equal(antigravity.format, undefined, "json is the default, not a declared format");
+  assert.ok(ids.includes("opencode"), "opencode should be an mcp target");
+  const opencode = ENGINE_TARGETS.find((t) => t.id === "opencode");
+  assert.equal(opencode.path, ".config/opencode/opencode.json");
+  assert.equal(opencode.key, "mcp.servers");
+  assert.equal(opencode.format, "opencode");
 });
 
-test("kiro and qoder are mcp targets with the plain command/args/env shape", () => {
-  const ids = mcpEngineTargets().map((t) => t.id);
-  for (const wanted of ["kiro", "qoder"]) {
-    assert.ok(ids.includes(wanted), `${wanted} should be an mcp target`);
-  }
-  const kiro = ENGINE_TARGETS.find((t) => t.id === "kiro");
-  const qoder = ENGINE_TARGETS.find((t) => t.id === "qoder");
-  // kiro.dev/docs/mcp/configuration — a nested settings/ folder, not just .kiro/.
-  assert.equal(kiro.path, ".kiro/settings/mcp.json");
-  assert.equal(kiro.key, "mcpServers");
-  // docs.qoder.com/cli/mcp-reference — merged into the shared settings.json.
-  assert.equal(qoder.path, ".qoder/settings.json");
-  assert.equal(qoder.key, "mcpServers");
+test("every runtime has a matching engine, and every engine a matching runtime", async () => {
+  // Owner's call (2026-11-23): an agent belongs in one registry only if it is in
+  // both — a skill with nowhere to register the engine, or an engine no skill ever
+  // calls, serves no one.
+  const { SKILL_RUNTIME_IDS } = await import("../src/lib/skills/runtimes.js");
+  const engineIds = ENGINE_TARGETS.map((t) => t.id);
+  assert.deepEqual([...SKILL_RUNTIME_IDS].sort(), [...engineIds].sort());
 });
 
 test("dsh is skipped: its plugin already owns an engine", () => {

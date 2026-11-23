@@ -271,8 +271,8 @@ test("a skill can target several runtimes at once", async () => {
   await skills.updateSkill(created.id, { summary: "x" });
   assert.deepEqual((await skills.getSkillById(created.id)).targets, ["claude", "codex"]);
 
-  await skills.updateSkill(created.id, { targets: ["cursor"] });
-  assert.deepEqual((await skills.getSkillById(created.id)).targets, ["cursor"]);
+  await skills.updateSkill(created.id, { targets: ["opencode"] });
+  assert.deepEqual((await skills.getSkillById(created.id)).targets, ["opencode"]);
 });
 
 test("no runtime named means every runtime; legacy single target and 'generic' still read", async () => {
@@ -288,9 +288,9 @@ test("no runtime named means every runtime; legacy single target and 'generic' s
   assert.deepEqual((await skills.getSkillById(generic.id)).targets, all);
 
   // A v45 row has no `targets` value: it reads as its single target.
-  const row = await skills.createSkill({ name: "Old", body: BODY, target: "cursor" });
+  const row = await skills.createSkill({ name: "Old", body: BODY, target: "opencode" });
   db.run(`UPDATE skills SET targets = NULL WHERE id = ?`, [row.id]);
-  assert.deepEqual((await skills.getSkillById(row.id)).targets, ["cursor"]);
+  assert.deepEqual((await skills.getSkillById(row.id)).targets, ["opencode"]);
   // Duplicates collapse.
   const dup = await skills.createSkill({ name: "Dup", body: BODY, targets: ["claude", "claude", "codex"] });
   assert.deepEqual((await skills.getSkillById(dup.id)).targets, ["claude", "codex"]);
@@ -343,10 +343,10 @@ test("a bulk patch changes only the allowed fields on every selected skill", asy
   reset();
   const a = await skills.createSkill({ name: "Bulk A", body: BODY, targets: ["claude"], category: "Old" });
   const b = await skills.createSkill({ name: "Bulk B", body: BODY, targets: ["codex"] });
-  const untouched = await skills.createSkill({ name: "Bulk C", body: BODY, targets: ["cursor"] });
+  const untouched = await skills.createSkill({ name: "Bulk C", body: BODY, targets: ["opencode"] });
 
   const results = await skills.patchSkills([a.id, b.id, "missing"], {
-    targets: ["claude", "codex", "cursor"],
+    targets: ["claude", "codex", "opencode"],
     isPublished: false,
     body: "must be ignored",
     slug: "must-be-ignored",
@@ -356,13 +356,13 @@ test("a bulk patch changes only the allowed fields on every selected skill", asy
 
   for (const id of [a.id, b.id]) {
     const row = await skills.getSkillById(id);
-    assert.deepEqual(row.targets, ["claude", "codex", "cursor"]);
+    assert.deepEqual(row.targets, ["claude", "codex", "opencode"]);
     assert.equal(row.isPublished, false);
     assert.equal(row.body, BODY);
     assert.match(row.slug, /^bulk-/);
   }
   assert.equal((await skills.getSkillById(a.id)).category, "Old");
-  assert.deepEqual((await skills.getSkillById(untouched.id)).targets, ["cursor"]);
+  assert.deepEqual((await skills.getSkillById(untouched.id)).targets, ["opencode"]);
 
   await assert.rejects(() => skills.patchSkills([], { isPublished: true }), /Chưa chọn/);
   await assert.rejects(() => skills.patchSkills([a.id], { body: "x" }), /Không có gì/);
@@ -375,7 +375,7 @@ test("a bulk delete removes every selected skill and reports a missing id on its
   reset();
   const a = await skills.createSkill({ name: "Del A", body: BODY, targets: ["claude"] });
   const b = await skills.createSkill({ name: "Del B", body: BODY, targets: ["codex"] });
-  const untouched = await skills.createSkill({ name: "Del C", body: BODY, targets: ["cursor"] });
+  const untouched = await skills.createSkill({ name: "Del C", body: BODY, targets: ["opencode"] });
 
   const results = await skills.deleteSkills([a.id, b.id, "missing"]);
   assert.deepEqual(results.map((r) => r.ok), [true, true, false]);
@@ -410,7 +410,7 @@ test("re-importing in update mode replaces content only and never changes visibi
     summary: "",
     body: `${BODY}v2\n`,
     fileName: "SKILL.md",
-    targets: ["claude", "codex", "cursor"],
+    targets: ["claude", "codex", "opencode"],
     category: "",
     audience: "customer",
     isPublished: true,
@@ -485,7 +485,7 @@ test("bundleId defaults to null, round-trips when set, and a patch that never me
 
 test("the newer agents are valid targets; an unknown one is still refused", () => {
   const base = { name: "X", body: BODY };
-  for (const id of ["omp", "dsh", "opencode", "cline"]) {
+  for (const id of ["omp", "dsh", "opencode", "codex"]) {
     assert.equal(skills.skillInputError({ ...base, targets: [id] }), null, id);
   }
   assert.match(skills.skillInputError({ ...base, targets: ["omp", "vim"] }), /Runtime/);
@@ -495,7 +495,12 @@ test("migration 007 turns the original three agents into 'all' and leaves real s
   reset();
   const legacy = await skills.createSkill({ name: "Legacy All", body: BODY });
   const subset = await skills.createSkill({ name: "Legacy Subset", body: BODY, targets: ["claude", "codex"] });
-  const nulled = await skills.createSkill({ name: "Legacy Null", body: BODY, target: "cursor" });
+  // LEGACY_ALL in the migration itself is a frozen historical constant (the three
+  // agents that existed when it was written) -- independent of today's registry, so
+  // "cursor" here is deliberate, not a stand-in for a currently-supported runtime.
+  // createSkill validates against today's registry, so the legacy "cursor" value can
+  // only land via a direct write, same as the row above.
+  const nulled = await skills.createSkill({ name: "Legacy Null", body: BODY, target: "codex" });
   db.run(`UPDATE skills SET targets = '["cursor","claude","codex"]' WHERE id = ?`, [legacy.id]);
   db.run(`UPDATE skills SET targets = NULL WHERE id = ?`, [nulled.id]);
 
@@ -505,7 +510,7 @@ test("migration 007 turns the original three agents into 'all' and leaves real s
   assert.equal(db.get(`SELECT targets FROM skills WHERE id = ?`, [legacy.id]).targets, "[]");
   assert.equal((await skills.getSkillById(legacy.id)).allAgents, true);
   assert.deepEqual((await skills.getSkillById(subset.id)).targets, ["claude", "codex"]);
-  assert.deepEqual((await skills.getSkillById(nulled.id)).targets, ["cursor"]);
+  assert.deepEqual((await skills.getSkillById(nulled.id)).targets, ["codex"]);
 });
 
 test("the admin form sends [] for 'every agent' and the repo keeps it as such", async () => {
