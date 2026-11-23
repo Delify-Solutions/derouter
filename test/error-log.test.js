@@ -295,6 +295,28 @@ test("statusMode: exclude flips the same status class/code into everything but i
   assert.equal((await repo.listErrorLogs({ status: "4", statusMode: "include" })).items.length, 4);
 });
 
+test("status accepts several codes/classes at once, comma- or space-separated, ORed as one group", async () => {
+  await repo.insertErrorLog({ source: "upstream", status: 503, message: "a", data: {} });
+  await repo.insertErrorLog({ source: "upstream", status: 429, message: "b", data: {} });
+  await repo.insertErrorLog({ source: "upstream", status: 500, message: "c", data: {} });
+  await repo.insertErrorLog({ source: "upstream", status: 404, message: "d", data: {} });
+
+  const included = await repo.listErrorLogs({ status: "503,429" });
+  assert.deepEqual(included.items.map((r) => r.message).sort(), ["a", "b"]);
+
+  // The exact scenario: exclude 503 and 429 together, everything else shows.
+  const excluded = await repo.listErrorLogs({ status: "503,429", statusMode: "exclude" });
+  assert.deepEqual(excluded.items.map((r) => r.message).sort(), ["c", "d"]);
+
+  // Space-separated works the same as comma-separated.
+  const spaced = await repo.listErrorLogs({ status: "503 429", statusMode: "exclude" });
+  assert.deepEqual(spaced.items.map((r) => r.message).sort(), ["c", "d"]);
+
+  // A class and a specific code combine fine too.
+  const mixed = await repo.listErrorLogs({ status: "4,500" });
+  assert.deepEqual(mixed.items.map((r) => r.message).sort(), ["b", "c", "d"]);
+});
+
 test("owner filters by substring, same as it already did through q", async () => {
   await seed(3, { owner: "ann@example.com" });
   await seed(2, { owner: "bob@example.com", timestamp: new Date(Date.UTC(2026, 9, 30, 11, 0)).toISOString() });
