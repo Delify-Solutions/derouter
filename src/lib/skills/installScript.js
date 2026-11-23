@@ -33,7 +33,8 @@ const TEMPLATE = String.raw`#!/bin/sh
 #   curl -fsSL __ORIGIN__/api/public/skills/install.sh | DEROUTER_KEY=<api key> sh -s -- --all
 #
 # Options:
-#   --all             install every skill in the catalogue
+#   --all             install every skill in the catalogue, and every published
+#                     bundle's engine (implies --engine)
 #   --list            only list the catalogue
 #   --bundle <slug>   install every skill in this bundle, plus its engine (implies
 #                     --engine; repeatable for several bundles)
@@ -71,11 +72,17 @@ TTY="@{DEROUTER_TTY:-/dev/tty}"
 
 die() { printf 'Lỗi: %s\n' "$1" >&2; exit 1; }
 
+# Escape a value so it can sit inside a double-quoted JS/TS string literal — used
+# only to inject the omp bridge's real engine path (install_one_bundle_engine),
+# never on anything that reaches a shell command line.
+js_dq() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
 usage() {
   cat <<'USAGE'
 Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<api key> sh -s -- [tuỳ chọn] [slug ...]
 
-  --all              cài mọi skill trong danh sách
+  --all              cài mọi skill trong danh sách, kèm engine của mọi bundle đã
+                     phát hành (tự bật --engine)
   --list             chỉ liệt kê, không cài
   --bundle <slug>    cài mọi skill trong bundle này, kèm engine (tự bật --engine;
                      dùng nhiều lần nếu muốn nhiều bundle)
@@ -421,7 +428,17 @@ install_one_bundle_engine() {
           fi
         fi
         if [ -f "$e_src" ]; then
-          cp "$e_src" "$e_bridge" && printf 'engine %s [%s]: đã cài bridge -> %s\n' "$b_slug" "$e_rt" "$e_bridge"
+          if cp "$e_src" "$e_bridge"; then
+            # The bridge only knows its own get.sh's single ~/rt-claude layout (its
+            # own header comment); our bundles live one per slug under
+            # ~/$ENGINE_HOME_BASE instead. Override enginePath() itself, not the
+            # env var it also reads, so a second bundle's bridge, loaded into the
+            # same omp process, never races this one over one process-wide variable.
+            printf '\nenginePath = function enginePath() { return "%s" }\n' "$(js_dq "$ENGINE_SERVER")" >>"$e_bridge"
+            printf 'engine %s [%s]: đã cài bridge -> %s\n' "$b_slug" "$e_rt" "$e_bridge"
+          else
+            printf 'engine %s [%s]: không ghi được bridge\n' "$b_slug" "$e_rt" >&2
+          fi
         else
           printf 'engine %s [%s]: không lấy được bridge (bỏ qua)\n' "$b_slug" "$e_rt" >&2
         fi
@@ -439,6 +456,18 @@ install_engine() {
   fi
   e_node="$(node_for_engine)" || die "cần Node >= $NODE_MIN cho engine (node:sqlite). Cài Node rồi thử lại, hoặc bỏ --engine."
   printf 'engine: node %s (%s)\n' "$("$e_node" -v 2>/dev/null)" "$e_node"
+
+  # A --target name can be a real skill runtime (runtimes.js) that the engine has no
+  # registration path for at all yet (it installs skills fine, just no tools): say so
+  # plainly instead of leaving it looking like the install silently did nothing.
+  if [ -n "$TARGETS" ]; then
+    for t_req in $(printf '%s' "$TARGETS" | tr ',' ' '); do
+      case " $ENGINE_TARGETS " in
+        *" $t_req "*) ;;
+        *) printf 'engine [%s]: agent này chưa có engine (chỉ cài được skill dạng văn bản)\n' "$t_req" >&2 ;;
+      esac
+    done
+  fi
 
   # Which agents to register: those asked for by --target, else those installed here.
   e_wanted=""
@@ -494,7 +523,7 @@ main() {
   ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; BUNDLES=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --all) ALL=1 ;;
+      --all) ALL=1; WITH_ENGINE=1 ;;
       --list) LIST=1 ;;
       --bundle) [ $# -ge 2 ] || die "--bundle cần một giá trị"; BUNDLES="$BUNDLES,$2"; WITH_ENGINE=1; shift ;;
       --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
@@ -591,7 +620,7 @@ main() {
     fi
     for token in $choice; do
       case "$token" in
-        a|A|all|ALL) ALL=1 ;;
+        a|A|all|ALL) ALL=1; WITH_ENGINE=1 ;;
         *[!0-9]*)
           cut -f1 "$WORK/catalog" | grep -Fxq -- "$token" || die "không có skill \"$token\" trong danh sách"
           SLUGS="$SLUGS $token" ;;
