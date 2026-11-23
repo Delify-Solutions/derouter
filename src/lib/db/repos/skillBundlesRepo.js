@@ -43,6 +43,11 @@ const MAX_NAME = 120;
 const MAX_DESCRIPTION = 4000;
 const MAX_USAGE_GUIDE = 8000;
 const MAX_ENTRYPOINT = 200;
+// Same cap as a skill's own version field (skillsRepo.js) -- free text, not parsed.
+const MAX_VERSION = 40;
+// A git commit SHA: hex, no fixed length across hosts (GitLab/Gitea may use a
+// prefix shorter than SHA-1's 40), generous upper bound against a wrong value.
+const SHA_RE = /^[0-9a-f]{7,64}$/i;
 
 /** The slug a payload asks for; only a missing slug is derived from the name. */
 function requestedSlug(input = {}) {
@@ -104,6 +109,8 @@ function normalize(input = {}) {
     audience: String(input.audience ?? "").trim() || "customer",
     isPublished: parseFlag(input.isPublished, 1),
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Math.trunc(Number(input.sortOrder)) : 0,
+    version: String(input.version ?? "").trim().slice(0, MAX_VERSION),
+    importedSha: SHA_RE.test(String(input.importedSha ?? "").trim()) ? String(input.importedSha).trim() : null,
   };
 }
 
@@ -148,6 +155,9 @@ export function bundleInputError(input = {}) {
   const usageGuide = String(input.usageGuide ?? "").trim();
   if (usageGuide.length > MAX_USAGE_GUIDE) return `Hướng dẫn sử dụng tối đa ${MAX_USAGE_GUIDE} ký tự`;
 
+  const version = String(input.version ?? "").trim();
+  if (version.length > MAX_VERSION) return `Phiên bản tối đa ${MAX_VERSION} ký tự`;
+
   return null;
 }
 
@@ -167,6 +177,8 @@ function rowToBundle(row) {
     audience: row.audience || "customer",
     isPublished: row.isPublished === 1 || row.isPublished === true,
     sortOrder: row.sortOrder ?? 0,
+    version: row.version || "",
+    importedSha: row.importedSha || null,
     createdBy: row.createdBy || null,
     createdAt: row.createdAt ?? null,
     updatedAt: row.updatedAt ?? null,
@@ -241,13 +253,14 @@ export async function createBundle(input, { createdBy = null } = {}) {
   db.run(
     `INSERT INTO skillBundles(
        id, slug, name, description, usageGuide, sourceHost, sourceOwner, sourceRepo,
-       sourceRef, installerEntrypoint, audience, isPublished, sortOrder, createdBy,
-       createdAt, updatedAt
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       sourceRef, installerEntrypoint, audience, isPublished, sortOrder, version,
+       importedSha, createdBy, createdAt, updatedAt
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, data.slug, data.name, data.description, data.usageGuide, data.sourceHost,
       data.sourceOwner, data.sourceRepo, data.sourceRef, data.installerEntrypoint,
-      data.audience, data.isPublished, data.sortOrder, createdBy, now, now,
+      data.audience, data.isPublished, data.sortOrder, data.version, data.importedSha,
+      createdBy, now, now,
     ]
   );
   return { id, slug: data.slug };
@@ -282,6 +295,8 @@ export async function updateBundle(id, patch = {}) {
     isPublished: patch.isPublished !== undefined ? patch.isPublished : current.isPublished === 1,
     sortOrder: patch.sortOrder !== undefined ? patch.sortOrder : current.sortOrder,
     slug: patch.slug !== undefined && String(patch.slug).trim() ? patch.slug : current.slug,
+    version: patch.version !== undefined ? patch.version : current.version,
+    importedSha: patch.importedSha !== undefined ? patch.importedSha : current.importedSha,
   };
 
   const problem = bundleInputError(merged);
@@ -295,12 +310,14 @@ export async function updateBundle(id, patch = {}) {
     `UPDATE skillBundles SET
        slug = ?, name = ?, description = ?, usageGuide = ?, sourceHost = ?,
        sourceOwner = ?, sourceRepo = ?, sourceRef = ?, installerEntrypoint = ?,
-       audience = ?, isPublished = ?, sortOrder = ?, updatedAt = ?
+       audience = ?, isPublished = ?, sortOrder = ?, version = ?, importedSha = ?,
+       updatedAt = ?
      WHERE id = ?`,
     [
       data.slug, data.name, data.description, data.usageGuide, data.sourceHost,
       data.sourceOwner, data.sourceRepo, data.sourceRef, data.installerEntrypoint,
-      data.audience, data.isPublished, data.sortOrder, nowIso(), id,
+      data.audience, data.isPublished, data.sortOrder, data.version, data.importedSha,
+      nowIso(), id,
     ]
   );
   return { id, slug: data.slug };

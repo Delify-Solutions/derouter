@@ -70,6 +70,49 @@ test("a minimal bundle is stored with an empty description and usage guide", asy
   assert.equal(full.usageGuide, "");
 });
 
+test("version is free text (no git tag to derive one from), capped like a skill's own", async () => {
+  reset();
+  const created = await bundles.createBundle({ ...BASE, version: "v1.0.0" });
+  assert.equal((await bundles.getBundleById(created.id)).version, "v1.0.0");
+
+  const bare = await bundles.createBundle({ ...BASE, slug: "bare", version: "" });
+  assert.equal((await bundles.getBundleById(bare.id)).version, "");
+
+  assert.match(bundles.bundleInputError({ ...BASE, version: "v".repeat(41) }), /Phiên bản tối đa 40/);
+  assert.equal(bundles.bundleInputError({ ...BASE, version: "v1.0.0" }), null);
+});
+
+test("importedSha only accepts a hex commit SHA; anything else is dropped, not stored garbage", async () => {
+  reset();
+  const sha = "a".repeat(40);
+  const created = await bundles.createBundle({ ...BASE, importedSha: sha });
+  assert.equal((await bundles.getBundleById(created.id)).importedSha, sha);
+
+  const short = await bundles.createBundle({ ...BASE, slug: "short-sha", importedSha: "abc1234" });
+  assert.equal((await bundles.getBundleById(short.id)).importedSha, "abc1234");
+
+  for (const bad of ["not-hex-at-all", "zzzzzzz", "", "abc123"]) { // "abc123" is under the 7-char floor
+    const row = await bundles.createBundle({ ...BASE, slug: `bad-${bad || "empty"}`, importedSha: bad });
+    assert.equal((await bundles.getBundleById(row.id)).importedSha, null, bad);
+  }
+});
+
+test("a partial update preserves version and importedSha when neither is mentioned", async () => {
+  reset();
+  const sha = "b".repeat(40);
+  const created = await bundles.createBundle({ ...BASE, version: "v1.0.0", importedSha: sha });
+  await bundles.updateBundle(created.id, { description: "changed" });
+  const after1 = await bundles.getBundleById(created.id);
+  assert.equal(after1.version, "v1.0.0");
+  assert.equal(after1.importedSha, sha);
+
+  const newSha = "c".repeat(40);
+  await bundles.updateBundle(created.id, { version: "v1.1.0", importedSha: newSha });
+  const after2 = await bundles.getBundleById(created.id);
+  assert.equal(after2.version, "v1.1.0");
+  assert.equal(after2.importedSha, newSha);
+});
+
 test("a duplicate slug is refused rather than silently overwriting", async () => {
   reset();
   await bundles.createBundle({ ...BASE });

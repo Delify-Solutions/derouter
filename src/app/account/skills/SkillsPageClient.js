@@ -157,21 +157,35 @@ function AgentTargetSelect({ id, mode, onModeChange, picked, onTogglePicked }) {
 }
 
 /**
- * One bundle, collapsed to what a list row needs: its name and how many skills it
- * groups. Everything else — description, usage guide, the install command — is a
- * click away in BundleDetailBody, not repeated for every bundle on the page.
+ * One bundle, as a row in the left-hand list: its name, version and skill count,
+ * selected or not. Everything else — description, usage guide, the install
+ * command — is the detail pane on the right (BundleDetailBody), not repeated here.
  */
-function BundleListItem({ bundle, skillCount, onOpen }) {
+function BundleListItem({ bundle, skillCount, selected, onSelect }) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 border border-border bg-surface p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="material-symbols-outlined text-[18px] text-text-muted" aria-hidden="true">inventory_2</span>
-        <h3 className="truncate font-mono text-sm font-semibold text-text-main">{bundle.name}</h3>
-        <Tag tone="neutral">Bundle · {skillCount} skill</Tag>
-      </div>
-      <button type="button" onClick={() => onOpen(bundle)} className={buttonClass({ tone: "outline", size: "sm" })}>
-        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">menu_book</span>
-        Xem hướng dẫn &amp; cài
+    <li>
+      <button
+        type="button"
+        onClick={() => onSelect(bundle)}
+        aria-current={selected ? "true" : undefined}
+        className={cn(
+          "flex w-full flex-col items-start gap-1 border px-3 py-2.5 text-left transition-colors duration-150",
+          selected
+            ? "border-text-main bg-surface-2"
+            : "border-border bg-surface hover:bg-surface-2"
+        )}
+      >
+        <div className="flex w-full min-w-0 items-center gap-1.5">
+          <span className="material-symbols-outlined shrink-0 text-[16px] text-text-muted" aria-hidden="true">inventory_2</span>
+          <span className="truncate font-mono text-sm font-semibold text-text-main">{bundle.name}</span>
+          {bundle.hasUpdate && (
+            <span className="ml-auto size-2 shrink-0 rounded-full bg-amber-500" title="Có bản cập nhật từ nguồn" aria-hidden="true" />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {bundle.version && <Tag tone="neutral">{bundle.version}</Tag>}
+          <Tag tone="neutral">{skillCount} skill</Tag>
+        </div>
       </button>
     </li>
   );
@@ -180,7 +194,9 @@ function BundleListItem({ bundle, skillCount, onOpen }) {
 /**
  * A bundle's full detail: its description and usage guide rendered as Markdown,
  * an API key picker, an agent-target picker, and the one short command — just the
- * bundle's name — that installs its skills together with its engine.
+ * bundle's name — that installs its skills together with its engine. When the
+ * source has moved past what was imported (hasUpdate), the same command with
+ * --engine-update refreshes the local copy of the engine.
  */
 function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, installOpts }) {
   const skillCount = skills.filter((s) => s.bundleId === bundle.id).length;
@@ -188,6 +204,30 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
   const usageHtml = renderBundleMarkdown(bundle.usageGuide);
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-mono text-base font-semibold text-text-main">{bundle.name}</h2>
+        {bundle.version && <Tag tone="neutral">{bundle.version}</Tag>}
+      </div>
+
+      {bundle.hasUpdate && (
+        <div className="flex flex-col gap-1.5 border border-amber-500/40 bg-amber-500/5 p-3">
+          <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-amber-700 dark:text-amber-400">
+            Có bản cập nhật từ nguồn
+          </p>
+          <p className="text-xs leading-5 text-text-muted">
+            Repo nguồn của bundle này đã có commit mới hơn lần nhập gần nhất. Chạy lại lệnh cài bên
+            dưới với <code>--engine-update</code> để lấy bản engine mới nhất.
+          </p>
+          {origin && (
+            <CopyLine
+              value={installCommand(origin, `--bundle ${bundle.slug} --engine-update`, installOpts)}
+              label={`lệnh cập nhật bundle ${bundle.name}`}
+              wrap
+            />
+          )}
+        </div>
+      )}
+
       {descriptionHtml && (
         <div
           className="docs-body text-sm text-text-main"
@@ -345,7 +385,9 @@ export default function SkillsPageClient() {
   const [opening, setOpening] = useState(null);
   const [detail, setDetail] = useState(null);
   const [picked, setPicked] = useState(() => new Set());
-  const [bundleDetail, setBundleDetail] = useState(null);
+  // Which bundle is open in the right-hand detail pane; the first one loaded is
+  // selected by default so the pane is never empty while any bundle exists.
+  const [selectedBundleId, setSelectedBundleId] = useState(null);
 
   // The customer's own API keys, for inlining the real secret into a command
   // instead of a placeholder. Secrets are fetched one at a time, on an explicit
@@ -414,6 +456,9 @@ export default function SkillsPageClient() {
   const target = targetMode === "pick" ? [...targetAgents] : null;
   const targetProps = { mode: targetMode, onModeChange: setTargetMode, picked: targetAgents, onTogglePicked: toggleTargetAgent };
   const installOpts = { apiKey, target };
+  // Falls back to the first bundle so the pane is never empty, without needing an
+  // effect to keep the selection in sync as the list loads or changes.
+  const selectedBundle = bundles.find((b) => b.id === selectedBundleId) || bundles[0] || null;
 
   const togglePicked = (slug) =>
     setPicked((prev) => {
@@ -555,16 +600,33 @@ export default function SkillsPageClient() {
           {bundles.length > 0 && (
             <div className="flex flex-col gap-3">
               <Eyebrow>Bundle (skill + engine)</Eyebrow>
-              <ul className="flex flex-col gap-3">
-                {bundles.map((bundle) => (
-                  <BundleListItem
-                    key={bundle.id}
-                    bundle={bundle}
-                    skillCount={skills.filter((s) => s.bundleId === bundle.id).length}
-                    onOpen={setBundleDetail}
-                  />
-                ))}
-              </ul>
+              <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+                <ul className="flex flex-col gap-2 lg:max-h-[640px] lg:overflow-y-auto">
+                  {bundles.map((bundle) => (
+                    <BundleListItem
+                      key={bundle.id}
+                      bundle={bundle}
+                      skillCount={skills.filter((s) => s.bundleId === bundle.id).length}
+                      selected={bundle.id === selectedBundleId}
+                      onSelect={(b) => setSelectedBundleId(b.id)}
+                    />
+                  ))}
+                </ul>
+                <Panel className="min-w-0 p-5">
+                  {selectedBundle ? (
+                    <BundleDetailBody
+                      bundle={selectedBundle}
+                      skills={skills}
+                      origin={origin}
+                      apiKeyProps={apiKeyProps}
+                      targetProps={targetProps}
+                      installOpts={installOpts}
+                    />
+                  ) : (
+                    <p className="text-sm text-text-muted">Chọn một bundle để xem hướng dẫn và cài.</p>
+                  )}
+                </Panel>
+              </div>
             </div>
           )}
 
@@ -814,17 +876,6 @@ export default function SkillsPageClient() {
         <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-text-main">
           {detail?.body}
         </pre>
-      </Modal>
-
-      <Modal
-        isOpen={Boolean(bundleDetail)}
-        onClose={() => setBundleDetail(null)}
-        title={bundleDetail?.name || ""}
-        size="full"
-      >
-        {bundleDetail && (
-          <BundleDetailBody bundle={bundleDetail} skills={skills} origin={origin} apiKeyProps={apiKeyProps} targetProps={targetProps} installOpts={installOpts} />
-        )}
       </Modal>
 
       {opening && (

@@ -10,6 +10,7 @@ import {
   rawFileUrl,
   MAX_REPO_FILES,
 } from "@/lib/skills/repoImport.js";
+import { fetchLatestCommitSha } from "@/lib/skills/bundleUpdateCheck.js";
 import { MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,7 @@ export async function POST(request) {
   // repository's own README is never a skill and never needed here.
   const engineInfo = detectEngine(tree.allPaths || []);
   let readme = null;
+  let sha = null;
   if (engineInfo.detected) {
     const readmePath = findRootReadme(tree.allPaths || []);
     if (readmePath) {
@@ -109,12 +111,20 @@ export async function POST(request) {
         readme = null;
       }
     }
+    // The commit this read resolved to, for bundle mode to record as importedSha
+    // (bundleUpdateCheck.js) — a non-bundle import has no use for it.
+    try {
+      sha = await fetchLatestCommitSha({ host: parsed.host, owner: parsed.owner, repo: parsed.repo, ref: tree.ref });
+    } catch {
+      sha = null;
+    }
   }
 
   return NextResponse.json({
     repo: `${parsed.owner}/${parsed.repo}`,
     host: parsed.host,
     ref: tree.ref,
+    sha,
     path: scope,
     total: tree.files.length,
     matched: picked.length,

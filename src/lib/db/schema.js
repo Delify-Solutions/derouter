@@ -5,7 +5,9 @@
 // to bump only skips that backup — it does NOT break the additive auto-sync.
 // v48: skillBundles (one row per imported "repo that ships an engine") and the
 // nullable skills.bundleId link to it. Purely additive.
-export const SCHEMA_VERSION = 48;
+// v49: skillBundles.version (admin-set label) and .importedSha (the commit this
+// bundle's content was imported at, for the "source has moved" check). Additive.
+export const SCHEMA_VERSION = 49;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1286,6 +1288,16 @@ export const TABLES = {
       // (e.g. 'install.mjs'); validated at write time to never escape the unpacked
       // tree (no leading slash, no '..' segment).
       installerEntrypoint: "TEXT",
+      // Admin-written free text (e.g. "v1.0.0"), shown next to the bundle's name.
+      // Not derived from anything -- the source repository itself ships no git tag
+      // or release to read one from (checked: rea_policy has neither).
+      version: "TEXT",
+      // The commit SHA resolved for sourceRef the last time this bundle's content
+      // was imported or re-synced; compared against the source host's current HEAD
+      // to flag "the source has moved since" (bundleUpdateCheck.js). Null means
+      // never checked, not "up to date" -- a bundle row written before this column
+      // existed has nothing to compare against yet.
+      importedSha: "TEXT",
       // 'customer' | 'internal' — mirrors skills.audience.
       audience: "TEXT NOT NULL DEFAULT 'customer'",
       // 1 = listed for customers; 0 = staged or retired.
