@@ -192,16 +192,49 @@ function BundleListItem({ bundle, skillCount, selected, onSelect }) {
 }
 
 /**
+ * Which action the "Cài đặt" card's command is for: install/update share one
+ * command (re-running install is the update), uninstall is the other. A picker
+ * instead of showing both commands at once — one bundle, one command to copy.
+ */
+function BundleActionSelect({ action, onChange }) {
+  const options = [
+    { id: "install", label: "Cài / cập nhật" },
+    { id: "uninstall", label: "Gỡ cài" },
+  ];
+  return (
+    <div className="flex gap-1.5">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={action === o.id}
+          className={cn(
+            "h-8 border px-3 font-mono text-xs font-medium transition-colors duration-150",
+            action === o.id
+              ? "border-text-main bg-text-main text-bg"
+              : "border-border bg-surface text-text-muted hover:text-text-main"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
  * A bundle's full detail: its description and usage guide rendered as Markdown,
- * an API key picker, an agent-target picker, and the one short command — just the
- * bundle's name — that installs its skills together with its engine. When the
- * source has moved past what was imported (hasUpdate), the same command with
- * --engine-update refreshes the local copy of the engine.
+ * and a "Cài đặt" card of its own with an action picker (install/update vs
+ * uninstall, install by default) so only one command shows at a time. When the
+ * source has moved past what was imported (hasUpdate), a separate banner offers
+ * the same install command with --engine-update to refresh the local engine.
  */
 function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, installOpts }) {
   const skillCount = skills.filter((s) => s.bundleId === bundle.id).length;
   const descriptionHtml = renderBundleMarkdown(bundle.description);
   const usageHtml = renderBundleMarkdown(bundle.usageGuide);
+  const [action, setAction] = useState("install");
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -210,31 +243,30 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
       </div>
 
       {origin && skillCount > 0 && (
-        <div className="flex flex-col gap-3">
+        <Panel className="flex flex-col gap-3 p-4">
           <Eyebrow>Cài đặt</Eyebrow>
-          <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
-          <AgentTargetSelect id="bundle-target" {...targetProps} />
-          <CopyLine
-            value={installCommand(origin, `--bundle ${bundle.slug}`, installOpts)}
-            label={`lệnh cài bundle ${bundle.name}`}
-            wrap
-          />
-          <p className="text-xs leading-5 text-text-muted">
-            Cài {skillCount} skill của bundle này cùng với engine (MCP server). Chạy lại đúng lệnh
-            trên là cập nhật lên bản mới nhất. Trên Claude Code, installer riêng của bundle (nếu có)
-            sẽ tự chạy sau đó để thêm agent preset và lệnh orchestrating.
-          </p>
-          <CopyLine
-            value={installCommand(origin, `--uninstall --bundle ${bundle.slug}`)}
-            label={`lệnh gỡ engine bundle ${bundle.name}`}
-            wrap
-          />
-          <p className="text-xs leading-5 text-text-muted">
-            Xoá engine đã giải nén và huỷ đăng ký MCP khỏi mọi agent (không cần key/máy chủ). Lệnh
-            này không xoá các skill riêng của bundle — muốn xoá luôn thì thêm <code>--uninstall</code>{" "}
-            với từng slug skill nữa.
-          </p>
-        </div>
+          <BundleActionSelect action={action} onChange={setAction} />
+          {action === "install" ? (
+            <>
+              <ApiKeySelect id="bundle-api-key" {...apiKeyProps} />
+              <AgentTargetSelect id="bundle-target" {...targetProps} />
+              <CopyLine
+                value={installCommand(origin, `--bundle ${bundle.slug}`, installOpts)}
+                label={`lệnh cài bundle ${bundle.name}`}
+                wrap
+              />
+            </>
+          ) : (
+            <>
+              <AgentTargetSelect id="bundle-target-uninstall" {...targetProps} />
+              <CopyLine
+                value={installCommand(origin, `--uninstall --bundle ${bundle.slug}`)}
+                label={`lệnh gỡ engine bundle ${bundle.name}`}
+                wrap
+              />
+            </>
+          )}
+        </Panel>
       )}
 
       {bundle.hasUpdate && (
