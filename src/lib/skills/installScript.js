@@ -417,17 +417,24 @@ install_engine_source() {
 # already did must stand.
 #
 # Agent presets and a slash/orchestrating command are not a Claude Code
-# privilege — rea_policy's own install.mjs, for one, writes them for omp and
-# Codex too, into each agent's own folder, given --agent <id>. This installer
-# does not know which ids any given bundle's own installer recognises, so each
-# wanted agent is tried on its own, never as one joined --agent list: a bundle
-# that has never heard of one id this run wanted (dsh and opencode, for
-# rea_policy today) must not cost every OTHER agent its presets too — only the
-# whole list, tried together, risked that. An installer with no --agent support
-# at all fails every one of those tries the same way, so it gets one last bare
-# (no arguments) attempt — today's one guaranteed behaviour — only when claude
-# is among the wanted agents, since that is the one id every version of
-# install.mjs is known to default to.
+# privilege — rea_policy's own install.mjs, for one, writes them for omp,
+# Codex and OpenCode too, into each agent's own folder, given --agent <id>.
+# This installer does not know which ids any given bundle's own installer
+# recognises, so each wanted agent is tried on its own, never as one joined
+# --agent list: a bundle that has never heard of one id this run wanted (dsh,
+# for rea_policy today) must not cost every OTHER agent its presets too — only
+# the whole list, tried together, risked that. An installer with no --agent
+# support at all fails every one of those tries the same way, so it gets one
+# last bare (no arguments) attempt — today's one guaranteed behaviour — only
+# when claude is among the wanted agents, since that is the one id every
+# version of install.mjs is known to default to.
+#
+# --server-name <bundle-slug> is also passed on every attempt: a bundle's own
+# installer bakes the MCP server's name into every tool reference it writes
+# (mcp__<name>__<tool>), and that name must match what register_mcp actually
+# registered it as — the bundle's own slug, not whatever default the bundle's
+# installer would otherwise assume. An installer too old to know the flag
+# ignores it, same as an unrecognised --agent value, and keeps its own default.
 run_bundle_installer() {
   rb_slug="$1"; rb_root="$2"; rb_node="$3"
   rb_entry="$(bundle_installer_for "$rb_slug")"
@@ -441,9 +448,13 @@ run_bundle_installer() {
   rb_file="$rb_root/$rb_entry"
   [ -f "$rb_file" ] || return 0
 
+  # Whatever this bundle's installer writes into skill/agent/command text as "the
+  # MCP server is named X" must match what register_mcp actually registered it as
+  # (the bundle's own slug) — rb_slug here is that same value, already validated
+  # by bundleShell() upstream, so it is also a safe plain --server-name.
   rb_ok=""
   for rb_rt in $e_wanted; do
-    if "$rb_node" "$rb_file" --agent "$rb_rt" >/dev/null 2>&1; then
+    if "$rb_node" "$rb_file" --agent "$rb_rt" --server-name "$rb_slug" >/dev/null 2>&1; then
       rb_ok="$rb_ok $rb_rt"
     fi
   done
@@ -458,7 +469,7 @@ run_bundle_installer() {
     *) printf 'engine %s: %s không hỗ trợ agent nào đã chọn, bỏ qua (skill + MCP vẫn hoạt động)\n' "$rb_slug" "$rb_entry" >&2; return 0 ;;
   esac
 
-  if "$rb_node" "$rb_file" >/dev/null 2>&1; then
+  if "$rb_node" "$rb_file" --server-name "$rb_slug" >/dev/null 2>&1; then
     printf 'engine %s [claude]: đã chạy %s (agent + lệnh; agent khác không được bundle này nhận cùng lúc)\n' "$rb_slug" "$rb_entry"
   else
     printf 'engine %s [claude]: %s thoát lỗi, bỏ qua (skill + MCP vẫn hoạt động)\n' "$rb_slug" "$rb_entry" >&2
