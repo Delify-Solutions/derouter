@@ -285,6 +285,50 @@ test("the list is newest first, filtered and paged without loading the prompt bl
   assert.equal((await repo.listErrorLogs({ q: "100%_" })).items.length, 0, "LIKE wildcards are escaped");
 });
 
+test("statusMode: exclude flips the same status class/code into everything but it", async () => {
+  await seed(7); // status alternates 400 (even i) / 513 (odd i)
+  assert.equal((await repo.listErrorLogs({ status: "4" })).items.length, 4);
+  assert.equal((await repo.listErrorLogs({ status: "4", statusMode: "exclude" })).items.length, 3);
+  assert.equal((await repo.listErrorLogs({ status: "400" })).items.length, 4);
+  assert.equal((await repo.listErrorLogs({ status: "400", statusMode: "exclude" })).items.length, 3);
+  // "include" (or anything other than the literal "exclude") behaves exactly like today.
+  assert.equal((await repo.listErrorLogs({ status: "4", statusMode: "include" })).items.length, 4);
+});
+
+test("owner filters by substring, same as it already did through q", async () => {
+  await seed(3, { owner: "ann@example.com" });
+  await seed(2, { owner: "bob@example.com", timestamp: new Date(Date.UTC(2026, 9, 30, 11, 0)).toISOString() });
+  assert.equal((await repo.listErrorLogs({ owner: "ann" })).items.length, 3);
+  assert.equal((await repo.listErrorLogs({ owner: "bob@example.com" })).items.length, 2);
+  assert.equal((await repo.listErrorLogs({ owner: "nobody" })).items.length, 0);
+});
+
+test("countErrorLogs matches the unpaged total for the same filter listErrorLogs applies", async () => {
+  await seed(5, { status: 400 });
+  await seed(3, { status: 503, owner: "zed@example.com" });
+  assert.equal(await repo.countErrorLogs({}), 8);
+  assert.equal(await repo.countErrorLogs({ status: "4" }), 5);
+  assert.equal(await repo.countErrorLogs({ status: "4", statusMode: "exclude" }), 3);
+  assert.equal(await repo.countErrorLogs({ owner: "zed" }), 3);
+  // A single page is capped at 200; the count is the real total, not the page size.
+  assert.equal((await repo.listErrorLogs({ limit: 3 })).items.length, 3);
+});
+
+test("deleteErrorLogsByFilter removes only what matches, and refuses an empty filter instead of clearing the table", async () => {
+  await seed(4, { status: 400, owner: "ann@example.com" });
+  await seed(2, { status: 503, owner: "bob@example.com" });
+  assert.equal(await repo.deleteErrorLogsByFilter({}), 0, "no filter at all is refused, not treated as delete-everything");
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM errorLogs`).n, 6);
+
+  assert.equal(await repo.deleteErrorLogsByFilter({ owner: "bob" }), 2);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM errorLogs`).n, 4);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM errorLogs WHERE owner LIKE '%bob%'`).n, 0);
+
+  assert.equal(await repo.deleteErrorLogsByFilter({ status: "4", statusMode: "exclude" }), 0, "nothing is outside 4xx once bob's 503s are gone");
+  assert.equal(await repo.deleteErrorLogsByFilter({ status: "400" }), 4);
+  assert.equal(db.get(`SELECT COUNT(*) AS n FROM errorLogs`).n, 0);
+});
+
 test("pruning drops rows past the age and then the oldest past the cap", async () => {
   const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
   await repo.insertErrorLog({ timestamp: old, source: "upstream", status: 400, message: "ancient", data: {} });

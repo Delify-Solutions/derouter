@@ -100,8 +100,19 @@ function where(filter) {
   if (filter.source && ERROR_LOG_SOURCES.includes(filter.source)) { conds.push("source = ?"); params.push(filter.source); }
   if (filter.status) {
     const s = String(filter.status);
-    if (/^\d$/.test(s)) { conds.push("status >= ? AND status < ?"); params.push(Number(s) * 100, Number(s) * 100 + 100); }
-    else if (/^\d{3}$/.test(s)) { conds.push("status = ?"); params.push(Number(s)); }
+    let cond = null;
+    let vals = [];
+    if (/^\d$/.test(s)) { cond = "status >= ? AND status < ?"; vals = [Number(s) * 100, Number(s) * 100 + 100]; }
+    else if (/^\d{3}$/.test(s)) { cond = "status = ?"; vals = [Number(s)]; }
+    if (cond) {
+      // "loại trừ": the same class/code, inverted — everything that does NOT match.
+      conds.push(filter.statusMode === "exclude" ? `NOT (${cond})` : cond);
+      params.push(...vals);
+    }
+  }
+  if (filter.owner) {
+    conds.push("owner LIKE ? ESCAPE '\\'");
+    params.push(`%${String(filter.owner).replace(/[\\%_]/g, "\\$&")}%`);
   }
   if (filter.model) {
     conds.push("(requestedModel LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')");
@@ -115,6 +126,26 @@ function where(filter) {
   }
   if (filter.since) { conds.push("timestamp >= ?"); params.push(new Date(filter.since).toISOString()); }
   return { sql: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
+}
+
+/** How many rows the same filter listErrorLogs()/exportErrorLogs() would match, unpaged. */
+export async function countErrorLogs(filter = {}) {
+  const db = await getAdapter();
+  const { sql, params } = where(filter);
+  return db.get(`SELECT COUNT(*) AS n FROM errorLogs ${sql}`, params)?.n || 0;
+}
+
+/**
+ * Deletes every row the filter matches — the scoped counterpart to clearErrorLogs()
+ * (which deletes everything, or everything past an age, on purpose with no filter
+ * at all). Refuses an empty filter rather than silently deleting the whole table:
+ * that case already has its own explicit entry point.
+ */
+export async function deleteErrorLogsByFilter(filter = {}) {
+  const db = await getAdapter();
+  const { sql, params } = where(filter);
+  if (!sql) return 0;
+  return db.run(`DELETE FROM errorLogs ${sql}`, params).changes;
 }
 
 /**
