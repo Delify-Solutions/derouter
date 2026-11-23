@@ -8,6 +8,10 @@
 //   * that a bundle's own tarball/bridge URLs are built correctly
 //   * that the rendered script carries real data and no placeholders
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
+import { writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 
 const {
@@ -166,11 +170,19 @@ test("the node floor is written into the script, not hard-coded twice", () => {
   assert.ok(script.includes(`NODE_MIN="${NODE_MIN.major}.${NODE_MIN.minor}"`));
 });
 
-test("sh -n would accept it: no unbalanced quotes or dangling expansions", () => {
-  // A cheap structural check in place of running sh, so the test suite stays pure.
+test("sh parses it: the script every customer runs must be valid shell", () => {
+  // Counting quotes was a proxy, and it broke the moment a legitimate `'` appeared in
+  // a TOML key. Ask the shell itself: `sh -n` parses without executing anything.
   for (const rendered of [script, bundleScript]) {
-    const quotes = (rendered.match(/(?<!\\)'/g) || []).length;
-    assert.equal(quotes % 2, 0, `odd number of single quotes (${quotes})`);
+    const file = join(tmpdir(), `rt-install-${process.pid}-${Math.random().toString(36).slice(2)}.sh`);
+    writeFileSync(file, rendered);
+    try {
+      execFileSync("sh", ["-n", file], { stdio: "pipe" });
+    } catch (error) {
+      assert.fail(`sh -n rejected the generated installer: ${error.stderr}`);
+    } finally {
+      rmSync(file, { force: true });
+    }
     assert.ok(!rendered.includes("@{"), "an unexpanded shell-brace placeholder survived");
   }
 });

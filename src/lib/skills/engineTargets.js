@@ -23,10 +23,17 @@
  *
  * `path` is where that registration lives, relative to `$HOME`, and `dir` marks the
  * agent as installed on this machine.
+ *
+ * `format` says how that file is written: `json` (the default, for every agent but
+ * one) or `toml`. It is not decoration — a TOML file handed to a JSON writer loses
+ * its contents, because parsing it fails and the writer starts from `{}`.
  */
 export const ENGINE_TARGETS = [
   { id: "claude", mode: "mcp", dir: ".claude", path: ".claude.json", key: "mcpServers" },
-  { id: "codex", mode: "mcp", dir: ".codex", path: ".codex/config.toml", key: "mcp_servers" },
+  // Codex is the one agent whose config is TOML, not JSON. `format` exists so the
+  // installer never hands it to a JSON writer: doing that once replaced the whole
+  // file with a JSON object and broke `codex` on startup.
+  { id: "codex", mode: "mcp", dir: ".codex", path: ".codex/config.toml", key: "mcp_servers", format: "toml" },
   { id: "cursor", mode: "mcp", dir: ".cursor", path: ".cursor/mcp.json", key: "mcpServers" },
   { id: "windsurf", mode: "mcp", dir: ".codeium", path: ".codeium/windsurf/mcp_config.json", key: "mcpServers" },
   { id: "amp", mode: "mcp", dir: ".config/amp", path: ".config/amp/settings.json", key: "amp.mcpServers" },

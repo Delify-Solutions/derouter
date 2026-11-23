@@ -173,6 +173,13 @@ __ENGINE_KEY_CASES__
   esac
 }
 
+engine_format_for() {
+  case "$1" in
+__ENGINE_FORMAT_CASES__
+    *) printf '%s' "json" ;;
+  esac
+}
+
 bundle_tarball_for() {
   case "$1" in
 __BUNDLE_TARBALL_CASES__
@@ -218,12 +225,34 @@ node_for_engine() {
 # named after its slug.
 register_mcp() {
   r_agent="$1"; r_key="$2"; r_config="$3"; r_node="$4"; r_server="$5"; r_name="$6"
+  r_format="$(engine_format_for "$r_agent")"
   mkdir -p "$(dirname "$r_config")" 2>/dev/null || true
+  # A TOML config (Codex) and a JSON one need different writers. Handing a TOML file
+  # to JSON.parse throws, and the catch below starts from {} — which used to replace
+  # the customer's entire config with one JSON object and stop codex from booting.
+  if [ "$r_format" = "toml" ]; then
+    register_mcp_toml "$r_config" "$r_key" "$r_node" "$r_server" "$r_name" && {
+      printf 'engine %s [%s]: đã đăng ký MCP -> %s\n' "$r_name" "$r_agent" "$r_config"
+      return 0
+    }
+    printf 'engine %s [%s]: KHÔNG ghi được %s\n' "$r_name" "$r_agent" "$r_config" >&2
+    return 1
+  fi
   if "$r_node" -e '
 const fs = require("fs");
 const [configPath, agent, keyName, nodePath, serverPath, serverName] = process.argv.slice(1);
+let raw = "";
+try { raw = fs.readFileSync(configPath, "utf8"); } catch { raw = ""; }
 let data = {};
-try { data = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { data = {}; }
+if (raw.trim() !== "") {
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // Never overwrite a file we cannot read: it belongs to the agent, not to us.
+    console.error("refusing to rewrite an unreadable config: " + configPath);
+    process.exit(1);
+  }
+}
 // amp nests its key ("amp.mcpServers"); everything else is top level.
 const parts = keyName.split(".");
 let holder = data;
@@ -246,6 +275,29 @@ fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
     return 1
   fi
 }
+
+# Append an [mcp_servers.<name>] table to a TOML config. Appending rather than
+# rewriting: TOML has no comment-preserving parser in Node's standard library, and a
+# file with hooks and trust state in it is the agent's, not ours to reflow. A table
+# with the same name already there is left alone (the entry points at the same
+# engine path anyway), so running the installer twice does not duplicate it.
+register_mcp_toml() {
+  t_config="$1"; t_key="$2"; t_node="$3"; t_server="$4"; t_name="$5"
+  # A fixed string, not a regex: the header is written by us, so there is nothing to
+  # pattern-match, and BRE/ERE differences across grep builds are a needless risk.
+  if grep -qF "[@{t_key}.\"@{t_name}\"]" "$t_config" 2>/dev/null; then
+    return 0
+  fi
+  # A header appended straight after the last line needs the blank line TOML wants.
+  [ -s "$t_config" ] && printf '\n' >>"$t_config"
+  {
+    printf '[%s."%s"]\n' "$t_key" "$t_name"
+    printf 'command = "%s"\n' "$t_node"
+    printf 'args = ["%s"]\n' "$t_server"
+    printf 'env = { DSH_HOME = "%s" }\n' "@{DSH_HOME:-$HOME/.dsh}"
+  } >>"$t_config"
+}
+
 
 # Fetch and unpack one bundle's engine, once. Sets ENGINE_SERVER (its mcp-server.mjs
 # path) and ENGINE_ROOT (its unpack root) on success. A fetch problem is only a
@@ -692,6 +744,7 @@ export function engineShell() {
     noneIds: none.map((t) => t.id).join(" "),
     pathCases: mcp.map((t) => `    ${t.id}) printf '%s' "$HOME/${t.path}" ;;`).join("\n"),
     keyCases: mcp.map((t) => `    ${t.id}) printf '%s' "${t.key}" ;;`).join("\n"),
+    formatCases: mcp.map((t) => `    ${t.id}) printf '%s' "${t.format || "json"}" ;;`).join("\n"),
   };
 }
 
@@ -749,6 +802,7 @@ export function buildInstallScript(origin, bundles = []) {
     .replaceAll("__ENGINE_NONE_IDS__", engine.noneIds)
     .replaceAll("__ENGINE_PATH_CASES__", engine.pathCases)
     .replaceAll("__ENGINE_KEY_CASES__", engine.keyCases)
+    .replaceAll("__ENGINE_FORMAT_CASES__", engine.formatCases)
     .replaceAll("__ENGINE_HOME_BASE__", ENGINE_HOME_BASE)
     .replaceAll("__BUNDLE_SLUGS__", bundle.slugs)
     .replaceAll("__BUNDLE_TARBALL_CASES__", bundle.tarballCases)
