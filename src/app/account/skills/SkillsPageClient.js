@@ -258,6 +258,16 @@ function BundleDetailBody({ bundle, skills, origin, apiKeyProps, targetProps, in
             installer riêng của bundle (nếu có) sẽ tự chạy sau đó để thêm agent preset và lệnh
             orchestrating.
           </p>
+          <CopyLine
+            value={installCommand(origin, `--uninstall --bundle ${bundle.slug}`)}
+            label={`lệnh gỡ engine bundle ${bundle.name}`}
+            wrap
+          />
+          <p className="text-xs leading-5 text-text-muted">
+            Xoá engine đã giải nén và huỷ đăng ký MCP khỏi mọi agent (không cần key/máy chủ). Lệnh
+            này không xoá các skill riêng của bundle — muốn xoá luôn thì thêm <code>--uninstall</code>{" "}
+            với từng slug skill nữa.
+          </p>
         </div>
       )}
     </div>
@@ -335,6 +345,10 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle, installOpts }) {
         <div className="flex flex-col gap-1.5">
           <Eyebrow>Cài nhanh bằng một lệnh</Eyebrow>
           <CopyLine value={installCommand(origin, skill.slug, installOpts)} label="lệnh cài nhanh" wrap />
+          <p className="text-xs leading-5 text-text-muted">
+            Chạy lại đúng lệnh trên là cập nhật lên bản mới nhất.
+          </p>
+          <CopyLine value={installCommand(origin, `--uninstall ${skill.slug}`)} label="lệnh gỡ cài" wrap />
         </div>
       )}
 
@@ -721,8 +735,14 @@ export default function SkillsPageClient() {
                 <CopyLine value={installCommand(origin, "--list", installOpts)} label="lệnh xem danh sách" wrap />
                 <CopyLine value={installCommand(origin, "--all", installOpts)} label="lệnh cài tất cả" wrap />
                 <CopyLine value={installCommand(origin, "<slug> <slug>", installOpts)} label="lệnh cài một số skill" wrap />
+                <CopyLine value={installCommand(origin, "--uninstall <slug> <slug>")} label="lệnh gỡ cài" wrap />
               </div>
             )}
+            <p className="mt-2 text-sm leading-6 text-text-muted">
+              <strong className="text-text-main">Cập nhật</strong>: chạy lại đúng lệnh cài ở trên.{" "}
+              <strong className="text-text-main">Gỡ cài</strong> không cần key hay địa chỉ máy chủ — chỉ
+              xoá file đã ghi trên máy này.
+            </p>
             <div className="mt-4 border-t border-border pt-4">
               <Eyebrow>Cần tool, không chỉ tài liệu?</Eyebrow>
               <p className="mt-2 text-sm leading-6 text-text-muted">
@@ -834,8 +854,12 @@ export default function SkillsPageClient() {
               <ul className="mt-2 flex flex-col gap-2 text-sm leading-6 text-text-muted">
                 <li>Mỗi skill là một thư mục riêng, không gộp nhiều skill vào một file.</li>
                 <li>Phần đầu file (<code>---</code> … <code>---</code>) phải giữ nguyên: đó là phần agent đọc để biết khi nào dùng skill.</li>
-                <li>Cập nhật skill = tải bản mới rồi ghi đè <code>SKILL.md</code> cũ.</li>
-                <li>Xoá skill = xoá cả thư mục của nó.</li>
+                <li>Cập nhật skill = tải bản mới rồi ghi đè <code>SKILL.md</code> cũ, hoặc chạy lại đúng lệnh cài.</li>
+                <li>
+                  Xoá skill = xoá cả thư mục của nó, hoặc dùng lệnh{" "}
+                  <code>--uninstall &lt;slug&gt;</code> ở mục &quot;Cách nhanh&quot; phía trên — tự tìm và gỡ
+                  đúng chỗ, không cần key hay máy chủ.
+                </li>
               </ul>
             </Panel>
 

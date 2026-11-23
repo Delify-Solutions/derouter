@@ -36,6 +36,13 @@ const TEMPLATE = String.raw`#!/bin/sh
 #   --all             install every skill in the catalogue, and every published
 #                     bundle's engine (implies --engine)
 #   --list            only list the catalogue
+#   --uninstall <slug> ...  remove these skills from wherever they were installed
+#                     (no server, no API key needed — a pure filesystem cleanup;
+#                     re-running the plain install command is the update)
+#   --uninstall --bundle <slug> ...  also delete that bundle's unpacked engine and
+#                     un-register it from every agent's MCP config (--target
+#                     narrows which agents); does not remove the bundle's own
+#                     skill files — name them too with plain --uninstall <slug>
 #   --bundle <slug>   install every skill in this bundle, plus its engine (implies
 #                     --engine; repeatable for several bundles)
 #   --target <names>  agent ids (comma list or repeated), e.g. claude,omp,dsh;
@@ -43,6 +50,7 @@ const TEMPLATE = String.raw`#!/bin/sh
 #   --copy            copy into each agent's folder instead of linking them to one
 #                     shared copy (when a skill goes to several agents)
 #   --dir <path>      install under <path>/<slug>/ instead of an agent's directory
+#                     (also where --uninstall looks, when given alongside it)
 #   --url <origin>    server address (default: the one this script came from)
 #   <slug> ...        install only these skills
 #   (nothing)         in a terminal: shows a numbered list and asks which to install
@@ -84,6 +92,12 @@ Dùng: curl -fsSL <địa-chỉ>/api/public/skills/install.sh | DEROUTER_KEY=<ap
   --all              cài mọi skill trong danh sách, kèm engine của mọi bundle đã
                      phát hành (tự bật --engine)
   --list             chỉ liệt kê, không cài
+  --uninstall <slug> gỡ các skill này khỏi mọi nơi đã cài (không cần key/máy chủ;
+                     cài lại = chạy lại đúng lệnh cài, đó là lệnh cập nhật)
+  --uninstall --bundle <slug>  gỡ luôn engine của bundle này và huỷ đăng ký MCP
+                     khỏi mọi agent (dùng --target để chỉ gỡ ở vài agent); không
+                     xoá các skill riêng của bundle, muốn xoá thì ghi thêm tên
+                     skill vào --uninstall
   --bundle <slug>    cài mọi skill trong bundle này, kèm engine (tự bật --engine;
                      dùng nhiều lần nếu muốn nhiều bundle)
   (không gì cả)      trong terminal: hiện danh sách đánh số và hỏi muốn cài cái nào
@@ -354,6 +368,54 @@ fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
 ' "$o_config" "$o_key" "$o_node" "$o_server" "$o_name" 2>/dev/null
 }
 
+# The register_mcp()/register_mcp_opencode() JSON writer in reverse: delete one
+# bundle's key, leave everything else in the file untouched. Exits non-zero (no
+# message of its own — the caller decides whether that is worth reporting) when
+# there was nothing to delete, same as when the file cannot be safely read at all.
+unregister_mcp_json() {
+  uj_config="$1"; uj_key="$2"; uj_name="$3"; uj_node="$4"
+  "$uj_node" -e '
+const fs = require("fs");
+const [configPath, keyName, serverName] = process.argv.slice(1);
+let raw = "";
+try { raw = fs.readFileSync(configPath, "utf8"); } catch { process.exit(1); }
+if (raw.trim() === "") process.exit(1);
+let data;
+try {
+  data = JSON.parse(raw);
+} catch {
+  console.error("refusing to rewrite an unreadable config: " + configPath);
+  process.exit(1);
+}
+const parts = keyName.split(".");
+let holder = data;
+for (const part of parts.slice(0, -1)) {
+  if (!holder[part] || typeof holder[part] !== "object") process.exit(1);
+  holder = holder[part];
+}
+const leaf = parts[parts.length - 1];
+if (!holder[leaf] || typeof holder[leaf] !== "object" || !(serverName in holder[leaf])) process.exit(1);
+delete holder[leaf][serverName];
+fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
+' "$uj_config" "$uj_key" "$uj_name" 2>/dev/null
+}
+
+# register_mcp_toml()'s append in reverse: remove the one [key."name"] table this
+# bundle owns, line-range, not full-file-reparse — TOML still has no
+# comment-preserving parser in Node's standard library. Stops skipping lines at the
+# next "[" header, so a nested sub-table under this exact one (never written by
+# register_mcp_toml itself) would survive rather than be guessed at.
+unregister_mcp_toml() {
+  ut_config="$1"; ut_key="$2"; ut_name="$3"
+  ut_hdr="[$ut_key.\"$ut_name\"]"
+  grep -qF "$ut_hdr" "$ut_config" 2>/dev/null || return 1
+  awk -v hdr="$ut_hdr" '
+    $0 == hdr { skip = 1; next }
+    skip && /^\[/ { skip = 0 }
+    !skip { print }
+  ' "$ut_config" >"$ut_config.tmp" && mv "$ut_config.tmp" "$ut_config"
+}
+
 # Fetch and unpack one bundle's engine, once. Sets ENGINE_SERVER (its mcp-server.mjs
 # path) and ENGINE_ROOT (its unpack root) on success. A fetch problem is only a
 # warning, the script is never stopped over it: one bad bundle must not stop a
@@ -593,14 +655,112 @@ place_skill() {
   done <"$WORK/groups"
 }
 
+# --uninstall <slug> [<slug> ...] [--bundle <slug> ...]: remove a skill from
+# wherever it landed — every agent's own folder, real copy or symlink alike (rm on
+# a symlink removes only the link, never follows it into the shared copy), plus the
+# shared canonical copy itself, or just --dir's folder when that is how it was
+# installed. --bundle <slug> additionally deletes that bundle's unpacked engine and
+# un-registers it from every agent's MCP config (--target narrows which agents, same
+# as install). No server, no API key, no network either way: this only ever touches
+# what is already on this machine, so it has no way to expand a bundle slug into its
+# member skills (that mapping lives in the catalogue) — name them with plain
+# --uninstall <slug> too if you also want those files gone. Not undone here either:
+# any agent preset or /rea a bundle's own installer wrote (run_bundle_installer) —
+# that installer has no uninstall mode of its own.
+run_uninstall() {
+  [ -n "$SLUGS" ] || [ -n "$BUNDLES" ] || die "--uninstall cần tên skill hoặc --bundle <slug> (vd: --uninstall rt-recon-pipeline, hoặc --uninstall --bundle rea-policy)"
+  u_removed=0
+  for u_slug in $SLUGS; do
+    case "$u_slug" in ""|*[!a-z0-9-]*|-*|*-) die "tên skill không hợp lệ: $u_slug" ;; esac
+    u_found=0
+    if [ -n "$DIR" ]; then
+      u_path="$DIR/$u_slug"
+      if [ -e "$u_path" ] || [ -L "$u_path" ]; then
+        rm -rf "$u_path"
+        u_found=1
+        printf '%s: đã gỡ khỏi %s\n' "$u_slug" "$u_path"
+      fi
+    else
+      if [ -e "$CANON/$u_slug" ] || [ -L "$CANON/$u_slug" ]; then
+        rm -rf "$CANON/$u_slug"
+        u_found=1
+      fi
+      for u_rt in $RUNTIMES; do
+        u_path="$(dir_for "$u_rt")/$u_slug"
+        if [ -e "$u_path" ] || [ -L "$u_path" ]; then
+          rm -rf "$u_path"
+          u_found=1
+          printf '%s [%s]: đã gỡ khỏi %s\n' "$u_slug" "$u_rt" "$u_path"
+        fi
+      done
+    fi
+    if [ "$u_found" = "1" ]; then
+      u_removed=$((u_removed + 1))
+    else
+      printf '%s: không thấy đã cài ở đâu, bỏ qua\n' "$u_slug" >&2
+    fi
+  done
+
+  u_bundles_removed=0
+  if [ -n "$BUNDLES" ]; then
+    # Not yet normalised/validated the way the install path's own --target is (that
+    # happens further down main(), after the early return this mode takes) — a
+    # light touch here is enough: empty means "every agent", same meaning either way.
+    ru_targets=",$(printf '%s' "$TARGETS" | tr ' ' ','),"
+    ru_node=""
+    for u_want in $(printf '%s' "$BUNDLES" | tr ',' ' '); do
+      case " $BUNDLE_SLUGS " in
+        *" $u_want "*) ;;
+        *) printf 'engine %s: không có bundle này (hoặc chưa phát hành), bỏ qua\n' "$u_want" >&2; continue ;;
+      esac
+      u_root="$HOME/$ENGINE_HOME_BASE/$u_want"
+      if [ -d "$u_root" ]; then
+        rm -rf "$u_root"
+        printf 'engine %s: đã xoá %s\n' "$u_want" "$u_root"
+      fi
+      for u_rt in $ENGINE_MCP; do
+        if [ -n "$TARGETS" ]; then
+          case "$ru_targets" in *",$u_rt,"*) ;; *) continue ;; esac
+        fi
+        u_config="$(engine_path_for "$u_rt")"
+        [ -f "$u_config" ] || continue
+        if [ "$(engine_format_for "$u_rt")" = "toml" ]; then
+          unregister_mcp_toml "$u_config" "$(engine_key_for "$u_rt")" "$u_want" &&
+            printf 'engine %s [%s]: đã gỡ đăng ký MCP khỏi %s\n' "$u_want" "$u_rt" "$u_config"
+        else
+          [ -n "$ru_node" ] || ru_node="$(node_for_engine 2>/dev/null || printf -- '-')"
+          if [ "$ru_node" != "-" ]; then
+            unregister_mcp_json "$u_config" "$(engine_key_for "$u_rt")" "$u_want" "$ru_node" &&
+              printf 'engine %s [%s]: đã gỡ đăng ký MCP khỏi %s\n' "$u_want" "$u_rt" "$u_config"
+          fi
+        fi
+      done
+      for u_rt in $ENGINE_BRIDGE; do
+        if [ -n "$TARGETS" ]; then
+          case "$ru_targets" in *",$u_rt,"*) ;; *) continue ;; esac
+        fi
+        u_bridge="$(home_for "$u_rt")/agent/extensions/$u_want-rt-engine.ts"
+        if [ -f "$u_bridge" ]; then
+          rm -f "$u_bridge"
+          printf 'engine %s [%s]: đã gỡ bridge %s\n' "$u_want" "$u_rt" "$u_bridge"
+        fi
+      done
+      u_bundles_removed=$((u_bundles_removed + 1))
+    done
+  fi
+
+  printf '\nXong: gỡ %s skill, %s bundle.\n' "$u_removed" "$u_bundles_removed"
+}
+
 main() {
   command -v curl >/dev/null 2>&1 || die "cần có curl"
 
-  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; BUNDLES=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0
+  ALL=0; LIST=0; TARGETS=""; DIR=""; SLUGS=""; BUNDLES=""; WITH_ENGINE=0; ENGINE_ONLY=0; UPDATE_ENGINE=0; UNINSTALL=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --all) ALL=1; WITH_ENGINE=1 ;;
       --list) LIST=1 ;;
+      --uninstall) UNINSTALL=1 ;;
       --bundle) [ $# -ge 2 ] || die "--bundle cần một giá trị"; BUNDLES="$BUNDLES,$2"; WITH_ENGINE=1; shift ;;
       --target) [ $# -ge 2 ] || die "--target cần một giá trị"; TARGETS="$TARGETS,$2"; shift ;;
       --copy) COPY=1 ;;
@@ -615,6 +775,12 @@ main() {
     esac
     shift
   done
+
+  # Pure filesystem cleanup: no server, no key, no --url needed at all.
+  if [ "$UNINSTALL" = "1" ]; then
+    run_uninstall
+    return 0
+  fi
 
   [ -n "$BASE" ] || die "không biết địa chỉ máy chủ, thêm --url https://..."
   # "http://127.0.0.1:1@evil.example" looks like loopback but connects to evil.example.
