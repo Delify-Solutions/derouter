@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Modal, Pagination, Select, CardSkeleton } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
+import { cn } from "@/shared/utils/cn";
 
 const STATUS_FILTERS = [
   { id: "", label: "Mọi trạng thái" },
@@ -19,6 +20,28 @@ const PLAN_FILTERS = [
   { id: "none", label: "Không có gói" },
   { id: "debt", label: "Đang nợ" },
 ];
+
+const UNLIMITED_FILTERS = [
+  { id: "", label: "Mọi tài khoản" },
+  { id: "yes", label: "Chỉ unlimited" },
+  { id: "no", label: "Không unlimited" },
+];
+
+// Every value userPlans.source is ever written with (adminUsersRepo.js SOURCE_COLUMN) —
+// "nạp" (purchase) vs "gift" split further into who actually granted it.
+const SOURCES = [
+  { id: "purchase", label: "Nạp", short: "Nạp" },
+  { id: "gift", label: "Gift (mã quà tặng)", short: "Gift" },
+  { id: "admin", label: "Admin cấp tay", short: "Admin" },
+  { id: "affiliate", label: "Hoa hồng affiliate", short: "Affiliate" },
+  { id: "referral_bonus", label: "Thưởng giới thiệu", short: "Giới thiệu" },
+];
+
+const EMPTY_SUMMARY = {
+  totalAvailableNanoUsd: 0,
+  unlimitedCount: 0,
+  bySource: { purchase: 0, gift: 0, admin: 0, affiliate: 0, referral_bonus: 0 },
+};
 
 const STATUS_STYLES = {
   active: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400",
@@ -35,6 +58,35 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/** One tile in the KPI strip: a label and a mono value, square-bordered, no fill. */
+function Kpi({ label, value }) {
+  return (
+    <div className="flex flex-col gap-1 border border-border bg-surface px-3 py-2.5">
+      <span className="meta text-text-muted">{label}</span>
+      <span className="font-mono text-sm font-semibold text-text-main">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Totals for the currently filtered (but unpaged) result set: how much credit is
+ * left in total, split by who granted it, and how many of the matching accounts
+ * are on an unlimited plan. Lets the operator read the numbers straight off the
+ * page instead of exporting and summing them by hand.
+ */
+function SummaryKpis({ summary }) {
+  const bySource = summary?.bySource || EMPTY_SUMMARY.bySource;
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+      <Kpi label="Tổng số dư còn lại" value={fmtUsdNano(summary?.totalAvailableNanoUsd ?? 0)} />
+      {SOURCES.map((s) => (
+        <Kpi key={s.id} label={s.short} value={fmtUsdNano(bySource[s.id] ?? 0)} />
+      ))}
+      <Kpi label="Tài khoản unlimited" value={String(summary?.unlimitedCount ?? 0)} />
+    </div>
+  );
 }
 
 function StatusBadge({ status }) {
@@ -62,7 +114,7 @@ export default function UsersPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [data, setData] = useState({ users: [], total: 0, page: 1, pageSize: PAGE_SIZE, groups: [] });
+  const [data, setData] = useState({ users: [], total: 0, page: 1, pageSize: PAGE_SIZE, groups: [], summary: EMPTY_SUMMARY });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [settings, setSettings] = useState(null);
@@ -71,9 +123,24 @@ export default function UsersPageClient() {
   const [groupFilter, setGroupFilter] = useState(searchParams.get("groupId") || "");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "");
   const [planFilter, setPlanFilter] = useState(searchParams.get("planState") || "");
+  const [unlimitedFilter, setUnlimitedFilter] = useState(searchParams.get("unlimited") || "");
+  const [balanceMin, setBalanceMin] = useState(searchParams.get("balanceMinUsd") || "");
+  const [balanceMax, setBalanceMax] = useState(searchParams.get("balanceMaxUsd") || "");
+  const [sourcesFilter, setSourcesFilter] = useState(() => new Set(
+    (searchParams.get("sources") || "").split(",").map((s) => s.trim()).filter(Boolean)
+  ));
   const [sort, setSort] = useState(searchParams.get("sort") || "createdAt");
   const [dir, setDir] = useState(searchParams.get("dir") || "desc");
   const [page, setPage] = useState(Number(searchParams.get("page")) || 1);
+
+  const toggleSource = (id) => {
+    setSourcesFilter((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Bulk selection. Cleared whenever the visible page changes (filter, sort, page),
   // because a selection the operator can no longer see is a mis-delete waiting to
@@ -97,6 +164,10 @@ export default function UsersPageClient() {
       if (groupFilter) params.set("groupId", groupFilter);
       if (statusFilter) params.set("status", statusFilter);
       if (planFilter) params.set("planState", planFilter);
+      if (unlimitedFilter) params.set("unlimited", unlimitedFilter);
+      if (balanceMin.trim()) params.set("balanceMinUsd", balanceMin.trim());
+      if (balanceMax.trim()) params.set("balanceMaxUsd", balanceMax.trim());
+      if (sourcesFilter.size > 0) params.set("sources", [...sourcesFilter].join(","));
 
       const [res, settingsRes] = await Promise.all([
         fetch(`/api/users?${params.toString()}`, { cache: "no-store" }),
@@ -114,6 +185,7 @@ export default function UsersPageClient() {
         page: Number(body.page) || 1,
         pageSize: Number(body.pageSize) || PAGE_SIZE,
         groups: Array.isArray(body.groups) ? body.groups : [],
+        summary: body.summary && typeof body.summary === "object" ? body.summary : EMPTY_SUMMARY,
       });
       if (settingsRes.ok) setSettings(await settingsRes.json().catch(() => null));
     } catch {
@@ -121,13 +193,15 @@ export default function UsersPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [page, sort, dir, q, groupFilter, statusFilter, planFilter]);
+  }, [page, sort, dir, q, groupFilter, statusFilter, planFilter, unlimitedFilter, balanceMin, balanceMax, sourcesFilter]);
 
   useEffect(() => { load(); }, [load]);
 
   // Filter changes restart at page 1: page 7 of a different result set shows an
   // empty table the operator cannot explain.
-  useEffect(() => { setPage(1); }, [q, groupFilter, statusFilter, planFilter, sort, dir]);
+  useEffect(() => {
+    setPage(1);
+  }, [q, groupFilter, statusFilter, planFilter, unlimitedFilter, balanceMin, balanceMax, sourcesFilter, sort, dir]);
 
   const relayWarning =
     settings?.requireEmailVerification === true && !String(settings?.smtpRelayUrl || "").trim();
@@ -142,7 +216,11 @@ export default function UsersPageClient() {
   useEffect(() => {
     setSelected(new Set());
     setBulkResult(null);
-  }, [page, q, groupFilter, statusFilter, planFilter, sort, dir]);
+  }, [page, q, groupFilter, statusFilter, planFilter, unlimitedFilter, balanceMin, balanceMax, sourcesFilter, sort, dir]);
+
+  const hasAnyFilter = Boolean(
+    q || groupFilter || statusFilter || planFilter || unlimitedFilter || balanceMin || balanceMax || sourcesFilter.size > 0
+  );
 
   const pageIds = useMemo(() => data.users.map((user) => user.id), [data.users]);
   const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
@@ -267,6 +345,8 @@ export default function UsersPageClient() {
         </div>
       )}
 
+      <SummaryKpis summary={data.summary} />
+
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-[220px] flex-1">
           <Input
@@ -303,7 +383,65 @@ export default function UsersPageClient() {
             selectClassName="h-10 py-0 text-[12px] font-mono"
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">Unlimited</span>
+          <Select
+            value={unlimitedFilter}
+            onChange={(event) => setUnlimitedFilter(event.target.value)}
+            options={UNLIMITED_FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+            selectClassName="h-10 py-0 text-[12px] font-mono"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">Số dư từ ($)</span>
+          <Input
+            type="number"
+            value={balanceMin}
+            onChange={(event) => setBalanceMin(event.target.value)}
+            placeholder="0"
+            className="w-24"
+            inputClassName="h-10 py-0"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="meta text-text-muted">đến ($)</span>
+          <Input
+            type="number"
+            value={balanceMax}
+            onChange={(event) => setBalanceMax(event.target.value)}
+            placeholder="∞"
+            className="w-24"
+            inputClassName="h-10 py-0"
+          />
+        </div>
         <p className="ml-auto font-mono text-[11px] text-text-muted">{data.total} tài khoản</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="meta text-text-muted">Nguồn credit</span>
+        {SOURCES.map((s) => {
+          const active = sourcesFilter.has(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => toggleSource(s.id)}
+              aria-pressed={active}
+              title={s.label}
+              className={cn(
+                "h-8 border px-3 font-mono text-xs font-medium transition-colors duration-150",
+                active
+                  ? "border-text-main bg-text-main text-bg"
+                  : "border-border bg-surface text-text-muted hover:text-text-main"
+              )}
+            >
+              {s.short}
+            </button>
+          );
+        })}
+        {sourcesFilter.size > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => setSourcesFilter(new Set())}>Bỏ lọc nguồn</Button>
+        )}
       </div>
 
       {error && (
@@ -322,20 +460,23 @@ export default function UsersPageClient() {
         <div className="flex flex-col items-start gap-3 border border-border bg-surface px-6 py-14">
           <span className="material-symbols-outlined text-[28px] text-text-muted" aria-hidden="true">group</span>
           <p className="font-medium text-text-main">
-            {data.total === 0 && !q && !groupFilter && !statusFilter && !planFilter
+            {data.total === 0 && !hasAnyFilter
               ? "Chưa có người dùng nào"
               : "Không có người dùng khớp bộ lọc"}
           </p>
           <p className="max-w-md text-sm text-text-muted">
-            {data.total === 0 && !q && !groupFilter && !statusFilter && !planFilter
+            {data.total === 0 && !hasAnyFilter
               ? "Khi có người đăng ký qua trang công khai, họ sẽ hiện ở đây."
               : "Bỏ bộ lọc để xem toàn bộ tài khoản."}
           </p>
-          {(q || groupFilter || statusFilter || planFilter) && (
+          {hasAnyFilter && (
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => { setQ(""); setGroupFilter(""); setStatusFilter(""); setPlanFilter(""); }}
+              onClick={() => {
+                setQ(""); setGroupFilter(""); setStatusFilter(""); setPlanFilter("");
+                setUnlimitedFilter(""); setBalanceMin(""); setBalanceMax(""); setSourcesFilter(new Set());
+              }}
             >
               Xóa bộ lọc
             </Button>
@@ -362,7 +503,7 @@ export default function UsersPageClient() {
           </div>
         )}
         <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[980px] border-collapse text-left">
+          <table className="w-full min-w-[1480px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2">
                 <th scope="col" className="w-10 px-4 py-2.5">
@@ -383,6 +524,11 @@ export default function UsersPageClient() {
                     Credit khả dụng{sortLabel("available")}
                   </button>
                 </th>
+                {SOURCES.map((s) => (
+                  <th key={s.id} scope="col" className="meta px-3 py-2.5 text-right font-medium text-text-muted" title={s.label}>
+                    {s.short}
+                  </th>
+                ))}
                 <th scope="col" className="meta px-4 py-2.5 text-right font-medium text-text-muted">
                   <button type="button" onClick={() => toggleSort("spend30d")} className="hover:text-text-main">
                     Chi 30 ngày{sortLabel("spend30d")}
@@ -438,6 +584,14 @@ export default function UsersPageClient() {
                       </span>
                     )}
                   </td>
+                  {SOURCES.map((s) => {
+                    const amount = user.bySource?.[s.id] ?? 0;
+                    return (
+                      <td key={s.id} className="px-3 py-3 text-right font-mono text-[12px] text-text-muted">
+                        {amount > 0 ? fmtUsdNano(amount) : "—"}
+                      </td>
+                    );
+                  })}
                   <td className="px-4 py-3 text-right font-mono text-[12px] text-text-muted">
                     {fmtUsdNano(user.spend30dNanoUsd)}
                   </td>

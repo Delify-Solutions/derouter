@@ -66,6 +66,14 @@ function purchase(id, userId, { remainingUsd = 100, status = "active", hours = 7
   );
 }
 
+function grantPlan(id, userId, { source = "purchase", remainingUsd = 100, unlimited = false, status = "active", hours = 720 } = {}) {
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, unlimitedCredit, startsAt, expiresAt, status, createdAt)
+     VALUES(?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, userId, source, USD(100), unlimited ? 0 : USD(remainingUsd), unlimited ? 1 : 0, at(T0), at(T0 + hours * 3_600_000), status, at(T0)]
+  );
+}
+
 function key(id, userId) {
   db.run(
     `INSERT INTO apiKeys(id, key, name, isActive, createdAt, userId) VALUES(?, ?, ?, 1, ?, ?)`,
@@ -258,6 +266,100 @@ test("each row carries queued plans, credit, 30-day spend and last API use", asy
   assert.equal(row.availableNanoUsd, USD(50));
   assert.equal(row.spend30dNanoUsd, USD(5));
   assert.ok(row.lastUsageAt);
+});
+
+// ── Credit source breakdown, unlimited count, and the new filters ──────────
+
+test("each row carries its live credit split by source, unlimited plans excluded from every source", async () => {
+  user("u1");
+  grantPlan("up-purchase", "u1", { source: "purchase", remainingUsd: 30 });
+  grantPlan("up-gift", "u1", { source: "gift", remainingUsd: 5 });
+  grantPlan("up-admin", "u1", { source: "admin", remainingUsd: 2 });
+  grantPlan("up-affiliate", "u1", { source: "affiliate", remainingUsd: 1 });
+  grantPlan("up-referral", "u1", { source: "referral_bonus", remainingUsd: 0.5 });
+  // Carries no dollar balance (unlimitedCredit plans zero out their own credit
+  // columns) — must not inflate any source, purchase included.
+  grantPlan("up-unlimited", "u1", { source: "purchase", unlimited: true });
+
+  const { users } = await listUsersAdmin({});
+  const row = users.find((u) => u.id === "u1");
+  assert.equal(row.bySource.purchase, USD(30));
+  assert.equal(row.bySource.gift, USD(5));
+  assert.equal(row.bySource.admin, USD(2));
+  assert.equal(row.bySource.affiliate, USD(1));
+  assert.equal(row.bySource.referral_bonus, USD(0.5));
+  assert.equal(row.hasUnlimitedCredit, true);
+  // Purchase credit plus the unlimited plan's own 0 — the unlimited grant adds
+  // nothing to availableNanoUsd either.
+  assert.equal(row.availableNanoUsd, USD(30 + 5 + 2 + 1 + 0.5));
+});
+
+test("summary totals every matching customer's balance, per source, and counts unlimited accounts — unpaged", async () => {
+  user("u1");
+  user("u2");
+  user("u3");
+  grantPlan("up1", "u1", { source: "purchase", remainingUsd: 10 });
+  grantPlan("up2", "u2", { source: "gift", remainingUsd: 4 });
+  grantPlan("up3", "u3", { source: "purchase", unlimited: true });
+
+  // pageSize 1 forces pagination; the summary must still see all 3 customers.
+  const result = await listUsersAdmin({ pageSize: 1 });
+  assert.equal(result.users.length, 1, "the page itself is still sliced");
+  assert.equal(result.summary.totalAvailableNanoUsd, USD(14));
+  assert.equal(result.summary.bySource.purchase, USD(10));
+  assert.equal(result.summary.bySource.gift, USD(4));
+  assert.equal(result.summary.bySource.admin, 0);
+  assert.equal(result.summary.unlimitedCount, 1);
+});
+
+test("unlimited filter: yes/no partition the list", async () => {
+  user("u-unlimited");
+  user("u-normal");
+  grantPlan("up-u", "u-unlimited", { unlimited: true });
+  grantPlan("up-n", "u-normal", { remainingUsd: 20 });
+
+  const yes = await listUsersAdmin({ unlimited: "yes" });
+  assert.deepEqual(yes.users.map((u) => u.id), ["u-unlimited"]);
+  assert.equal(yes.summary.unlimitedCount, 1);
+
+  const no = await listUsersAdmin({ unlimited: "no" });
+  assert.deepEqual(no.users.map((u) => u.id), ["u-normal"]);
+});
+
+test("balance range filter: min and max, in USD, both inclusive", async () => {
+  user("u-low");
+  user("u-mid");
+  user("u-high");
+  grantPlan("up-low", "u-low", { remainingUsd: 2 });
+  grantPlan("up-mid", "u-mid", { remainingUsd: 20 });
+  grantPlan("up-high", "u-high", { remainingUsd: 200 });
+
+  const atLeast10 = await listUsersAdmin({ balanceMinUsd: 10 });
+  assert.deepEqual(atLeast10.users.map((u) => u.id).sort(), ["u-high", "u-mid"]);
+
+  const atMost20 = await listUsersAdmin({ balanceMaxUsd: 20 });
+  assert.deepEqual(atMost20.users.map((u) => u.id).sort(), ["u-low", "u-mid"]);
+
+  const between = await listUsersAdmin({ balanceMinUsd: 10, balanceMaxUsd: 20 });
+  assert.deepEqual(between.users.map((u) => u.id), ["u-mid"]);
+});
+
+test("source filter: keeps an account with live credit from any of the named sources", async () => {
+  user("u-purchase");
+  user("u-gift");
+  user("u-neither");
+  grantPlan("up-p", "u-purchase", { source: "purchase", remainingUsd: 5 });
+  grantPlan("up-g", "u-gift", { source: "gift", remainingUsd: 5 });
+  user("u-no-plan");
+
+  const giftOnly = await listUsersAdmin({ sources: ["gift"] });
+  assert.deepEqual(giftOnly.users.map((u) => u.id), ["u-gift"]);
+
+  const either = await listUsersAdmin({ sources: ["gift", "purchase"] });
+  assert.deepEqual(either.users.map((u) => u.id).sort(), ["u-gift", "u-purchase"]);
+
+  const unknownSourceIgnored = await listUsersAdmin({ sources: ["not-a-real-source"] });
+  assert.equal(unknownSourceIgnored.total, 4, "an unrecognised source name is dropped, not treated as a filter that matches nothing");
 });
 
 test("getUserSummary reports credit, debt, 7/30-day spend, keys and sessions", async () => {

@@ -8,6 +8,7 @@
 import { getAdapter } from "../driver.js";
 import { nano } from "../../billing/ledger.js";
 import { looksLikeIp } from "./activityRepo.js";
+import { usdToNano } from "../../../shared/utils/money.js";
 
 // Column names in the OUTER select (the CTEs already flattened the `u.` prefix), so
 // sorting refers to the derived names the query actually exposes.
@@ -20,6 +21,17 @@ const SORTABLE = {
 
 const PLAN_STATES = new Set(["active", "none", "debt"]);
 
+// userPlans.source as written by grantUserPlan's callers (billing/orders.js "purchase",
+// giftRepo.js "gift", billing/adminActions.js "admin", affiliate/wallet.js "affiliate",
+// affiliate/buyerBonus.js "referral_bonus") — the only five values ever stored there.
+const SOURCE_COLUMN = {
+  purchase: "purchaseNanoUsd",
+  gift: "giftNanoUsd",
+  admin: "adminNanoUsd",
+  affiliate: "affiliateNanoUsd",
+  referral_bonus: "referralBonusNanoUsd",
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -30,6 +42,12 @@ function nowIso() {
  * @param {string} [query.groupId]
  * @param {string} [query.status]
  * @param {string} [query.planState]    active | none | debt
+ * @param {string} [query.unlimited]    yes | no — has a live unlimited-credit plan
+ * @param {number|string} [query.balanceMinUsd]  availableNanoUsd floor, in USD
+ * @param {number|string} [query.balanceMaxUsd]  availableNanoUsd ceiling, in USD
+ * @param {string[]} [query.sources]    any of purchase|gift|admin|affiliate|referral_bonus —
+ *                                      kept only when the account holds live credit from
+ *                                      at least one of the named sources
  * @param {string} [query.sort]         createdAt | lastLoginAt | available | spend30d
  * @param {string} [query.dir]          asc | desc
  * @param {number} [query.page]         from 1
@@ -103,9 +121,27 @@ export async function listUsersAdmin(query = {}) {
                    WHERE uh.timestamp >= ?
                      AND uh.apiKeyId IN (SELECT k.id FROM apiKeys k WHERE k.userId = u.id)), 0) AS spend30d,
         (SELECT MAX(uh.timestamp) FROM usageHistory uh
-          WHERE uh.apiKeyId IN (SELECT k.id FROM apiKeys k WHERE k.userId = u.id)) AS lastUsageAt
+          WHERE uh.apiKeyId IN (SELECT k.id FROM apiKeys k WHERE k.userId = u.id)) AS lastUsageAt,
+        COALESCE(src.purchaseNanoUsd, 0) AS purchaseNanoUsd,
+        COALESCE(src.giftNanoUsd, 0) AS giftNanoUsd,
+        COALESCE(src.adminNanoUsd, 0) AS adminNanoUsd,
+        COALESCE(src.affiliateNanoUsd, 0) AS affiliateNanoUsd,
+        COALESCE(src.referralBonusNanoUsd, 0) AS referralBonusNanoUsd
       FROM users u
       LEFT JOIN keyGroups g ON g.id = u.groupId
+      -- One pass over userPlans per candidate row set, grouped by source, instead of
+      -- five more correlated sub-selects each re-scanning the table on their own.
+      LEFT JOIN (
+        SELECT userId,
+          SUM(CASE WHEN source = 'purchase' THEN creditRemainingNanoUsd ELSE 0 END) AS purchaseNanoUsd,
+          SUM(CASE WHEN source = 'gift' THEN creditRemainingNanoUsd ELSE 0 END) AS giftNanoUsd,
+          SUM(CASE WHEN source = 'admin' THEN creditRemainingNanoUsd ELSE 0 END) AS adminNanoUsd,
+          SUM(CASE WHEN source = 'affiliate' THEN creditRemainingNanoUsd ELSE 0 END) AS affiliateNanoUsd,
+          SUM(CASE WHEN source = 'referral_bonus' THEN creditRemainingNanoUsd ELSE 0 END) AS referralBonusNanoUsd
+        FROM userPlans
+        WHERE status = 'active' AND expiresAt > ? AND startsAt <= ?
+        GROUP BY userId
+      ) src ON src.userId = u.id
     )`;
 
   // Derived columns are computed once in a second CTE so both the WHERE (planState)
@@ -125,20 +161,42 @@ export async function listUsersAdmin(query = {}) {
     else if (query.planState === "none") outerWhere.push(`queuedPlans = 0`);
     else if (query.planState === "debt") outerWhere.push(`debt > 0`);
   }
+  if (query.unlimited === "yes") outerWhere.push(`hasUnlimited = 1`);
+  else if (query.unlimited === "no") outerWhere.push(`hasUnlimited = 0`);
+
+  if (query.balanceMinUsd !== undefined && query.balanceMinUsd !== null && query.balanceMinUsd !== "") {
+    outerWhere.push(`availableNanoUsd >= ?`);
+    outerParams.push(usdToNano(query.balanceMinUsd));
+  }
+  if (query.balanceMaxUsd !== undefined && query.balanceMaxUsd !== null && query.balanceMaxUsd !== "") {
+    outerWhere.push(`availableNanoUsd <= ?`);
+    outerParams.push(usdToNano(query.balanceMaxUsd));
+  }
+
+  const selectedSources = Array.isArray(query.sources)
+    ? query.sources.filter((s) => SOURCE_COLUMN[s])
+    : [];
+  if (selectedSources.length) {
+    outerWhere.push(`(${selectedSources.map((s) => `${SOURCE_COLUMN[s]} > 0`).join(" OR ")})`);
+  }
+
   const clause = outerWhere.length ? `WHERE ${outerWhere.join(" AND ")}` : "";
 
   const sortColumn = SORTABLE[query.sort] ?? SORTABLE.createdAt;
   const dir = String(query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
 
-  // The CTE parameters are bound in textual order: the six `?` in `agg`, then the
-  // filter parameters, then LIMIT/OFFSET. Live credit and "has unlimited" leave out
-  // periods that have not started (spec plan-terms); the queued count keeps them.
-  const cteParams = [at, at, at, at, at, spendSince];
+  // The CTE parameters are bound in textual order: the six `?` in `agg`'s SELECT
+  // list, then the two for the per-source LEFT JOIN's own WHERE, then the filter
+  // parameters, then LIMIT/OFFSET. Live credit, "has unlimited" and the per-source
+  // sums all leave out periods that have not started (spec plan-terms); the queued
+  // count keeps them.
+  const cteParams = [at, at, at, at, at, spendSince, at, at];
 
   const rows = db.all(
     `${base}${derived}
      SELECT id, email, displayName, groupId, groupName, status, createdAt, lastLoginAt,
-            availableNanoUsd, debt, spend30dNanoUsd, queuedPlans, hasUnlimited, lastUsageAt, overdraftNanoUsd
+            availableNanoUsd, debt, spend30dNanoUsd, queuedPlans, hasUnlimited, lastUsageAt, overdraftNanoUsd,
+            purchaseNanoUsd, giftNanoUsd, adminNanoUsd, affiliateNanoUsd, referralBonusNanoUsd
        FROM d
        ${clause}
       ORDER BY ${sortColumn} ${dir}, id ASC
@@ -146,9 +204,30 @@ export async function listUsersAdmin(query = {}) {
     [...cteParams, ...outerParams, take, skip]
   );
 
-  const total = Number(
-    db.get(`${base}${derived} SELECT COUNT(*) AS c FROM d ${clause}`, [...cteParams, ...outerParams])?.c ?? 0
+  // Same filtered set as `rows`, but unpaged: the KPI strip must total every
+  // matching customer, not just the 50 on this page.
+  const summaryRow = db.get(
+    `${base}${derived}
+     SELECT COUNT(*) AS c,
+            COALESCE(SUM(availableNanoUsd), 0) AS totalAvailable,
+            COALESCE(SUM(purchaseNanoUsd), 0) AS totalPurchase,
+            COALESCE(SUM(giftNanoUsd), 0) AS totalGift,
+            COALESCE(SUM(adminNanoUsd), 0) AS totalAdmin,
+            COALESCE(SUM(affiliateNanoUsd), 0) AS totalAffiliate,
+            COALESCE(SUM(referralBonusNanoUsd), 0) AS totalReferralBonus,
+            COALESCE(SUM(CASE WHEN hasUnlimited = 1 THEN 1 ELSE 0 END), 0) AS unlimitedCount
+       FROM d ${clause}`,
+    [...cteParams, ...outerParams]
   );
+  const total = Number(summaryRow?.c ?? 0);
+
+  const bySource = (row) => ({
+    purchase: nano(row.purchaseNanoUsd),
+    gift: nano(row.giftNanoUsd),
+    admin: nano(row.adminNanoUsd),
+    affiliate: nano(row.affiliateNanoUsd),
+    referral_bonus: nano(row.referralBonusNanoUsd),
+  });
 
   return {
     users: rows.map((row) => ({
@@ -168,10 +247,22 @@ export async function listUsersAdmin(query = {}) {
       debtNanoUsd: nano(row.debt),
       spend30dNanoUsd: nano(row.spend30dNanoUsd),
       lastUsageAt: row.lastUsageAt ?? null,
+      bySource: bySource(row),
     })),
     total,
     page,
     pageSize: take,
+    summary: {
+      totalAvailableNanoUsd: nano(summaryRow?.totalAvailable),
+      unlimitedCount: Number(summaryRow?.unlimitedCount ?? 0),
+      bySource: bySource({
+        purchaseNanoUsd: summaryRow?.totalPurchase,
+        giftNanoUsd: summaryRow?.totalGift,
+        adminNanoUsd: summaryRow?.totalAdmin,
+        affiliateNanoUsd: summaryRow?.totalAffiliate,
+        referralBonusNanoUsd: summaryRow?.totalReferralBonus,
+      }),
+    },
   };
 }
 

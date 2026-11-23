@@ -13,20 +13,28 @@ const NO_STORE = { "Cache-Control": "no-store" };
 /**
  * GET /api/users — the admin users list (spec admin-user-management "Users list").
  *
- * Query: `q`, `groupId`, `status`, `planState`, `sort`, `dir`, `page`, `pageSize`.
- * Returns `{ users, total, page, pageSize }`, where every user already carries the
- * aggregates the table renders (queued plans, available credit, 30-day spend, last
- * API use). All of them come from set-based sub-selects in the repo, never one query
- * per row.
+ * Query: `q`, `groupId`, `status`, `planState`, `unlimited`, `balanceMinUsd`,
+ * `balanceMaxUsd`, `sources` (comma list), `sort`, `dir`, `page`, `pageSize`.
+ * Returns `{ users, total, page, pageSize, summary }`, where every user already
+ * carries the aggregates the table renders (queued plans, available credit split by
+ * source, 30-day spend, last API use) and `summary` totals the same filtered,
+ * UNPAGED set (total available credit, per source, and how many hold a live
+ * unlimited plan) for the KPI strip. All of it comes from set-based sub-selects and
+ * one join in the repo, never one query per row.
  */
 export async function GET(request) {
   try {
     const params = request.nextUrl.searchParams;
+    const sources = (params.get("sources") || "").split(",").map((s) => s.trim()).filter(Boolean);
     const result = await listUsersAdmin({
       q: params.get("q") || "",
       groupId: params.get("groupId") || "",
       status: params.get("status") || "",
       planState: params.get("planState") || "",
+      unlimited: params.get("unlimited") || "",
+      balanceMinUsd: params.get("balanceMinUsd") || "",
+      balanceMaxUsd: params.get("balanceMaxUsd") || "",
+      sources,
       sort: params.get("sort") || "createdAt",
       dir: params.get("dir") || "desc",
       page: Number(params.get("page")) || 1,
