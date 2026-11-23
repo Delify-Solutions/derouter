@@ -901,13 +901,79 @@ test("the installer-entrypoint step is conditional: present, absent, and a faili
   assert.ok(!/die "[^"]*thoát lỗi/.test(script));
 });
 
-test("non-Claude-Code runtimes never run the installer, and the script says why", () => {
+test("the bundle installer is offered every wanted agent, not just claude", () => {
+  // Agent presets and a slash command are not a Claude Code privilege (rea_policy's
+  // own install.mjs writes them for omp and Codex too, given --agent) — this
+  // installer does not know which ids a given bundle's own installer recognises,
+  // so it tries the full list first.
   const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
-  assert.ok(script.includes("khái niệm riêng của Claude Code"));
-  // The note only fires for a runtime that is not claude — the loop explicitly
-  // excludes it, and running the entrypoint itself is gated on claude being wanted.
-  assert.ok(script.includes('if [ "$rb_rt" != "claude" ]'));
+  assert.ok(script.includes('rb_agents="$(printf \'%s\' "$e_wanted" | tr -s \' \' \',\')"'));
+  assert.ok(script.includes('"$rb_node" "$rb_file" --agent "$rb_agents"'));
+  // An installer that rejects the full list (an unknown id, or no --agent support
+  // at all) is retried bare, but only when claude is one of the wanted agents —
+  // that is the one guaranteed-safe fallback.
   assert.ok(script.includes('*" claude "*) ;;'));
+  assert.ok(script.includes("không nhận các agent đã chọn, bỏ qua"));
+});
+
+/**
+ * Run the real run_bundle_installer (extracted verbatim from the rendered
+ * script, same source as production) against a fake "bundle installer" so the
+ * --agent / fallback control flow is exercised for real, not just pattern-matched.
+ */
+function runBundleInstaller({ eWanted, dir = "", fakeInstaller }) {
+  const script = buildInstallScript("https://ai.example.com", [BUNDLE_A]);
+  const fn = (name) => script.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?\\n\\}`, "m"))[0];
+  const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-rb-installer-"));
+  const entry = path.join(harnessDir, "install.mjs");
+  fs.writeFileSync(entry, fakeInstaller);
+  const harness = `#!/bin/sh
+set -eu
+DIR="${dir}"
+e_wanted="${eWanted}"
+${fn("bundle_installer_for")}
+${fn("run_bundle_installer")}
+run_bundle_installer "${BUNDLE_A.slug}" "${harnessDir}" "${process.execPath}"
+`;
+  const file = path.join(harnessDir, "run.sh");
+  fs.writeFileSync(file, harness);
+  const r = spawnSync("sh", [file], { encoding: "utf8" });
+  fs.rmSync(harnessDir, { recursive: true, force: true });
+  return r;
+}
+
+test("run_bundle_installer: an installer that honours --agent gets every wanted agent in one call", () => {
+  const r = runBundleInstaller({
+    eWanted: "claude omp",
+    fakeInstaller: `
+      const i = process.argv.indexOf("--agent");
+      if (i === -1 || process.argv[i + 1] !== "claude,omp") process.exit(1);
+    `,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /đã chạy install\.mjs \(agent \+ lệnh\)/);
+  assert.match(r.stdout, /\[claude,omp\]/);
+});
+
+test("run_bundle_installer: an installer that rejects --agent falls back to bare, for claude only", () => {
+  const r = runBundleInstaller({
+    eWanted: "claude cursor",
+    // Simulates an installer with no --agent support (or one that does not
+    // recognise "cursor"): any --agent flag at all is refused.
+    fakeInstaller: `if (process.argv.includes("--agent")) process.exit(2);`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\[claude\]: đã chạy install\.mjs \(agent \+ lệnh; agent khác không được bundle này nhận cùng lúc\)/);
+});
+
+test("run_bundle_installer: no claude and the installer refuses --agent, nothing is run bare", () => {
+  const r = runBundleInstaller({
+    eWanted: "cursor windsurf",
+    fakeInstaller: `if (process.argv.includes("--agent")) process.exit(2);`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /install\.mjs không nhận các agent đã chọn, bỏ qua/);
 });
 
 test("--dir skips the bundle installer step and says why", () => {

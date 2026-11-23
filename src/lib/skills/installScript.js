@@ -361,40 +361,48 @@ install_engine_source() {
   ENGINE_SERVER="$e_root/lib/mcp-server.mjs"; ENGINE_ROOT="$e_root"
 }
 
-# For Claude Code only: run a bundle's own installer entrypoint, if it has one and
-# it exists in the unpacked tree, so the agent presets and orchestrating command
-# that repository's own installer produces land next to the engine — never
-# re-derived here (design.md). A missing entrypoint is skipped silently; a failing
-# one is a warning, never a stopped install: the skills and MCP registration this
-# run already did must stand. Every other runtime only ever gets the engine and its
-# MCP/bridge registration — agents and slash commands are a Claude Code concept
-# that runtime has nowhere to receive.
+# Run a bundle's own installer entrypoint, if it has one and it exists in the
+# unpacked tree, so the agent presets and orchestrating command that repository's
+# own installer produces land next to the engine — never re-derived here
+# (design.md). A missing entrypoint is skipped silently; a failing one is a
+# warning, never a stopped install: the skills and MCP registration this run
+# already did must stand.
+#
+# Agent presets and a slash/orchestrating command are not a Claude Code
+# privilege — rea_policy's own install.mjs, for one, writes them for omp and
+# Codex too, into each agent's own folder, given --agent <comma-list>. This
+# installer does not know which ids any given bundle's own installer recognises,
+# so it offers every agent this run wanted and lets that installer say yes or
+# no: a bundle that does not understand --agent at all, or rejects one of the
+# ids, is retried with no arguments at all (today's one guaranteed behaviour —
+# claude only) rather than left with nothing.
 run_bundle_installer() {
   rb_slug="$1"; rb_root="$2"; rb_node="$3"
   rb_entry="$(bundle_installer_for "$rb_slug")"
   [ -n "$rb_entry" ] || return 0
 
-  for rb_rt in $e_wanted; do
-    if [ "$rb_rt" != "claude" ]; then
-      printf 'engine %s [%s]: agent/lệnh là khái niệm riêng của Claude Code, bỏ qua cho agent này\n' "$rb_slug" "$rb_rt"
-    fi
-  done
-
-  case " $e_wanted " in
-    *" claude "*) ;;
-    *) return 0 ;;
-  esac
-
   if [ -n "$DIR" ]; then
-    printf 'engine %s: bỏ qua cài agent/lệnh cho Claude Code (đang dùng --dir, không phải thư mục cài mặc định)\n' "$rb_slug"
+    printf 'engine %s: bỏ qua cài agent/lệnh (đang dùng --dir, không phải thư mục cài mặc định)\n' "$rb_slug"
     return 0
   fi
 
   rb_file="$rb_root/$rb_entry"
   [ -f "$rb_file" ] || return 0
 
+  rb_agents="$(printf '%s' "$e_wanted" | tr -s ' ' ',')"
+  rb_agents="@{rb_agents#,}"
+  if [ -n "$rb_agents" ] && "$rb_node" "$rb_file" --agent "$rb_agents" >/dev/null 2>&1; then
+    printf 'engine %s [%s]: đã chạy %s (agent + lệnh)\n' "$rb_slug" "$rb_agents" "$rb_entry"
+    return 0
+  fi
+
+  case " $e_wanted " in
+    *" claude "*) ;;
+    *) printf 'engine %s: %s không nhận các agent đã chọn, bỏ qua (skill + MCP vẫn hoạt động)\n' "$rb_slug" "$rb_entry" >&2; return 0 ;;
+  esac
+
   if "$rb_node" "$rb_file" >/dev/null 2>&1; then
-    printf 'engine %s [claude]: đã chạy %s (agent + lệnh)\n' "$rb_slug" "$rb_entry"
+    printf 'engine %s [claude]: đã chạy %s (agent + lệnh; agent khác không được bundle này nhận cùng lúc)\n' "$rb_slug" "$rb_entry"
   else
     printf 'engine %s [claude]: %s thoát lỗi, bỏ qua (skill + MCP vẫn hoạt động)\n' "$rb_slug" "$rb_entry" >&2
   fi
