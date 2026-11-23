@@ -743,6 +743,21 @@ export default function ProviderDetailPage() {
     setOneByOneStopping(true);
   };
 
+  const handleClone = async (id) => {
+    try {
+      const res = await fetch(`/api/providers/${id}/clone`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(body.error || "Failed to clone connection");
+        return;
+      }
+      setConnections(prev => [...prev, body.connection]);
+    } catch (error) {
+      console.error("Error cloning connection:", error);
+      alert("Failed to clone connection");
+    }
+  };
+
   const handleDelete = async (id) => {
     setConfirmState({
       title: "Delete Connection",
@@ -1031,6 +1046,7 @@ export default function ProviderDetailPage() {
                   setShowEditModal(true);
                 }}
                 onDelete={() => handleDelete(conn.id)}
+                onClone={isCompatible ? () => handleClone(conn.id) : undefined}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
