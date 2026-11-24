@@ -26,6 +26,10 @@ const NAV = [
   // Published skills the customer installs into their own agent runtime
   // (change customer-skills).
   { href: "/account/skills", label: "Skill", icon: "extension" },
+  // DSH plugins: npm packages added to the customer's own harness profile, not
+  // files to download (change dsh-plugins). Kept apart from "Skill" because the
+  // install path and the thing installed are different.
+  { href: "/account/plugins", label: "Plugin DSH", icon: "widgets" },
   { href: "/account/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
   { href: "/account/notifications", label: "Thông báo", icon: "notifications", badge: "unread" },

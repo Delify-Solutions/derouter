@@ -7,7 +7,7 @@
 // nullable skills.bundleId link to it. Purely additive.
 // v49: skillBundles.version (admin-set label) and .importedSha (the commit this
 // bundle's content was imported at, for the "source has moved" check). Additive.
-export const SCHEMA_VERSION = 49;
+export const SCHEMA_VERSION = 50;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1310,6 +1310,54 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_skill_bundles_slug ON skillBundles(slug)",
       "CREATE INDEX IF NOT EXISTS idx_skill_bundles_listed ON skillBundles(isPublished, audience, sortOrder)",
+    ],
+  },
+  // DSH plugins the operator publishes: a DeepSeek Harness bundle the customer adds
+  // to their own profile, not a skill file. A plugin is an npm package whose
+  // package.json carries `dsh.bundle.patch`; installing it means appending its name
+  // to `dsh.profile.bundles` in the profile's package.json and letting the profile's
+  // package manager resolve it.
+  //
+  // Why a separate table from skillBundles: that one groups skill markdown and its
+  // installer is a shell script over the skill catalogue. A plugin ships code that
+  // runs inside the harness — a different lifecycle (npm version, engine target
+  // range) and a different install command (`dsh plugin add`), so it is a different
+  // kind of row.
+  dshPlugins: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // Becomes the npm package name shown in the install command, and the row key.
+      slug: "TEXT NOT NULL UNIQUE",
+      name: "TEXT NOT NULL",
+      // What the plugin does, in the customer's language.
+      description: "TEXT",
+      // Admin-written: how to use it once installed (commands, panels, settings).
+      usageGuide: "TEXT",
+      // The npm package to install. Either a registry name ("dsh-purge-safe") or a
+      // git/tarball spec, since a plugin does not have to be published to npm.
+      packageName: "TEXT NOT NULL",
+      // Free text ("2.0.1"), shown next to the name. Not resolved from npm.
+      version: "TEXT",
+      // The DSH release the plugin targets, e.g. "0.2.2-rc.3" (its dshTarget). Shown
+      // so a customer can tell whether it matches their harness before installing.
+      dshTarget: "TEXT",
+      // Where to read the source, for a customer who wants to audit it first.
+      repoUrl: "TEXT",
+      // Docs URL or the repository's README anchor.
+      docsUrl: "TEXT",
+      // 'customer' | 'internal' — mirrors skills.audience.
+      audience: "TEXT NOT NULL DEFAULT 'customer'",
+      // 1 = listed for customers; 0 = staged or retired.
+      isPublished: "INTEGER DEFAULT 1",
+      sortOrder: "INTEGER DEFAULT 0",
+      installCount: "INTEGER DEFAULT 0",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_dsh_plugins_slug ON dshPlugins(slug)",
+      "CREATE INDEX IF NOT EXISTS idx_dsh_plugins_listed ON dshPlugins(isPublished, audience, sortOrder)",
     ],
   },
 };
