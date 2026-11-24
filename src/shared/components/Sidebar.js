@@ -59,6 +59,9 @@ const systemItems = [
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
   // Skills the operator publishes for customers to download (change customer-skills).
   { href: "/dashboard/customer-skills", label: "Skill khách hàng", icon: "download" },
+  // DSH plugins: npm packages a customer adds to their harness profile. Different
+  // install path from a skill, so a different page (change dsh-plugins).
+  { href: "/dashboard/dsh-plugins", label: "Plugin DSH", icon: "widgets" },
 ];
 
 export default function Sidebar({ onClose }) {
