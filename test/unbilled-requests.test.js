@@ -119,6 +119,33 @@ test("a request that finishes after its key was deleted is still charged", async
   assert.equal(remaining(up), USD(9));
 });
 
+// ── saveRequestUsage's own return value (consumed by the Details tab) ───────
+
+test("saveRequestUsage returns the real charged amount: equal to cost on a real-credit plan", async () => {
+  plan("A"); user();
+  grant("A", { usd: 10 });
+  const secret = key("k1");
+
+  const result = await saveRequestUsage({ provider: "test", model: "model-a", apiKey: secret, tokens: ONE_DOLLAR_REQUEST, endpoint: "/v1/chat/completions" });
+  assert.equal(result.costNanoUsd, USD(1));
+  assert.equal(result.chargedNanoUsd, USD(1));
+});
+
+test("saveRequestUsage returns 0 charged (but the real cost) when an unlimited plan pays", async () => {
+  user();
+  const now = NOW();
+  db.run(
+    `INSERT INTO userPlans(id, userId, planId, orderId, source, creditTotalNanoUsd, creditRemainingNanoUsd, unlimitedCredit, startsAt, expiresAt, status, createdAt)
+     VALUES('up-unl', 'u1', NULL, NULL, 'admin', 0, 0, 1, ?, ?, 'active', ?)`,
+    [now, inDays(30), now]
+  );
+  const secret = key("k1");
+
+  const result = await saveRequestUsage({ provider: "test", model: "model-a", apiKey: secret, tokens: ONE_DOLLAR_REQUEST, endpoint: "/v1/chat/completions" });
+  assert.equal(result.costNanoUsd, USD(1), "the list-price value is unaffected by which plan pays");
+  assert.equal(result.chargedNanoUsd, 0, "nothing real was deducted — mirrors the admin stats' own exclusion");
+});
+
 test("a deleted pinned key is still charged to its pinned plan only", async () => {
   plan("A"); plan("B"); user();
   const upA = grant("A", { usd: 100, priority: 1 });

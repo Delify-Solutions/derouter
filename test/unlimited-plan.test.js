@@ -106,6 +106,21 @@ test("1. a charge leaves an unlimited plan's credit alone, ledgers the spend and
   assert.equal(rows[0].deltaNanoUsd, -USD(3));
   assert.equal(JSON.parse(rows[0].meta).unlimited, true);
   assert.equal(db.get(`SELECT overdraftNanoUsd AS d FROM users WHERE id = 'u1'`).d, 0);
+
+  // Same fact, carried on the part chargeSync itself returns — callers that split
+  // "real money taken" from "value covered by the plan" read it from here, not by
+  // re-querying creditLedger.
+  assert.equal(result.parts.length, 1);
+  assert.equal(result.parts[0].unlimited, true);
+});
+
+test("1b. a charge against a finite plan's own part is not tagged unlimited", () => {
+  user();
+  const id = grantFinite({ creditUsd: 10 });
+  const result = charge("u1", 3, "r1b", T0 + HOUR);
+  assert.equal(result.parts.length, 1);
+  assert.equal(result.parts[0].userPlanId, id);
+  assert.ok(!result.parts[0].unlimited);
 });
 
 test("2. a full window blocks the plan with 429 and a reset time; it reopens when the window closes", () => {

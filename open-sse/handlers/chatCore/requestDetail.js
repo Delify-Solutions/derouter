@@ -140,13 +140,21 @@ export function formatDoneLine({ usage, latency }) {
   return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
 }
 
+/**
+ * Records the usage row and returns the promise of its result ({ costNanoUsd,
+ * chargedNanoUsd } — the real money taken, unlimited-plan parts excluded, same
+ * figures usageHistory/creditLedger themselves carry). A caller that also writes
+ * a requestDetails row for this same request awaits this first, so that row can
+ * carry the one real figure instead of a guess — see the callers in
+ * nonStreamingHandler.js / streamingHandler.js / sseToJsonHandler.js.
+ */
 export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, clientIp, label = "USAGE", silent = false }) {
-  if (!tokens || typeof tokens !== "object") return;
+  if (!tokens || typeof tokens !== "object") return Promise.resolve(null);
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
   const outTokens = tokens.output_tokens ?? tokens.completion_tokens ?? 0;
 
-  if (inTokens === 0 && outTokens === 0) return;
+  if (inTokens === 0 && outTokens === 0) return Promise.resolve(null);
 
   // Canonicalize to one storage convention (prompt_tokens cache-inclusive) so
   // cached/cache-creation tokens survive to cost calc + stats. See canonicalizeUsage.
@@ -155,7 +163,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0
   };
 
-  saveRequestUsage({
+  return saveRequestUsage({
     provider: provider || "unknown",
     model: model || "unknown",
     tokens: normalized,
@@ -178,7 +186,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     ttftMs: Number.isFinite(ttftMs) ? ttftMs : null,
     // Trusted client IP of the request (spec activity-ip-log), or null.
     clientIp: clientIp || null
-  }).catch(() => {});
+  }).catch(() => null);
 }
 
 /**

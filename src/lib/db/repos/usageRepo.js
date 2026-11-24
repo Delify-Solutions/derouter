@@ -457,6 +457,10 @@ export async function getActiveRequests() {
 }
 
 export async function saveRequestUsage(entry) {
+  // Real credit actually taken for this one request, unlimited-plan parts left
+  // out — set inside the transaction below when a charge happens; 0 covers every
+  // path that never reaches it (no owner, dedup hit, zero-cost request).
+  let chargedNanoUsd = 0;
   try {
     const db = await getAdapter();
 
@@ -622,7 +626,7 @@ export async function saveRequestUsage(entry) {
       // becoming debt. Admin keys have no owner and are never charged.
       if (entry.apiKey && owner) {
         try {
-          chargeSync(db, {
+          const charge = chargeSync(db, {
             userId: owner.userId,
             apiKeyId: owner.apiKeyId,
             usageId: insertedUsage.lastInsertRowid,
@@ -637,6 +641,13 @@ export async function saveRequestUsage(entry) {
             // the client asked for must never be billed for it.
             model: entry.requestedModel || null,
           });
+          // Real money taken from a real balance — an unlimited plan's own part is
+          // left out, same exclusion tokenStats.js applies by reading
+          // creditLedger's meta.unlimited; this is that same fact read straight off
+          // the part chargeSync just computed, not re-derived from the ledger.
+          chargedNanoUsd = (charge?.parts || [])
+            .filter((p) => p.amountNanoUsd != null && !p.unlimited)
+            .reduce((sum, p) => sum + p.amountNanoUsd, 0);
         } catch (e) {
           console.error("[billing] charge failed", e.message);
         }
@@ -672,8 +683,11 @@ export async function saveRequestUsage(entry) {
       pushToRing(entry);
       scheduleStatsEvent("update", 250);
     }
+
+    return { costNanoUsd: entry.costNanoUsd || 0, chargedNanoUsd };
   } catch (e) {
     console.error("Failed to save usage stats:", e);
+    return { costNanoUsd: 0, chargedNanoUsd: 0 };
   }
 }
 

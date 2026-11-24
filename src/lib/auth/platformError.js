@@ -193,7 +193,7 @@ export async function logPlatformDenial({ apiKey, model, status, message, resetA
       status: statusText,
       errorSource: "platform",
       response: { error: message, resetAt: resetAt ?? undefined },
-    }, { latency: { ttft: null, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 } })).catch(() => {});
+    }, { latency: { ttft: null, total: 0 }, tokens: { prompt_tokens: 0, completion_tokens: 0 }, costNanoUsd: 0, chargedNanoUsd: 0 })).catch(() => {});
     saveUsageError({
       provider: "platform",
       model: model || "unknown",

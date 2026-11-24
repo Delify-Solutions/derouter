@@ -240,7 +240,9 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
       appendLog({ tokens: usage, status: "200 OK" });
       const _reqModelRaw = clientRawRequest?.body?.model;
       const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
-      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
+      // Not awaited (would delay the client response); the detail write below
+      // chains off it instead, so it still carries the real cost/charged figures.
+      const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
       if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
@@ -250,14 +252,18 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
       const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
       const totalLatency = Date.now() - requestStartTime;
 
-      saveRequestDetail(buildRequestDetail({
+      usageSavePromise.then((usageResult) => saveRequestDetail(buildRequestDetail({
         ...ctx,
         requestedModel,
         latency: { ttft: null, total: totalLatency },
         tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
         response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
         status: "success"
-      }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
+      }, {
+        endpoint: clientRawRequest?.endpoint || null,
+        costNanoUsd: usageResult?.costNanoUsd ?? null,
+        chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+      }))).catch(() => {});
 
       // Client is Responses API → return as-is
       if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
@@ -363,11 +369,11 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
     // Responses branch; `body.model` is the rewritten provider/model here.
     const _reqModelRaw = clientRawRequest?.body?.model;
     const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
+    const usageSavePromise2 = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
     const totalLatency = Date.now() - requestStartTime;
-    saveRequestDetail(buildRequestDetail({
+    usageSavePromise2.then((usageResult) => saveRequestDetail(buildRequestDetail({
       ...ctx,
       requestedModel,
       latency: { ttft: null, total: totalLatency },
@@ -378,7 +384,11 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
         finish_reason: parsed.choices?.[0]?.finish_reason || "unknown"
       },
       status: "success"
-    }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
+    }, {
+      endpoint: clientRawRequest?.endpoint || null,
+      costNanoUsd: usageResult?.costNanoUsd ?? null,
+      chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+    }))).catch(() => {});
 
     // `parsed.usage` is the upstream's own usage object, untouched: the client can tell a
     // cached request from a cheap one. (Any estimate lives only in the recorded row.)
