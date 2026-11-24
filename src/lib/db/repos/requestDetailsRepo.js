@@ -132,6 +132,11 @@ async function flushToDatabase() {
             // public /usage detail view can show the combo the key holder called,
             // not the internal pool/fallback model the proxy resolved to.
             requestedModel: item.requestedModel || null,
+            // Giá trị / Đã trừ (see the requestDetails columns): null when the
+            // caller never computed them (an error path, or a record predating
+            // this pair) rather than a guessed 0.
+            costNanoUsd: Number.isFinite(item.costNanoUsd) ? item.costNanoUsd : null,
+            chargedNanoUsd: Number.isFinite(item.chargedNanoUsd) ? item.chargedNanoUsd : null,
             connectionId: item.connectionId || null,
             apiKey: item.apiKey || null,
             timestamp: item.timestamp,
@@ -150,11 +155,11 @@ async function flushToDatabase() {
           };
 
           db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, apiKey, status, data, userId, apiKeyId, requestedModel) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, apiKey = excluded.apiKey, status = excluded.status, data = excluded.data, userId = excluded.userId, apiKeyId = excluded.apiKeyId, requestedModel = excluded.requestedModel`,
+            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, apiKey, status, data, userId, apiKeyId, requestedModel, costNanoUsd, chargedNanoUsd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, apiKey = excluded.apiKey, status = excluded.status, data = excluded.data, userId = excluded.userId, apiKeyId = excluded.apiKeyId, requestedModel = excluded.requestedModel, costNanoUsd = excluded.costNanoUsd, chargedNanoUsd = excluded.chargedNanoUsd`,
             [
               record.id, record.timestamp, record.provider, record.model, record.connectionId, record.apiKey,
               record.status, stringifyJson(record), record.owner?.userId ?? null, record.owner?.apiKeyId ?? null,
-              record.requestedModel,
+              record.requestedModel, record.costNanoUsd, record.chargedNanoUsd,
             ]
           );
         }

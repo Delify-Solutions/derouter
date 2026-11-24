@@ -772,7 +772,10 @@ export function chargeSync(db, {
     applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 1, model });
     ledgerRows += 1;
     remaining -= take;
-    parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 1 });
+    // Tagged so a caller can split "real credit charged" from "covered by an
+    // unlimited plan" without re-deriving it from the ledger (tokenStats.js's
+    // own exclusion reads meta.unlimited; this is the same fact, on the part).
+    parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 1, unlimited: !!entry.unlimitedCredit });
   }
 
   // ── Pass 2: ignore windows ────────────────────────────────────────────────
@@ -796,7 +799,7 @@ export function chargeSync(db, {
       applyTake(db, { entry, amount: take, requestKey: rowKey(), usageId, apiKeyId, at, pass: 2, model });
       ledgerRows += 1;
       remaining -= take;
-      parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 2 });
+      parts.push({ userPlanId: entry.id, amountNanoUsd: take, pass: 2, unlimited: !!entry.unlimitedCredit });
     }
   }
 

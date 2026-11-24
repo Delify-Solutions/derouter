@@ -169,7 +169,15 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
     const _reqModelRaw = clientRawRequest?.body?.model;
     const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
 
-    saveRequestDetail(buildRequestDetail({
+    // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
+    // TTFT = time to the first bytes from the upstream; null when none were seen.
+    // Kicked off BEFORE the requestDetail upsert below, which awaits it so the final
+    // row (overwriting the "streaming in progress" placeholder) carries the real
+    // cost/charged figures instead of null.
+    const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
+    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
+
+    usageSavePromise.then((usageResult) => saveRequestDetail(buildRequestDetail({
       provider, model, requestedModel, connectionId, apiKey,
       latency,
       tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -179,14 +187,13 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
       response: { content: safeContent, thinking: safeThinking, type: "streaming" },
       pxpipe,
       status: "success"
-    }, { id: streamDetailId })).catch(err => {
+    }, {
+      id: streamDetailId,
+      costNanoUsd: usageResult?.costNanoUsd ?? null,
+      chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+    }))).catch(err => {
       console.error("[RequestDetail] Failed to update streaming content:", err.message);
     });
-
-    // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
-    // TTFT = time to the first bytes from the upstream; null when none were seen.
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
-    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
     }
   };
 

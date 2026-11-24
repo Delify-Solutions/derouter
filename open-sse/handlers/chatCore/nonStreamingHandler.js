@@ -404,9 +404,12 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   const _reqModelRaw = clientRawRequest?.body?.model;
   const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
   const usageLatencyMs = Date.now() - requestStartTime;
+  // The requestDetail write below awaits this so its row can carry the real
+  // cost/charged figures instead of a guess (see requestDetail.js saveUsageStats).
+  let usageSavePromise = Promise.resolve(null);
   const recordUsage = () => {
     appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: usageLatencyMs, silent: true });
+    usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: usageLatencyMs, silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: usageLatencyMs } }));
   };
   if (!deferUsage) {
@@ -480,7 +483,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   reqLogger.logConvertedResponse(translatedResponse);
 
   const totalLatency = Date.now() - requestStartTime;
-  const recordDetail = () => saveRequestDetail(buildRequestDetail({
+  const recordDetail = () => usageSavePromise.then((usageResult) => saveRequestDetail(buildRequestDetail({
     provider, model, requestedModel, connectionId, apiKey,
     latency: { ttft: null, total: totalLatency },
     tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -494,7 +497,11 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
     },
     pxpipe,
     status: "success"
-  }, { endpoint: clientRawRequest?.endpoint || null })).catch(err => {
+  }, {
+    endpoint: clientRawRequest?.endpoint || null,
+    costNanoUsd: usageResult?.costNanoUsd ?? null,
+    chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+  }))).catch(err => {
     console.error("[RequestDetail] Failed to save:", err.message);
   });
   if (deferUsage) {

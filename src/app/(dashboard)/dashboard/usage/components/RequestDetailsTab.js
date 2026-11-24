@@ -13,6 +13,7 @@ import { cn } from "@/shared/utils/cn";
 import { maskKeyFull } from "@/shared/utils/apiKey";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 import { detailTtft, formatLatency } from "@/shared/utils/latencyFormat";
+import { fmtUsdNano } from "@/shared/utils/money";
 
 /**
  * Who made the request: the key owner's e-mail (or "Key admin"), then the key's
@@ -621,6 +622,18 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                   align="right"
                   className="p-4 text-sm font-semibold text-text-main"
                 />
+                <th
+                  className="text-right p-4 text-sm font-semibold text-text-main"
+                  title="Giá niêm yết của request này, theo bảng giá — không phân biệt gói unlimited hay credit thật"
+                >
+                  Giá trị
+                </th>
+                <th
+                  className="text-right p-4 text-sm font-semibold text-text-main"
+                  title="Số tiền thực sự bị trừ khỏi credit thật — bằng 0 khi request được trả hoàn toàn bằng gói unlimited"
+                >
+                  Đã trừ
+                </th>
                 <SortableHeader label="Latency" field="latency" state={query} onSort={onHeaderSort} className="p-4 text-sm font-semibold text-text-main" />
                 <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
               </tr>
@@ -629,7 +642,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               {tableState !== "ready" ? (
                 <TableStateRow
                   state={tableState}
-                  colSpan={12}
+                  colSpan={14}
                   emptyMessage="No request details found"
                   onRetry={() => setReloadTick((t) => t + 1)}
                   onClearFilters={clearAllFilters}
@@ -696,6 +709,12 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                         </td>
                       );
                     })()}
+                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                      {Number.isFinite(detail.costNanoUsd) ? fmtUsdNano(detail.costNanoUsd) : "—"}
+                    </td>
+                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                      {Number.isFinite(detail.chargedNanoUsd) ? fmtUsdNano(detail.chargedNanoUsd) : "—"}
+                    </td>
                     <td className="p-4 text-sm text-text-muted">
                       <div className="flex flex-col gap-0.5">
                         <div>TTFT: <span className="font-mono">{detailTtft(detail.latency) != null ? `${detailTtft(detail.latency)}ms` : "—"}</span></div>

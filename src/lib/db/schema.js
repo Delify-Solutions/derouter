@@ -7,7 +7,7 @@
 // nullable skills.bundleId link to it. Purely additive.
 // v49: skillBundles.version (admin-set label) and .importedSha (the commit this
 // bundle's content was imported at, for the "source has moved" check). Additive.
-export const SCHEMA_VERSION = 50;
+export const SCHEMA_VERSION = 51;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -232,6 +232,16 @@ export const TABLES = {
       // written before this column are filled once from data.requestedModel
       // (requestDetailsRepo backfill).
       requestedModel: "TEXT",
+      // Giá trị (list-price value, same figure usageHistory.costNanoUsd records for
+      // the same request) and Đã trừ (the real money taken from a real credit
+      // balance — the part chargeSync tagged NOT unlimited; 0 when the whole
+      // request was covered by an unlimited plan). NULL, not 0, for every row
+      // written before this pair existed: there is nothing to backfill them from
+      // (no shared key ties a requestDetails row back to its usageHistory/
+      // creditLedger siblings), so NULL means "not recorded", 0 means "recorded,
+      // genuinely free or fully unlimited".
+      costNanoUsd: "INTEGER",
+      chargedNanoUsd: "INTEGER",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_rd_ts ON requestDetails(timestamp DESC)",
