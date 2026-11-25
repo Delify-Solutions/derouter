@@ -107,6 +107,9 @@ export default function ProvidersPage() {
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  // Providers the admin pinned to the "Hay sử dụng" row at the top, in order
+  // (settingsRepo pinnedProviders). Loaded once; edited only from this page.
+  const [pinnedProviders, setPinnedProviders] = useState([]);
   const notify = useNotificationStore();
   const searchQuery = useHeaderSearchStore((s) => s.query);
   const registerSearch = useHeaderSearchStore((s) => s.register);
@@ -169,6 +172,43 @@ export default function ProvidersPage() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data?.pinnedProviders)) setPinnedProviders(data.pinnedProviders);
+      })
+      .catch(() => {});
+  }, []);
+
+  const persistPinned = async (next) => {
+    setPinnedProviders(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinnedProviders: next }),
+      });
+    } catch {}
+  };
+
+  const togglePin = (id) => {
+    persistPinned(
+      pinnedProviders.includes(id)
+        ? pinnedProviders.filter((p) => p !== id)
+        : [...pinnedProviders, id],
+    );
+  };
+
+  const movePinned = (id, dir) => {
+    const idx = pinnedProviders.indexOf(id);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= pinnedProviders.length) return;
+    const next = [...pinnedProviders];
+    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    persistPinned(next);
+  };
 
   const getProviderStats = (providerId, authType) => {
     const authTypes = Array.isArray(authType) ? authType : [authType];
@@ -307,6 +347,47 @@ export default function ProvidersPage() {
     return ["oauth", "apikey", "api_key"];
   };
 
+  // Resolves a pinned provider id back to its card component + props,
+  // regardless of which category it actually lives in (unfiltered by search or
+  // status — a pin should not vanish just because a filter is active elsewhere
+  // on the page).
+  const entryRenderSpec = (id) => {
+    if (OAUTH_PROVIDERS[id] && !OAUTH_PROVIDERS[id].hidden) {
+      const info = OAUTH_PROVIDERS[id];
+      const authTypes = dualAuthTypes(info, id);
+      return { Component: ProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, authTypes), authType: "oauth", onToggle: (active) => handleToggleProvider(id, authTypes, active) } };
+    }
+    if (FREE_PROVIDERS[id] && !FREE_PROVIDERS[id].hidden) {
+      const info = FREE_PROVIDERS[id];
+      const authTypes = dualAuthTypes(info, id);
+      return { Component: ProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, authTypes), authType: "free", onToggle: (active) => handleToggleProvider(id, authTypes, active) } };
+    }
+    if (FREE_TIER_PROVIDERS[id] && !FREE_TIER_PROVIDERS[id].hidden) {
+      const info = FREE_TIER_PROVIDERS[id];
+      const authTypes = dualAuthTypes(info, id);
+      return { Component: ApiKeyProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, authTypes), authType: Array.isArray(authTypes) ? (authTypes[0] ?? "apikey") : authTypes, onToggle: (active) => handleToggleProvider(id, authTypes, active) } };
+    }
+    if (APIKEY_PROVIDERS[id] && !APIKEY_PROVIDERS[id].hidden) {
+      const info = APIKEY_PROVIDERS[id];
+      return { Component: ApiKeyProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, "apikey"), authType: "apikey", onToggle: (active) => handleToggleProvider(id, "apikey", active) } };
+    }
+    const compatNode = providerNodes.find((n) => n.id === id && n.type === "openai-compatible");
+    if (compatNode) {
+      const info = { id: compatNode.id, name: compatNode.name || "OpenAI Compatible", color: "#10A37F", textIcon: "OC", apiType: compatNode.apiType };
+      return { Component: ApiKeyProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, "apikey"), authType: "apikey", onToggle: (active) => handleToggleProvider(id, "apikey", active) } };
+    }
+    const anthroNode = providerNodes.find((n) => n.id === id && n.type === "anthropic-compatible");
+    if (anthroNode) {
+      const info = { id: anthroNode.id, name: anthroNode.name || "Anthropic Compatible", color: "#D97757", textIcon: "AC" };
+      return { Component: ApiKeyProviderCard, props: { providerId: id, provider: info, stats: getProviderStats(id, "apikey"), authType: "apikey", onToggle: (active) => handleToggleProvider(id, "apikey", active) } };
+    }
+    return null;
+  };
+
+  const pinnedEntries = pinnedProviders
+    .map((id) => ({ id, spec: entryRenderSpec(id) }))
+    .filter((e) => e.spec);
+
   const oauthEntries = sortByPriority(
     Object.entries(OAUTH_PROVIDERS).filter(
       ([key, info]) =>
@@ -413,6 +494,31 @@ export default function ProvidersPage() {
         </div>
       )}
 
+      {/* Hay sử dụng — providers the admin pinned, pulled to the very top */}
+      {pinnedEntries.length > 0 && (
+        <div className="flex flex-col gap-4">
+          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+            <span className="material-symbols-outlined text-[18px] text-amber-500">star</span>
+            Hay sử dụng
+          </h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            {pinnedEntries.map(({ id, spec }, idx) => (
+              <spec.Component
+                key={id}
+                {...spec.props}
+                pinned
+                onTogglePin={() => togglePin(id)}
+                showReorder
+                onMoveLeft={() => movePinned(id, -1)}
+                onMoveRight={() => movePinned(id, 1)}
+                isFirstPinned={idx === 0}
+                isLastPinned={idx === pinnedEntries.length - 1}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -458,6 +564,8 @@ export default function ProvidersPage() {
                   onToggle={(active) =>
                     handleToggleProvider(info.id, "apikey", active)
                   }
+                  pinned={pinnedProviders.includes(info.id)}
+                  onTogglePin={() => togglePin(info.id)}
                 />
               ),
             )}
@@ -505,6 +613,8 @@ export default function ProvidersPage() {
                 stats={getProviderStats(key, authTypes)}
                 authType="oauth"
                 onToggle={(active) => handleToggleProvider(key, authTypes, active)}
+                pinned={pinnedProviders.includes(key)}
+                onTogglePin={() => togglePin(key)}
               />
             );
           })}
@@ -553,6 +663,8 @@ export default function ProvidersPage() {
                 onToggle={(active) =>
                   handleToggleProvider(key, freeAuthTypes, active)
                 }
+                pinned={pinnedProviders.includes(key)}
+                onTogglePin={() => togglePin(key)}
               />
             );
           })}
@@ -566,6 +678,8 @@ export default function ProvidersPage() {
                 stats={getProviderStats(key, freeAuthTypes)}
                 authType={Array.isArray(freeAuthTypes) ? (freeAuthTypes[0] ?? "apikey") : freeAuthTypes}
                 onToggle={(active) => handleToggleProvider(key, freeAuthTypes, active)}
+                pinned={pinnedProviders.includes(key)}
+                onTogglePin={() => togglePin(key)}
               />
             );
           })}
@@ -608,6 +722,8 @@ export default function ProvidersPage() {
               stats={getProviderStats(key, "apikey")}
               authType="apikey"
               onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+              pinned={pinnedProviders.includes(key)}
+              onTogglePin={() => togglePin(key)}
             />
           ))}
         </div>
@@ -694,7 +810,11 @@ export default function ProvidersPage() {
   );
 }
 
-function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
+function ProviderCard({
+  providerId, provider, stats, authType, onToggle,
+  pinned = false, onTogglePin = null,
+  showReorder = false, onMoveLeft = null, onMoveRight = null, isFirstPinned = false, isLastPinned = false,
+}) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
   const isNoAuth = !!provider.noAuth;
 
@@ -761,7 +881,16 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1">
+            <PinReorderControls
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              showReorder={showReorder}
+              onMoveLeft={onMoveLeft}
+              onMoveRight={onMoveRight}
+              isFirstPinned={isFirstPinned}
+              isLastPinned={isLastPinned}
+            />
             {stats.total > 0 && (
               <div
                 className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
@@ -802,6 +931,13 @@ ProviderCard.propTypes = {
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  pinned: PropTypes.bool,
+  onTogglePin: PropTypes.func,
+  showReorder: PropTypes.bool,
+  onMoveLeft: PropTypes.func,
+  onMoveRight: PropTypes.func,
+  isFirstPinned: PropTypes.bool,
+  isLastPinned: PropTypes.bool,
 };
 
 function ApiKeyProviderCard({
@@ -810,6 +946,13 @@ function ApiKeyProviderCard({
   stats,
   authType,
   onToggle,
+  pinned = false,
+  onTogglePin = null,
+  showReorder = false,
+  onMoveLeft = null,
+  onMoveRight = null,
+  isFirstPinned = false,
+  isLastPinned = false,
 }) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
   const isCompatible = providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
@@ -901,7 +1044,16 @@ function ApiKeyProviderCard({
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1">
+            <PinReorderControls
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              showReorder={showReorder}
+              onMoveLeft={onMoveLeft}
+              onMoveRight={onMoveRight}
+              isFirstPinned={isFirstPinned}
+              isLastPinned={isLastPinned}
+            />
             {stats.total > 0 && (
               <div
                 className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
@@ -943,6 +1095,65 @@ ApiKeyProviderCard.propTypes = {
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  pinned: PropTypes.bool,
+  onTogglePin: PropTypes.func,
+  showReorder: PropTypes.bool,
+  onMoveLeft: PropTypes.func,
+  onMoveRight: PropTypes.func,
+  isFirstPinned: PropTypes.bool,
+  isLastPinned: PropTypes.bool,
+};
+
+/** Star (pin to "Hay sử dụng") +, inside that row, left/right reorder arrows. */
+function PinReorderControls({ pinned, onTogglePin, showReorder, onMoveLeft, onMoveRight, isFirstPinned, isLastPinned }) {
+  if (!onTogglePin) return null;
+  const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+  return (
+    <>
+      {showReorder && (
+        <>
+          <button
+            type="button"
+            onClick={stop(onMoveLeft)}
+            disabled={isFirstPinned}
+            title="Chuyển trái"
+            className={`flex size-6 items-center justify-center rounded ${isFirstPinned ? "text-text-muted/30 cursor-not-allowed" : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"}`}
+          >
+            <span className="material-symbols-outlined text-[14px]">chevron_left</span>
+          </button>
+          <button
+            type="button"
+            onClick={stop(onMoveRight)}
+            disabled={isLastPinned}
+            title="Chuyển phải"
+            className={`flex size-6 items-center justify-center rounded ${isLastPinned ? "text-text-muted/30 cursor-not-allowed" : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"}`}
+          >
+            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={stop(onTogglePin)}
+        title={pinned ? "Bỏ ghim khỏi Hay sử dụng" : "Ghim vào Hay sử dụng"}
+        className={`flex size-7 items-center justify-center rounded-lg transition-opacity ${
+          pinned ? "text-amber-500 opacity-100" : "text-text-muted opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-amber-500"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[16px]">{pinned ? "star" : "star_outline"}</span>
+      </button>
+    </>
+  );
+}
+
+PinReorderControls.propTypes = {
+  pinned: PropTypes.bool,
+  onTogglePin: PropTypes.func,
+  showReorder: PropTypes.bool,
+  onMoveLeft: PropTypes.func,
+  onMoveRight: PropTypes.func,
+  isFirstPinned: PropTypes.bool,
+  isLastPinned: PropTypes.bool,
 };
 
 function ProviderTestResultsView({ results }) {

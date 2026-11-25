@@ -4,12 +4,19 @@ import { useState, useEffect, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import CooldownTimer from "./CooldownTimer";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, onClone, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
+  // The list/detail APIs never return the raw secret (stripped server-side); this
+  // fetches it only when the admin asks, from a dedicated endpoint.
+  const [revealedKey, setRevealedKey] = useState(null);
+  const [revealing, setRevealing] = useState(false);
+  const [revealError, setRevealError] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
 
   const proxyPoolMap = new Map((proxyPools || []).map((pool) => [pool.id, pool]));
   const boundProxyPoolId = connection.providerSpecificData?.proxyPoolId || null;
@@ -66,6 +73,22 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     } finally {
       setUpdatingProxy(false);
       setShowProxyDropdown(false);
+    }
+  };
+
+  const toggleReveal = async () => {
+    if (revealedKey !== null) { setRevealedKey(null); return; }
+    setRevealing(true);
+    setRevealError(false);
+    try {
+      const res = await fetch(`/api/providers/${connection.id}/reveal-key`, { cache: "no-store" });
+      if (!res.ok) throw new Error("failed");
+      const data = await res.json();
+      setRevealedKey(data.apiKey || "");
+    } catch {
+      setRevealError(true);
+    } finally {
+      setRevealing(false);
     }
   };
 
@@ -192,6 +215,28 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </Badge>
             )}
           </div>
+          {rowAuthType !== "oauth" && (revealedKey !== null || revealError) && (
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              {revealError ? (
+                <span className="text-[11px] text-red-500">Không hiện được key.</span>
+              ) : (
+                <>
+                  <code className="max-w-full truncate rounded bg-black/5 px-1 py-0.5 font-mono text-[10px] text-text-main dark:bg-white/5 sm:max-w-[420px]">
+                    {revealedKey || "(trống)"}
+                  </code>
+                  {revealedKey && (
+                    <button
+                      type="button"
+                      onClick={() => copy(revealedKey, connection.id)}
+                      className="text-[11px] text-text-muted hover:text-primary"
+                    >
+                      {copied === connection.id ? "Đã chép" : "Chép"}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {hasAnyProxy && (
             <div className="mt-1 flex items-center gap-2 flex-wrap">
               <span className="max-w-full truncate text-[11px] text-text-muted sm:max-w-[420px]" title={proxyDisplayText}>
@@ -213,6 +258,20 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
       </div>
       <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
         <div className="grid flex-1 grid-cols-3 gap-1 sm:flex sm:flex-none">
+          {rowAuthType !== "oauth" && (
+            <Tooltip text={revealedKey !== null ? "Ẩn key" : "Hiện key"}>
+              <button
+                onClick={toggleReveal}
+                disabled={revealing}
+                className="flex w-full flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {revealing ? "progress_activity" : revealedKey !== null ? "visibility_off" : "visibility"}
+                </span>
+                <span className="text-[10px] leading-tight">{revealedKey !== null ? "Ẩn" : "Key"}</span>
+              </button>
+            </Tooltip>
+          )}
           {/* Proxy button with inline dropdown */}
           {(proxyPools || []).length > 0 && (
             <div className="relative" ref={proxyDropdownRef}>
