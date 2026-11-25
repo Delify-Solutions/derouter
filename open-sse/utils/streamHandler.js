@@ -150,6 +150,13 @@ export function createDisconnectAwareStream(transformStream, streamController, o
           msg.includes("ECONNRESET") ||
           msg.includes("ETIMEDOUT") ||
           msg.includes("EPIPE") ||
+          // undici throws a bare `TypeError: terminated` (sometimes with no
+          // `.code` anywhere on the error or its `.cause`) when the upstream
+          // socket closes mid-read — the exact case that used to fall through
+          // to controller.error() below and surface to the real client as a
+          // hard "Stream failed: terminated" instead of a clean stream end.
+          msg.includes("terminated") ||
+          msg.includes("other side closed") ||
           code === "ECONNRESET" ||
           code === "ETIMEDOUT" ||
           code === "EPIPE" ||
