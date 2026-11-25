@@ -24,12 +24,15 @@ const NAV = [
   { href: "/account/affiliate", label: "Giới thiệu", icon: "group_add", affiliateOnly: true },
   { href: "/account/keys", label: "API key", icon: "key" },
   // Published skills the customer installs into their own agent runtime
-  // (change customer-skills).
-  { href: "/account/skills", label: "Skill", icon: "extension" },
+  // (change customer-skills). navKey: admin-togglable, admin-relabelable
+  // (settingsRepo skillsNavEnabled/skillsNavLabel) — off hides this AND the
+  // page itself redirects (see src/app/account/skills/page.js).
+  { href: "/account/skills", label: "Skill", icon: "extension", navKey: "skills" },
   // DSH plugins: npm packages added to the customer's own harness profile, not
   // files to download (change dsh-plugins). Kept apart from "Skill" because the
-  // install path and the thing installed are different.
-  { href: "/account/plugins", label: "Plugin DSH", icon: "widgets" },
+  // install path and the thing installed are different. Same toggle/label
+  // story as "skills" above, via dshPluginsNavEnabled/dshPluginsNavLabel.
+  { href: "/account/plugins", label: "Plugin DSH", icon: "widgets", navKey: "dshPlugins" },
   { href: "/account/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
   { href: "/account/notifications", label: "Thông báo", icon: "notifications", badge: "unread" },
@@ -52,15 +55,24 @@ function isActive(pathname, href) {
  * and the account controls, then the page. Below `lg` the sidebar becomes an app-style
  * liquid-glass tab bar at the bottom (MobileMenu): four main pages and "Thêm" for the rest.
  */
-export default function AccountShell({ email = "", name = "", affiliateAvailable = false, unreadCount = 0, channelUrl = "", children }) {
+export default function AccountShell({
+  email = "", name = "", affiliateAvailable = false, unreadCount = 0, channelUrl = "",
+  skillsNavEnabled = true, skillsNavLabel = "Skill",
+  dshPluginsNavEnabled = true, dshPluginsNavLabel = "Plugin DSH",
+  children,
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
+  const navToggles = { skills: skillsNavEnabled, dshPlugins: dshPluginsNavEnabled };
+  const navLabels = { skills: skillsNavLabel, dshPlugins: dshPluginsNavLabel };
   const unread = badgeText(unreadCount);
   const items = NAV
     .filter((item) => !item.affiliateOnly || affiliateAvailable)
-    .map((item) => (item.badge === "unread" ? { ...item, badge: unread } : item));
+    .filter((item) => !item.navKey || navToggles[item.navKey] !== false)
+    .map((item) => (item.badge === "unread" ? { ...item, badge: unread } : item))
+    .map((item) => (item.navKey && navLabels[item.navKey] ? { ...item, label: navLabels[item.navKey] } : item));
   // The admin's Telegram channel, opened in a new tab (change models-notifications).
   const channelItem = channelUrl ? { href: channelUrl, label: "Kênh Telegram", icon: "send", external: true } : null;
   const current = items.find((item) => isActive(pathname, item.href)) ?? items[0];

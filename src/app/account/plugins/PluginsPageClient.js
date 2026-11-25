@@ -242,7 +242,7 @@ function PluginDetailModal({ plugin, onClose }) {
  * download will look for a download button that is not here, because a plugin is an
  * npm package added to the harness profile.
  */
-export default function PluginsPageClient() {
+export default function PluginsPageClient({ label = "Plugin DSH" }) {
   const [tab, setTab] = useState("catalogue");
   const [plugins, setPlugins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -285,7 +285,7 @@ export default function PluginsPageClient() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-2">
-        <Heading>Plugin DSH</Heading>
+        <Heading>{label}</Heading>
         <p className="max-w-2xl text-sm leading-6 text-text-muted">
           Plugin cài thẳng vào DeepSeek Harness trên máy bạn — khác với skill (skill là
           tài liệu agent đọc, plugin là code harness nạp). Cài bằng một lệnh, không có file

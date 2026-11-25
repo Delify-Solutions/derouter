@@ -428,7 +428,7 @@ function SkillCard({ skill, onOpen, origin, checked, onToggle, installOpts }) {
  * skill, so a customer who has never installed a skill has a path from "I
  * downloaded a file" to "my agent is using it".
  */
-export default function SkillsPageClient() {
+export default function SkillsPageClient({ label = "Skill" }) {
   const origin = useOrigin();
   const [tab, setTab] = useState("catalogue");
   const [skills, setSkills] = useState([]);
@@ -580,7 +580,7 @@ export default function SkillsPageClient() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-2">
-        <Heading>Skill</Heading>
+        <Heading>{label}</Heading>
         <p className="max-w-2xl text-sm leading-6 text-text-muted">
           Skill markdown cài vào agent của bạn (Claude Code, Codex, OpenCode, omp, dsh) để agent biết
           cách dùng derouter và các quy trình kèm theo. Tải file, đặt đúng thư mục, rồi gọi
