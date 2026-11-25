@@ -17,12 +17,16 @@ function getLocaleFromCookie() {
 }
 
 // Load translation map
+//
+// "en" used to be a hardcoded no-op (translationMap = {}): every page here is
+// authored in English, so the dashboard needed no dictionary to show English.
+// The customer account area (src/app/account/**) is authored natively in
+// Vietnamese instead, so "en" needs its OWN dictionary (public/i18n/literals/en.json,
+// keyed by the Vietnamese source text) to translate those pages — the same
+// fetch every other locale already does. A page whose source IS English is
+// unaffected: its strings are simply absent from en.json, so lookups miss and
+// the original text passes through unchanged, exactly like before.
 async function loadTranslations(locale) {
-  if (locale === "en") {
-    translationMap = {};
-    return;
-  }
-  
   try {
     const response = await fetch(`/i18n/literals/${locale}.json`);
     translationMap = await response.json();
@@ -37,8 +41,7 @@ export function translate(text) {
   if (!text || typeof text !== "string") return text;
   const trimmed = text.trim();
   if (!trimmed) return text;
-  if (currentLocale === "en") return text;
-  
+
   // Catalog keys are single-spaced; JSX source and rendered text wrap lines
   const collapsed = trimmed.replace(/\s+/g, " ");
   return translationMap[trimmed] || translationMap[collapsed] || text;
