@@ -108,6 +108,18 @@ const DEFAULT_SETTINGS = {
   // combo, never the upstream model (spec model-privacy). Admin keys unaffected.
   hideUpstreamModels: true,
 
+  // Nav visibility + display label for two customer-facing areas: off hides the
+  // sidebar item AND redirects a direct visit (an admin who disables a feature
+  // means "customers cannot use this", not just "do not advertise it").
+  skillsNavEnabled: true,
+  skillsNavLabel: "Skill",
+  dshPluginsNavEnabled: true,
+  dshPluginsNavLabel: "Plugin DSH",
+
+  // Provider ids the admin pinned to the "Hay sử dụng" row at the top of
+  // /dashboard/providers, in display order (dashboard/providers/page.js).
+  pinnedProviders: [],
+
   // ── Affiliate program (spec affiliate-program "Program settings") ─────────
   // Off by default: deploying this changes nothing until an admin turns it on,
   // and turning it off is the rollback. The defaults live in

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, Button, ConfirmModal, CardSkeleton } from "@/shared/components";
+import { Card, Button, Input, Toggle, ConfirmModal, CardSkeleton } from "@/shared/components";
 import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
@@ -42,6 +42,54 @@ export default function SkillsAdminPageClient() {
   const [deleting, setDeleting] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [busyId, setBusyId] = useState(null);
+
+  // Customer-area nav visibility + display label (settingsRepo skillsNavEnabled/
+  // skillsNavLabel): off hides the "Skill" item for customers AND redirects a
+  // direct visit (src/app/account/skills/page.js).
+  const [navEnabled, setNavEnabled] = useState(true);
+  const [navLabel, setNavLabel] = useState("Skill");
+  const [navLabelDraft, setNavLabelDraft] = useState("Skill");
+  const [navSaving, setNavSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          setNavEnabled(data.skillsNavEnabled !== false);
+          setNavLabel(data.skillsNavLabel || "Skill");
+          setNavLabelDraft(data.skillsNavLabel || "Skill");
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const handleNavEnabled = async (value) => {
+    setNavEnabled(value);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skillsNavEnabled: value }),
+      });
+    } catch {}
+  };
+
+  const saveNavLabel = async () => {
+    const next = navLabelDraft.trim() || "Skill";
+    setNavSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skillsNavLabel: next }),
+      });
+      if (res.ok) { setNavLabel(next); setNavLabelDraft(next); }
+    } catch {} finally {
+      setNavSaving(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -234,6 +282,38 @@ export default function SkillsAdminPageClient() {
           <Button onClick={openRepo} icon="link">Nhập từ repo</Button>
         </div>
       </div>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Hiển thị cho khách hàng</p>
+            <p className="text-sm text-text-muted">
+              Tắt sẽ ẩn mục này khỏi menu tài khoản và chặn truy cập trực tiếp bằng URL.
+            </p>
+          </div>
+          <Toggle checked={navEnabled} onChange={() => handleNavEnabled(!navEnabled)} />
+        </div>
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
+          <div className="flex-1 min-w-[200px]">
+            <label htmlFor="skills-nav-label" className="mb-1 block text-xs text-text-muted">Tên hiển thị trong menu</label>
+            <Input
+              id="skills-nav-label"
+              value={navLabelDraft}
+              onChange={(e) => setNavLabelDraft(e.target.value)}
+              placeholder="Skill"
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={navSaving}
+            disabled={navLabelDraft.trim() === navLabel || !navLabelDraft.trim()}
+            onClick={saveNavLabel}
+          >
+            Lưu tên
+          </Button>
+        </div>
+      </Card>
 
       {error && (
         <p role="alert" className="border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-700 dark:text-red-400">

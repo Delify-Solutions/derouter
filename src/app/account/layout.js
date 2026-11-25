@@ -35,13 +35,24 @@ export default async function AccountLayout({ children }) {
   // Telegram channel link (change models-notifications). Never fatal.
   let unreadCount = 0;
   let channelUrl = "";
+  // Nav visibility + display label for Skill / Plugin DSH (settingsRepo defaults
+  // keep both on with their usual names if settings cannot be read at all).
+  let skillsNavEnabled = true;
+  let skillsNavLabel = "Skill";
+  let dshPluginsNavEnabled = true;
+  let dshPluginsNavLabel = "Plugin DSH";
   try {
     unreadCount = unreadCountSync(await getAdapter(), user.id);
   } catch {
     unreadCount = 0;
   }
   try {
-    channelUrl = channelUrlOf(await getSettings());
+    const settings = await getSettings();
+    channelUrl = channelUrlOf(settings);
+    skillsNavEnabled = settings.skillsNavEnabled !== false;
+    skillsNavLabel = settings.skillsNavLabel || "Skill";
+    dshPluginsNavEnabled = settings.dshPluginsNavEnabled !== false;
+    dshPluginsNavLabel = settings.dshPluginsNavLabel || "Plugin DSH";
   } catch {
     channelUrl = "";
   }
@@ -53,6 +64,10 @@ export default async function AccountLayout({ children }) {
       affiliateAvailable={affiliateAvailable}
       unreadCount={unreadCount}
       channelUrl={channelUrl}
+      skillsNavEnabled={skillsNavEnabled}
+      skillsNavLabel={skillsNavLabel}
+      dshPluginsNavEnabled={dshPluginsNavEnabled}
+      dshPluginsNavLabel={dshPluginsNavLabel}
     >
       {children}
       {/* New accounts only (no purchase, popup code not redeemed); never on the

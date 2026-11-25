@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, Button, Modal, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
+import { Card, Button, Modal, ConfirmModal, Badge, CardSkeleton, Toggle } from "@/shared/components";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
 const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
@@ -67,6 +67,54 @@ export default function DshPluginsPageClient() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [busyId, setBusyId] = useState(null);
+
+  // Customer-area nav visibility + display label (settingsRepo dshPluginsNavEnabled/
+  // dshPluginsNavLabel): off hides the "Plugin DSH" item for customers AND redirects
+  // a direct visit (src/app/account/plugins/page.js).
+  const [navEnabled, setNavEnabled] = useState(true);
+  const [navLabel, setNavLabel] = useState("Plugin DSH");
+  const [navLabelDraft, setNavLabelDraft] = useState("Plugin DSH");
+  const [navSaving, setNavSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          setNavEnabled(data.dshPluginsNavEnabled !== false);
+          setNavLabel(data.dshPluginsNavLabel || "Plugin DSH");
+          setNavLabelDraft(data.dshPluginsNavLabel || "Plugin DSH");
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const handleNavEnabled = async (value) => {
+    setNavEnabled(value);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dshPluginsNavEnabled: value }),
+      });
+    } catch {}
+  };
+
+  const saveNavLabel = async () => {
+    const next = navLabelDraft.trim() || "Plugin DSH";
+    setNavSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dshPluginsNavLabel: next }),
+      });
+      if (res.ok) { setNavLabel(next); setNavLabelDraft(next); }
+    } catch {} finally {
+      setNavSaving(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,6 +240,38 @@ export default function DshPluginsPageClient() {
         </div>
         <Button onClick={openCreate} icon="add">Plugin mới</Button>
       </div>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Hiển thị cho khách hàng</p>
+            <p className="text-sm text-text-muted">
+              Tắt sẽ ẩn mục này khỏi menu tài khoản và chặn truy cập trực tiếp bằng URL.
+            </p>
+          </div>
+          <Toggle checked={navEnabled} onChange={() => handleNavEnabled(!navEnabled)} />
+        </div>
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
+          <label className="flex-1 min-w-[200px] flex flex-col gap-1.5">
+            <span className={LABEL}>Tên hiển thị trong menu</span>
+            <input
+              value={navLabelDraft}
+              onChange={(e) => setNavLabelDraft(e.target.value)}
+              className={INPUT}
+              placeholder="Plugin DSH"
+            />
+          </label>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={navSaving}
+            disabled={navLabelDraft.trim() === navLabel || !navLabelDraft.trim()}
+            onClick={saveNavLabel}
+          >
+            Lưu tên
+          </Button>
+        </div>
+      </Card>
 
       {error && (
         <p role="alert" className="border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-700 dark:text-red-400">
