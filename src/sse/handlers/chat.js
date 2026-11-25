@@ -31,7 +31,7 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { noteClientBody } from "open-sse/utils/errorTrace.js";
 import { withErrorLog } from "../utils/withErrorLog.js";
-import { publicModelContextSync, customerMayCallSync, maskOptionsFor, isCustomerKeySync, hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
+import { publicModelContextSync, customerMayCallSync, maskOptionsFor, isCustomerKeySync } from "@/lib/models/customerModels.js";
 import { platformErrorResponse, logPlatformDenial, markPlatform } from "@/lib/auth/platformError";
 import { maskResponse, upstreamError } from "@/lib/models/publicModel.js";
 import { getAdapter } from "@/lib/db/driver.js";
@@ -139,7 +139,10 @@ async function handleChatRequestInner(request, clientRawRequest, ctx) {
   // A translator that turns an upstream error event into message text (Responses
   // → chat) runs this filter first for a customer key: that text is content, out
   // of reach of the response mask. Read lazily: the ids are known once routed.
-  if (apiKey && hideUpstreamModelsEnabled(settings) && isCustomerKeySync(await getAdapter(), apiKey)) {
+  // Unconditional for any customer key — unlike hideUpstreamModelsEnabled (which
+  // of model/provider identity the operator wants to share), never leaking a raw
+  // backend crash is not optional.
+  if (apiKey && isCustomerKeySync(await getAdapter(), apiKey)) {
     clientRawRequest.errorTextFilter = (text) => upstreamError(0, text, maskOptionsFor({
       publicName: ctx.publicName, members: ctx.members || [], upstream: ctx.upstream || [], providers: ctx.providers || [],
     })).message;

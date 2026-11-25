@@ -286,7 +286,7 @@ export function createSSEStream(options = {}) {
       onStreamComplete({
         content: accumulatedContent,
         thinking: accumulatedThinking
-      }, reportedUsage, ttftAt);
+      }, reportedUsage, ttftAt, state?.error ?? null);
     }
   };
 

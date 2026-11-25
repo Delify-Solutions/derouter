@@ -911,6 +911,16 @@ const PROVIDER_ACCOUNT_HINTS = [
 ];
 const OVERLOAD_HINTS = ["rate limit", "rate_limit", "too many requests", "overloaded", "capacity"];
 
+// A self-hosted serving engine's own crash leaking through as if it were a
+// request-rejection message — a Python-style exception constructor
+// ("KVTransferError(…)"), a stack trace, or a SCREAMING_SNAKE_CASE error
+// constant ("NIXL_ERR_REMOTE_DISCONNECT", "CUDA_ERROR_…"). None of these are
+// shaped like a message about what the customer sent; unlike SIZE_HINTS/
+// PROVIDER_ACCOUNT_HINTS this is a shape check, not a phrase list, because the
+// exact wording is whichever engine the operator happens to run behind the
+// combo, not something a fixed vocabulary could keep up with.
+const INTERNAL_CRASH_PATTERN = /[A-Za-z]\w*(?:Error|Exception)\s*\(|traceback \(most recent call last\)|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b/;
+
 const GENERIC = {
   provider: "Model tạm thời không khả dụng. Vui lòng thử lại sau.",
   timeout: "Model phản hồi quá lâu. Vui lòng thử lại.",
@@ -978,6 +988,13 @@ export function upstreamError(status, rawMessage, options) {
   if (status === 408 || status === 504) return { message: GENERIC.timeout, type: "server_error", code: "model_timeout" };
   if (status === 0 && OVERLOAD_HINTS.some((hint) => lower.includes(hint))) return busy;
   if (status >= 500) return { message: GENERIC.server, type: "server_error", code: "model_error" };
+  // Caught here rather than folded into the status >= 500 branch above: this text
+  // can arrive with no real status at all (status 0 — a translator turned an
+  // upstream error event into message content, chat.js's errorTextFilter), so a
+  // shape check on the text itself is the only thing that catches it.
+  if (INTERNAL_CRASH_PATTERN.test(String(rawMessage || ""))) {
+    return { message: GENERIC.server, type: "server_error", code: "model_error" };
+  }
   return {
     message: cleanUpstreamMessage(rawMessage, options) || GENERIC.request,
     type: "invalid_request_error",
