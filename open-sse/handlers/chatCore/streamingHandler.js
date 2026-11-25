@@ -11,6 +11,7 @@ import { saveRequestDetail } from "@/lib/usageDb.js";
 import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
+import { getTrace, reportStreamError } from "../../utils/errorTrace.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
 // Gemini-family all map to ANTIGRAVITY decoder; unknown sources fall back to OPENAI.
@@ -135,13 +136,30 @@ export async function handleStreamingResponse({ compat, providerResponse, provid
  */
 export function buildOnStreamComplete({ cacheCtx = null, provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  // Captured now: the stream ends long after this function returned, on whatever
+  // turn the transform's flush happens to run on (same reasoning as chatCore.js's
+  // own errorTrace capture for onError/onDisconnect).
+  const errorTrace = getTrace();
 
-  const onStreamComplete = (contentObj, reportedUsage, ttftAt) => {
+  const onStreamComplete = (contentObj, reportedUsage, ttftAt, upstreamErrorInfo) => {
     const latency = {
       // Unknown (null) when no upstream byte was seen; never "= total".
       ttft: ttftAt ? ttftAt - requestStartTime : null,
       total: Date.now() - requestStartTime
     };
+    // A translator turned an upstream error event into message content (spec
+    // model-privacy: content itself is never masked, so the raw text would
+    // otherwise reach the customer AND never show up as a failure anywhere —
+    // this still reports HTTP 200 like any other reply). Logged the same way a
+    // stream that physically disconnects after its headers already is
+    // (reportStreamError, source "stream"): the customer still gets the masked
+    // reply built below; this only makes the failure visible to the admin.
+    if (upstreamErrorInfo) {
+      reportStreamError(errorTrace, {
+        message: upstreamErrorInfo.message || (() => { try { return JSON.stringify(upstreamErrorInfo); } catch { return String(upstreamErrorInfo); } })(),
+        provider, model, connectionId,
+      });
+    }
     // The estimated cached part (combo option) is computed after the last byte was forwarded and
     // off the stream's own turn (setImmediate), never while chunks are in flight.
     const record = () => {

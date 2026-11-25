@@ -351,6 +351,34 @@ test("no usage from the upstream to a Responses client: the field is simply abse
   assert.equal(cap.usage.estimated, true);
 });
 
+test("a Responses API error event mid-stream: masked content for the client, the raw text surfaces to onStreamComplete for the error log", async () => {
+  const raw = "Error: Decode transfer failed for request rank=2 with exception KVTransferError(bootstrap_room=123): KVSender failed to post prepped transfer: NIXL_ERR_REMOTE_DISCONNECT";
+  const input = [data({ type: "error", error: { message: raw } }), DONE];
+  const cap = capture();
+  // Provider format (targetFormat) = Responses API, client format (sourceFormat) = OpenAI
+  // chat — selects openaiResponsesToOpenAIResponse (register(OPENAI_RESPONSES, OPENAI, …)).
+  const ts = createSSETransformStreamWithLogger(
+    FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "openai-compatible-chat-x", null, null, "m", "c1", REQ, cap.onStreamComplete, "k",
+    null, { errorTextFilter: () => "Model tạm thời gặp lỗi. Vui lòng thử lại sau." }
+  );
+  const out = await drive(ts, input);
+  const chunkWithContent = payloads(out).find((e) => e.choices?.[0]?.delta?.content);
+  // The customer never sees the raw backend text.
+  assert.match(chunkWithContent.choices[0].delta.content, /^\[Error\] Model tạm thời gặp lỗi/);
+  assert.doesNotMatch(chunkWithContent.choices[0].delta.content, /KVTransferError|NIXL_ERR/);
+  // The admin-visible side channel carries the untouched original, for the error log.
+  assert.equal(cap.calls, 1);
+  assert.deepEqual(cap.upstreamErrorInfo, { message: raw });
+});
+
+test("a normal stream (no error event) reports no upstreamErrorInfo", async () => {
+  const input = [data(chunk({ role: "assistant", content: "hi" })), data(chunk({ content: "!" })), data(chunk({}, "stop")), DONE];
+  const cap = capture();
+  const ts = createSSETransformStreamWithLogger(FORMATS.OPENAI, FORMATS.OPENAI, "openai-compatible-chat-x", null, null, "m", "c1", REQ, cap.onStreamComplete, "k");
+  await drive(ts, input);
+  assert.equal(cap.upstreamErrorInfo, null);
+});
+
 // ── failed / aborted streams ───────────────────────────────────────────────
 
 async function partial(ts, chunks) {

@@ -47,8 +47,11 @@ export async function drive(ts, chunks) {
 
 /** Build a stream whose onStreamComplete result is captured on `result`. */
 export function capture() {
-  const result = { content: null, usage: undefined, calls: 0 };
-  result.onStreamComplete = (content, usage) => { result.content = content; result.usage = usage; result.calls++; };
+  const result = { content: null, usage: undefined, ttftAt: undefined, upstreamErrorInfo: null, calls: 0 };
+  result.onStreamComplete = (content, usage, ttftAt, upstreamErrorInfo) => {
+    result.content = content; result.usage = usage; result.ttftAt = ttftAt; result.upstreamErrorInfo = upstreamErrorInfo ?? null;
+    result.calls++;
+  };
   return result;
 }
 
