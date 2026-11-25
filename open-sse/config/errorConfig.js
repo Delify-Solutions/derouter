@@ -73,6 +73,13 @@ export const ERROR_RULES = [
   { text: "quota exceeded",           backoff: true },
   { text: "insufficient credit",      backoff: true },
   { text: "credit balance is too low", backoff: true },
+  // Deploy pauses the whole organization when its prepaid balance runs out and
+  // answers HTTP 405 with "Your Organization is currently paused…". The account
+  // is dead until someone tops it up: a 30s transient retry only burns attempts
+  // and answers every caller in between with the upstream's billing sentence.
+  { text: "organization is currently paused", cooldownMs: COOLDOWN.long },
+  { text: "out of balance",           cooldownMs: COOLDOWN.long },
+  { text: "positive organization credit balance is required", cooldownMs: COOLDOWN.long },
   { text: "capacity",                 backoff: true },
   { text: "overloaded",               backoff: true },
 

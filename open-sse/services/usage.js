@@ -27,6 +27,7 @@ import { getGlmUsage } from "./usage/glm.js";
 import { getCommandCodeUsage } from "./usage/commandcode.js";
 import { getSyntheticUsage } from "./usage/synthetic.js";
 import { getDeepAIUsage } from "./usage/deepai.js";
+import { getDeployUsage } from "./usage/deploy.js";
 import {
   getIflowUsage,
   getOllamaUsage,
@@ -72,6 +73,8 @@ const USAGE_HANDLERS = {
   "xiaomi-mimo": (c) => getXiaomiMimoUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   commandcode: (c) => getCommandCodeUsage(c.apiKey, c.proxyOptions),
   synthetic: (c) => getSyntheticUsage(c.apiKey, c.proxyOptions),
+  // Deploy: the prepaid balance lives behind the portal session cookie, not the Secret Key.
+  deploy: (c) => getDeployUsage(c.apiKey, c.providerSpecificData, c.proxyOptions),
   // DeepAI Code: the api_key is stored as the OAuth access token.
   deepai: (c) => getDeepAIUsage(c.accessToken || c.apiKey, c.providerSpecificData, c.proxyOptions),
   cursor: (c) => getCursorUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),

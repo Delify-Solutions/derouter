@@ -922,6 +922,34 @@ case "llm7": {
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
+      case "deploy": {
+        // /api/v1/models on Deploy is public, so only an authenticated chat probe says
+        // anything. A 405 is Deploy's out-of-balance answer (not 402): the key is good,
+        // the organization is paused. That is a warning, not a broken connection, so
+        // the connection stays `active` and the reason is kept as lastError.
+        const res = await fetchWithConnectionProxy("https://api.deploy.com/api/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${connection.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: getDefaultModel("deploy"),
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 1,
+            stream: false,
+          }),
+        }, effectiveProxy);
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid Deploy Secret Key", refreshed: false };
+        }
+        if (res.status === 405) {
+          return {
+            valid: true,
+            error: "Deploy organization is paused: prepaid balance is empty",
+            warning: "Deploy organization is paused: prepaid balance is empty",
+            refreshed: false,
+          };
+        }
+        return { valid: true, error: null, refreshed: false };
+      }
       default:
         return UNTESTABLE;
     }

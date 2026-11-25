@@ -20,6 +20,9 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
 
   const isAzure = provider === "azure";
   const isCloudflareAi = provider === "cloudflare-ai";
+  // Deploy bills inference from a Secret Key but reports the prepaid balance only to
+  // the portal session cookie, so the modal collects both in one step.
+  const isDeploy = provider === "deploy";
   const providerRegions = AI_PROVIDERS?.[provider]?.regions || null;
   const defaultRegion = AI_PROVIDERS?.[provider]?.defaultRegion || providerRegions?.[0]?.id || "";
 
@@ -30,6 +33,8 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     priority: 1,
     proxyPoolId: NONE_PROXY_POOL_VALUE,
     ollamaHostUrl: "",
+    portalCookie: "",
+    organizationId: "",
   });
   const [azureData, setAzureData] = useState({
     azureEndpoint: "",
@@ -66,6 +71,14 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     }
     if (isCloudflareAi) {
       return { accountId: cloudflareData.accountId };
+    }
+    if (isDeploy) {
+      const portalCookie = formData.portalCookie.trim();
+      const organizationId = formData.organizationId.trim();
+      const extra = {};
+      if (portalCookie) extra.cookie = portalCookie;
+      if (organizationId) extra.organizationId = organizationId;
+      return Object.keys(extra).length > 0 ? extra : undefined;
     }
     if (providerRegions && region) {
       return { region };
@@ -270,6 +283,30 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           <p className="text-xs text-text-muted">
             Use a direct xAI API key from console.x.ai. This is separate from Grok Build OAuth.
           </p>
+        )}
+        {isDeploy && (
+          <>
+            <Input
+              label="Portal cookie (for balance)"
+              type="text"
+              value={formData.portalCookie}
+              onChange={(e) => setFormData({ ...formData, portalCookie: e.target.value })}
+              placeholder="hive-portal-production=…"
+            />
+            <Input
+              label="Organization ID (optional)"
+              value={formData.organizationId}
+              onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
+              placeholder="read from /api/profile when blank"
+            />
+            <p className="text-xs text-text-muted">
+              The Secret Key authenticates inference; the prepaid balance is only readable
+              through the portal session. On portal.deploy.com open DevTools → Application →
+              Cookies, copy <code>hive-portal-production</code>, and paste it above. The
+              organization id is filled from <code>/api/profile</code> when left blank.
+              Inference answers HTTP 405 while the balance is zero.
+            </p>
+          </>
         )}
         {isCookie && authHint && (
           <p className="text-xs text-text-muted">

@@ -150,6 +150,7 @@ import p153 from "./nace.js";
 import p154 from "./sensenova-intl.js";
 import p155 from "./synthetic.js";
 import p156 from "./deepai.js";
+import p157 from "./deploy.js";
 const builtinProviders = [
   p0,
   p1,
@@ -300,5 +301,6 @@ const builtinProviders = [
   p154,
   p155,
   p156,
+  p157,
 ];
 export default builtinProviders;

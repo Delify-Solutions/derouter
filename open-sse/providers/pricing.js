@@ -202,6 +202,17 @@ export const PROVIDER_PRICING = {
   gh: {
     "gpt-5.3-codex": { input: 1.75, output: 14.00, cached: 0.175, reasoning: 14.00, cache_creation: 1.75 },
   },
+  // Deploy (deploy.com) — list rates from https://docs.deploy.com/models-and-pricing,
+  // USD per 1M tokens. Deploy's own numbers are well below the canonical rates for the
+  // same models (deepseek-v4.1-flash is 0.10/0.35 here, 0.14/0.28 canonical; glm-5.3-flash
+  // is 0.05/0.17 here and has no canonical entry at all). Billing a Deploy call at the
+  // canonical price would over- or under-charge real usage, so the upstream's list wins.
+  deploy: {
+    "deepseek-ai/deepseek-v4.1-flash-1017": { input: 0.10, output: 0.35, cached: 0.003, reasoning: 0.35 },
+    "deepseek-v4.1-flash-1017":             { input: 0.10, output: 0.35, cached: 0.003, reasoning: 0.35 },
+    "zai-org/glm-5.3-flash":                { input: 0.05, output: 0.17, cached: 0.01,  reasoning: 0.17 },
+    "glm-5.3-flash":                        { input: 0.05, output: 0.17, cached: 0.01,  reasoning: 0.17 },
+  },
   // TokenRouter — exact rates from https://api.tokenrouter.com/api/pricing ($1/1M tokens).
   // Ratio→USD: input = model_ratio×2, output = model_ratio×completion_ratio×2.
   // These override the canonical MODEL_PRICING/PATTERN_PRICING, whose rates often
