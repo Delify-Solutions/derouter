@@ -3,7 +3,7 @@ import { FORMATS } from "../translator/formats.js";
 import { PROVIDERS } from "../config/providers.js";
 import { liftReasoningAliases } from "../translator/concerns/reasoning.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
-import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, canonicalizeUsage, logUsage, pickRecordedUsage, floorAbortedOutput, isClosingUsageChunk, COLORS } from "./usageTracking.js";
+import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, canonicalizeUsage, logUsage, pickRecordedUsage, floorAbortedOutput, isClosingUsageChunk, sumUsages, COLORS } from "./usageTracking.js";
 import { chunkText, bodyText } from "./chunkText.js";
 import { extractUsageFromResponse } from "../handlers/chatCore/requestDetail.js";
 import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE, ensureStreamToolCallIds } from "./streamHelpers.js";
@@ -139,6 +139,33 @@ export function createSSEStream(options = {}) {
   let totalContentLength = 0;
   // Character classes of everything generated, for the billing estimate (see usageTracking).
   const contentStats = { ascii: 0, wide: 0 };
+  // Same two counters, but reset by markContinuationStarted() at the start of each
+  // upstream attempt after a mid-stream auto-continue (pipeWithDisconnect). The
+  // finalize-time "no usage reported, estimate from generated text" fallback must
+  // estimate only the CURRENT attempt's output — totalContentLength/contentStats
+  // span every attempt and would double-count whatever earlier attempts already
+  // banked their own usage for (see bankedUsages below). Identical to the
+  // totalContentLength/contentStats pair above when no continuation ever happens.
+  let segmentContentLength = 0;
+  const segmentContentStats = { ascii: 0, wide: 0 };
+  // Each attempt's own (real-or-estimated) usage, banked by markContinuationStarted()
+  // before the NEXT attempt starts reporting its own — see that function for why
+  // mergeUsage's Math.max is wrong across separate upstream calls.
+  const bankedUsages = [];
+  // True once ANY tool-call text has been seen on this reply: an auto-continue
+  // would ask the model to keep writing a plain-text message, which cannot safely
+  // resume a tool call already in flight (a coding-agent client reads tool_calls
+  // structurally, not as free text) — markContinuationStarted's caller checks this
+  // via getContinuationSnapshot() and never retries once it's true.
+  let toolCallSeen = false;
+  // How many times this stream has spliced in a new upstream attempt. Gates the
+  // passthrough id/role normalization below: a stream that never continues must
+  // forward every byte untouched (proxy-transparency).
+  let continuationCount = 0;
+  // The very first upstream `id` seen (passthrough only): every attempt after a
+  // continuation gets its own fresh id from the upstream, which would otherwise
+  // read to the client as a second, unrelated message.
+  let firstUpstreamId = null;
   let accumulatedContent = "";
   let accumulatedThinking = "";
   // Retained copies are capped (see MAX_BUFFER_BYTES); when a cap trips we record
@@ -173,8 +200,10 @@ export function createSSEStream(options = {}) {
   };
   const countGenerated = (text) => {
     totalContentLength += text.length;
+    segmentContentLength += text.length;
     for (let i = 0; i < text.length; i++) {
-      if (text.charCodeAt(i) < 128) contentStats.ascii++; else contentStats.wide++;
+      const wide = text.charCodeAt(i) >= 128;
+      if (wide) { contentStats.wide++; segmentContentStats.wide++; } else { contentStats.ascii++; segmentContentStats.ascii++; }
     }
   };
 
@@ -184,11 +213,53 @@ export function createSSEStream(options = {}) {
     const t = chunkText(parsed);
     if (t.content) { countGenerated(t.content); appendAccumulated("content", t.content); }
     if (t.thinking) { countGenerated(t.thinking); appendAccumulated("thinking", t.thinking); }
-    if (t.tool) countGenerated(t.tool);
+    if (t.tool) { countGenerated(t.tool); toolCallSeen = true; }
     const extracted = extractUsage(parsed);
     if (extracted) upstreamUsage = mergeUsage(upstreamUsage, extracted);
     if (isClosingUsageChunk(parsed)) closingUsageSeen = true;
   };
+
+  /**
+   * Called by pipeWithDisconnect right before it starts feeding bytes from a
+   * fresh upstream attempt into this same stream (auto-continue after a
+   * mid-stream drop). Banks what THIS attempt billed (its own usage, floored
+   * to at least what it visibly streamed if the upstream never sent a closing
+   * count) and resets the per-attempt trackers so the next attempt's usage is
+   * computed independently — see bankedUsages/segmentContentLength above.
+   * accumulatedContent/Thinking (the client-visible merged text) and
+   * continuationCount/firstUpstreamId are NOT reset: they span every attempt.
+   */
+  const markContinuationStarted = () => {
+    continuationCount++;
+    let segmentUsage = upstreamUsage;
+    if (!hasValidUsage(segmentUsage) && mode !== STREAM_MODE.PASSTHROUGH && hasValidUsage(state?.usage)) segmentUsage = state.usage;
+    // Same fallback chain finalizeStream uses: a dropped attempt that generated
+    // real output but never got ANY usage chunk at all (died before the
+    // upstream's terminal event) would otherwise bank nothing for it — losing
+    // that attempt's real cost instead of flooring it to an estimate.
+    segmentUsage = pickRecordedUsage({
+      real: segmentUsage,
+      estimate: () => (segmentContentLength > 0 ? estimateUsage(body, segmentContentStats, FORMATS.OPENAI) : null),
+    }) || segmentUsage;
+    if (!closingUsageSeen && segmentContentLength > 0 && hasValidUsage(segmentUsage)) {
+      segmentUsage = floorAbortedOutput(segmentUsage, segmentContentStats);
+    }
+    if (hasValidUsage(segmentUsage)) bankedUsages.push(segmentUsage);
+    upstreamUsage = null;
+    closingUsageSeen = false;
+    segmentContentLength = 0;
+    segmentContentStats.ascii = 0;
+    segmentContentStats.wide = 0;
+  };
+
+  /** Read-only facts pipeWithDisconnect needs to decide whether a mid-stream
+   * drop is safe to auto-continue, and the admin-visible toggle it must still
+   * honor itself (this only reports eligibility; it never checks settings). */
+  const getContinuationSnapshot = () => ({
+    eligible: mode === STREAM_MODE.PASSTHROUGH && docMode !== true && !toolCallSeen,
+    content: accumulatedContent,
+    hasContent: totalContentLength > 0,
+  });
 
   // The upstream already sent the count it bills from: a later cut changes nothing.
   let closingUsageSeen = false;
@@ -254,18 +325,26 @@ export function createSSEStream(options = {}) {
     // read (Kiro, CommandCode...) the usage their translator built from them. 3. only when
     // the upstream gave nothing at all and something was actually generated: a flagged
     // estimate (billing only; it was never shown to the client).
+    // Estimate/floor on THIS (last) attempt's own generation only — earlier
+    // attempts (if any) already banked their own via markContinuationStarted;
+    // summed back in below. Identical to totalContentLength/contentStats when
+    // this stream never continued (segment counters were never reset).
     let finalUsage = upstreamUsage;
     if (!hasValidUsage(finalUsage) && !isPassthrough && hasValidUsage(state?.usage)) finalUsage = state.usage;
     finalUsage = pickRecordedUsage({
       real: finalUsage,
-      estimate: () => (totalContentLength > 0
-        ? estimateUsage(body, contentStats, FORMATS.OPENAI) // internal shape: never sent to a client
+      estimate: () => (segmentContentLength > 0
+        ? estimateUsage(body, segmentContentStats, FORMATS.OPENAI) // internal shape: never sent to a client
         : null),
     }) || finalUsage;
     // A cut stream never got the upstream's closing count: bill at least what was streamed.
-    if (reason === "aborted" && !closingUsageSeen && totalContentLength > 0 && hasValidUsage(finalUsage)) {
-      finalUsage = floorAbortedOutput(finalUsage, contentStats);
+    if (reason === "aborted" && !closingUsageSeen && segmentContentLength > 0 && hasValidUsage(finalUsage)) {
+      finalUsage = floorAbortedOutput(finalUsage, segmentContentStats);
     }
+    // Auto-continue happened at least once: this is one logical reply billed as
+    // several separate upstream calls (see bankedUsages/sumUsages — NOT a
+    // mergeUsage fold, each attempt's tokens are real and additive).
+    if (bankedUsages.length > 0) finalUsage = sumUsages([...bankedUsages, finalUsage].filter(Boolean));
 
     if (hasValidUsage(finalUsage)) {
       logUsage(isPassthrough ? provider : (state?.provider || targetFormat), finalUsage, model, connectionId, apiKey);
@@ -362,6 +441,25 @@ export function createSSEStream(options = {}) {
     passthroughTerminal = isOpenAIResponsesTerminalEvent(currentOpenAIResponsesEvent, parsed);
 
     if (compat && normalizeLegacyChunk(parsed)) rewritten = true;
+
+    // Auto-continue spliced in a fresh upstream attempt (markContinuationStarted
+    // already ran): its first chunk(s) carry a brand new `id` and repeat the
+    // `role: "assistant"` delta, which would read to the client as a second,
+    // unrelated message. Pin every chunk to the first attempt's id and drop the
+    // repeat role. A stream that never continues reaches here with
+    // continuationCount === 0 and is untouched (proxy-transparency).
+    if (typeof parsed.id === "string" && parsed.id && firstUpstreamId === null) firstUpstreamId = parsed.id;
+    if (continuationCount > 0) {
+      if (typeof parsed.id === "string" && firstUpstreamId !== null && parsed.id !== firstUpstreamId) {
+        parsed.id = firstUpstreamId;
+        rewritten = true;
+      }
+      if (Array.isArray(parsed.choices)) {
+        for (const choice of parsed.choices) {
+          if (choice?.delta?.role !== undefined) { delete choice.delta.role; rewritten = true; }
+        }
+      }
+    }
 
     if (Array.isArray(parsed.choices)) {
       const hasUsage = hasValidUsage(parsed.usage);
@@ -683,6 +781,11 @@ export function createSSEStream(options = {}) {
   // what is known (usage the upstream already reported, else a flagged estimate for output that
   // was delivered) is still recorded. Nothing is invented for a stream that produced nothing.
   stream.abortFinalize = () => finalizeStream("aborted");
+  // Stream auto-continue (pipeWithDisconnect): eligibility facts + the hook that
+  // banks this attempt's usage and resets per-attempt trackers before the next
+  // attempt's bytes start arriving. See markContinuationStarted/getContinuationSnapshot above.
+  stream.getContinuationSnapshot = getContinuationSnapshot;
+  stream.markContinuationStarted = markContinuationStarted;
   return stream;
 
   // Hoisted helpers that need `controller` ---------------------------------

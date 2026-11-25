@@ -120,6 +120,17 @@ const DEFAULT_SETTINGS = {
   // /dashboard/providers, in display order (dashboard/providers/page.js).
   pinnedProviders: [],
 
+  // Stream auto-continue: when the upstream connection drops mid-reply (the
+  // "Stream failed: terminated" a client used to show with no recovery), the
+  // router re-requests the rest from where it left off and splices it into the
+  // SAME client-visible stream, instead of cutting the reply and making the
+  // customer type "continue" themselves. Scoped to same-format passthrough
+  // streams with no tool call in flight yet (open-sse/utils/stream.js
+  // getContinuationSnapshot) — anything else keeps today's clean-stream-end
+  // behavior. maxAttempts bounds how many extra upstream calls one reply may cost.
+  streamAutoContinueEnabled: true,
+  streamAutoContinueMaxAttempts: 2,
+
   // ── Affiliate program (spec affiliate-program "Program settings") ─────────
   // Off by default: deploying this changes nothing until an admin turns it on,
   // and turning it off is the rollback. The defaults live in

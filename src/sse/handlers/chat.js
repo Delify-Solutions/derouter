@@ -439,6 +439,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       providerCache,
       compatNormalization: chatSettings.compatNormalization === true,
       cacheEstimation: opts.cacheEstimation === true,
+      streamAutoContinueEnabled: chatSettings.streamAutoContinueEnabled !== false,
+      streamAutoContinueMaxAttempts: Number.isFinite(chatSettings.streamAutoContinueMaxAttempts)
+        ? Math.max(0, chatSettings.streamAutoContinueMaxAttempts)
+        : 2,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
       // Client disconnect cancels the upstream call, so an abandoned non-streaming
