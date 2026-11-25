@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { parseStatsQuery, tokenStatsSync, statsFilterOptionsCachedSync } from "@/lib/stats/tokenStats.js";
+import { parseStatsQuery, tokenStatsCached, statsFilterOptionsCachedSync } from "@/lib/stats/tokenStats.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -13,7 +13,7 @@ export async function GET(request) {
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400, headers: NO_STORE });
   try {
     const db = await getAdapter();
-    const stats = tokenStatsSync(db, parsed.value);
+    const stats = await tokenStatsCached(db, parsed.value);
     const options = statsFilterOptionsCachedSync(db, parsed.value);
     return NextResponse.json({ ...stats, options }, { headers: NO_STORE });
   } catch (error) {
