@@ -79,7 +79,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerCache, requestSignal = null, compatNormalization = false, cacheEstimation = false, providerOverrides }) {
+async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerCache, requestSignal = null, compatNormalization = false, cacheEstimation = false, providerOverrides, streamAutoContinueEnabled = true, streamAutoContinueMaxAttempts = 2 }) {
   const { provider, model } = modelInfo;
   // Strict transparency (spec proxy-transparency) applies to CUSTOM NODES only: the operator
   // pointed those at an arbitrary upstream and the router knows none of its quirks. A built-in
@@ -708,7 +708,35 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
     enabled: cacheEstimation === true, apiKey, connectionId, model,
     getText: () => promptTextForCache(finalBody ?? translatedBody),
   });
-  const sharedCtx = { cacheCtx, compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs };
+  // Stream auto-continue (pipeWithDisconnect, via handleStreamingResponse below):
+  // builds the next upstream call from a mid-stream drop's snapshot. Reads
+  // `finalBody` live (not a snapshot at definition time) so a continuation after
+  // the 401/403 token-refresh retry above still rebuilds from whichever body was
+  // actually last sent. Reuses the SAME connection/executor — a continuation is
+  // meant to recover from a transient blip on an account that just proved it
+  // works, not to run the account-fallback rotation a second time.
+  const buildContinuationRequest = async (snapshot) => {
+    if (!snapshot?.eligible || !Array.isArray(finalBody?.messages)) return null;
+    const continuationBody = snapshot.hasContent
+      ? { ...finalBody, stream: true, messages: [...finalBody.messages, { role: "assistant", content: snapshot.content }] }
+      : { ...finalBody, stream: true };
+    try {
+      const result = await executor.execute({
+        model, body: continuationBody, stream, credentials,
+        providerSessionId: sessionSeed, clientTool, signal: requestAbortSignal,
+        log, proxyOptions, providerOverrides,
+      });
+      if (!result?.response?.ok) {
+        try { result?.response?.body?.cancel?.(); } catch { /* best-effort */ }
+        return null;
+      }
+      return { response: result.response };
+    } catch {
+      return null;
+    }
+  };
+
+  const sharedCtx = { cacheCtx, compat: legacy, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, requestSignal: requestAbortSignal, timeoutMs: bodyTimeoutMs, streamAutoContinueEnabled, streamAutoContinueMaxAttempts, buildContinuationRequest };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => endPending(false);
   // A client that left while the body was being read gets the same 499 history

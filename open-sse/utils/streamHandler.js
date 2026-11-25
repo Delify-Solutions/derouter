@@ -184,6 +184,29 @@ export function createDisconnectAwareStream(transformStream, streamController, o
 }
 
 /**
+ * A genuine mid-stream transport drop (upstream socket reset/closed) — the
+ * narrow subset of isNetworkClose (above) that stream auto-continue treats as
+ * safe to retry. Deliberately excludes AbortError/ETIMEDOUT: those mean WE gave
+ * up (client left, or our own stall watchdog fired), not "the network blipped",
+ * and retrying either would either resend a request nobody wants or immediately
+ * stall again.
+ */
+export function isContinuableDrop(error) {
+  const msg = error?.message || "";
+  const code = error?.code || error?.cause?.code || "";
+  return (
+    msg.includes("terminated") ||
+    msg.includes("other side closed") ||
+    msg.includes("socket hang up") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("EPIPE") ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "UND_ERR_SOCKET"
+  );
+}
+
+/**
  * Pipe provider response through transform with disconnect detection.
  *
  * Stall watchdog tracks raw upstream byte activity, not transform output.
@@ -198,8 +221,25 @@ export function createDisconnectAwareStream(transformStream, streamController, o
  * @param {Response} providerResponse - Response from provider
  * @param {TransformStream} transformStream - Transform stream for SSE
  * @param {object} streamController - Stream controller from createStreamController
+ * @param {function} [onAbortTerminal] - see createDisconnectAwareStream
+ * @param {number} [stallTimeoutMs]
+ * @param {object} [continuation] - Stream auto-continue (optional). When the
+ *   upstream drops mid-stream with isContinuableDrop(error) true, this is
+ *   consulted instead of ending the stream:
+ *   - `enabled` (bool): the admin setting, combined with this provider/format
+ *     actually supporting it (see chatCore.js).
+ *   - `maxAttempts` (number): how many more upstream calls this one reply may use.
+ *   - `getSnapshot()`: reads transformStream.getContinuationSnapshot() — whether
+ *     the drop happened in a state safe to resume (passthrough text, no tool
+ *     call started) and what was generated so far.
+ *   - `retry(snapshot)`: builds a continuation request from the snapshot and
+ *     returns `{ response }` (a fresh provider Response to keep piping from) or
+ *     a falsy value to give up.
+ *   A continuation's bytes are fed into the SAME transformStream instance — it
+ *   is what makes the splice invisible to the client (one id, one role, the
+ *   accumulated text and usage both carried over; see markContinuationStarted).
  */
-export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS) {
+export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS, continuation = null) {
   let stallTimer = null;
   let chunkCount = 0;
   let totalBytes = 0;
@@ -254,29 +294,75 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   armStall();
   dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms`);
 
-  const upstreamTap = new TransformStream({
-    transform(chunk, controller) {
-      chunkCount++;
-      const sz = chunk?.byteLength || chunk?.length || 0;
-      totalBytes += sz;
-      const now = Date.now();
-      const gap = now - lastChunkAt;
-      lastChunkAt = now;
-      if (isDebugEnabled && (chunkCount <= 5 || chunkCount % 20 === 0 || gap > 5000)) {
-        dbg(tag, `chunk #${chunkCount} | size=${sz}B | gap=${gap}ms | total=${totalBytes}B`);
+  // Manually pumped (not .pipeThrough) so a mid-stream drop can swap in a
+  // continuation's body and keep writing into the SAME transform instance —
+  // .pipeThrough would close/error transformStream.writable the moment
+  // providerResponse.body ends, with no way to splice a second source after it.
+  const writer = transformStream.writable.getWriter();
+
+  // Feeds one upstream response's body into the writer, chunk by chunk — same
+  // byte-counting/stall-timer bookkeeping the old upstreamTap TransformStream did.
+  async function pumpOne(response) {
+    const reader = response.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        chunkCount++;
+        const sz = value?.byteLength || value?.length || 0;
+        totalBytes += sz;
+        const now = Date.now();
+        const gap = now - lastChunkAt;
+        lastChunkAt = now;
+        if (isDebugEnabled && (chunkCount <= 5 || chunkCount % 20 === 0 || gap > 5000)) {
+          dbg(tag, `chunk #${chunkCount} | size=${sz}B | gap=${gap}ms | total=${totalBytes}B`);
+        }
+        armStall();
+        await writer.write(value);
       }
-      armStall();
-      controller.enqueue(chunk);
-    },
-    flush() { dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); }
+    } finally {
+      try { reader.cancel().catch(() => {}); } catch { /* already done */ }
+    }
+  }
+
+  (async () => {
+    let current = providerResponse;
+    let attempts = 0;
+    for (;;) {
+      try {
+        await pumpOne(current);
+        break; // clean upstream EOF — this attempt (the only one, usually) is done
+      } catch (error) {
+        const snapshot = continuation?.getSnapshot?.();
+        const eligible = !!continuation?.enabled
+          && isContinuableDrop(error)
+          && snapshot?.eligible === true
+          && attempts < (continuation.maxAttempts ?? 0);
+        if (!eligible) throw error;
+        attempts++;
+        dbg(tag, `auto-continue ${attempts}/${continuation.maxAttempts} after: ${error?.message}`);
+        let next = null;
+        try { next = await continuation.retry(snapshot); } catch { next = null; }
+        if (!next?.response) throw error; // the retry itself failed — give up as if this were the original error
+        try { transformStream.markContinuationStarted?.(); } catch { /* bookkeeping only */ }
+        current = next.response;
+        // loop: pump the continuation's body into the same writer
+      }
+    }
+    clearStall();
+    try { await writer.close(); } catch { /* already closed/errored by the reader side */ }
+  })().catch((error) => {
+    // Every attempt failed and none was retryable: error the writable so the
+    // readable side (read by createDisconnectAwareStream below) sees the exact
+    // same error it always would have, via the exact same path.
+    try { writer.abort(error).catch(() => {}); } catch { /* already closed/errored */ }
   });
 
-  const transformedBody = providerResponse.body
-    .pipeThrough(upstreamTap)
-    .pipeThrough(transformStream);
-
   return createDisconnectAwareStream(
-    { readable: transformedBody, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },
+    // writable is a facade around the ONE real writer above: createDisconnectAwareStream
+    // only ever calls .getWriter().abort() on it (client-cancel path) — handing back the
+    // same locked writer instead of a second one keeps that abort wired to the real pump.
+    { readable: transformStream.readable, writable: { getWriter: () => writer } },
     wrappedController,
     onAbortTerminal ? () => onAbortTerminal(abortMessage) : null
   );

@@ -45,6 +45,31 @@ export async function drive(ts, chunks) {
   return parts.join("");
 }
 
+/**
+ * Like drive, but calls `ts.markContinuationStarted()` between each chunk group
+ * — simulates stream auto-continue (pipeWithDisconnect) splicing a fresh
+ * upstream attempt into the same transform after a mid-stream drop.
+ */
+export async function driveSegments(ts, groups) {
+  const writer = ts.writable.getWriter();
+  const reader = ts.readable.getReader();
+  const parts = [];
+  const pump = (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(dec.decode(value, { stream: true }));
+    }
+  })();
+  for (let i = 0; i < groups.length; i++) {
+    if (i > 0) ts.markContinuationStarted();
+    for (const c of groups[i]) await writer.write(typeof c === "string" ? enc.encode(c) : c);
+  }
+  await writer.close();
+  await pump;
+  return parts.join("");
+}
+
 /** Build a stream whose onStreamComplete result is captured on `result`. */
 export function capture() {
   const result = { content: null, usage: undefined, ttftAt: undefined, upstreamErrorInfo: null, calls: 0 };

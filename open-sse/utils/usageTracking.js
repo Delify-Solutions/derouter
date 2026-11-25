@@ -389,6 +389,44 @@ export function mergeUsage(prev, next) {
   return merged;
 }
 
+/**
+ * Sum the usage of several SEPARATE upstream calls that together produced one
+ * logical reply (stream auto-continue after a mid-stream drop: see
+ * stream.js's `markContinuationStarted`). Unlike mergeUsage — which folds
+ * several partial reports of the SAME call via Math.max, because a later
+ * report refines/replaces an earlier one — each entry here is its own billed
+ * call: the operator really paid for attempt #1's tokens AND attempt #2's, so
+ * Math.max would silently drop whichever attempt generated fewer tokens
+ * (undercharging the customer for real upstream cost). Every numeric field is
+ * added; `total_tokens` is recomputed from the summed prompt+completion
+ * rather than summing each attempt's own (already-redundant) total; a nested
+ * object field (e.g. token detail breakdowns) is kept as-is from whichever
+ * entry has it, last one wins, same as mergeUsage.
+ */
+export function sumUsages(list) {
+  const entries = (list || []).filter((u) => u && typeof u === "object");
+  if (entries.length === 0) return null;
+  if (entries.length === 1) return entries[0];
+  const out = {};
+  for (const u of entries) {
+    for (const [k, v] of Object.entries(u)) {
+      if (k === "estimated") continue;
+      if (typeof v === "number" && Number.isFinite(v)) {
+        out[k] = (typeof out[k] === "number" ? out[k] : 0) + v;
+      } else if (v && typeof v === "object") {
+        out[k] = v;
+      }
+    }
+  }
+  const prompt = out.prompt_tokens ?? out.input_tokens ?? 0;
+  const completion = out.completion_tokens ?? out.output_tokens ?? 0;
+  if (entries.some((u) => typeof u.total_tokens === "number")) out.total_tokens = prompt + completion;
+  // Same convention as mergeUsage: a real figure from any attempt wins — only
+  // when EVERY attempt was itself an estimate does the sum stay flagged as one.
+  if (entries.every((u) => u.estimated === true)) out.estimated = true;
+  return out;
+}
+
 // ── Estimation ─────────────────────────────────────────────────────────────
 // An estimate is a BILLING fallback for an upstream that reported no usage at all. It is
 // never shown to a client, never carries a safety margin ("buffer"), and is always flagged

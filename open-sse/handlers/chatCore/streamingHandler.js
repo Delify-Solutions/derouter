@@ -58,7 +58,7 @@ function buildTransformStream({ provider, sourceFormat, targetFormat, userAgent,
 /**
  * Handle streaming response — pipe provider SSE through transform stream to client.
  */
-export async function handleStreamingResponse({ compat, providerResponse, provider, model, sourceFormat, targetFormat, userAgent, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, streamController, onStreamComplete, streamDetailId, pxpipe, reqTag, log, credentials }) {
+export async function handleStreamingResponse({ compat, providerResponse, provider, model, sourceFormat, targetFormat, userAgent, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, streamController, onStreamComplete, streamDetailId, pxpipe, reqTag, log, credentials, streamAutoContinueEnabled = false, streamAutoContinueMaxAttempts = 0, buildContinuationRequest = null }) {
   if (onRequestSuccess) {
     Promise.resolve()
       .then(onRequestSuccess)
@@ -103,7 +103,16 @@ export async function handleStreamingResponse({ compat, providerResponse, provid
   const isResponsesPassthrough = sourceFormat === FORMATS.OPENAI_RESPONSES && targetFormat === FORMATS.OPENAI_RESPONSES;
   const onAbortTerminal = isResponsesPassthrough ? buildAbortedResponsesTerminalBytes : null;
   const stallTimeoutMs = PROVIDERS[provider]?.stallTimeoutMs || STREAM_STALL_TIMEOUT_MS;
-  const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs);
+  // See pipeWithDisconnect's own doc comment for what each field does; eligibility
+  // (format/tool-call/content) is decided per-drop from the live transform
+  // snapshot, not here — this only carries the admin setting + how to retry.
+  const continuation = buildContinuationRequest ? {
+    enabled: streamAutoContinueEnabled === true,
+    maxAttempts: streamAutoContinueMaxAttempts,
+    getSnapshot: () => transformStream.getContinuationSnapshot?.(),
+    retry: (snapshot) => buildContinuationRequest(snapshot),
+  } : null;
+  const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs, continuation);
 
   // requestedModel = the original client model string (bare combo name when the
   // request targeted a combo, snapshotted before combo expansion rewrote body.model).
