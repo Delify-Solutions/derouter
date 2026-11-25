@@ -38,13 +38,13 @@ beforeEach(() => {
   db.run(`INSERT INTO deletedApiKeys(keyHash, apiKeyId, userId, deletedAt) VALUES('h2', 'k2', 'ub', ?)`, [now]);
 });
 
-const q = (input) => {
+const q = async (input) => {
   const parsed = stats.parseStatsQuery(input, Date.parse("2026-11-06T00:00:00Z"));
   assert.equal(parsed.ok, true, parsed.error);
-  return stats.tokenStatsSync(db, parsed.value);
+  return stats.tokenStats(db, parsed.value);
 };
 
-test("buckets are Vietnam local time; weeks start on Monday", () => {
+test("buckets are Vietnam local time; weeks start on Monday", async () => {
   // 2026-11-05 20:30 UTC = 2026-11-06 03:30 in Vietnam (a Friday).
   const ms = Date.parse("2026-11-05T20:30:00Z");
   assert.equal(stats.bucketKeyOf(ms, "hour"), "2026-11-06 03:00");
@@ -52,12 +52,12 @@ test("buckets are Vietnam local time; weeks start on Monday", () => {
   assert.equal(stats.bucketKeyOf(ms, "week"), "2026-11-02");
   assert.equal(stats.bucketKeyOf(ms, "month"), "2026-11");
   usage({ ts: "2026-11-05T20:30:00.000Z" });
-  const res = q({ from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z", granularity: "week" });
+  const res = await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z", granularity: "week" });
   const filled = res.series.filter((s) => s.requests > 0).map((s) => s.bucket);
   assert.deepEqual(filled, ["2026-11-02"], "the SQL bucket matches the JS one");
 });
 
-test("totals, per-day series and grouping by requested model", () => {
+test("totals, per-day series and grouping by requested model", async () => {
   usage({ ts: "2026-11-03T03:00:00.000Z", requested: "gpt-5", input: 100, output: 50, cached: 20, cost: 1000 });
   usage({ ts: "2026-11-03T04:00:00.000Z", requested: "claude-x", provider: "anthropic", model: "claude-up", input: 300, output: 100, cost: 3000 });
   usage({ ts: "2026-11-04T03:00:00.000Z", requested: "gpt-5", input: 10, output: 5, status: "502", cost: 0 });
@@ -65,7 +65,7 @@ test("totals, per-day series and grouping by requested model", () => {
   usage({ ts: "2026-11-04T05:00:00.000Z", requested: "gpt-5", input: 0, output: 0, status: "success", cost: 0 });
   usage({ ts: "2026-11-04T05:00:00.000Z", requested: "gpt-5", input: 0, output: 0, status: "499", cost: 0 });
 
-  const res = q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", granularity: "day", groupBy: "model" });
+  const res = await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", granularity: "day", groupBy: "model" });
   assert.equal(res.totals.requests, 5, "platform rows are left out");
   assert.equal(res.totals.errors, 1, "a numeric status is an error; 'success' and a client abort (499) are not");
   assert.equal(res.totals.input, 410);
@@ -79,28 +79,28 @@ test("totals, per-day series and grouping by requested model", () => {
   assert.equal(res.series.length, 5, "empty days are filled");
 });
 
-test("grouping by provider, upstream model and user (deleted keys keep their owner)", () => {
+test("grouping by provider, upstream model and user (deleted keys keep their owner)", async () => {
   usage({ ts: "2026-11-03T03:00:00.000Z", keyId: "k1", provider: "openai", model: "gpt-up" });
   usage({ ts: "2026-11-03T03:00:00.000Z", keyId: "k2", provider: "anthropic", model: "claude-up" });
   usage({ ts: "2026-11-03T03:00:00.000Z", keyId: null, provider: "openai", model: "gpt-up" });
   const range = { from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" };
-  assert.deepEqual(q({ ...range, groupBy: "provider" }).groups.map((g) => g.key).sort(), ["anthropic", "openai"]);
-  assert.deepEqual(q({ ...range, groupBy: "upstream" }).groups.map((g) => g.key).sort(), ["claude-up", "gpt-up"]);
-  const users = q({ ...range, groupBy: "user" }).groups;
+  assert.deepEqual((await q({ ...range, groupBy: "provider" })).groups.map((g) => g.key).sort(), ["anthropic", "openai"]);
+  assert.deepEqual((await q({ ...range, groupBy: "upstream" })).groups.map((g) => g.key).sort(), ["claude-up", "gpt-up"]);
+  const users = (await q({ ...range, groupBy: "user" })).groups;
   assert.deepEqual(users.map((g) => g.label).sort(), ["Admin / không có chủ", "a@x.vn", "b@x.vn"]);
 });
 
-test("filters by user, provider and model; charged credit comes from the ledger", () => {
+test("filters by user, provider and model; charged credit comes from the ledger", async () => {
   const a = usage({ ts: "2026-11-03T03:00:00.000Z", keyId: "k1", requested: "gpt-5" });
   usage({ ts: "2026-11-03T03:00:00.000Z", keyId: "k2", requested: "claude-x", provider: "anthropic" });
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, createdAt) VALUES('ua', ?, -800, 'charge', '2026-11-03T03:00:01.000Z')`, [a]);
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, createdAt) VALUES('ua', ?, -100, 'charge', '2026-11-03T03:00:01.000Z')`, [a]);
   const range = { from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" };
-  assert.equal(q({ ...range, userId: "ua" }).totals.requests, 1);
-  assert.equal(q({ ...range, userId: "ub" }).totals.requests, 1);
-  assert.equal(q({ ...range, provider: "anthropic" }).totals.requests, 1);
-  assert.equal(q({ ...range, model: "gpt-5" }).totals.requests, 1);
-  const byUser = q({ ...range, groupBy: "user" });
+  assert.equal((await q({ ...range, userId: "ua" })).totals.requests, 1);
+  assert.equal((await q({ ...range, userId: "ub" })).totals.requests, 1);
+  assert.equal((await q({ ...range, provider: "anthropic" })).totals.requests, 1);
+  assert.equal((await q({ ...range, model: "gpt-5" })).totals.requests, 1);
+  const byUser = await q({ ...range, groupBy: "user" });
   assert.equal(byUser.totals.chargedNanoUsd, 900);
   assert.equal(byUser.groups.find((g) => g.key === "ua").chargedNanoUsd, 900, "two charge rows of one request add up");
   assert.equal(byUser.groups.find((g) => g.key === "ua").requests, 1, "a split charge does not double the request");
@@ -116,7 +116,7 @@ test("query validation", () => {
   assert.equal(stats.parseStatsQuery({ groupBy: "drop table" }, now).value.groupBy, "model");
 });
 
-test("usage keeps its customer after the key and its tombstone are gone", () => {
+test("usage keeps its customer after the key and its tombstone are gone", async () => {
   // Newer rows carry the owner themselves.
   db.run(
     `INSERT INTO usageHistory(id, timestamp, provider, model, apiKeyId, userId, promptTokens, completionTokens, costNanoUsd, status, meta)
@@ -128,22 +128,83 @@ test("usage keeps its customer after the key and its tombstone are gone", () => 
      VALUES(9002, '2026-11-03T03:00:00.000Z', 'openai', 'gpt-up', 'gone-key-2', 10, 5, 100, 'ok', '{}')`
   );
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, createdAt) VALUES('ub', 9002, -100, 'charge', '2026-11-03T03:00:01.000Z')`);
-  const res = q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", groupBy: "user" });
+  const res = await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", groupBy: "user" });
   assert.equal(res.groups.find((g) => g.key === "ua").requests, 1);
   assert.equal(res.groups.find((g) => g.key === "ub").requests, 1);
   assert.equal(res.groups.find((g) => g.key === "ub").chargedNanoUsd, 100);
   assert.equal(res.groups.some((g) => g.key === ""), false, "nothing falls to the admin row");
-  assert.equal(q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", userId: "ub" }).totals.requests, 1);
+  assert.equal((await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", userId: "ub" })).totals.requests, 1);
 });
 
-test("a back-charge counts at its request's time; unlimited-plan charges take no credit", () => {
+test("a range spanning many 3-hour slices sums correctly, not just the last slice", async () => {
+  // Spread well past a handful of slices (3h each): 6 days, several per day.
+  // Hours chosen so +7h (VN local, the bucket's own timezone) never rolls the
+  // UTC timestamp into the next calendar day.
+  let expectedRequests = 0, expectedInput = 0, expectedOutput = 0, expectedCost = 0;
+  for (let day = 1; day <= 6; day++) {
+    for (const hour of [0, 4, 8, 12]) {
+      usage({ ts: `2026-11-0${day}T${String(hour).padStart(2, "0")}:00:00.000Z`, input: 10, output: 5, cost: 100 });
+      expectedRequests += 1; expectedInput += 10; expectedOutput += 5; expectedCost += 100;
+    }
+  }
+  const res = await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-07T00:00:00Z", granularity: "day" });
+  assert.equal(res.totals.requests, expectedRequests);
+  assert.equal(res.totals.input, expectedInput);
+  assert.equal(res.totals.output, expectedOutput);
+  assert.equal(res.totals.costNanoUsd, expectedCost);
+  // Each day's own bucket also adds its 4 rows, not just whichever slice ran last.
+  for (let day = 1; day <= 6; day++) {
+    const key = `2026-11-0${day}`;
+    const bucket = res.series.find((s) => s.bucket === key);
+    assert.equal(bucket.requests, 4, key);
+  }
+});
+
+test("a back-charge recorded in a later time slice than its own request still counts", async () => {
+  // The request falls in the FIRST slice of the range; the charge recording it is
+  // written days later (a different slice entirely) — c.createdAt must stay fixed
+  // at the overall q.from, not be tightened to the request's own slice, or this
+  // charge would be silently dropped.
+  const early = usage({ ts: "2026-11-01T01:00:00.000Z" });
+  db.run(
+    `INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, createdAt) VALUES('ua', ?, -321, 'charge', '2026-11-04T12:00:00.000Z')`,
+    [early]
+  );
+  const res = await q({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z", granularity: "day" });
+  assert.equal(res.totals.chargedNanoUsd, 321);
+  assert.equal(res.series.find((s) => s.bucket === "2026-11-01").chargedNanoUsd, 321, "bucketed by the request's own time, not the charge's createdAt");
+});
+
+test("tokenStatsCached reuses a result within 5 minutes, recomputes after or when a filter differs", async () => {
+  usage({ ts: "2026-11-03T03:00:00.000Z" });
+  const range = { from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" };
+  const parsed = stats.parseStatsQuery(range, Date.parse("2026-11-06T00:00:00Z")).value;
+  const t0 = 1_700_000_000_000;
+  const first = await stats.tokenStatsCached(db, parsed, t0);
+  assert.equal(first.totals.requests, 1);
+
+  // A row added after the first call must not appear from a cache hit.
+  usage({ ts: "2026-11-03T04:00:00.000Z" });
+  const cached = await stats.tokenStatsCached(db, parsed, t0 + 60_000);
+  assert.equal(cached.totals.requests, 1, "served from cache, not recomputed");
+  assert.equal(cached, first, "the exact same object, not a fresh equal one");
+
+  const afterTtl = await stats.tokenStatsCached(db, parsed, t0 + 6 * 60_000);
+  assert.equal(afterTtl.totals.requests, 2, "past the 5-minute window: recomputed");
+
+  const otherFilter = stats.parseStatsQuery({ ...range, groupBy: "provider" }, Date.parse("2026-11-06T00:00:00Z")).value;
+  const different = await stats.tokenStatsCached(db, otherFilter, t0);
+  assert.notEqual(different, first, "a different filter is its own cache key, not reused");
+});
+
+test("a back-charge counts at its request's time; unlimited-plan charges take no credit", async () => {
   const inRange = usage({ ts: "2026-11-03T03:00:00.000Z" });
   const before = usage({ ts: "2026-10-20T03:00:00.000Z" });
   // Back-charged at boot, long after the request.
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, meta, createdAt) VALUES('ua', ?, -500, 'charge', '{"backfill":true}', '2026-11-10T00:00:00.000Z')`, [inRange]);
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, meta, createdAt) VALUES('ua', ?, -700, 'charge', '{"backfill":true}', '2026-11-03T05:00:00.000Z')`, [before]);
   db.run(`INSERT INTO creditLedger(userId, usageId, deltaNanoUsd, kind, meta, createdAt) VALUES('ua', ?, -900, 'charge', '{"unlimited":true}', '2026-11-03T03:00:01.000Z')`, [inRange]);
-  const res = stats.tokenStatsSync(db, stats.parseStatsQuery({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" }, Date.parse("2026-11-12T00:00:00Z")).value);
+  const res = await stats.tokenStats(db, stats.parseStatsQuery({ from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" }, Date.parse("2026-11-12T00:00:00Z")).value);
   assert.equal(res.totals.chargedNanoUsd, 500, "only the back-charge of the in-range request");
   assert.ok(res.series.every((s) => s.bucket >= "2026-11-01" && s.bucket <= "2026-11-05"), "no bucket outside the range");
 });

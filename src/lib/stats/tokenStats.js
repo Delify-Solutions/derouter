@@ -6,7 +6,15 @@
 // `platform` pseudo-provider (requests refused by key limits) are left out: they
 // moved no tokens.
 //
-// Synchronous, adapter first, relative imports only (tests import it directly).
+// Async, adapter first, relative imports only (tests import it directly). Read in
+// time slices (own loop below, not usageRepo.js's forEachUsageSlice — kept local
+// so this read-only report never risks the billing-adjacent rollup backfill that
+// shares that helper) so a wide range never runs as one giant synchronous scan
+// that freezes the event loop for every other request on the server (the exact
+// failure the sibling /dashboard/usage page had before its own rollup fix —
+// see memory usage-dashboard-perf). A short in-process cache then absorbs
+// repeat loads of the same filters, the same way statsFilterOptionsCachedSync
+// already does below.
 
 export const GRANULARITIES = ["hour", "day", "week", "month"];
 export const GROUP_BYS = ["model", "upstream", "provider", "user"];
@@ -128,13 +136,44 @@ export function parseStatsQuery(input = {}, now = Date.now()) {
   };
 }
 
-function usageWhere(q) {
-  const conds = ["u.timestamp >= ?", "u.timestamp <= ?", "COALESCE(u.provider, '') != 'platform'"];
-  const params = [q.from, q.to];
+// Every filter EXCEPT the time range: the range is applied per slice by the
+// loops below instead, so the full range is never scanned in one query.
+function usageExtraWhere(q) {
+  const conds = ["COALESCE(u.provider, '') != 'platform'"];
+  const params = [];
   if (q.userId) { conds.push(`${OWNER_SQL} = ?`); params.push(q.userId); }
   if (q.provider) { conds.push("u.provider = ?"); params.push(q.provider); }
   if (q.model) { conds.push(`(${REQUESTED_SQL} = ? OR u.model = ?)`); params.push(q.model, q.model); }
   return { where: conds.join(" AND "), params };
+}
+
+// Same width usageRepo.js's own usage-slicing uses (USAGE_SLICE_MS): wide enough
+// that a 90-day range (this page's longest preset) is ~720 slices, not
+// thousands, narrow enough that one slice's scan is never heavy regardless of
+// how much history the table holds.
+const SLICE_MS = 3 * 60 * 60 * 1000;
+const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Runs `sql` once per [from, to) time slice (the last slice closes with <=,
+ * matching what a single unsliced query over the whole range would have done),
+ * yielding to the event loop between slices, and calls `onRows` with each
+ * slice's result. `timeParams(sliceFromIso, sliceToIso, isLast)` returns the
+ * slice's own two time-bound parameters, placed wherever the caller's SQL needs
+ * them — the two queries here bind the range differently (plain columns vs. a
+ * COALESCE expression, with or without an extra non-sliced lower-bound hint), so
+ * this does not assume a fixed parameter shape the way a one-size helper would.
+ */
+async function forEachSlice(db, { fromMs, toMs, sliceMs = SLICE_MS, sql, timeParams, extraParams = [] }, onRows) {
+  for (let sliceStart = fromMs; sliceStart < toMs; sliceStart += sliceMs) {
+    const sliceEnd = Math.min(sliceStart + sliceMs, toMs);
+    const isLast = sliceEnd >= toMs;
+    const sliceFrom = new Date(sliceStart).toISOString();
+    const sliceTo = new Date(sliceEnd).toISOString();
+    const rows = db.all(sql(isLast), [...timeParams(sliceFrom, sliceTo, isLast), ...extraParams]);
+    onRows(rows);
+    if (!isLast) await yieldToLoop();
+  }
 }
 
 const ZERO = () => ({ requests: 0, errors: 0, input: 0, output: 0, cached: 0, costNanoUsd: 0, chargedNanoUsd: 0 });
@@ -159,52 +198,10 @@ function addInto(target, row) {
  *   request's price), chargedNanoUsd (credit actually taken from customers).
  *   `byGroup` holds total tokens per top group, plus "__other".
  */
-export function tokenStatsSync(db, q) {
+export async function tokenStats(db, q) {
   const bucket = BUCKET_SQL[q.granularity]("u.timestamp");
   const group = GROUP_SQL[q.groupBy];
-  const { where, params } = usageWhere(q);
-
-  const rows = db.all(
-    `SELECT ${bucket} AS bucket, ${group} AS grp,
-            COUNT(*) AS requests,
-            SUM(CASE WHEN COALESCE(u.status, 'ok') NOT IN ('ok', 'success', '499') THEN 1 ELSE 0 END) AS errors,
-            SUM(${INPUT_SQL}) AS input, SUM(${OUTPUT_SQL}) AS output, SUM(${CACHED_SQL}) AS cached,
-            SUM(${COST_SQL}) AS cost
-       FROM ${USAGE_FROM}
-      WHERE ${where}
-      GROUP BY bucket, grp`,
-    params
-  );
-
-  // Credit taken from customers: the charge rows of the ledger, tied to their
-  // request when there is one. Grouped the same way; a charge with no request
-  // row falls under "" (unknown) for model and provider.
-  // A charge belongs to its request's time (a back-charge is written later than
-  // the request): the same instant both filters and buckets it. A charge is never
-  // written before its request, so `c.createdAt >= from` only narrows the scan.
-  // Unlimited plans ledger their spend as charges that take no credit: left out.
-  const chargeAt = "COALESCE(u.timestamp, c.createdAt)";
-  const chargeBucket = BUCKET_SQL[q.granularity](chargeAt);
-  const chargeGroup = q.groupBy === "user" ? "COALESCE(c.userId, '')" : group;
-  const chargeConds = [
-    "c.kind = 'charge'", "c.createdAt >= ?", `${chargeAt} >= ?`, `${chargeAt} <= ?`,
-    "json_extract(c.meta, '$.unlimited') IS NOT 1",
-  ];
-  const chargeParams = [q.from, q.from, q.to];
-  if (q.userId) { chargeConds.push("c.userId = ?"); chargeParams.push(q.userId); }
-  if (q.provider) { chargeConds.push("u.provider = ?"); chargeParams.push(q.provider); }
-  if (q.model) { chargeConds.push(`(${REQUESTED_SQL} = ? OR u.model = ?)`); chargeParams.push(q.model, q.model); }
-  const charges = db.all(
-    `SELECT ${chargeBucket} AS bucket, ${chargeGroup} AS grp, SUM(-c.deltaNanoUsd) AS charged
-       FROM creditLedger c
-       LEFT JOIN usageHistory u ON u.id = c.usageId
-       LEFT JOIN apiKeys k1 ON k1.id = u.apiKeyId
-       LEFT JOIN apiKeys k2 ON u.apiKeyId IS NULL AND u.apiKey IS NOT NULL AND k2.key = u.apiKey
-       LEFT JOIN deletedApiKeys dk ON k1.id IS NULL AND dk.apiKeyId = u.apiKeyId
-      WHERE ${chargeConds.join(" AND ")}
-      GROUP BY bucket, grp`,
-    chargeParams
-  );
+  const { where: extraWhere, params: extraParams } = usageExtraWhere(q);
 
   const totals = ZERO();
   const byGroup = new Map();
@@ -217,20 +214,74 @@ export function tokenStatsSync(db, q) {
     if (!byBucket.has(key)) byBucket.set(key, { bucket: key, ...ZERO(), groupTokens: new Map() });
     return byBucket.get(key);
   };
-  for (const row of rows) {
-    addInto(totals, row);
-    addInto(groupOf(row.grp), row);
-    const b = bucketOf(row.bucket);
-    addInto(b, row);
-    const tokens = (Number(row.input) || 0) + (Number(row.output) || 0);
-    b.groupTokens.set(row.grp, (b.groupTokens.get(row.grp) || 0) + tokens);
-  }
-  for (const row of charges) {
-    const amount = Number(row.charged) || 0;
-    totals.chargedNanoUsd += amount;
-    groupOf(row.grp).chargedNanoUsd += amount;
-    bucketOf(row.bucket).chargedNanoUsd += amount;
-  }
+
+  const fromMs = Date.parse(q.from);
+  const toMs = Date.parse(q.to);
+
+  await forEachSlice(db, {
+    fromMs, toMs,
+    sql: (isLast) => `SELECT ${bucket} AS bucket, ${group} AS grp,
+            COUNT(*) AS requests,
+            SUM(CASE WHEN COALESCE(u.status, 'ok') NOT IN ('ok', 'success', '499') THEN 1 ELSE 0 END) AS errors,
+            SUM(${INPUT_SQL}) AS input, SUM(${OUTPUT_SQL}) AS output, SUM(${CACHED_SQL}) AS cached,
+            SUM(${COST_SQL}) AS cost
+       FROM ${USAGE_FROM}
+      WHERE u.timestamp >= ? AND u.timestamp ${isLast ? "<=" : "<"} ? AND ${extraWhere}
+      GROUP BY bucket, grp`,
+    timeParams: (from, to) => [from, to],
+    extraParams,
+  }, (rows) => {
+    for (const row of rows) {
+      addInto(totals, row);
+      addInto(groupOf(row.grp), row);
+      const b = bucketOf(row.bucket);
+      addInto(b, row);
+      const tokens = (Number(row.input) || 0) + (Number(row.output) || 0);
+      b.groupTokens.set(row.grp, (b.groupTokens.get(row.grp) || 0) + tokens);
+    }
+  });
+
+  // Credit taken from customers: the charge rows of the ledger, tied to their
+  // request when there is one. Grouped the same way; a charge with no request
+  // row falls under "" (unknown) for model and provider.
+  // A charge belongs to its request's time (a back-charge is written later than
+  // the request): the same instant both filters and buckets it. A charge is never
+  // written before its request, so `c.createdAt >= from` only narrows the scan —
+  // kept at the OVERALL q.from, not tightened per slice: a back-charge's own
+  // createdAt can fall well after its request's slice, so slicing on it directly
+  // would silently drop charges outside the request's own bucket window.
+  // Unlimited plans ledger their spend as charges that take no credit: left out.
+  const chargeAt = "COALESCE(u.timestamp, c.createdAt)";
+  const chargeBucket = BUCKET_SQL[q.granularity](chargeAt);
+  const chargeGroup = q.groupBy === "user" ? "COALESCE(c.userId, '')" : group;
+  const chargeExtraConds = ["json_extract(c.meta, '$.unlimited') IS NOT 1"];
+  const chargeExtraParams = [];
+  if (q.userId) { chargeExtraConds.push("c.userId = ?"); chargeExtraParams.push(q.userId); }
+  if (q.provider) { chargeExtraConds.push("u.provider = ?"); chargeExtraParams.push(q.provider); }
+  if (q.model) { chargeExtraConds.push(`(${REQUESTED_SQL} = ? OR u.model = ?)`); chargeExtraParams.push(q.model, q.model); }
+
+  await forEachSlice(db, {
+    fromMs, toMs,
+    sql: (isLast) => `SELECT ${chargeBucket} AS bucket, ${chargeGroup} AS grp, SUM(-c.deltaNanoUsd) AS charged
+       FROM creditLedger c
+       LEFT JOIN usageHistory u ON u.id = c.usageId
+       LEFT JOIN apiKeys k1 ON k1.id = u.apiKeyId
+       LEFT JOIN apiKeys k2 ON u.apiKeyId IS NULL AND u.apiKey IS NOT NULL AND k2.key = u.apiKey
+       LEFT JOIN deletedApiKeys dk ON k1.id IS NULL AND dk.apiKeyId = u.apiKeyId
+      WHERE c.kind = 'charge' AND c.createdAt >= ?
+        AND ${chargeAt} >= ? AND ${chargeAt} ${isLast ? "<=" : "<"} ?
+        AND ${chargeExtraConds.join(" AND ")}
+      GROUP BY bucket, grp`,
+    timeParams: (from, to) => [q.from, from, to],
+    extraParams: chargeExtraParams,
+  }, (rows) => {
+    for (const row of rows) {
+      const amount = Number(row.charged) || 0;
+      totals.chargedNanoUsd += amount;
+      groupOf(row.grp).chargedNanoUsd += amount;
+      bucketOf(row.bucket).chargedNanoUsd += amount;
+    }
+  });
 
   const allTokens = totals.input + totals.output;
   const labels = labelsFor(db, q.groupBy, [...byGroup.keys()]);
@@ -265,6 +316,23 @@ export function tokenStatsSync(db, q) {
     query: q, totals: { ...totals, total: allTokens }, series, groups, topKeys,
     retention: { days: RETENTION_DAYS, truncated: q.from < retainedFrom, retainedFrom },
   };
+}
+
+// Same 5-minute window as statsFilterOptionsCachedSync below, keyed by every
+// field that changes the result (not just the range): two admins — or one
+// flipping between tabs — asking the same question moments apart get the
+// answer without another full sliced scan.
+const statsCache = new Map();
+
+/** tokenStats, cached. */
+export async function tokenStatsCached(db, q, now = Date.now()) {
+  const key = [q.from, q.to, q.granularity, q.groupBy, q.userId, q.provider, q.model, q.top].join("|");
+  const hit = statsCache.get(key);
+  if (hit && now - hit.at < 5 * 60 * 1000) return hit.value;
+  const value = await tokenStats(db, q);
+  if (statsCache.size > 50) statsCache.clear();
+  statsCache.set(key, { at: now, value });
+  return value;
 }
 
 /** Display names: the account e-mail for users; the key itself otherwise. */
