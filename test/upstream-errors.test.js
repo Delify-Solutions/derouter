@@ -244,3 +244,21 @@ test("a caller abort with its own reason is not retried as a network error", asy
   assert.equal(hits, 1, "the abort ends the attempt; nothing is resent");
   assert.ok(Date.now() - t0 < 1000, "no retry delay is spent for a client that left");
 });
+
+test("Deploy's out-of-balance 405 locks the account instead of retrying every 30s", () => {
+  // deploy.com documents 405 for an organization paused on a zero prepaid balance
+  // (it never sends 402). Unmatched, 405 fell to TRANSIENT_COOLDOWN_MS: the next
+  // request retried a dead account 30s later and every caller in between read the
+  // upstream's billing sentence.
+  const text = "[deploy] [405]: Your Organization is currently paused. Please check your account balance, our terms and conditions, or contact support@deploy.com for more information.";
+  const r = checkFallbackError(405, text, 0, "deploy");
+  assert.equal(r.shouldFallback, true);
+  assert.equal(r.cooldownMs, 2 * 60 * 1000, "locked like 402/403, not the 30s transient");
+  assert.equal(r.newBackoffLevel, undefined, "a paused organization is not a rate limit");
+  assert.equal(r.requestError, undefined, "the account is at fault, not the request");
+  // The shorter documented phrase and the long form both match.
+  assert.equal(checkFallbackError(405, "out of balance", 0).cooldownMs, 2 * 60 * 1000);
+  assert.equal(checkFallbackError(400, "Positive Organization credit balance is required", 0).cooldownMs, 2 * 60 * 1000);
+  // A bare 405 that is nothing to do with billing keeps the transient cooldown.
+  assert.equal(checkFallbackError(405, "Method Not Allowed", 0).cooldownMs, TRANSIENT_COOLDOWN_MS);
+});

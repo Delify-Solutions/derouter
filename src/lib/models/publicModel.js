@@ -902,6 +902,12 @@ const PROVIDER_ACCOUNT_HINTS = [
   "billing details", "billing hard limit", "insufficient credit", "insufficient balance", "credit balance",
   "payment required", "no active credentials", "no credentials", "account has been suspended",
   "account has been deactivated", "account suspended", "account deactivated",
+  // Deploy (deploy.com) answers HTTP 405, not 402, when the operator's
+  // organization runs out of prepaid balance: "Your Organization is currently
+  // paused. Please check your account balance…". The status is not one of the
+  // account statuses above, and no earlier phrase matches "account balance", so
+  // without these the customer would read the operator's billing sentence.
+  "organization is currently paused", "out of balance", "positive organization credit balance",
 ];
 const OVERLOAD_HINTS = ["rate limit", "rate_limit", "too many requests", "overloaded", "capacity"];
 

@@ -459,6 +459,25 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "deploy":
+        // Deploy reports a prepaid USD credit balance (payment_model "credits"), not a
+        // request window: there is no allotment, so `remaining`/`remainingPercentage`
+        // travel with the row and the absolute numbers are the balance itself.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              resetAt: quota.resetAt || null,
+              remainingPercentage: quota.remainingPercentage,
+              isCreditBalance: quota.isCreditBalance === true,
+              currency: quota.currency,
+            });
+          });
+        }
+        break;
+
       case "vercel-ai-gateway":
         // Vercel returns currency credit balance, not request quotas.
         // The 'Remaining (USD)' row needs explicit remainingPercentage because

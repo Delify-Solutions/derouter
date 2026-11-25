@@ -60,6 +60,9 @@ const SAFE_PSD_KEYS = [
   // Model catalogs, not credentials — /api/providers consumers
   // (cli-tools ToolDetailClient) render these.
   "customModels", "enabledModels",
+  // Deploy's balance path needs the organization id; it is a public account number,
+  // not a credential (the portal cookie that authenticates the call stays hidden).
+  "organizationId",
 ];
 
 function safeProviderSpecificData(psd) {

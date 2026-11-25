@@ -294,3 +294,24 @@ test("ordinary words, joined words and stored content survive", () => {
   assert.deepEqual(stored.input, ["a  b", " 1.50", '{"model":"q"}']);
   assert.equal(stored.model, "glm-5");
 });
+
+test("Deploy's out-of-balance 405 is the operator's account, not the customer's request", async () => {
+  // deploy.com pauses the whole organization when the prepaid balance runs out and
+  // reports it as 405, not 402. 405 is not an account status and the body never says
+  // "credit balance"/"insufficient", so the text rules have to carry it: the customer
+  // must read model_unavailable, never the operator's billing sentence.
+  const body = JSON.stringify({
+    status_code: 405,
+    message: "Your Organization is currently paused. Please check your account balance, our terms and conditions, or contact support@deploy.com for more information.",
+  });
+  const res = new Response(body, { status: 405, headers: { "content-type": "application/json" } });
+  const masked = await pm.maskResponse(res, { publicName: "router-x", ids: ["deepseek-ai/deepseek-v4.1-flash-1017"], providers: ["deploy"] });
+  const parsed = JSON.parse(await masked.text());
+  assert.equal(masked.status, 405, "the status is unchanged");
+  assert.equal(parsed.error.code, "model_unavailable");
+  assert.equal(parsed.error.type, "server_error");
+  assert.doesNotMatch(parsed.error.message, /paused|balance|support|deploy/i);
+  // The same sentence reaching the classifier as plain text classifies the same way.
+  assert.equal(pm.upstreamError(405, JSON.parse(body).message, {}).code, "model_unavailable");
+  assert.equal(pm.upstreamError(400, JSON.parse(body).message, {}).code, "model_unavailable", "status-independent");
+});

@@ -379,6 +379,28 @@ export async function POST(request) {
           break;
         }
 
+        case "deploy": {
+          // GET /api/v1/models is public on Deploy — it answers 200 without any key, so a
+          // models probe cannot tell a good Secret Key from a bad one. The only honest
+          // check is a 1-token chat call. 401/403 mean the key is wrong; 405 means the key
+          // is fine and the organization is paused on a zero prepaid balance (Deploy uses
+          // 405, not 402), which is a billing state, not an invalid credential.
+          const res = await guardedFetch("https://api.deploy.com/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: getDefaultModel("deploy"),
+              messages: [{ role: "user", content: "ping" }],
+              max_tokens: 1,
+              stream: false,
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          isValid = res.status !== 401 && res.status !== 403;
+          if (!isValid) error = "Invalid Deploy Secret Key";
+          break;
+        }
+
         case "deepseek":
         case "groq":
         case "xai":

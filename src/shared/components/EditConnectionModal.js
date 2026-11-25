@@ -22,6 +22,10 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     organization: "",
   });
   const [cloudflareData, setCloudflareData] = useState({ accountId: "" });
+  // Deploy: the Secret Key is inference, the portal cookie is the balance. The cookie
+  // expires (7 days) far more often than the key, so re-pasting it has to be possible
+  // here without deleting and recreating the connection.
+  const [deployData, setDeployData] = useState({ cookie: "", organizationId: "" });
   const [region, setRegion] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -48,6 +52,14 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (connection.provider === "cloudflare-ai" && connection.providerSpecificData) {
         setCloudflareData({ accountId: connection.providerSpecificData.accountId || "" });
       }
+      if (connection.provider === "deploy") {
+        // The cookie is a stored secret and is not returned by the API; only the org id
+        // survives a reload. Leaving the cookie field blank keeps the stored one.
+        setDeployData({
+          cookie: "",
+          organizationId: connection.providerSpecificData?.organizationId || "",
+        });
+      }
       // Load region for providers that support it (e.g. xiaomi-tokenplan)
       const providerCfg = AI_PROVIDERS?.[connection.provider];
       if (providerCfg?.regions) {
@@ -62,6 +74,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const isOAuth = connection?.authType === "oauth";
   const isAzure = connection?.provider === "azure";
   const isCloudflareAi = connection?.provider === "cloudflare-ai";
+  const isDeploy = connection?.provider === "deploy";
   const isCompatible = connection
     ? (isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider))
     : false;
@@ -168,6 +181,15 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (isCloudflareAi) {
         updates.providerSpecificData = { accountId: cloudflareData.accountId };
       }
+      if (isDeploy) {
+        // Merge, never replace: the stored cookie must survive an edit that only
+        // changes the organization id (and vice versa).
+        const psd = { ...(connection?.providerSpecificData || {}) };
+        if (deployData.cookie.trim()) psd.cookie = deployData.cookie.trim();
+        if (deployData.organizationId.trim()) psd.organizationId = deployData.organizationId.trim();
+        else delete psd.organizationId;
+        updates.providerSpecificData = psd;
+      }
       // Persist updated region for region-aware providers
       if (providerRegions && region) {
         updates.providerSpecificData = buildRegionSpecificData();
@@ -260,6 +282,28 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
                 onChange={(e) => setAzureData({ ...azureData, organization: e.target.value })}
                 placeholder="Organization ID"
                 hint="Required for billing"
+              />
+            </div>
+          </div>
+        )}
+
+        {isDeploy && (
+          <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
+            <h3 className="font-semibold mb-3 text-sm">Deploy portal (balance)</h3>
+            <div className="flex flex-col gap-3">
+              <Input
+                label="Portal cookie"
+                value={deployData.cookie}
+                onChange={(e) => setDeployData({ ...deployData, cookie: e.target.value })}
+                placeholder="hive-portal-production=…"
+                hint="Leave blank to keep the stored cookie. Copy it from portal.deploy.com DevTools → Cookies."
+              />
+              <Input
+                label="Organization ID"
+                value={deployData.organizationId}
+                onChange={(e) => setDeployData({ ...deployData, organizationId: e.target.value })}
+                placeholder="read from /api/profile when blank"
+                hint="Blank resolves it from /api/profile on every refresh."
               />
             </div>
           </div>
