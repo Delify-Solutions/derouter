@@ -246,10 +246,16 @@ export async function tokenStats(db, q) {
   // row falls under "" (unknown) for model and provider.
   // A charge belongs to its request's time (a back-charge is written later than
   // the request): the same instant both filters and buckets it. A charge is never
-  // written before its request, so `c.createdAt >= from` only narrows the scan —
-  // kept at the OVERALL q.from, not tightened per slice: a back-charge's own
-  // createdAt can fall well after its request's slice, so slicing on it directly
-  // would silently drop charges outside the request's own bucket window.
+  // written before its request, so a back-charge's own createdAt can land long
+  // after its request's own bucket (days later, even past the overall range) — the
+  // output window [q.from, q.to] below is therefore a FIXED filter on that
+  // computed instant, applied the same way on every iteration, never the thing
+  // we slice by. What we slice by instead is c.createdAt itself (indexed,
+  // monotonic): each row is visited exactly once as its own slice scrolls from
+  // q.from up to "now" (a charge can never be created after the instant this
+  // query runs), instead of the whole range being rescanned once per request-time
+  // slice above — that quadratic rescan was the actual freeze: every one of the
+  // ~50-150 request-time slices re-read the entire charge history since q.from.
   // Unlimited plans ledger their spend as charges that take no credit: left out.
   const chargeAt = "COALESCE(u.timestamp, c.createdAt)";
   const chargeBucket = BUCKET_SQL[q.granularity](chargeAt);
@@ -261,18 +267,19 @@ export async function tokenStats(db, q) {
   if (q.model) { chargeExtraConds.push(`(${REQUESTED_SQL} = ? OR u.model = ?)`); chargeExtraParams.push(q.model, q.model); }
 
   await forEachSlice(db, {
-    fromMs, toMs,
+    fromMs, toMs: Math.max(toMs, Date.now()),
     sql: (isLast) => `SELECT ${chargeBucket} AS bucket, ${chargeGroup} AS grp, SUM(-c.deltaNanoUsd) AS charged
        FROM creditLedger c
        LEFT JOIN usageHistory u ON u.id = c.usageId
        LEFT JOIN apiKeys k1 ON k1.id = u.apiKeyId
        LEFT JOIN apiKeys k2 ON u.apiKeyId IS NULL AND u.apiKey IS NOT NULL AND k2.key = u.apiKey
        LEFT JOIN deletedApiKeys dk ON k1.id IS NULL AND dk.apiKeyId = u.apiKeyId
-      WHERE c.kind = 'charge' AND c.createdAt >= ?
-        AND ${chargeAt} >= ? AND ${chargeAt} ${isLast ? "<=" : "<"} ?
+      WHERE c.kind = 'charge'
+        AND c.createdAt >= ? AND c.createdAt ${isLast ? "<=" : "<"} ?
+        AND ${chargeAt} >= ? AND ${chargeAt} <= ?
         AND ${chargeExtraConds.join(" AND ")}
       GROUP BY bucket, grp`,
-    timeParams: (from, to) => [q.from, from, to],
+    timeParams: (from, to) => [from, to, q.from, q.to],
     extraParams: chargeExtraParams,
   }, (rows) => {
     for (const row of rows) {
