@@ -643,3 +643,40 @@ export function parseQuotaData(provider, data) {
 
   return normalizedQuotas;
 }
+
+// Groups connections by provider, first-appearance order, original order
+// preserved within each group. Used to collapse the quota page into one card
+// per provider instead of one card per account.
+//
+// Every custom OpenAI/Anthropic-compatible node has its OWN generated provider
+// id (openai-compatible-chat-<uuid>, anthropic-compatible-<uuid>): grouping by
+// that raw id would make one singleton group per node — as long a list as no
+// grouping at all once an account has several of them. Bucket those under one
+// umbrella group instead; a real registry provider (openai, anthropic, gemini,
+// ...) still gets its own group exactly as before.
+//
+// Inlined rather than imported from src/shared/constants/providers.js because
+// that module pulls in open-sse's provider registry at import time, which
+// this file's plain-Node test hook (test/helpers/quota-utils-hook.mjs) does
+// not stub.
+function groupIdentityFor(provider) {
+  if (typeof provider === "string" && provider.startsWith("openai-compatible-")) {
+    return { provider: "__openai_compatible__", label: "OpenAI Compatible", icon: "/providers/oai-cc.png", fallbackText: "OC" };
+  }
+  if (typeof provider === "string" && provider.startsWith("anthropic-compatible-")) {
+    return { provider: "__anthropic_compatible__", label: "Anthropic Compatible", icon: "/providers/anthropic-m.png", fallbackText: "AC" };
+  }
+  const id = provider || "";
+  return { provider: id, label: id || "unknown", icon: `/providers/${id}.png`, fallbackText: id ? id.slice(0, 2).toUpperCase() : "PR" };
+}
+
+export function groupConnectionsByProvider(connections) {
+  const order = [];
+  const map = new Map();
+  for (const conn of connections) {
+    const identity = groupIdentityFor(conn.provider);
+    if (!map.has(identity.provider)) { map.set(identity.provider, { ...identity, connections: [] }); order.push(identity.provider); }
+    map.get(identity.provider).connections.push(conn);
+  }
+  return order.map((key) => map.get(key));
+}
