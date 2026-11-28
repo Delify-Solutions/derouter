@@ -68,22 +68,40 @@ const COMPLETION = `COALESCE(completionTokens, json_extract(tk, '$.completion_to
 function rollProviderHour(db, fromIso, toIso, hour) {
   // Same rules as getProviderUsageSummary's raw path: platform denials are not provider
   // usage; a blank provider is "unknown"; typed token columns win over the tokens JSON.
+  //
+  // Widened to (provider, connectionId) (spec admin-usage-views "Provider cache ratio and
+  // per-connection breakdown"): '' = no recorded connection, same convention as
+  // usageRollupKey's rawHash/apiKeyId. cacheRead/cacheCreation/vendorCostNano/
+  // pricedRequests are plain per-group sums — a true MAX-of-request figure (peakTokS) is
+  // safely distributive over this split (max of per-connection maxima = the provider's
+  // max), but peakTpm/peakRpm are max of a PER-MINUTE SUM across connections, which is NOT
+  // distributive that way (two connections busy in the same minute must be summed before
+  // the minute max is taken) — so those two stay computed at the provider level, unchanged,
+  // and are simply duplicated onto every connection row of that (hour, provider).
   const filter = `timestamp >= ? AND timestamp < ? AND COALESCE(provider, '') != 'platform'`;
   const totals = db.all(
     `WITH h AS (
-       SELECT COALESCE(NULLIF(provider, ''), 'unknown') AS prov, timestamp, promptTokens, completionTokens,
-              costNanoUsd, cost, ${TOKENS_OK} AS tk, ${META_OK} AS mt
+       SELECT COALESCE(NULLIF(provider, ''), 'unknown') AS prov, COALESCE(connectionId, '') AS conn,
+              timestamp, promptTokens, completionTokens, costNanoUsd, cost, vendorCostNanoUsd,
+              ${TOKENS_OK} AS tk, ${META_OK} AS mt
          FROM usageHistory WHERE ${filter}
      ), x AS (
-       SELECT prov, timestamp, ${PROMPT} AS pin, ${COMPLETION} AS pout, ${COST_NANO} AS costNano,
+       SELECT prov, conn, timestamp, ${PROMPT} AS pin, ${COMPLETION} AS pout, ${COST_NANO} AS costNano,
+              COALESCE(json_extract(tk, '$.cached_tokens'), json_extract(tk, '$.cache_read_input_tokens'),
+                       json_extract(tk, '$.prompt_tokens_details.cached_tokens'), 0) AS cr,
+              COALESCE(json_extract(tk, '$.cache_creation_input_tokens'), 0) AS cc,
+              vendorCostNanoUsd,
               json_extract(mt, '$.latencyMs') AS lat
          FROM h
      )
-     SELECT prov AS provider, COUNT(*) AS requests, SUM(pin) AS input, SUM(pout) AS output,
+     SELECT prov AS provider, conn AS connectionId, COUNT(*) AS requests, SUM(pin) AS input, SUM(pout) AS output,
+            SUM(cr) AS cacheRead, SUM(cc) AS cacheCreation,
             SUM(costNano) AS costNano,
+            SUM(COALESCE(vendorCostNanoUsd, 0)) AS vendorCostNano,
+            SUM(CASE WHEN vendorCostNanoUsd IS NOT NULL THEN 1 ELSE 0 END) AS priced,
             MAX(CASE WHEN lat > 0 AND pout > 0 THEN pout * 1000.0 / lat END) AS peakTokS,
             MAX(timestamp) AS lastTs
-       FROM x GROUP BY prov`,
+       FROM x GROUP BY prov, conn`,
     [fromIso, toIso]
   );
   if (totals.length === 0) return;
@@ -104,10 +122,12 @@ function rollProviderHour(db, fromIso, toIso, hour) {
   for (const row of totals) {
     const peak = peaks.get(row.provider) || {};
     db.run(
-      `INSERT OR REPLACE INTO usageRollupProvider(hour, provider, requests, input, output, costNano, peakTpm, peakRpm, peakTokS, lastTs)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [hour, row.provider, row.requests, row.input || 0, row.output || 0,
-        Math.round(row.costNano || 0), peak.peakTpm || 0, peak.peakRpm || 0, row.peakTokS || 0, row.lastTs]
+      `INSERT OR REPLACE INTO usageRollupProvider(hour, provider, connectionId, requests, input, output, cacheRead, cacheCreation, costNano, vendorCostNano, pricedRequests, peakTpm, peakRpm, peakTokS, lastTs)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [hour, row.provider, row.connectionId, row.requests, row.input || 0, row.output || 0,
+        row.cacheRead || 0, row.cacheCreation || 0,
+        Math.round(row.costNano || 0), Math.round(row.vendorCostNano || 0), row.priced || 0,
+        peak.peakTpm || 0, peak.peakRpm || 0, row.peakTokS || 0, row.lastTs]
     );
   }
 }
@@ -117,7 +137,7 @@ function rollKeyHour(db, fromIso, toIso, hour) {
   const groups = db.all(
     `WITH h AS (
        SELECT apiKeyId, apiKey, model, timestamp, promptTokens, completionTokens, costNanoUsd, cost,
-              ${TOKENS_OK} AS tk, ${META_OK} AS mt
+              vendorCostNanoUsd, ${TOKENS_OK} AS tk, ${META_OK} AS mt
          FROM usageHistory WHERE timestamp >= ? AND timestamp < ?
      ), x AS (
        SELECT apiKeyId, apiKey, timestamp,
@@ -127,22 +147,25 @@ function rollKeyHour(db, fromIso, toIso, hour) {
                        json_extract(tk, '$.prompt_tokens_details.cached_tokens'), 0) AS cr,
               COALESCE(json_extract(tk, '$.cache_creation_input_tokens'), 0) AS cc,
               ${COST_NANO} AS costNano,
+              vendorCostNanoUsd,
               json_extract(mt, '$.cacheEstimated') AS ce
          FROM h
      )
      SELECT apiKeyId, apiKey, m, COUNT(*) AS n, SUM(pin) AS pin, SUM(pout) AS pout, SUM(cr) AS cr, SUM(cc) AS cc,
             SUM(costNano) AS costNano, MAX(timestamp) AS lastTs,
-            MAX(CASE WHEN ce = 1 AND cr > 0 THEN 1 ELSE 0 END) AS est
+            MAX(CASE WHEN ce = 1 AND cr > 0 THEN 1 ELSE 0 END) AS est,
+            SUM(COALESCE(vendorCostNanoUsd, 0)) AS vendorCostNano,
+            SUM(CASE WHEN vendorCostNanoUsd IS NOT NULL THEN 1 ELSE 0 END) AS priced
        FROM x GROUP BY COALESCE(apiKeyId, ''), COALESCE(apiKey, ''), m`,
     [fromIso, toIso]
   );
   for (const g of groups) {
     db.run(
-      `INSERT OR REPLACE INTO usageRollupKey(hour, apiKeyId, rawHash, model, requests, input, output, cacheRead, cacheCreation, costNano, est, lastTs)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO usageRollupKey(hour, apiKeyId, rawHash, model, requests, input, output, cacheRead, cacheCreation, costNano, vendorCostNano, pricedRequests, est, lastTs)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // '' = absent, so the primary key never holds NULL. The raw key is hashed, not stored.
       [hour, g.apiKeyId || "", g.apiKey ? sha256Hex(g.apiKey) : "", g.m, g.n, g.pin || 0, g.pout || 0,
-        g.cr || 0, g.cc || 0, Math.round(g.costNano || 0), g.est ? 1 : 0, g.lastTs]
+        g.cr || 0, g.cc || 0, Math.round(g.costNano || 0), Math.round(g.vendorCostNano || 0), g.priced || 0, g.est ? 1 : 0, g.lastTs]
     );
   }
 
@@ -355,9 +378,27 @@ export async function forEachRollupSlice({ fromHour, toHour }, fn, hoursPerSlice
 export function readProviderRollup(db, { fromHour, toHour }) {
   return db.all(
     `SELECT provider, SUM(requests) AS requests, SUM(input) AS input, SUM(output) AS output, SUM(costNano) AS costNano,
+            SUM(cacheRead) AS cacheRead, SUM(cacheCreation) AS cacheCreation,
+            SUM(vendorCostNano) AS vendorCostNano, SUM(pricedRequests) AS pricedRequests,
             MAX(peakTpm) AS peakTpm, MAX(peakRpm) AS peakRpm, MAX(peakTokS) AS peakTokS, MAX(lastTs) AS lastTs,
             MAX(CASE WHEN lastTs IS NULL THEN hour END) AS unfilledHour
        FROM usageRollupProvider WHERE hour >= ? AND hour < ? GROUP BY provider`,
+    [fromHour, toHour]
+  );
+}
+
+/**
+ * Per (provider, connection) breakdown over a rolled hour range (spec admin-usage-views
+ * "Provider cache ratio and per-connection breakdown"). connectionId '' = no recorded
+ * connection on those requests — surfaced as its own row, like any other connection.
+ */
+export function readProviderConnectionRollup(db, { fromHour, toHour }) {
+  return db.all(
+    `SELECT provider, connectionId, SUM(requests) AS requests, SUM(input) AS input, SUM(output) AS output,
+            SUM(cacheRead) AS cacheRead, SUM(cacheCreation) AS cacheCreation, SUM(costNano) AS costNano,
+            SUM(vendorCostNano) AS vendorCostNano, SUM(pricedRequests) AS pricedRequests,
+            MAX(lastTs) AS lastTs
+       FROM usageRollupProvider WHERE hour >= ? AND hour < ? GROUP BY provider, connectionId`,
     [fromHour, toHour]
   );
 }
@@ -442,6 +483,7 @@ export function readKeyRollup(db, { fromHour, toHour }) {
   return db.all(
     `SELECT apiKeyId, rawHash, model AS m, SUM(requests) AS n, SUM(input) AS pin, SUM(output) AS pout,
             SUM(cacheRead) AS cr, SUM(cacheCreation) AS cc, SUM(costNano) AS costNano,
+            SUM(vendorCostNano) AS vendorCostNano, SUM(pricedRequests) AS pricedRequests,
             MAX(lastTs) AS lastTs, MAX(est) AS est
        FROM usageRollupKey WHERE hour >= ? AND hour < ? GROUP BY apiKeyId, rawHash, model`,
     [fromHour, toHour]

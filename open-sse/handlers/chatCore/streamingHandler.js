@@ -218,6 +218,7 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
       id: streamDetailId,
       costNanoUsd: usageResult?.costNanoUsd ?? null,
       chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+      vendorCostNanoUsd: usageResult?.vendorCostNanoUsd ?? null,
     }))).catch(err => {
       console.error("[RequestDetail] Failed to update streaming content:", err.message);
     });

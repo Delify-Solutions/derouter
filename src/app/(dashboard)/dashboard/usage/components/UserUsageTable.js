@@ -11,7 +11,7 @@ import Table from "@/shared/components/Table";
 import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { cn } from "@/shared/utils/cn";
-import { fmtUsd } from "@/shared/utils/money";
+import { fmtUsd, fmtUsdNano } from "@/shared/utils/money";
 import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
 
 // Usage grouped by the customer who owns the key: one customer may hold many
@@ -19,7 +19,7 @@ import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tabl
 // underneath. Data: GET /api/usage/user-summary (admin only).
 
 const PAGE_SIZE = 20;
-const COLS = 12;
+const COLS = 13;
 
 const PERIOD_PRESETS = [
   { value: "today", label: "Today" },
@@ -34,6 +34,7 @@ const USER_SORTS = [
   { value: "requests", label: "Requests" },
   { value: "tokens", label: "Tokens" },
   { value: "cost", label: "Chi phí" },
+  { value: "vendorCost", label: "Đã dùng thực (giá vốn)" },
   { value: "lastUsed", label: "Lần dùng cuối" },
 ];
 const USER_DEFAULTS = { sort: "cost", dir: "desc", top: 0 };
@@ -46,6 +47,9 @@ function userSortValue(o, field) {
     case "requests": return t.requests || 0;
     case "tokens": return (t.input || 0) + (t.output || 0);
     case "cost": return t.costNanoUsd != null ? t.costNanoUsd : Math.round(Number(t.cost || 0) * 1e9);
+    // No priced requests in the period: null, sorts after every customer who has one
+    // (spec admin-usage-views "Users vendor-cost column"), never 0.
+    case "vendorCost": return (t.pricedRequests || 0) > 0 ? (t.vendorCostNanoUsd || 0) : null;
     case "lastUsed": {
       // No last request in the period: sorts after every customer who has one.
       const ms = o.lastUsedAt ? Date.parse(o.lastUsedAt) : NaN;
@@ -81,6 +85,13 @@ function fmtCompact(v) {
 function fmtCost(acc) {
   if (!acc) return "—";
   return fmtUsd(acc.costNanoUsd != null ? acc.costNanoUsd / 1e9 : Number(acc.cost || 0));
+}
+
+// "Đã dùng thực (giá vốn)" (spec admin-usage-views "Users vendor-cost column"): "—" for
+// a customer with no priced requests in range, never 0.
+function fmtVendorCost(acc) {
+  if (!acc || !(acc.pricedRequests > 0)) return "—";
+  return fmtUsdNano(acc.vendorCostNanoUsd || 0);
 }
 
 function fmtWhen(iso) {
@@ -232,6 +243,7 @@ export default function UserUsageTable() {
                 <Table.HeaderCell className="text-right">Output</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Input cache</Table.HeaderCell>
                 <SortableHeader label="Cost" field="cost" state={query} onSort={onHeaderSort} align="right" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
+                <SortableHeader label="Đã dùng thực (giá vốn)" field="vendorCost" state={query} onSort={onHeaderSort} align="right" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted whitespace-nowrap" />
                 <Table.HeaderCell className="text-right">Peak RPM</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Peak TPM</Table.HeaderCell>
                 <SortableHeader label="Last used" field="lastUsed" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted whitespace-nowrap" />
@@ -313,6 +325,7 @@ function OwnerRow({ o, rowIdx, isOpen, onToggle }) {
           {t.cacheRead > 0 ? `${t.cacheEstimated ? "≈" : ""}${fmtCompact(t.cacheRead)}` : "—"}
         </Table.Cell>
         <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCost(t)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtVendorCost(t)}</Table.Cell>
         <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakRpm)}</Table.Cell>
         <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakTpm)}</Table.Cell>
         <Table.Cell className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(o.lastUsedAt)}</Table.Cell>

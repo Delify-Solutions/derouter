@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestDetails, clearAllRequestDetails } from "@/lib/usageDb";
 import { describeKeysByRaw } from "@/lib/db/repos/apiKeysRepo.js";
+import { getProviderConnections } from "@/lib/db/repos/connectionsRepo.js";
 
 /** keyInfo from the owner snapshot stored on a request-details row (key deleted since). */
 function snapshotKeyInfo(owner) {
@@ -114,6 +115,15 @@ export async function GET(request) {
     // Name the key and its owner on every row, so the admin sees WHO made the
     // request, not just a masked key.
     const owners = await describeKeysByRaw(redactedDetails.map((d) => d.apiKey));
+    // Account column (spec admin-usage-views "Request details by model"): the provider
+    // connection that served the request, by name (or e-mail, if no name). A row with no
+    // recorded connectionId, or whose connection has since been deleted, shows null — the
+    // UI renders "—" for that.
+    let connectionMap = {};
+    try {
+      const connections = await getProviderConnections();
+      connectionMap = Object.fromEntries(connections.map((c) => [c.id, c.name || c.email || null]));
+    } catch { /* connections unavailable — every row falls back to "—" */ }
     // A key deleted since the request no longer resolves live; the owner
     // snapshotted on the row at request time still names the customer.
     const details = redactedDetails.map((d) => ({
@@ -122,6 +132,7 @@ export async function GET(request) {
       requestedModel: d.requestedModel || null,
       upstreamModel: d.model ?? null,
       keyInfo: d.apiKey ? owners[d.apiKey] ?? snapshotKeyInfo(d.owner) ?? { kind: "unknown" } : null,
+      accountName: d.connectionId ? (connectionMap[d.connectionId] || null) : null,
     }));
 
     return NextResponse.json({ ...result, details, modelView, sort, order });

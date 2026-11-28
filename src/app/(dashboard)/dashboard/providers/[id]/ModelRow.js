@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { Badge, CapacityBadges } from "@/shared/components";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEditVendorCost, hasVendorCost, caps, thinkingSuffix }) {
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
     ? "border-vx-success/40"
@@ -40,6 +40,21 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             <CapacityBadges caps={caps} colorOverride="text-vx-text-muted/70" size={12} />
           </span>
         </div>
+        {onEditVendorCost && (
+          <div className="relative shrink-0 group/btn">
+            <button
+              onClick={onEditVendorCost}
+              className="rounded-vx-sm p-0.5 text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-primary"
+            >
+              {/* Distinct glyph (not just colour) marks whether this model already has a
+                  vendor cost set — ui-dna.md "no colour-only status". */}
+              <span className="material-symbols-outlined text-sm">{hasVendorCost ? "payments" : "add_card"}</span>
+            </button>
+            <span className="pointer-events-none absolute mt-1 top-5 left-1/2 -translate-x-1/2 text-[10px] text-vx-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
+              {hasVendorCost ? "Sửa giá vốn" : "Thêm giá vốn"}
+            </span>
+          </div>
+        )}
         {onTest && (
           <div className="relative shrink-0 group/btn">
             <button
@@ -106,6 +121,8 @@ ModelRow.propTypes = {
   onTest: PropTypes.func,
   isTesting: PropTypes.bool,
   onDisable: PropTypes.func,
+  onEditVendorCost: PropTypes.func,
+  hasVendorCost: PropTypes.bool,
   caps: PropTypes.object,
   thinkingSuffix: PropTypes.string,
 };
