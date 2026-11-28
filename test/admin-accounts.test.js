@@ -230,10 +230,14 @@ test("the registry lists every page key named in spec admin-accounts (32 existin
   // admin-accounts — 33 keys total. (tasks.md's "31 existing pages" summary
   // undercounts its own enumerated list by one; the enumerated list is ground truth.)
   // +1 (34): change cache-miss-auto-refund registered its own admin page
-  // ("cache-refunds") after this spec was written — the count here tracks the
-  // registry as it stands, not a frozen historical total.
-  assert.equal(PAGE_KEYS.length, 34);
-  assert.equal(new Set(PAGE_KEYS).size, 34);
+  // ("cache-refunds") after this spec was written.
+  // -1 (33): change vendor-cost-profit removed the "pricing" page (pool
+  // sell-price override) — unreachable for customer billing under
+  // model-privacy's default combo-only restriction, so dropped as dead UI
+  // rather than kept. The count here tracks the registry as it stands, not a
+  // frozen historical total.
+  assert.equal(PAGE_KEYS.length, 33);
+  assert.equal(new Set(PAGE_KEYS).size, 33);
   assert.ok(PAGE_KEYS.includes("admin-accounts"));
 });
 

@@ -1196,6 +1196,8 @@ export default function ProviderDetailPage() {
           onDeleteCustomModel={(modelId, type = "llm") => handleDeleteCustomModel(modelId, type, providerStorageAlias)}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
+          onEditVendorCost={(modelId) => setEditingVendorCostModelId(modelId)}
+          vendorCostModelIds={vendorCostModelIds}
         />
       );
     }

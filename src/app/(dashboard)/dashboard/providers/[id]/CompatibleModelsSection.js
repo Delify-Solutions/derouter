@@ -8,7 +8,7 @@ import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels"
 import { guessModelKind } from "@/lib/models/modelKind";
 
 const KIND_LABEL = { llm: "Text", image: "Image" };
-function CompatibleModelRow({ modelId, fullModel, kind, copied, onCopy, onDeleteAlias, onTest, onChangeKind, result, isTesting }) {
+function CompatibleModelRow({ modelId, fullModel, kind, copied, onCopy, onDeleteAlias, onTest, onChangeKind, result, isTesting, onEditVendorCost, hasVendorCost }) {
   const status = result?.status;
   const borderColor = status === "ok"
     ? "border-vx-success/40"
@@ -67,6 +67,21 @@ function CompatibleModelRow({ modelId, fullModel, kind, copied, onCopy, onDelete
             </div>
           </div>
         </div>
+        {onEditVendorCost && (
+          <div className="relative shrink-0 group/btn">
+            <button
+              onClick={onEditVendorCost}
+              className="rounded-vx-sm p-1 text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-primary"
+            >
+              {/* Distinct glyph (not just colour) marks whether this model already has a
+                  vendor cost set — ui-dna.md "no colour-only status". */}
+              <span className="material-symbols-outlined text-sm">{hasVendorCost ? "payments" : "add_card"}</span>
+            </button>
+            <span className="pointer-events-none absolute mt-1 top-6 left-1/2 -translate-x-1/2 text-[10px] text-vx-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
+              {hasVendorCost ? "Sửa giá vốn" : "Thêm giá vốn"}
+            </span>
+          </div>
+        )}
         {onTest && (
           <button
             onClick={onTest}
@@ -110,7 +125,7 @@ function CompatibleModelRow({ modelId, fullModel, kind, copied, onCopy, onDelete
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onEditVendorCost, vendorCostModelIds }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -276,6 +291,8 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                 onTest={connections.length > 0 ? () => handleTestModel(id, kind) : undefined}
                 result={testResults[id]}
                 isTesting={testingModelId === id}
+                onEditVendorCost={onEditVendorCost ? () => onEditVendorCost(id) : undefined}
+                hasVendorCost={vendorCostModelIds ? vendorCostModelIds.has(id) : false}
               />
             );
           })}
@@ -300,4 +317,21 @@ CompatibleModelsSection.propTypes = {
     isActive: PropTypes.bool,
   })).isRequired,
   isAnthropic: PropTypes.bool,
+  onEditVendorCost: PropTypes.func,
+  vendorCostModelIds: PropTypes.instanceOf(Set),
+};
+
+CompatibleModelRow.propTypes = {
+  modelId: PropTypes.string.isRequired,
+  fullModel: PropTypes.string.isRequired,
+  kind: PropTypes.string.isRequired,
+  copied: PropTypes.string,
+  onCopy: PropTypes.func.isRequired,
+  onDeleteAlias: PropTypes.func.isRequired,
+  onTest: PropTypes.func,
+  onChangeKind: PropTypes.func,
+  result: PropTypes.object,
+  isTesting: PropTypes.bool,
+  onEditVendorCost: PropTypes.func,
+  hasVendorCost: PropTypes.bool,
 };

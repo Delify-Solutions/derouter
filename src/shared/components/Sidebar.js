@@ -27,7 +27,12 @@ const navItems = [
   // này thì admin không thể đổi nhóm, khóa hay xem ai đang dùng bao nhiêu.
   { href: "/dashboard/users", label: "Người dùng", icon: "person", key: "users" },
   { href: "/dashboard/groups", label: "Groups", icon: "group_work", key: "groups" },
-  { href: "/dashboard/pricing", label: "Pricing", icon: "sell", key: "pricing" },
+  // Pool model pricing (the sell-price override this page edited) only applied to a
+  // customer calling a provider/model directly — unreachable under model-privacy's
+  // default combo-only restriction (src/lib/models/customerModels.js), so removed
+  // rather than kept as dead UI. resolvePrice's "user override" tier and its API
+  // route are untouched (harmless if unused; only reachable with hideUpstreamModels
+  // explicitly turned off).
   { href: "/dashboard/plans", label: "Plans", icon: "sell", key: "plans" },
   { href: "/dashboard/orders", label: "Orders", icon: "receipt_long", key: "orders" },
   { href: "/dashboard/providers", label: "Providers", icon: "dns", key: "providers" },
