@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Select from "@/shared/components/Select";
@@ -8,6 +8,7 @@ import Table from "@/shared/components/Table";
 import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
+import { fmtUsdNano } from "@/shared/utils/money";
 
 const PERIOD_PRESETS = [
   { value: "today", label: "Today" },
@@ -32,7 +33,24 @@ const PROVIDER_SORTS = [
 ];
 const PROVIDER_DEFAULTS = { sort: "requests", dir: "desc", top: 0 };
 const PROVIDER_QUERY_OPTIONS = { sortFields: PROVIDER_SORTS.map((s) => s.value) };
-const COLS = 12;
+const COLS = 14;
+
+// Share of input tokens that were cache reads or cache-creation writes (spec
+// admin-usage-views "Provider cache ratio and per-connection breakdown"). "—" when there
+// were no input tokens in the period to take a ratio of.
+function fmtCacheRatio(ratio) {
+  if (ratio == null) return "—";
+  return `${Math.round(ratio * 1000) / 10}%`;
+}
+
+// Profit (charge minus vendor cost); "Chưa có dữ liệu giá vốn" when nothing in this row
+// was priced, never a fabricated 0.
+function ProfitCell({ profitNanoUsd }) {
+  if (profitNanoUsd == null) {
+    return <span className="text-vx-text-muted text-xs" title="Chưa có dữ liệu giá vốn">Chưa có dữ liệu giá vốn</span>;
+  }
+  return <span className={profitNanoUsd < 0 ? "text-vx-danger" : ""}>{fmtUsdNano(profitNanoUsd)}</span>;
+}
 
 const providerName = (it) => it.name || it.provider || "";
 // Integer nanoUSD (money rule): the authoritative figure, the legacy float only as fallback.
@@ -68,6 +86,8 @@ function sumProviders(list) {
       acc.input += it.input || 0;
       acc.output += it.output || 0;
       acc.costNanoUsd += costNanoOf(it);
+      acc.cacheRead += it.cacheRead || 0;
+      acc.cacheCreation += it.cacheCreation || 0;
       acc.liveRpm += it.liveRpm || 0;
       acc.liveTpm += it.liveTpm || 0;
       acc.peakRpm = Math.max(acc.peakRpm, it.peakRpm || 0);
@@ -76,7 +96,7 @@ function sumProviders(list) {
       if (it.lastUsed && (!acc.lastUsed || it.lastUsed > acc.lastUsed)) acc.lastUsed = it.lastUsed;
       return acc;
     },
-    { requests: 0, input: 0, output: 0, costNanoUsd: 0, liveRpm: 0, liveTpm: 0, peakRpm: 0, peakTpm: 0, peakTokS: 0, lastUsed: null }
+    { requests: 0, input: 0, output: 0, costNanoUsd: 0, cacheRead: 0, cacheCreation: 0, liveRpm: 0, liveTpm: 0, peakRpm: 0, peakTpm: 0, peakTokS: 0, lastUsed: null }
   );
 }
 
@@ -89,12 +109,14 @@ function TotalsRow({ label, count, t }) {
       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.input)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.output)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(t.costNanoUsd)}</td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCacheRatio(t.input > 0 ? (t.cacheRead + t.cacheCreation) / t.input : null)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums" title="Sum of live RPM across providers">{fmtCompact(t.liveRpm)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums" title="Sum of live TPM across providers">{fmtCompact(t.liveTpm)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakRpm)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakTpm)}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums" title="Max peak across providers">{fmtCompact(t.peakTokS)}</td>
       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(t.lastUsed)}</td>
+      <td className="px-3 py-2"></td>
     </tr>
   );
 }
@@ -114,6 +136,7 @@ export default function ProviderUsageTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState("30d");
+  const [expanded, setExpanded] = useState(null);
   const [query, setQuery] = useTableQuery("providers", PROVIDER_DEFAULTS, PROVIDER_QUERY_OPTIONS);
 
   const load = useCallback(async () => {
@@ -205,12 +228,14 @@ export default function ProviderUsageTable() {
                 <SortableHeader label="Input" field="input" align="right" {...headerProps} />
                 <SortableHeader label="Output" field="output" align="right" {...headerProps} />
                 <SortableHeader label="Cost" field="cost" align="right" {...headerProps} />
+                <Table.HeaderCell className="text-right">Cache hit</Table.HeaderCell>
                 <SortableHeader label="RPM" field="liveRpm" align="right" {...headerProps} />
                 <SortableHeader label="TPM" field="liveTpm" align="right" {...headerProps} />
                 <Table.HeaderCell className="text-right">Peak RPM</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Peak TPM</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Peak Tok/s</Table.HeaderCell>
                 <SortableHeader label="Last used" field="lastUsed" {...headerProps} />
+                <Table.HeaderCell className="w-10"><span className="sr-only">Chi tiết</span></Table.HeaderCell>
               </tr>
             </Table.Head>
             <Table.Body>
@@ -224,25 +249,90 @@ export default function ProviderUsageTable() {
                 />
               ) : (
                 <>
-                  {sorted.map((it, idx) => (
-                    <Table.Row key={it.provider}>
-                      <Table.Cell className="px-3 py-2 text-vx-text-muted">{idx + 1}</Table.Cell>
-                      <Table.Cell className="px-3 py-2">
-                        <div className="font-medium text-vx-text">{providerName(it)}</div>
-                        <div className="font-mono text-xs text-vx-text-muted">{it.provider}</div>
-                      </Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.requests)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.input)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.output)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(it))}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveRpm)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveTpm)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakRpm)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTpm)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTokS)}</Table.Cell>
-                      <Table.Cell className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(it.lastUsed)}</Table.Cell>
-                    </Table.Row>
-                  ))}
+                  {sorted.map((it, idx) => {
+                    const hasBreakdown = Array.isArray(it.breakdown) && it.breakdown.length > 0;
+                    const isOpen = expanded === it.provider;
+                    const detailsId = `provider-breakdown-${it.provider}`;
+                    return (
+                      <Fragment key={it.provider}>
+                        <Table.Row>
+                          <Table.Cell className="px-3 py-2 text-vx-text-muted">{idx + 1}</Table.Cell>
+                          <Table.Cell className="px-3 py-2">
+                            <div className="font-medium text-vx-text">{providerName(it)}</div>
+                            <div className="font-mono text-xs text-vx-text-muted">{it.provider}</div>
+                          </Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.requests)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.input)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.output)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(it))}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCacheRatio(it.cacheHitRatio)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveRpm)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveTpm)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakRpm)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTpm)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTokS)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(it.lastUsed)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-right">
+                            {hasBreakdown && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setExpanded(isOpen ? null : it.provider)}
+                                aria-expanded={isOpen}
+                                aria-controls={detailsId}
+                                aria-label={`${isOpen ? "Ẩn" : "Hiện"} chi tiết theo tài khoản của ${providerName(it)}`}
+                                className="w-8 border border-vx-border px-0"
+                              >
+                                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{isOpen ? "expand_less" : "expand_more"}</span>
+                              </Button>
+                            )}
+                          </Table.Cell>
+                        </Table.Row>
+                        {isOpen && hasBreakdown && (
+                          <tr id={detailsId} className="bg-vx-surface-2/30">
+                            <td colSpan={COLS} className="p-4">
+                              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-vx-text-muted">
+                                Theo tài khoản ({it.breakdown.length})
+                              </h3>
+                              <table className="w-full text-sm">
+                                <Table.Head>
+                                  <tr>
+                                    <Table.HeaderCell className="px-2 py-1.5">Tài khoản</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Requests</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Input</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Output</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Cost</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Cache hit</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Giá vốn</Table.HeaderCell>
+                                    <Table.HeaderCell className="px-2 py-1.5 text-right">Lợi nhuận</Table.HeaderCell>
+                                  </tr>
+                                </Table.Head>
+                                <Table.Body>
+                                  {it.breakdown.map((c) => (
+                                    <Table.Row key={c.connectionId || "none"}>
+                                      <Table.Cell className="px-2 py-1.5 text-vx-text">{c.accountName || "—"}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(c.requests)}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(c.input)}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(c.output)}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(c))}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCacheRatio(c.cacheHitRatio)}</Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">
+                                        {c.pricedRequests > 0 ? fmtUsdNano(c.vendorCostNanoUsd || 0) : "—"}
+                                      </Table.Cell>
+                                      <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">
+                                        <ProfitCell profitNanoUsd={c.profitNanoUsd} />
+                                      </Table.Cell>
+                                    </Table.Row>
+                                  ))}
+                                </Table.Body>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                   {partial && <TotalsRow label="Tổng đang hiển thị" count={sorted.length} t={shownTotals} />}
                   <TotalsRow label="Tổng kỳ" count={items.length} t={periodTotals} />
                 </>

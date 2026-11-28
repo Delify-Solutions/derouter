@@ -572,7 +572,7 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
       errorSource: "platform"
       // A pre-upstream failure never reaches saveRequestUsage/chargeSync: 0, not null — the
       // cost IS known (nothing was billed), it just was never computed at a row with no usage.
-    }, { costNanoUsd: 0, chargedNanoUsd: 0 })).catch(() => { });
+    }, { costNanoUsd: 0, chargedNanoUsd: 0, vendorCostNanoUsd: null })).catch(() => { });
     // Pre-upstream failure (abort/bad-gateway) — record an error row in
     // usageHistory so the public /usage page shows it. Source is "platform":
     // the error did not come back from the upstream API.
@@ -680,7 +680,7 @@ async function handleChatCoreAttempt({ detachers, body, modelInfo, credentials, 
       pxpipe: pxpipeSummary,
       status: "error",
       errorSource: "upstream"
-    }, { costNanoUsd: 0, chargedNanoUsd: 0 })).catch(() => { });
+    }, { costNanoUsd: 0, chargedNanoUsd: 0, vendorCostNanoUsd: null })).catch(() => { });
     // Upstream API returned an error (429/5xx/...) — record it in usageHistory
     // so the public /usage page shows error rows alongside 200s. errorSource
     // "upstream" lets the admin details tab distinguish API-returned errors.

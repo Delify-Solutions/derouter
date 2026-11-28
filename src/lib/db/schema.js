@@ -12,7 +12,15 @@
 // view/edit/delete matrix). Additive — migration 008 creates both tables itself
 // (new tables, needed before the row it inserts) and backfills a `super_admin`
 // account from settings.password.
-export const SCHEMA_VERSION = 52;
+// v53: vendor-cost-profit (admin-only vendor cost snapshot, separate from
+// customer billing). `usageHistory`/`requestDetails` gain a nullable
+// `vendorCostNanoUsd` (additive). `usageRollupKey` gains `vendorCostNano`/
+// `pricedRequests` (additive). `usageRollupProvider` is widened to
+// `(hour, provider, connectionId)` plus `cacheRead`/`cacheCreation`/
+// `vendorCostNano`/`pricedRequests` — destructive (primary key change), so
+// migration 009 drops and recreates that one table; the background hourly
+// rollup repopulates it within LOG_RETENTION_DAYS.
+export const SCHEMA_VERSION = 53;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -192,6 +200,13 @@ export const TABLES = {
       // Client IP of the API request (spec activity-ip-log). NULL when no trusted
       // address was available and for rows written before this column existed.
       clientIp: "TEXT",
+      // Admin-only vendor (upstream) cost snapshot, integer nanoUSD (spec
+      // vendor-cost-pricing). Resolved once at log time from the admin's vendor-cost
+      // record for (provider, model) at this row's own timestamp; never recomputed.
+      // NULL = no vendor-cost record matched at the time (including every row written
+      // before this column existed) — distinct from a vendor cost of zero. Never read
+      // by customer billing (costNanoUsd / chargedNanoUsd are unaffected).
+      vendorCostNanoUsd: "INTEGER",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",
@@ -247,6 +262,10 @@ export const TABLES = {
       // genuinely free or fully unlimited".
       costNanoUsd: "INTEGER",
       chargedNanoUsd: "INTEGER",
+      // Same admin-only vendor-cost snapshot as usageHistory.vendorCostNanoUsd (spec
+      // vendor-cost-pricing), written at log time alongside costNanoUsd/chargedNanoUsd.
+      // NULL = no vendor-cost record matched (including every row predating this column).
+      vendorCostNanoUsd: "INTEGER",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_rd_ts ON requestDetails(timestamp DESC)",
@@ -726,14 +745,33 @@ export const TABLES = {
   // repos/usageRollup.js). One row per COMPLETE hour (`hour` = "YYYY-MM-DDTHH", UTC), so a
   // month is ~720 hours of rows instead of millions of requests. Rebuildable from
   // usageHistory at any time: invalidation just deletes rows and rewinds the watermark.
+  //
+  // v53 (vendor-cost-profit): widened from (hour, provider) to (hour, provider,
+  // connectionId) so the Providers tab can expand a provider into its per-connection
+  // (account) breakdown, plus cacheRead/cacheCreation (cache-hit ratio) and
+  // vendorCostNano/pricedRequests (profit). This is a DESTRUCTIVE primary-key change —
+  // existing rows cannot be split into per-connection rows after the fact — handled by
+  // migration 009 (drop + let the additive sync recreate; the background hourly rollup
+  // repopulates it within LOG_RETENTION_DAYS). connectionId is '' for a request with no
+  // recorded connection, same convention as usageRollupKey's '' = absent.
   usageRollupProvider: {
     columns: {
       hour: "TEXT NOT NULL",
       provider: "TEXT NOT NULL",
+      connectionId: "TEXT NOT NULL DEFAULT ''",
       requests: "INTEGER NOT NULL DEFAULT 0",
       input: "INTEGER NOT NULL DEFAULT 0",
       output: "INTEGER NOT NULL DEFAULT 0",
+      // Cache reads / cache-creation writes (spec admin-usage-views "Provider cache
+      // ratio and per-connection breakdown"). Additive alongside the PK widening.
+      cacheRead: "INTEGER NOT NULL DEFAULT 0",
+      cacheCreation: "INTEGER NOT NULL DEFAULT 0",
       costNano: "INTEGER NOT NULL DEFAULT 0",
+      // Sum of vendorCostNanoUsd over priced requests, and how many of this bucket's
+      // requests had one (spec vendor-cost-pricing). pricedRequests = 0 means "no vendor
+      // cost data", never "zero cost" (design.md decision #4).
+      vendorCostNano: "INTEGER NOT NULL DEFAULT 0",
+      pricedRequests: "INTEGER NOT NULL DEFAULT 0",
       // Highest per-minute tokens / requests inside the hour, and the fastest single
       // request (output tokens per second of generation).
       peakTpm: "INTEGER NOT NULL DEFAULT 0",
@@ -744,7 +782,7 @@ export const TABLES = {
       // background (usageRollup.scheduleProviderLastTsBackfill).
       lastTs: "TEXT",
     },
-    primaryKey: "PRIMARY KEY (hour, provider)",
+    primaryKey: "PRIMARY KEY (hour, provider, connectionId)",
     indexes: [],
   },
   // Per (hour, key, effective model). `rawHash` is the SHA-256 of a raw API key for the
@@ -761,6 +799,11 @@ export const TABLES = {
       cacheRead: "INTEGER NOT NULL DEFAULT 0",
       cacheCreation: "INTEGER NOT NULL DEFAULT 0",
       costNano: "INTEGER NOT NULL DEFAULT 0",
+      // Sum of vendorCostNanoUsd over priced requests, and how many of this bucket's
+      // requests had one (spec vendor-cost-pricing, design.md decision #7). Additive —
+      // backfilled going forward only, like the rest of this table.
+      vendorCostNano: "INTEGER NOT NULL DEFAULT 0",
+      pricedRequests: "INTEGER NOT NULL DEFAULT 0",
       est: "INTEGER NOT NULL DEFAULT 0",
       lastTs: "TEXT",
     },

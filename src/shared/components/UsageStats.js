@@ -14,7 +14,9 @@ import Card from "./Card";
 import TableToolbar, { useTableQuery } from "./TableToolbar";
 import TableState from "./TableState";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
+import OverviewProfitSummary from "@/app/(dashboard)/dashboard/usage/components/OverviewProfitSummary";
 import UsageTable, { fmt, fmtTime, ProviderList } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
+import { fmtUsdNano } from "@/shared/utils/money";
 import { useModelView } from "@/app/(dashboard)/dashboard/usage/components/ModelViewSwitch";
 import {
   filterRows, sortRows, normalizeTop, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf,
@@ -110,7 +112,13 @@ function toRows(dataMap, pendingOf = () => 0) {
     const inputCost = totalTokens > 0 ? nonCachedInput * (totalCost / totalTokens) : 0;
     const cachedCost = totalTokens > 0 ? cachedTokens * (totalCost / totalTokens) : 0;
     const outputCost = totalTokens > 0 ? (data.completionTokens || 0) * (totalCost / totalTokens) : 0;
-    return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: Number(pendingOf(key, data)) || 0 };
+    return {
+      ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: Number(pendingOf(key, data)) || 0,
+      // NULL-aware vendor cost / profit (spec vendor-cost-pricing): pricedRequests says how
+      // many of `requests` contributed a real vendorCostNanoUsd.
+      vendorCostNanoUsd: data.vendorCostNanoUsd || 0,
+      pricedRequests: data.pricedRequests || 0,
+    };
   });
 }
 
@@ -132,7 +140,7 @@ function groupDataByKey(data, keyField) {
     if (!groups.has(gk)) {
       groups.set(gk, {
         groupKey: gk,
-        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, costNanoUsd: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null, pending: 0 },
+        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, costNanoUsd: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null, pending: 0, vendorCostNanoUsd: 0, pricedRequests: 0 },
         items: [],
       });
     }
@@ -149,6 +157,8 @@ function groupDataByKey(data, keyField) {
     s.cachedCost += item.cachedCost || 0;
     s.outputCost += item.outputCost || 0;
     s.pending += item.pending || 0;
+    s.vendorCostNanoUsd += item.vendorCostNanoUsd || 0;
+    s.pricedRequests += item.pricedRequests || 0;
     if (item.lastUsed && (!s.lastUsed || new Date(item.lastUsed) > new Date(s.lastUsed))) {
       s.lastUsed = item.lastUsed;
     }
@@ -199,10 +209,35 @@ function metricOf(obj, field, name) {
 const providerNamesOf = (row) => (Array.isArray(row.providers) && row.providers.length ? row.providers.map((p) => p.name) : (row.provider ? [row.provider] : []));
 const itemNameOf = (row) => `${row.rawModel || ""} ${row.provider || ""}`.trim();
 
+// Profit cell shared by every Overview table (spec admin-usage-views "Overview profit and
+// loss summary"): revenue (the row's recorded cost) minus its vendor cost, counting only
+// priced requests. pricedRequests === 0 ⇒ no figure at all (never 0), per design.md
+// decision #4; 0 < pricedRequests < requests ⇒ the figure plus a muted note icon.
+function ProfitCell({ row }) {
+  const requests = row.requests || 0;
+  const priced = row.pricedRequests || 0;
+  if (priced === 0) {
+    return <span className="text-vx-text-muted text-xs" title="Chưa có dữ liệu giá vốn">Chưa có dữ liệu giá vốn</span>;
+  }
+  const revenueNano = row.costNanoUsd != null ? row.costNanoUsd : Math.round((row.cost || 0) * 1e9);
+  const profitNano = revenueNano - (row.vendorCostNanoUsd || 0);
+  return (
+    <span className="inline-flex items-center gap-1 font-mono tabular-nums">
+      <span className={profitNano < 0 ? "text-vx-danger" : ""}>{fmtUsdNano(profitNano)}</span>
+      {priced < requests && (
+        <span className="material-symbols-outlined text-[13px] text-vx-text-muted" title="Một số yêu cầu chưa có dữ liệu giá vốn">info</span>
+      )}
+    </span>
+  );
+}
+
+const PROFIT_COLUMN = { field: "profit", label: "Lợi nhuận", align: "right" };
+
 const MODEL_COLUMNS = [
   { field: "rawModel", label: "Model", sortField: "name" },
   { field: "provider", label: "Provider" },
   { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  PROFIT_COLUMN,
   { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
@@ -211,6 +246,7 @@ const ACCOUNT_COLUMNS = [
   { field: "provider", label: "Provider" },
   { field: "accountName", label: "Account" },
   { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  PROFIT_COLUMN,
   { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
@@ -219,6 +255,7 @@ const API_KEY_COLUMNS = [
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
   { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  PROFIT_COLUMN,
   { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
@@ -227,6 +264,7 @@ const ENDPOINT_COLUMNS = [
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
   { field: "requests", label: "Requests", align: "right", sortField: "requests" },
+  PROFIT_COLUMN,
   { field: "lastUsed", label: "Last Used", align: "right", sortField: "lastUsed" },
 ];
 
@@ -455,6 +493,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
                 {reqView && group.items.length === 1 ? <ProviderList providers={group.items[0].providers || []} /> : "—"}
               </td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={group.summary} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -463,6 +502,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
               <td className="px-6 py-3">{providerCell(item)}</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={item} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -487,6 +527,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={group.summary} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -496,6 +537,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
               <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={item} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -514,6 +556,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={group.summary} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -523,6 +566,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3">{item.rawModel}</td>
               <td className="px-6 py-3">{providerCell(item)}</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={item} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -542,6 +586,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={group.summary} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -551,6 +596,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3">{item.rawModel}</td>
               <td className="px-6 py-3">{providerCell(item)}</td>
               <td className="px-6 py-3 text-right font-mono tabular-nums">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right"><ProfitCell row={item} /></td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -643,6 +689,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
       {/* Overview cards */}
       {loading ? spinner : <OverviewCards stats={stats} />}
+
+      {/* Profit/loss summary (spec vendor-cost-pricing / admin-usage-views) */}
+      {loading ? spinner : <OverviewProfitSummary stats={stats} />}
 
       {/* Provider topology + Recent Requests */}
       {loading ? spinner : (

@@ -8,7 +8,7 @@ import { chargeSync, ratePlanIdSync } from "../../billing/planQueue.js";
 import { applyRequestDiscountSync } from "../../billing/discounts.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 import {
-  scheduleRollup, planRollupRange, forEachRollupSlice, rollupEpoch, readProviderRollup, readKeyRollup, readOwnerPeakRollup,
+  scheduleRollup, planRollupRange, forEachRollupSlice, rollupEpoch, readProviderRollup, readProviderConnectionRollup, readKeyRollup, readOwnerPeakRollup,
   invalidateRollupFromSync, pruneRollupSync, sha256Hex, scheduleProviderLastTsBackfill, hourLastTsByProviderSync,
 } from "./usageRollup.js";
 
@@ -42,6 +42,16 @@ function addCostTo(acc, costNano) {
 // the legacy float, so round it once here. The integer always wins when present.
 function blobCostNano(c) {
   return c?.costNanoUsd ? Math.round(c.costNanoUsd) : Math.round((c?.cost || 0) * 1e9);
+}
+
+// Accumulate one bucket's/day's vendor-cost sum + priced-request count into an aggregate
+// (spec vendor-cost-pricing). Both fields are additive and NULL-free on every source
+// object by the time they reach here (aggregateEntryToDay / addToCounter seed them at 0),
+// so a day blob written before this feature existed simply contributes 0 of each — which
+// is the correct fact (those requests really have no recorded vendor cost), not a guess.
+function addVendorCostTo(acc, source) {
+  acc.vendorCostNanoUsd = (acc.vendorCostNanoUsd || 0) + Math.round(source?.vendorCostNanoUsd || 0);
+  acc.pricedRequests = (acc.pricedRequests || 0) + (source?.pricedRequests || 0);
 }
 
 function maskApiKey(key) {
@@ -177,11 +187,23 @@ function getLocalDateKey(timestamp) {
 }
 
 // `target` is a day-blob map, possibly parsed from JSON: own-property access only.
+//
+// vendorCostNanoUsd/pricedRequests (spec vendor-cost-pricing) are additive fields on
+// these SAME existing buckets — unlike the separate `req` map (requested-model view),
+// there is no parallel structure that can be entirely missing for a historical day, so
+// no background rebuild is needed: a bucket written before vendor cost existed simply
+// has no key for either field yet, which seeds at 0 below. That is not a guess — it is
+// the true fact for those requests (spec "Historical requests have no vendor cost").
+// Mixing historical (unpriced) and new (possibly priced) requests in the same bucket
+// therefore always yields a correct pricedRequests <= requests, never an undercount of
+// `requests` itself and never a fabricated vendor cost for a request that has none.
 function addToCounter(target, key, values) {
   const c = ownGet(target, key)
-    || ownSet(target, key, { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 });
+    || ownSet(target, key, { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, vendorCostNanoUsd: 0, pricedRequests: 0 });
   // Seed from the legacy float once, for rollup blobs written before nano existed.
   if (c.costNanoUsd == null) c.costNanoUsd = Math.round((c.cost || 0) * 1e9);
+  if (c.vendorCostNanoUsd == null) c.vendorCostNanoUsd = 0;
+  if (c.pricedRequests == null) c.pricedRequests = 0;
   c.requests += values.requests || 1;
   c.promptTokens += values.promptTokens || 0;
   c.completionTokens += values.completionTokens || 0;
@@ -189,6 +211,8 @@ function addToCounter(target, key, values) {
   // Integer accumulates; the float mirror is re-derived so it never drifts.
   c.costNanoUsd = (c.costNanoUsd || 0) + (values.costNanoUsd || 0);
   c.cost = nanoToUsd(c.costNanoUsd);
+  c.vendorCostNanoUsd += values.vendorCostNanoUsd || 0;
+  c.pricedRequests += values.pricedRequests || 0;
   if (values.meta) Object.assign(c, values.meta);
   return c;
 }
@@ -200,16 +224,25 @@ function aggregateEntryToDay(day, entry) {
   // Integer nanoUSD is the authoritative day total; `cost` is re-derived from it
   // as the legacy float mirror so old dashboard readers keep working.
   const costNano = entry.costNanoUsd != null ? Math.round(entry.costNanoUsd) : Math.round((entry.cost || 0) * 1e9);
-  const vals = { promptTokens, completionTokens, cachedTokens, costNanoUsd: costNano };
+  // null when unpriced (no vendor-cost record matched) — pricedRequests says how many of
+  // the summed requests contributed a real vendorCostNanoUsd, so "0 priced" never reads
+  // as "priced at zero" (design.md decision #4).
+  const vendorCostNanoUsd = entry.vendorCostNanoUsd != null ? Math.round(entry.vendorCostNanoUsd) : 0;
+  const pricedRequests = entry.vendorCostNanoUsd != null ? 1 : 0;
+  const vals = { promptTokens, completionTokens, cachedTokens, costNanoUsd: costNano, vendorCostNanoUsd, pricedRequests };
 
   // Seed from the legacy float once, for day blobs written before nano existed.
   if (day.costNanoUsd == null) day.costNanoUsd = Math.round((day.cost || 0) * 1e9);
+  if (day.vendorCostNanoUsd == null) day.vendorCostNanoUsd = 0;
+  if (day.pricedRequests == null) day.pricedRequests = 0;
   day.requests = (day.requests || 0) + 1;
   day.promptTokens = (day.promptTokens || 0) + promptTokens;
   day.completionTokens = (day.completionTokens || 0) + completionTokens;
   day.cachedTokens = (day.cachedTokens || 0) + cachedTokens;
   day.costNanoUsd = (day.costNanoUsd || 0) + costNano;
   day.cost = nanoToUsd(day.costNanoUsd);
+  day.vendorCostNanoUsd += vendorCostNanoUsd;
+  day.pricedRequests += pricedRequests;
 
   day.byProvider ||= newMap();
   day.byModel ||= newMap();
@@ -366,6 +399,23 @@ async function calculateCostNano(provider, model, tokens, requestedModel, imageC
   }
 }
 
+// Admin-only vendor (upstream) cost snapshot (spec vendor-cost-pricing), resolved beside
+// the customer-facing cost above but from a completely separate price (vendorCostRepo),
+// using the request's OWN timestamp so a later edit to the vendor-cost rate can never
+// change a request already logged. Returns null (not 0) when no vendor-cost record
+// matches — distinct from a known cost of zero — so every downstream sum can tell
+// "no data" apart from "zero profit".
+async function calculateVendorCostNanoForEntry(provider, model, tokens, imageCount, atIso) {
+  try {
+    const { calculateVendorCostNano } = await import("./vendorCostRepo.js");
+    const atMs = atIso ? Date.parse(atIso) : Date.now();
+    return await calculateVendorCostNano(provider, model, tokens, imageCount, Number.isFinite(atMs) ? atMs : Date.now());
+  } catch (e) {
+    console.error("[usageRepo] vendor cost snapshot failed:", e.message);
+    return null;
+  }
+}
+
 export function trackPendingRequest(model, provider, connectionId, started, error = false) {
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;
@@ -471,6 +521,10 @@ export async function saveRequestUsage(entry) {
     if (imageCount > 0) entry.tokens = { ...(entry.tokens || {}), image_count: imageCount };
     entry.costNanoUsd = await calculateCostNano(entry.provider, entry.model, entry.tokens, entry.requestedModel, imageCount);
     entry.cost = nanoToUsd(entry.costNanoUsd);
+    // Snapshot once, at this timestamp; never recomputed after insert (see
+    // calculateVendorCostNanoForEntry). Entirely separate from the cost above —
+    // never read by billing.
+    entry.vendorCostNanoUsd = await calculateVendorCostNanoForEntry(entry.provider, entry.model, entry.tokens, imageCount, entry.timestamp);
 
     const tokens = entry.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
@@ -601,7 +655,7 @@ export async function saveRequestUsage(entry) {
       // still needs its raw value to stay attributable. Tenant keys store their
       // apiKeyId and leave the secret out of the database entirely.
       const insertedUsage = db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, userId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, apiKeyId, userId, endpoint, promptTokens, completionTokens, cost, costNanoUsd, status, tokens, meta, ratePlanId, clientIp, vendorCostNanoUsd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, apiKeyId ? null : entry.apiKey || null, apiKeyId,
@@ -613,6 +667,7 @@ export async function saveRequestUsage(entry) {
           ratePlanId,
           // Spec activity-ip-log: the trusted client IP of the API request, or null.
           typeof entry.clientIp === "string" && entry.clientIp ? entry.clientIp.slice(0, 64) : null,
+          Number.isFinite(entry.vendorCostNanoUsd) ? Math.round(entry.vendorCostNanoUsd) : null,
         ]
       );
 
@@ -684,10 +739,10 @@ export async function saveRequestUsage(entry) {
       scheduleStatsEvent("update", 250);
     }
 
-    return { costNanoUsd: entry.costNanoUsd || 0, chargedNanoUsd };
+    return { costNanoUsd: entry.costNanoUsd || 0, chargedNanoUsd, vendorCostNanoUsd: entry.vendorCostNanoUsd ?? null };
   } catch (e) {
     console.error("Failed to save usage stats:", e);
-    return { costNanoUsd: 0, chargedNanoUsd: 0 };
+    return { costNanoUsd: 0, chargedNanoUsd: 0, vendorCostNanoUsd: null };
   }
 }
 
@@ -832,7 +887,9 @@ const REQ_GROUP_SELECT = `SELECT ${REQ_MODEL_SQL} AS rm, provider, connectionId,
         SUM(COALESCE(NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.cached_tokens'), 0),
                      NULLIF(json_extract(${REQ_TOKENS_JSON}, '$.cache_read_input_tokens'), 0), 0)) AS cached,
         SUM(CASE WHEN COALESCE(costNanoUsd, 0) != 0 THEN ROUND(costNanoUsd)
-                 ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano
+                 ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano,
+        SUM(COALESCE(vendorCostNanoUsd, 0)) AS vendorCostNano,
+        SUM(CASE WHEN vendorCostNanoUsd IS NOT NULL THEN 1 ELSE 0 END) AS priced
    FROM usageHistory`;
 const REQ_GROUP_TAIL = "GROUP BY rm, provider, connectionId, apiKey, apiKeyId, endpoint";
 
@@ -856,6 +913,8 @@ function addRequestedRows(req, rows) {
       completionTokens: r.ct || 0,
       cachedTokens: r.cached || 0,
       costNanoUsd: Math.round(r.costNano || 0),
+      vendorCostNanoUsd: Math.round(r.vendorCostNano || 0),
+      pricedRequests: r.priced || 0,
     }, r.n);
   }
 }
@@ -1157,7 +1216,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
   const upstreamOnlyDays = [];
   const providerTallies = new Map();
   const reqBucket = (map, key, init, lastUsed) => {
-    if (!map[key]) map[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, ...init, lastUsed };
+    if (!map[key]) map[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0, vendorCostNanoUsd: 0, pricedRequests: 0, ...init, lastUsed };
     return map[key];
   };
   const addCounts = (b, c, costNano, ts) => {
@@ -1166,6 +1225,11 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
     b.completionTokens += c.completionTokens || 0;
     b.cachedTokens += c.cachedTokens || 0;
     addCostTo(b, costNano);
+    // NULL-aware vendor-cost sum (spec vendor-cost-pricing): pricedRequests says how many
+    // of `b.requests` contributed a real vendorCostNanoUsd, never conflating "no data"
+    // with "zero profit" (design.md decision #4).
+    b.vendorCostNanoUsd = (b.vendorCostNanoUsd || 0) + Math.round(c.vendorCostNanoUsd || 0);
+    b.pricedRequests = (b.pricedRequests || 0) + (c.pricedRequests || 0);
     if (ts && (!b.lastUsed || new Date(ts) > new Date(b.lastUsed))) b.lastUsed = ts;
   };
   const tally = (b, provider, n) => {
@@ -1286,6 +1350,11 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
     totalPromptTokens: 0, totalCompletionTokens: 0, totalCachedTokens: 0, totalCost: 0,
     // Integer nanoUSD total — authoritative. `totalCost` is the legacy float mirror.
     totalCostNanoUsd: 0,
+    // Admin-only profit summary (spec admin-usage-views "Overview profit and loss
+    // summary"): sum of vendorCostNanoUsd over priced requests, and how many of
+    // totalRequests were priced. totalPricedRequests === 0 means "no vendor cost data
+    // for this period", never "zero cost".
+    totalVendorCostNanoUsd: 0, totalPricedRequests: 0,
     // Prototype-less: keyed by model names a client can choose (see ownGet / ownSet).
     byProvider: newMap(), byModel: newMap(), byAccount: newMap(), byApiKey: newMap(), byEndpoint: newMap(),
     last10Minutes: [],
@@ -1350,6 +1419,8 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       stats.totalCachedTokens += day.cachedTokens || 0;
       stats.totalCostNanoUsd += blobCostNano(day);
       stats.totalCost = nanoToUsd(stats.totalCostNanoUsd);
+      stats.totalVendorCostNanoUsd += Math.round(day.vendorCostNanoUsd || 0);
+      stats.totalPricedRequests += day.pricedRequests || 0;
 
       for (const [prov, p] of Object.entries(day.byProvider || {})) {
         if (!stats.byProvider[prov]) stats.byProvider[prov] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
@@ -1378,6 +1449,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         stats.byModel[statsKey].completionTokens += m.completionTokens || 0;
         stats.byModel[statsKey].cachedTokens += m.cachedTokens || 0;
         addCostTo(stats.byModel[statsKey], blobCostNano(m));
+        addVendorCostTo(stats.byModel[statsKey], m);
         if (dateKey > (stats.byModel[statsKey].lastUsed || "")) stats.byModel[statsKey].lastUsed = dateKey;
       }
 
@@ -1395,6 +1467,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         stats.byAccount[accountKey].completionTokens += a.completionTokens || 0;
         stats.byAccount[accountKey].cachedTokens += a.cachedTokens || 0;
         addCostTo(stats.byAccount[accountKey], blobCostNano(a));
+        addVendorCostTo(stats.byAccount[accountKey], a);
         if (dateKey > (stats.byAccount[accountKey].lastUsed || "")) stats.byAccount[accountKey].lastUsed = dateKey;
       }
 
@@ -1418,6 +1491,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         stats.byApiKey[groupKey].completionTokens += ak.completionTokens || 0;
         stats.byApiKey[groupKey].cachedTokens += ak.cachedTokens || 0;
         addCostTo(stats.byApiKey[groupKey], blobCostNano(ak));
+        addVendorCostTo(stats.byApiKey[groupKey], ak);
         if (dateKey > (stats.byApiKey[groupKey].lastUsed || "")) stats.byApiKey[groupKey].lastUsed = dateKey;
       }
 
@@ -1434,6 +1508,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         stats.byEndpoint[epKey].completionTokens += ep.completionTokens || 0;
         stats.byEndpoint[epKey].cachedTokens += ep.cachedTokens || 0;
         addCostTo(stats.byEndpoint[epKey], blobCostNano(ep));
+        addVendorCostTo(stats.byEndpoint[epKey], ep);
         if (dateKey > (stats.byEndpoint[epKey].lastUsed || "")) stats.byEndpoint[epKey].lastUsed = dateKey;
       }
     }
@@ -1527,7 +1602,9 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
               SUM(COALESCE(NULLIF(json_extract(${TK}, '$.cached_tokens'), 0),
                            json_extract(${TK}, '$.cache_read_input_tokens'), 0)) AS cached,
               SUM(CASE WHEN COALESCE(costNanoUsd, 0) != 0 THEN ROUND(costNanoUsd)
-                       ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano
+                       ELSE ROUND(COALESCE(cost, 0) * 1e9) END) AS costNano,
+              SUM(COALESCE(vendorCostNanoUsd, 0)) AS vendorCostNano,
+              SUM(CASE WHEN vendorCostNanoUsd IS NOT NULL THEN 1 ELSE 0 END) AS priced
          FROM usageHistory`,
       tail: `GROUP BY ${reqView ? "rm, " : ""}provider, model, connectionId, apiKey, apiKeyId, endpoint`,
     }, (rows) => { for (const row of rows) filtered.push(row); });
@@ -1537,6 +1614,8 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       const completionTokens = Math.round(r.ct || 0);
       const cachedTokens = Math.round(r.cached || 0);
       const entryCostNano = Math.round(r.costNano || 0);
+      const entryVendorCostNano = Math.round(r.vendorCostNano || 0);
+      const entryPriced = r.priced || 0;
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
 
       stats.totalPromptTokens += promptTokens;
@@ -1544,6 +1623,8 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       stats.totalCachedTokens += cachedTokens;
       stats.totalCostNanoUsd += entryCostNano;
       stats.totalCost = nanoToUsd(stats.totalCostNanoUsd);
+      stats.totalVendorCostNanoUsd += entryVendorCostNano;
+      stats.totalPricedRequests += entryPriced;
 
       if (!stats.byProvider[r.provider]) stats.byProvider[r.provider] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, costNanoUsd: 0 };
       stats.byProvider[r.provider].requests += r.n;
@@ -1553,7 +1634,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       addCostTo(stats.byProvider[r.provider], entryCostNano);
 
       if (reqView) {
-        const counts = { requests: r.n, promptTokens, completionTokens, cachedTokens };
+        const counts = { requests: r.n, promptTokens, completionTokens, cachedTokens, vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced };
         tally(reqModelRow(r.rm, counts, entryCostNano, r.ts), r.provider, r.n);
         if (r.connectionId) reqAccountRow(r.rm, r.provider || "", r.connectionId, counts, entryCostNano, r.ts);
         tally(reqKeyRow(r.rm, r.apiKeyId || null, r.apiKey || null, counts, entryCostNano, r.ts), r.provider, r.n);
@@ -1570,6 +1651,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       stats.byModel[modelKey].completionTokens += completionTokens;
       stats.byModel[modelKey].cachedTokens += cachedTokens;
       addCostTo(stats.byModel[modelKey], entryCostNano);
+      addVendorCostTo(stats.byModel[modelKey], { vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced });
       if (new Date(r.ts) > new Date(stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = r.ts;
 
       if (r.connectionId) {
@@ -1583,6 +1665,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         stats.byAccount[accountKey].completionTokens += completionTokens;
         stats.byAccount[accountKey].cachedTokens += cachedTokens;
         addCostTo(stats.byAccount[accountKey], entryCostNano);
+        addVendorCostTo(stats.byAccount[accountKey], { vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced });
         if (new Date(r.ts) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = r.ts;
       }
 
@@ -1598,6 +1681,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         const ake = stats.byApiKey[akKey];
         ake.requests += r.n; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
         addCostTo(ake, entryCostNano);
+        addVendorCostTo(ake, { vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced });
         if (new Date(r.ts) > new Date(ake.lastUsed)) ake.lastUsed = r.ts;
       } else {
         if (!stats.byApiKey["local-no-key"]) {
@@ -1606,6 +1690,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
         const ake = stats.byApiKey["local-no-key"];
         ake.requests += r.n; ake.promptTokens += promptTokens; ake.completionTokens += completionTokens; ake.cachedTokens += cachedTokens;
         addCostTo(ake, entryCostNano);
+        addVendorCostTo(ake, { vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced });
         if (new Date(r.ts) > new Date(ake.lastUsed)) ake.lastUsed = r.ts;
       }
 
@@ -1617,6 +1702,7 @@ export async function getUsageStats(period = "all", { modelView = "upstream" } =
       const epe = stats.byEndpoint[epKey];
       epe.requests += r.n; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens;
       addCostTo(epe, entryCostNano);
+      addVendorCostTo(epe, { vendorCostNanoUsd: entryVendorCostNano, pricedRequests: entryPriced });
       if (new Date(r.ts) > new Date(epe.lastUsed)) epe.lastUsed = r.ts;
     }
   }
@@ -1773,7 +1859,10 @@ function maskStoredKey(key) {
 }
 
 function emptyUsageTotals() {
-  return { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0 };
+  // vendorCostNanoUsd/pricedRequests (spec vendor-cost-pricing, admin-only) are populated
+  // by getUsageByOwner (the admin Users tab); getKeyUsageSummary's per-key customer
+  // summary never sets them, so they stay inert zeros there — never real admin data.
+  return { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0, cost: 0, costNanoUsd: 0, vendorCostNanoUsd: 0, pricedRequests: 0 };
 }
 
 /**
@@ -1885,6 +1974,8 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs, useRollup =
         acc.requests += g.n;
         if (g.est === 1) acc.cacheEstimated = true;
         addCostTo(acc, costNano);
+        acc.vendorCostNanoUsd += Math.round(g.vendorCostNano || 0);
+        acc.pricedRequests += g.pricedRequests || 0;
       }
       const e = keyEntry(o, k, noKey);
       e.requests += g.n;
@@ -1908,7 +1999,7 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs, useRollup =
   for (const range of plan.raw) {
   await forEachUsageSlice(db, {
     startDate: range.startDate, endDate: range.endDate, sliceMs,
-    select: "SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory",
+    select: "SELECT apiKey, apiKeyId, model, timestamp, promptTokens, completionTokens, cost, costNanoUsd, vendorCostNanoUsd, tokens, meta FROM usageHistory",
   }, (rows) => {
   for (const r of rows) {
     const k = (r.apiKeyId && keyById.get(r.apiKeyId)) || (r.apiKey && keyByRaw.get(r.apiKey)) || null;
@@ -1933,6 +2024,10 @@ export async function getUsageByOwner({ startDate, endDate, sliceMs, useRollup =
       acc.requests += 1;
       if (meta.cacheEstimated === true && cacheRead > 0) acc.cacheEstimated = true;
       addCostTo(acc, costNano);
+      if (r.vendorCostNanoUsd != null) {
+        acc.vendorCostNanoUsd += Math.round(r.vendorCostNanoUsd);
+        acc.pricedRequests += 1;
+      }
     }
 
     const e = keyEntry(o, k, noKey);
@@ -2110,11 +2205,30 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
   const startMs = parseRangeBound(startDate);
   const endMs = parseRangeBound(endDate);
 
+  let connectionMap = newMap();
+  try {
+    const { getProviderConnections } = await import("./connectionsRepo.js");
+    for (const c of await getProviderConnections()) connectionMap[c.id] = c.name || c.email || c.id;
+  } catch { /* breakdown rows fall back to a generic label */ }
+
   const byProvider = newMap();
-  const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0 };
+  const totals = { input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, cacheRead: 0, cacheCreation: 0, vendorCostNanoUsd: 0, pricedRequests: 0 };
   const ensure = (provider) => byProvider[provider]
-    || (byProvider[provider] = { provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, lastUsed: null, _minTok: {}, _minReq: {}, _peakTokS: 0, _rollTpm: 0, _rollRpm: 0 });
+    || (byProvider[provider] = {
+      provider, input: 0, output: 0, requests: 0, cost: 0, costNanoUsd: 0, cacheRead: 0, cacheCreation: 0,
+      vendorCostNanoUsd: 0, pricedRequests: 0, lastUsed: null,
+      _minTok: {}, _minReq: {}, _peakTokS: 0, _rollTpm: 0, _rollRpm: 0, _byConnection: newMap(),
+    });
   const touch = (p, ts) => { if (ts && (!p.lastUsed || ts > p.lastUsed)) p.lastUsed = ts; };
+  // Per-connection breakdown bucket (spec admin-usage-views "Provider cache ratio and
+  // per-connection breakdown"). '' = no recorded connection on those requests.
+  const ensureConn = (p, connectionId) => p._byConnection[connectionId]
+    || (p._byConnection[connectionId] = {
+      connectionId: connectionId || null,
+      accountName: connectionId ? (connectionMap[connectionId] || `Account ${connectionId.slice(0, 8)}...`) : null,
+      requests: 0, input: 0, output: 0, cost: 0, costNanoUsd: 0, cacheRead: 0, cacheCreation: 0,
+      vendorCostNanoUsd: 0, pricedRequests: 0,
+    });
 
   // Whole hours come from the hourly rollup, the partial edges (and anything not rolled yet)
   // from the raw rows (see repos/usageRollup.js: the result equals a raw read).
@@ -2134,16 +2248,40 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
       p.output += r.output || 0;
       p.requests += r.requests || 0;
       addCostTo(p, costNano);
+      p.cacheRead += r.cacheRead || 0;
+      p.cacheCreation += r.cacheCreation || 0;
+      p.vendorCostNanoUsd += Math.round(r.vendorCostNano || 0);
+      p.pricedRequests += r.pricedRequests || 0;
       totals.input += r.input || 0;
       totals.output += r.output || 0;
       totals.requests += r.requests || 0;
       addCostTo(totals, costNano);
+      totals.cacheRead += r.cacheRead || 0;
+      totals.cacheCreation += r.cacheCreation || 0;
+      totals.vendorCostNanoUsd += Math.round(r.vendorCostNano || 0);
+      totals.pricedRequests += r.pricedRequests || 0;
       // A minute lies inside one hour, so a peak over hours is the maximum of the hourly ones.
       p._rollTpm = Math.max(p._rollTpm, r.peakTpm || 0);
       p._rollRpm = Math.max(p._rollRpm, r.peakRpm || 0);
       p._peakTokS = Math.max(p._peakTokS, r.peakTokS || 0);
       touch(p, r.lastTs);
       if (r.unfilledHour && (!p._unfilledHour || r.unfilledHour > p._unfilledHour)) p._unfilledHour = r.unfilledHour;
+    }
+    // Per-connection breakdown: a second, separately-grouped read of the same rolled
+    // hours. Never used for peak figures (not distributive over a connection split —
+    // see usageRollup.js rollProviderHour), only requests/tokens/cost/cache/vendor cost.
+    for (const r of readProviderConnectionRollup(db, slice)) {
+      const p = ensure(r.provider);
+      const c = ensureConn(p, r.connectionId);
+      const costNano = Math.round(r.costNano || 0);
+      c.requests += r.requests || 0;
+      c.input += r.input || 0;
+      c.output += r.output || 0;
+      c.cacheRead += r.cacheRead || 0;
+      c.cacheCreation += r.cacheCreation || 0;
+      addCostTo(c, costNano);
+      c.vendorCostNanoUsd += Math.round(r.vendorCostNano || 0);
+      c.pricedRequests += r.pricedRequests || 0;
     }
     }, rollupSliceHours);
     // Someone deleted history while this read yielded between slices: rolled rows it had not
@@ -2175,26 +2313,55 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
     // "platform" rows are key-holder denials (RPM/TPM/budget) recorded by the proxy —
     // not real upstream provider usage. Exclude them from the provider table.
     conds: ["COALESCE(provider, '') != 'platform'"],
-    select: "SELECT provider, timestamp, promptTokens, completionTokens, cost, costNanoUsd, tokens, meta FROM usageHistory",
+    select: "SELECT provider, connectionId, timestamp, promptTokens, completionTokens, cost, costNanoUsd, vendorCostNanoUsd, tokens, meta FROM usageHistory",
     tail: "",
   }, (rows) => {
   for (const r of rows) {
     const t = parseJson(r.tokens, {}) || {};
     const prompt = r.promptTokens ?? t.prompt_tokens ?? t.input_tokens ?? 0;
     const completion = r.completionTokens ?? t.completion_tokens ?? t.output_tokens ?? 0;
+    const cacheRead = t.cached_tokens ?? t.cache_read_input_tokens ?? t.prompt_tokens_details?.cached_tokens ?? 0;
+    const cacheCreation = t.cache_creation_input_tokens ?? 0;
     const tokSum = prompt + completion;
     const provider = r.provider || "unknown";
+    const costNano = rowCostNano(r.costNanoUsd, r.cost);
 
     const p = ensure(provider);
     p.input += prompt;
     p.output += completion;
     p.requests += 1;
-    addCostTo(p, rowCostNano(r.costNanoUsd, r.cost));
+    addCostTo(p, costNano);
+    p.cacheRead += cacheRead;
+    p.cacheCreation += cacheCreation;
 
     totals.input += prompt;
     totals.output += completion;
     totals.requests += 1;
-    addCostTo(totals, rowCostNano(r.costNanoUsd, r.cost));
+    addCostTo(totals, costNano);
+    totals.cacheRead += cacheRead;
+    totals.cacheCreation += cacheCreation;
+
+    if (r.vendorCostNanoUsd != null) {
+      p.vendorCostNanoUsd += Math.round(r.vendorCostNanoUsd);
+      p.pricedRequests += 1;
+      totals.vendorCostNanoUsd += Math.round(r.vendorCostNanoUsd);
+      totals.pricedRequests += 1;
+    }
+
+    // '' = no recorded connection — same convention readProviderConnectionRollup uses
+    // (COALESCE(connectionId, '')), so the "no connection" bucket from the rolled hours
+    // and the raw edges merge into one row instead of splitting into two.
+    const c = ensureConn(p, r.connectionId || "");
+    c.requests += 1;
+    c.input += prompt;
+    c.output += completion;
+    c.cacheRead += cacheRead;
+    c.cacheCreation += cacheCreation;
+    addCostTo(c, costNano);
+    if (r.vendorCostNanoUsd != null) {
+      c.vendorCostNanoUsd += Math.round(r.vendorCostNanoUsd);
+      c.pricedRequests += 1;
+    }
 
     const ts = r.timestamp || "";
     touch(p, ts);
@@ -2216,13 +2383,28 @@ export async function getProviderUsageSummary({ startDate, endDate, sliceMs, use
   });
   }
 
+  // Share of input tokens that were cache reads or cache-creation writes (spec
+  // admin-usage-views "Provider cache ratio and per-connection breakdown"). null (shown
+  // as "—") when there were no input tokens to take a ratio of.
+  const cacheHitRatio = (acc) => (acc.input > 0 ? (acc.cacheRead + acc.cacheCreation) / acc.input : null);
+  // Profit (charge minus vendor cost), null-aware: no priced requests in this bucket ⇒
+  // null (rendered as "no vendor cost data"), never a fabricated 0.
+  const profitOf = (acc) => (acc.pricedRequests > 0 ? acc.costNanoUsd - acc.vendorCostNanoUsd : null);
+
   const items = Object.values(byProvider).map((p) => {
     let peakTpm = p._rollTpm, peakRpm = p._rollRpm, peakTokS = 0;
     for (const v of Object.values(p._minTok)) if (v > peakTpm) peakTpm = v;
     for (const v of Object.values(p._minReq)) if (v > peakRpm) peakRpm = v;
     peakTokS = Math.round((p._peakTokS || 0) * 10) / 10;
-    const { provider, input, output, requests, cost, costNanoUsd, lastUsed } = p;
-    return { provider, input, output, requests, cost, costNanoUsd, peakTpm, peakRpm, peakTokS, lastUsed };
+    const { provider, input, output, requests, cost, costNanoUsd, cacheRead, cacheCreation, vendorCostNanoUsd, pricedRequests, lastUsed } = p;
+    const breakdown = Object.values(p._byConnection)
+      .map((c) => ({ ...c, cacheHitRatio: cacheHitRatio(c), profitNanoUsd: profitOf(c) }))
+      .sort((a, b) => (b.requests || 0) - (a.requests || 0) || String(a.accountName || "").localeCompare(String(b.accountName || "")));
+    return {
+      provider, input, output, requests, cost, costNanoUsd, cacheRead, cacheCreation, vendorCostNanoUsd, pricedRequests,
+      cacheHitRatio: cacheHitRatio(p), profitNanoUsd: profitOf(p),
+      peakTpm, peakRpm, peakTokS, lastUsed, breakdown,
+    };
   }).sort((a, b) => (b.requests || 0) - (a.requests || 0) || String(a.provider).localeCompare(String(b.provider)));
 
   return { items, totals };
