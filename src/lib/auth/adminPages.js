@@ -14,7 +14,6 @@ export const ADMIN_PAGES = [
   { key: "endpoint", label: "Endpoint & Key", pathPrefix: "/dashboard/endpoint" },
   { key: "users", label: "Người dùng", pathPrefix: "/dashboard/users" },
   { key: "groups", label: "Groups", pathPrefix: "/dashboard/groups" },
-  { key: "pricing", label: "Pricing", pathPrefix: "/dashboard/pricing" },
   { key: "plans", label: "Plans", pathPrefix: "/dashboard/plans" },
   { key: "orders", label: "Orders", pathPrefix: "/dashboard/orders" },
   { key: "providers", label: "Providers", pathPrefix: "/dashboard/providers" },
