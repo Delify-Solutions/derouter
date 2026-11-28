@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, Button, Toggle, Input, Select, Toast } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
+import ChangelogModal from "@/shared/components/ChangelogModal";
 import { useTheme } from "@/shared/hooks/useTheme";
 import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG } from "@/shared/constants/config";
@@ -25,6 +26,7 @@ export default function ProfilePage() {
   const [langOpen, setLangOpen] = useState(false);
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [settings, setSettings] = useState({ fallbackStrategy: "fill-first" });
   const [loading, setLoading] = useState(true);
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
@@ -1956,6 +1958,16 @@ export default function ProfilePage() {
         {/* Account actions */}
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
+            variant="secondary"
+            fullWidth
+            icon="history"
+            onClick={() => setChangelogOpen(true)}
+          >
+            Nhật ký thay đổi
+          </Button>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
             variant="danger-outline"
             fullWidth
             icon="power_settings_new"
@@ -1988,6 +2000,7 @@ export default function ProfilePage() {
           setLocale(next);
         }}
       />
+      <ChangelogModal isOpen={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <ConfirmModal
         isOpen={shutdownOpen}
         onClose={() => setShutdownOpen(false)}

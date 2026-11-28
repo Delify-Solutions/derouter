@@ -7,7 +7,8 @@ import Button from "./Button";
 import Input from "./Input";
 
 // Self-service "Đổi mật khẩu" (spec admin-accounts "Self-service password
-// change") — reachable from HeaderMenu for ANY signed-in account, independent of
+// change") — opened from a standalone icon button in Header.js (shell chrome,
+// rendered on every dashboard page) for ANY signed-in account, independent of
 // which dashboard pages that account can view (unlike the Super Admin's existing
 // password field on /dashboard/profile, which that account may not have view on).
 export default function ChangePasswordModal({ isOpen, onClose }) {
