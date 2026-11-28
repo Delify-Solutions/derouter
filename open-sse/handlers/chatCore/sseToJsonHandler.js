@@ -6,7 +6,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { newResponseId } from "../../utils/responseIds.js";
-import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
+import { applyEstimatedCache, promptTextForCache } from "../../utils/cacheEstimator.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine, usageOrEstimate } from "./requestDetail.js";
 // readBodyWithTimeout/guardWithTimeout live in nonStreamingHandler (which imports
 // parseSSEToOpenAIResponse from here). The cycle is safe: both are function
@@ -242,7 +242,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
       const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
       // Not awaited (would delay the client response); the detail write below
       // chains off it instead, so it still carries the real cost/charged figures.
-      const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
+      const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, promptText: promptTextForCache(finalBody || translatedBody || body), silent: true });
       if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
@@ -370,7 +370,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
     // Responses branch; `body.model` is the rewritten provider/model here.
     const _reqModelRaw = clientRawRequest?.body?.model;
     const requestedModel = _reqModelRaw && typeof _reqModelRaw === "string" && !_reqModelRaw.includes("/") ? _reqModelRaw : null;
-    const usageSavePromise2 = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, silent: true });
+    const usageSavePromise2 = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: Date.now() - requestStartTime, promptText: promptTextForCache(finalBody || translatedBody || body), silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
     const totalLatency = Date.now() - requestStartTime;

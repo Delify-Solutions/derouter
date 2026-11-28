@@ -8,7 +8,7 @@ import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamH
 import { buildStreamErrorBytes } from "../../utils/streamHelpers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
-import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
+import { applyEstimatedCache, promptTextForCache } from "../../utils/cacheEstimator.js";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { getTrace, reportStreamError } from "../../utils/errorTrace.js";
@@ -201,7 +201,7 @@ export function buildOnStreamComplete({ cacheCtx = null, provider, model, connec
     // Kicked off BEFORE the requestDetail upsert below, which awaits it so the final
     // row (overwriting the "streaming in progress" placeholder) carries the real
     // cost/charged figures instead of null.
-    const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, label: "STREAM USAGE", silent: true });
+    const usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: latency.total, ttftMs: latency.ttft, promptText: promptTextForCache(finalBody || translatedBody || body), label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
 
     usageSavePromise.then((usageResult) => saveRequestDetail(buildRequestDetail({

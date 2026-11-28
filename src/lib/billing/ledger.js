@@ -95,6 +95,10 @@ export function writeOffDebtSync(db, userId, { userPlanId = null, meta = {}, cre
  * `usageId` ties a `charge` row to the usage row that caused it, which is how the
  * ledger page shows the model and token counts.
  */
+/**
+ * @returns {number} the new row's creditLedger.id (callers that do not need it
+ * simply ignore the return value, same as before this was added).
+ */
 export function insertLedgerSync(db, entry) {
   const createdAt = entry.createdAt || nowIso();
   const deltaImages = Math.round(Number(entry.deltaImages) || 0);
@@ -108,7 +112,7 @@ export function insertLedgerSync(db, entry) {
         ? Math.max(0, Math.round(Number(entry.balanceAfterImages) || 0))
         : bookBalanceImagesSync(db, entry.userId))
     : null;
-  db.run(
+  const result = db.run(
     `INSERT INTO creditLedger(userId, userPlanId, apiKeyId, usageId, requestKey, deltaNanoUsd, deltaImages, balanceAfterNanoUsd, balanceAfterImages, kind, meta, createdAt)
      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -126,4 +130,5 @@ export function insertLedgerSync(db, entry) {
       createdAt,
     ]
   );
+  return result?.lastInsertRowid ?? null;
 }

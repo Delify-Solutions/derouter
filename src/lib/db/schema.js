@@ -20,7 +20,10 @@
 // `vendorCostNano`/`pricedRequests` — destructive (primary key change), so
 // migration 009 drops and recreates that one table; the background hourly
 // rollup repopulates it within LOG_RETENTION_DAYS.
-export const SCHEMA_VERSION = 53;
+// v54: cacheMissDetections (change cache-miss-auto-refund): one row per request
+// flagged as a cache miss not caused by the customer's own context change.
+// Purely additive — a brand new table, no versioned migration needed.
+export const SCHEMA_VERSION = 54;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1470,6 +1473,40 @@ export const TABLES = {
     primaryKey: "PRIMARY KEY (adminUserId, pageKey)",
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_admin_perms_user ON adminPermissions(adminUserId)",
+    ],
+  },
+  // One row per request flagged as a cache miss the customer did not cause
+  // (change cache-miss-auto-refund, capability cache-miss-refund): a prompt that
+  // shared >=90% of its tokens as a common prefix with the same key's immediately
+  // preceding request, yet reported zero cache-read tokens. `refundNanoUsd` is
+  // computed once, at detection, from the pricing that applied to the original
+  // request, capped at what it was actually charged — it is never recomputed.
+  cacheMissDetections: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // usageHistory.id. UNIQUE is the idempotency guard: a request is evaluated
+      // for this exactly once, and a retried/duplicate insert attempt is a no-op.
+      usageHistoryId: "INTEGER NOT NULL UNIQUE",
+      userId: "TEXT NOT NULL",
+      apiKeyId: "TEXT",
+      provider: "TEXT NOT NULL",
+      model: "TEXT NOT NULL",
+      requestedModel: "TEXT",
+      overlapTokens: "INTEGER NOT NULL",
+      refundNanoUsd: "INTEGER NOT NULL",
+      // 'pending' | 'auto_refunded' | 'approved' | 'rejected'
+      status: "TEXT NOT NULL DEFAULT 'pending'",
+      // creditLedger.id once a refund row exists (auto or admin-approved).
+      ledgerId: "INTEGER",
+      detectedAt: "TEXT NOT NULL",
+      resolvedAt: "TEXT",
+      adminNote: "TEXT",
+    },
+    indexes: [
+      // Admin filter+sort and the customer's own refunds view.
+      "CREATE INDEX IF NOT EXISTS idx_cmd_user_ts ON cacheMissDetections(userId, detectedAt DESC)",
+      // The daily sweep's query: every pending row, oldest first.
+      "CREATE INDEX IF NOT EXISTS idx_cmd_status_ts ON cacheMissDetections(status, detectedAt)",
     ],
   },
 };

@@ -8,6 +8,9 @@ import LatencyCell from "@/shared/components/LatencyCell";
 
 const fmt = (n) => (typeof n === "number" && !Number.isNaN(n) ? n.toLocaleString() : "0");
 const CACHE_ESTIMATE_TITLE = "Ước lượng, upstream không báo cache";
+// Spec cache-miss-refund "No internal cause exposed" — the ONLY reason text shown
+// anywhere, regardless of the internal cause the system recorded for diagnostics.
+const CACHE_MISS_TITLE = "Hệ thống không dùng được cache cho yêu cầu này";
 
 function statusClass(status) {
   const s = String(status || "");
@@ -194,7 +197,17 @@ export default function AccountUsageTable({
                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.input)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.output)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.tok)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums" title={row.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>{row.cacheEstimated ? "≈" : ""}{fmt(row.cacheRead)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums" title={row.cacheEstimated ? CACHE_ESTIMATE_TITLE : undefined}>
+                      {row.cacheEstimated ? "≈" : ""}{fmt(row.cacheRead)}
+                      {row.cacheMiss && (
+                        <span
+                          className="ml-1.5 inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 align-middle text-[10px] font-medium normal-case text-amber-700 dark:text-amber-400"
+                          title={CACHE_MISS_TITLE}
+                        >
+                          Lỡ cache
+                        </span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{fmt(row.cacheCreation)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
                       {row.costLabel}

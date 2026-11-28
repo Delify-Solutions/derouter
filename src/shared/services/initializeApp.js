@@ -126,6 +126,13 @@ async function runHeavyStartup() {
     .then(({ startBillingJanitor }) => startBillingJanitor())
     .catch((e) => console.error("[BillingJanitor] start failed:", e.message));
 
+  // Cache-miss refund sweep (spec cache-miss-refund): once a day, auto-refunds
+  // flagged requests up to each user's daily cap. Started lazily like its
+  // neighbours; startCacheMissRefundSweeper is idempotent.
+  import("@/lib/billing/cacheMissRefund.js")
+    .then(({ startCacheMissRefundSweeper }) => startCacheMissRefundSweeper())
+    .catch((e) => console.error("[CacheMissRefundSweeper] start failed:", e.message));
+
   // Payment poller: expires stale gateway orders and pulls transactions from every
   // active provider (web2m / ACB / Binance / SePay-with-token). Also idempotent and
   // skipped during a build; DISABLE_PAYMENT_POLLER turns it off.
