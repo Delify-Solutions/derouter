@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { deleteStorageSync, saveAndTestStorage, storageViewSync, SYSTEM_STORAGE_ID } from "@/lib/storage/userStorage.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -14,6 +15,8 @@ export async function GET() {
 }
 
 export async function PUT(request) {
+  const denied = await requirePagePermission(request, "storage", "edit");
+  if (denied) return denied;
   let input;
   try {
     input = await request.json();
@@ -25,7 +28,9 @@ export async function PUT(request) {
   return NextResponse.json(result.body, { status: result.status, headers: NO_STORE });
 }
 
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "storage", "delete");
+  if (denied) return denied;
   const db = await getAdapter();
   deleteStorageSync(db, SYSTEM_STORAGE_ID);
   return NextResponse.json(storageViewSync(db, SYSTEM_STORAGE_ID), { headers: NO_STORE });

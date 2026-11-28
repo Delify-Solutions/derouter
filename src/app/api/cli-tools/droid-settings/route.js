@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const execAsync = promisify(exec);
 
@@ -82,6 +83,8 @@ export async function GET() {
 // Accepts either `model` (string, legacy single-model) or `models` (array of strings, multi-model)
 // Also accepts `activeModel` to set which model is active/primary
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { baseUrl, apiKey, model, models, activeModel } = await request.json();
     
@@ -170,7 +173,9 @@ export async function POST(request) {
 }
 
 // DELETE - Remove derouter customModels only (keep other settings)
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const settingsPath = getDroidSettingsPath();
 

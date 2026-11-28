@@ -6,6 +6,7 @@ import {
 } from "@/lib/db/repos/paymentProvidersRepo.js";
 import { clearAcbToken } from "@/lib/payments/poller.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -33,6 +34,8 @@ export async function GET(request, { params }) {
  * a token ACB minted for other credentials, which reads as a refusal.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "payments", "edit");
+  if (denied) return denied;
   const { id } = await params;
   let body;
   try {
@@ -70,6 +73,8 @@ export async function PATCH(request, { params }) {
  * only way out is to disable it.
  */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "payments", "delete");
+  if (denied) return denied;
   const { id } = await params;
   try {
     const result = await deleteProvider(id);

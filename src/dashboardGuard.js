@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, validateApiKey, getApiKeyByKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { verifyDashboardAuthToken, getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 import { verifyUserToken } from "@/lib/auth/userSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 import { safeEqual } from "@/lib/auth/internalHeaders";
@@ -9,6 +9,14 @@ import { keyLookupLimited, recordKeyLookupMiss } from "@/lib/auth/keyLookupLimit
 import { isObfuscatedPath } from "@/lib/auth/obfuscatedPath";
 // Shared with every LLM handler: the key the guard accepts is the key they enforce.
 import { extractApiKey } from "@/lib/auth/apiKeyExtract.js";
+import { ADMIN_PAGES, PAGE_KEYS, resolvePageKeyFromPath } from "@/lib/auth/adminPages";
+import { sessionCanAccessPage, viewablePageKeys } from "@/lib/auth/adminAccess";
+
+// Escape hatch for a signed-in account with no viewable page yet (spec admin-accounts
+// "Permission enforcement on every admin surface" — "or to a 'no access' state if
+// none"). Not a registry page key: always reachable once authenticated, never itself
+// permission-checked, so it can never become unreachable.
+const NO_ACCESS_PATH = "/dashboard/no-access";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const CLI_TOKEN_SALT = "dr-cli-auth";
@@ -35,6 +43,10 @@ const PUBLIC_API_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/status",
+  // Pre-session counterpart to the self-service change-password route: proving
+  // the current (temporary) password IS the authentication, same trust level as
+  // /api/auth/login itself (spec admin-accounts "Forced change on first login").
+  "/api/auth/force-password-reset",
   "/api/auth/oidc",
   "/api/auth/saml",
   "/api/version",
@@ -368,11 +380,22 @@ export async function proxy(request) {
     // be served unauthenticated (otherwise the shell/layout leaks).
     const token = request.cookies.get("auth_token")?.value;
     if (token) {
-      if (await verifyDashboardAuthToken(token)) {
-        return NextResponse.next();
-      } else {
-        return notFound();
+      if (!(await verifyDashboardAuthToken(token))) return notFound();
+
+      // Per-account page permission (spec admin-accounts "Permission enforcement
+      // on every admin surface"). Super Admin always passes (sessionCanAccessPage
+      // short-circuits); a `member` account needs `view` on the resolved page key.
+      if (pathname !== NO_ACCESS_PATH) {
+        const session = await getDashboardAuthSession(token);
+        const pageKey = resolvePageKeyFromPath(pathname);
+        if (pageKey && !(await sessionCanAccessPage(session, pageKey, "view"))) {
+          const viewable = await viewablePageKeys(session, PAGE_KEYS);
+          const firstPage = ADMIN_PAGES.find((p) => viewable.includes(p.key));
+          return NextResponse.redirect(new URL(firstPage ? firstPage.pathPrefix : NO_ACCESS_PATH, request.url));
+        }
       }
+
+      return NextResponse.next();
     }
 
     return notFound();

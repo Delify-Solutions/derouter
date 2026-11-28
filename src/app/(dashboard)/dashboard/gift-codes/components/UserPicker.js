@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
+import { Button } from "@/shared/components";
 
 /**
  * Pick customer accounts by e-mail or name. Searches the admin user list as the
@@ -58,14 +59,15 @@ export default function UserPicker({ value, onChange, label = "Tài khoản nh�
           {value.map((user) => (
             <li key={user.id} className="flex min-w-0 max-w-full items-center gap-1 border border-border bg-surface-2 pl-2 text-xs text-text-main">
               <span className="truncate font-mono" title={user.email}>{user.email}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => remove(user.id)}
                 aria-label={`Bỏ ${user.email}`}
-                className="flex size-7 shrink-0 items-center justify-center text-text-muted hover:text-text-main"
-              >
-                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">close</span>
-              </button>
+                className="size-7 px-0"
+                icon="close"
+              />
             </li>
           ))}
         </ul>

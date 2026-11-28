@@ -4,6 +4,7 @@ import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { getUserById } from "@/lib/localDb";
 import { insertAuditSync } from "@/lib/billing/audit.js";
 import { deleteStorageSync, getStorageRowSync, saveAndTestStorage, storageViewSync } from "@/lib/storage/userStorage.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -18,6 +19,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id } = await params;
   if (!(await getUserById(id))) return NextResponse.json(NOT_FOUND, { status: 404, headers: NO_STORE });
   let input;
@@ -43,6 +46,8 @@ export async function PUT(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "delete");
+  if (denied) return denied;
   const { id } = await params;
   if (!(await getUserById(id))) return NextResponse.json(NOT_FOUND, { status: 404, headers: NO_STORE });
   const db = await getAdapter();

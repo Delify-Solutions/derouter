@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getPlanById, updatePlanSync, deletePlan, validatePlanInput } from "@/lib/db/repos/billingRepo.js";
 import { applyLimitsToActiveSync, applyModelsToActiveSync } from "@/lib/billing/adminActions.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { parseLimits } from "@/lib/billing/limits.js";
 import { normalizePlanModels } from "@/lib/billing/planModels.js";
 
@@ -38,6 +39,8 @@ export async function GET(request, { params }) {
  * ran, and then it is the largest number of purchases either pass touched.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "plans", "edit");
+  if (denied) return denied;
   const { id } = await params;
   let body;
   try {
@@ -118,6 +121,8 @@ export async function PATCH(request, { params }) {
 
 /** Soft delete — orders and granted plans keep a valid reference. */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "plans", "delete");
+  if (denied) return denied;
   const { id } = await params;
   try {
     const ok = await deletePlan(id);

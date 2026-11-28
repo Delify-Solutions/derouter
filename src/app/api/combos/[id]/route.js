@@ -6,6 +6,7 @@ import { updateComboPricing, resetComboPricing } from "@/lib/db/repos/comboPrici
 import { renameComboDiscounts, removeComboDiscounts } from "@/lib/db/repos/modelDiscountsRepo.js";
 import { CACHE_ESTIMATION_ERROR, isValidCacheEstimationInput, withCacheEstimation } from "@/lib/combos/cacheEstimation.js";
 import { MAINTENANCE_ERROR, isValidMaintenanceInput, withMaintenance } from "@/lib/combos/maintenance.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -28,6 +29,9 @@ export async function GET(request, { params }) {
 
 // PUT /api/combos/[id] - Update combo
 export async function PUT(request, { params }) {
+  // Shared by the Combo page and the Media Providers combo editor.
+  const denied = await requireAnyPagePermission(request, ["combos", "media-providers"], "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -117,6 +121,8 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/combos/[id] - Delete combo
 export async function DELETE(request, { params }) {
+  const denied = await requireAnyPagePermission(request, ["combos", "media-providers"], "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const prev = await getComboById(id);

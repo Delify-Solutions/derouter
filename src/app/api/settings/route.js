@@ -15,6 +15,7 @@ import {
   getDashboardAuthSession,
   setDashboardAuthCookie,
 } from "@/lib/auth/dashboardSession";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +28,69 @@ const SETTINGS_RESPONSE_HEADERS = {
 // The session cut-off is only ever moved by a password change below.
 // The bot webhook secret is set only by POST /api/telegram-bot (change telegram-bot-commands).
 const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted", SESSIONS_VALID_AFTER_KEY, "telegramWebhookSecret"];
+
+// This single endpoint is a kitchen sink shared by many dashboard pages, each
+// PATCHing its own slice of the settings blob (spec admin-accounts "Permission
+// enforcement on every admin surface"). A key not named here falls back to
+// "profile" — the Settings page already hosts every other general/system toggle
+// (OIDC, SAML, database export, outbound proxy, ...), so treating it as the
+// catch-all owner is the safe default: an unrecognized field requires the same
+// permission a general-settings edit would, rather than silently going unchecked.
+const SETTINGS_FIELD_OWNERS = {
+  telegramChannelUrl: "telegram",
+  telegramChannelChatId: "telegram",
+  telegramAdminIds: "telegram",
+  telegramBotUsername: "telegram",
+  telegramMiniAppName: "telegram",
+  paymentCodePrefix: "payments",
+  paymentOrderTtlMinutes: "payments",
+  allowManualOrders: "payments",
+  skillsNavEnabled: "customer-skills",
+  skillsNavLabel: "customer-skills",
+  dshPluginsNavEnabled: "dsh-plugins",
+  dshPluginsNavLabel: "dsh-plugins",
+  tunnelDashboardAccess: "endpoint",
+  hideUpstreamModels: "endpoint",
+  requireApiKey: "endpoint",
+  sudoPassword: "endpoint",
+  claudeAutoPing: "usage",
+  codexAutoPing: "usage",
+  cavemanLevel: "token-saver",
+  cavemanEnabled: "token-saver",
+  compatNormalization: "token-saver",
+  headroomEnabled: "token-saver",
+  headroomUrl: "token-saver",
+  headroomTimeoutMs: "token-saver",
+  headroomCodeAware: "token-saver",
+  headroomKompress: "token-saver",
+  ponytailEnabled: "token-saver",
+  ponytailLevel: "token-saver",
+  pxpipeEnabled: "token-saver",
+  pxpipeMinChars: "token-saver",
+};
+
+/** Every distinct page key that owns at least one field present in `body`. */
+function ownerPagesOf(body) {
+  const owners = new Set();
+  for (const key of Object.keys(body || {})) {
+    // Every affiliate-program field is prefixed "affiliate" (see validateAffiliateSettings).
+    if (key.startsWith("affiliate")) {
+      owners.add("affiliates");
+      continue;
+    }
+    owners.add(SETTINGS_FIELD_OWNERS[key] || "profile");
+  }
+  return owners.size ? [...owners] : ["profile"];
+}
+
+/** A request may touch fields owned by several pages at once; `edit` is required on EVERY one. */
+async function requireEditOnEveryOwner(request, body) {
+  for (const pageKey of ownerPagesOf(body)) {
+    const denied = await requirePagePermission(request, pageKey, "edit");
+    if (denied) return denied;
+  }
+  return null;
+}
 
 export async function GET() {
   try {
@@ -56,6 +120,9 @@ export async function PATCH(request) {
 
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
+
+    const denied = await requireEditOnEveryOwner(request, body);
+    if (denied) return denied;
 
     // The default customer group must name an existing ACTIVE group. Accepting an
     // unknown or inactive id would leave new signups unattached until the next boot

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { testSingleConnection } from "./testUtils.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // POST /api/providers/[id]/test - Test connection
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const result = await testSingleConnection(id);

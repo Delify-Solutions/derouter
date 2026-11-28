@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getAffiliateDetail, updateAffiliate } from "@/lib/db/repos/affiliateRepo.js";
 import { validateOverride } from "@/lib/affiliate/settings.js";
@@ -34,6 +35,8 @@ const STATUSES = new Set(["active", "blocked"]);
  * may be selected. Every write is audited on the affiliate's account.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "affiliates", "edit");
+  if (denied) return denied;
   const { userId } = await params;
   const actor = await getAdminActor(request);
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Modal } from "@/shared/components";
+import { Button, Card, Modal, Table } from "@/shared/components";
 import { dateOf, timeOf } from "@/shared/components/billing";
 
 // Spec activity-ip-log "Admin IP lookup": where an account has been, who else was
@@ -74,47 +74,45 @@ function IpAccountsModal({ ip, onClose }) {
           <p className="text-sm text-text-muted">
             {state.accounts.length} tài khoản. Khóa tài khoản ở tab Tổng quan của từng người.
           </p>
-          <div className="overflow-x-auto border border-border">
-            <table className="w-full min-w-[560px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th scope="col" className="meta px-3 py-2 font-medium text-text-muted">Tài khoản</th>
-                  <th scope="col" className="meta px-3 py-2 font-medium text-text-muted">Trạng thái</th>
-                  <th scope="col" className="meta px-3 py-2 text-right font-medium text-text-muted">Web</th>
-                  <th scope="col" className="meta px-3 py-2 text-right font-medium text-text-muted">API</th>
-                  <th scope="col" className="meta px-3 py-2 font-medium text-text-muted">Gần nhất</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.accounts.map((account) => (
-                  <tr key={account.userId} className="border-b border-border last:border-b-0">
-                    <td className="px-3 py-2 text-sm">
-                      {account.status === "deleted" ? (
-                        <span className="font-mono text-[12px] text-text-muted">{account.userId}</span>
-                      ) : (
-                        <Link href={`/dashboard/users/${account.userId}?tab=ip`} className="text-text-main underline underline-offset-2 [overflow-wrap:anywhere]">
-                          {account.email || account.userId}
-                        </Link>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-[12px] text-text-muted">
-                      {account.status === "suspended" ? (
-                        <span className="inline-flex items-center gap-1 text-danger">
-                          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">block</span>
-                          {STATUS_LABEL.suspended}
-                        </span>
-                      ) : (
-                        STATUS_LABEL[account.status] || account.status
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-[12px] text-text-main">{account.webCount}</td>
-                    <td className="px-3 py-2 text-right font-mono text-[12px] text-text-main">{account.apiCount}</td>
-                    <td className="px-3 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">{when(account.lastSeen)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-[560px] text-left">
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell>Tài khoản</Table.HeaderCell>
+                <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Web</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">API</Table.HeaderCell>
+                <Table.HeaderCell>Gần nhất</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {state.accounts.map((account) => (
+                <Table.Row key={account.userId}>
+                  <Table.Cell className="text-sm">
+                    {account.status === "deleted" ? (
+                      <span className="font-mono text-[12px] text-text-muted">{account.userId}</span>
+                    ) : (
+                      <Link href={`/dashboard/users/${account.userId}?tab=ip`} className="text-text-main underline underline-offset-2 [overflow-wrap:anywhere]">
+                        {account.email || account.userId}
+                      </Link>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="text-[12px] text-text-muted">
+                    {account.status === "suspended" ? (
+                      <span className="inline-flex items-center gap-1 text-danger">
+                        <span className="material-symbols-outlined text-[14px]" aria-hidden="true">block</span>
+                        {STATUS_LABEL.suspended}
+                      </span>
+                    ) : (
+                      STATUS_LABEL[account.status] || account.status
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="text-right font-mono text-[12px] text-text-main">{account.webCount}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-[12px] text-text-main">{account.apiCount}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">{when(account.lastSeen)}</Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         </div>
       )}
     </Modal>
@@ -155,7 +153,7 @@ export default function IpTab({ userId }) {
     return (
       <div className="flex flex-col gap-3">
         <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</p>
-        <div><button type="button" onClick={load} className="text-sm underline">Thử lại</button></div>
+        <div><Button variant="ghost" size="sm" onClick={load}>Thử lại</Button></div>
       </div>
     );
   }
@@ -175,53 +173,51 @@ export default function IpTab({ userId }) {
           </p>
         </div>
         {ips.length === 0 ? (
-          <div className="border border-border bg-surface px-6 py-8">
+          <Card padding="sm">
             <p className="text-sm text-text-muted">Chưa ghi nhận IP nào. IP được ghi từ bản cập nhật này trở đi.</p>
-          </div>
+          </Card>
         ) : (
-          <div className="overflow-x-auto border border-border bg-surface">
-            <table className="w-full min-w-[720px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">IP</th>
-                  <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Web</th>
-                  <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">API</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Lần đầu</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Gần nhất</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Tài khoản khác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ips.map((row) => (
-                  <tr key={row.ip} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setLookupIp(row.ip)}
-                        className="font-mono text-[12px] text-text-main underline underline-offset-2 hover:text-brand-600"
-                      >
-                        {row.ip}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono text-[12px] text-text-main">{row.webCount}</td>
-                    <td className="px-4 py-2 text-right font-mono text-[12px] text-text-main">{row.apiCount}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.firstSeen)}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.lastSeen)}</td>
-                    <td className="px-4 py-2 text-[12px]">
-                      {row.otherAccounts > 0 ? (
-                        <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
-                          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">group</span>
-                          <span className="font-mono">{row.otherAccounts}</span> tài khoản khác
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">Không</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-[720px] text-left">
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell>IP</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Web</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">API</Table.HeaderCell>
+                <Table.HeaderCell>Lần đầu</Table.HeaderCell>
+                <Table.HeaderCell>Gần nhất</Table.HeaderCell>
+                <Table.HeaderCell>Tài khoản khác</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {ips.map((row) => (
+                <Table.Row key={row.ip}>
+                  <Table.Cell>
+                    <button
+                      type="button"
+                      onClick={() => setLookupIp(row.ip)}
+                      className="font-mono text-[12px] text-text-main underline underline-offset-2 hover:text-brand-600"
+                    >
+                      {row.ip}
+                    </button>
+                  </Table.Cell>
+                  <Table.Cell className="text-right font-mono text-[12px] text-text-main">{row.webCount}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-[12px] text-text-main">{row.apiCount}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.firstSeen)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.lastSeen)}</Table.Cell>
+                  <Table.Cell className="text-[12px]">
+                    {row.otherAccounts > 0 ? (
+                      <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                        <span className="material-symbols-outlined text-[14px]" aria-hidden="true">group</span>
+                        <span className="font-mono">{row.otherAccounts}</span> tài khoản khác
+                      </span>
+                    ) : (
+                      <span className="text-text-muted">Không</span>
+                    )}
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         )}
       </section>
 
@@ -231,50 +227,48 @@ export default function IpTab({ userId }) {
           <p className="text-[12px] text-text-muted">100 thao tác mới nhất trên web.</p>
         </div>
         {activity.length === 0 ? (
-          <div className="border border-border bg-surface px-6 py-8">
+          <Card padding="sm">
             <p className="text-sm text-text-muted">Chưa có thao tác nào được ghi.</p>
-          </div>
+          </Card>
         ) : (
-          <div className="overflow-x-auto border border-border bg-surface">
-            <table className="w-full min-w-[760px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Thời gian</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Thao tác</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Chi tiết</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">IP</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Thiết bị</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activity.map((row) => (
-                  <tr key={row.id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.createdAt)}</td>
-                    <td className="px-4 py-2 text-sm text-text-main whitespace-nowrap">{ACTION_LABEL[row.action] || row.action}</td>
-                    <td className="max-w-[220px] truncate px-4 py-2 font-mono text-[11px] text-text-muted" title={detailText(row.action, row.details)}>
-                      {detailText(row.action, row.details) || "—"}
-                    </td>
-                    <td className="px-4 py-2">
-                      {row.ip ? (
-                        <button
-                          type="button"
-                          onClick={() => setLookupIp(row.ip)}
-                          className="font-mono text-[12px] text-text-main underline underline-offset-2 hover:text-brand-600"
-                        >
-                          {row.ip}
-                        </button>
-                      ) : (
-                        <span className="font-mono text-[12px] text-text-muted">—</span>
-                      )}
-                    </td>
-                    <td className="max-w-[260px] truncate px-4 py-2 font-mono text-[11px] text-text-muted" title={row.userAgent || ""}>
-                      {row.userAgent || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-[760px] text-left">
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell>Thời gian</Table.HeaderCell>
+                <Table.HeaderCell>Thao tác</Table.HeaderCell>
+                <Table.HeaderCell>Chi tiết</Table.HeaderCell>
+                <Table.HeaderCell>IP</Table.HeaderCell>
+                <Table.HeaderCell>Thiết bị</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {activity.map((row) => (
+                <Table.Row key={row.id}>
+                  <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">{when(row.createdAt)}</Table.Cell>
+                  <Table.Cell className="text-sm text-text-main whitespace-nowrap">{ACTION_LABEL[row.action] || row.action}</Table.Cell>
+                  <Table.Cell className="max-w-[220px] truncate font-mono text-[11px] text-text-muted" title={detailText(row.action, row.details)}>
+                    {detailText(row.action, row.details) || "—"}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {row.ip ? (
+                      <button
+                        type="button"
+                        onClick={() => setLookupIp(row.ip)}
+                        className="font-mono text-[12px] text-text-main underline underline-offset-2 hover:text-brand-600"
+                      >
+                        {row.ip}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-[12px] text-text-muted">—</span>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="max-w-[260px] truncate font-mono text-[11px] text-text-muted" title={row.userAgent || ""}>
+                    {row.userAgent || "—"}
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         )}
       </section>
 

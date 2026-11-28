@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Resolve chatLanguageModels.json path per OS
 const getConfigPath = () => {
@@ -61,6 +62,8 @@ export async function GET() {
 
 // POST - Apply derouter config to chatLanguageModels.json
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { baseUrl, apiKey, models } = await request.json();
 
@@ -118,7 +121,9 @@ export async function POST(request) {
 }
 
 // DELETE - Remove derouter entry from chatLanguageModels.json
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const configPath = getConfigPath();
 

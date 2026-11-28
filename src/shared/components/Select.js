@@ -2,6 +2,10 @@
 
 import { cn } from "@/shared/utils/cn";
 
+// Vuexy select shape (change admin-accounts-rbac-vuexy, group 10 — missed in
+// group 7's original primitive list alongside Toggle; same rounded/focus-ring
+// treatment as Input.js, retrofitted here so every call site picks it up
+// without further edits).
 export default function Select({
   label,
   options = [],
@@ -20,9 +24,9 @@ export default function Select({
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
-        <label className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
+        <label className="text-xs font-medium text-vx-text-muted">
           {label}
-          {required && <span className="text-red-600 ml-1">*</span>}
+          {required && <span className="text-vx-danger ml-1">*</span>}
         </label>
       )}
       <div className="relative">
@@ -31,12 +35,12 @@ export default function Select({
           onChange={onChange}
           disabled={disabled}
           className={cn(
-            "w-full py-2.5 px-3 pr-10 text-sm text-text-main",
-            "bg-surface border border-border rounded-none appearance-none",
-            "focus:border-brand-500 focus:outline-none",
+            "w-full py-2.5 px-3 pr-10 text-sm text-vx-text",
+            "bg-vx-surface border border-vx-border rounded-vx-md appearance-none",
+            "focus:border-vx-primary focus:outline-none focus:ring-2 focus:ring-vx-primary/15",
             "transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed",
             "text-[16px] sm:text-sm",
-            error && "border-red-600",
+            error && "border-vx-danger focus:border-vx-danger focus:ring-vx-danger/15",
             selectClassName
           )}
           {...props}
@@ -55,18 +59,18 @@ export default function Select({
             </option>
           ))}
         </select>
-        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-text-muted">
+        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-vx-text-muted">
           <span className="material-symbols-outlined text-[20px]">expand_more</span>
         </div>
       </div>
       {error && (
-        <p className="text-[11px] text-red-600 flex items-center gap-1">
+        <p className="text-xs text-vx-danger flex items-center gap-1">
           <span className="material-symbols-outlined text-[14px]">error</span>
           {error}
         </p>
       )}
       {hint && !error && (
-        <p className="text-[11px] text-text-muted">{hint}</p>
+        <p className="text-xs text-vx-text-muted">{hint}</p>
       )}
     </div>
   );

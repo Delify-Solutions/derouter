@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDisabledModels, disableModels, enableModels } from "@/lib/disabledModelsDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,8 @@ export async function GET(request) {
 
 // POST /api/models/disabled  body: { providerAlias, ids: [...] }
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const { providerAlias, ids } = await request.json();
     if (!providerAlias || !Array.isArray(ids)) {
@@ -32,6 +35,8 @@ export async function POST(request) {
 
 // DELETE /api/models/disabled?providerAlias=xxx[&id=yyy]
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "providers", "delete");
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");

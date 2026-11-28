@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
+import { Select, Input, Button } from "@/shared/components";
 import { readPresets, upsertPreset, deletePreset, subscribePresets, stripSlash } from "./cliEndpointPresets";
 
 const CUSTOM_VALUE = "__custom__";
@@ -150,32 +151,38 @@ export default function BaseUrlSelect({
   const isCustom = mode === CUSTOM_VALUE;
   const canSave = isCustom && (customInput || "").trim().length > 0;
 
+  const selectOptions = canSave
+    ? [...options, { value: SAVE_VALUE, label: "+ Save current as..." }]
+    : options;
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
-        <select
+        <Select
           value={mode}
           onChange={handleSelect}
-          className="flex-1 min-w-0 px-2 py-2 bg-surface rounded text-xs border border-border focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-          {canSave && <option value={SAVE_VALUE}>+ Save current as...</option>}
-        </select>
+          options={selectOptions}
+          className="flex-1 min-w-0"
+        />
         {isSaved && (
-          <button type="button" onClick={handleDeleteSaved} className="p-1 text-text-muted hover:text-red-500 rounded transition-colors shrink-0" title="Delete saved endpoint">
-            <span className="material-symbols-outlined text-[14px]">delete</span>
-          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon="delete"
+            onClick={handleDeleteSaved}
+            aria-label="Delete saved endpoint"
+            title="Delete saved endpoint"
+            className="shrink-0 text-red-600 hover:bg-red-500/10"
+          />
         )}
       </div>
       {isCustom && (
-        <input
+        <Input
           type="text"
           value={customInput}
           onChange={handleCustomInput}
           placeholder={withV1 ? "https://example.com/v1" : "https://example.com"}
-          className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
         />
       )}
     </div>

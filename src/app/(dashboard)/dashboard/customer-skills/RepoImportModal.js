@@ -1,12 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, Modal } from "@/shared/components";
+import { Button, Modal, Input, Select, Badge } from "@/shared/components";
 import { slugFromName } from "@/lib/skills/frontmatter.js";
 import RuntimePicker from "./RuntimePicker";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
-const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
 const OUTCOME = { created: "Đã thêm", updated: "Đã cập nhật", skipped: "Bỏ qua", error: "Lỗi" };
 const MAX_ITEMS = 100;
 
@@ -257,7 +256,7 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
     >
       <div className="flex max-h-[70vh] flex-col gap-5 overflow-y-auto pr-1">
         {error && (
-          <p role="alert" className="border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+          <p role="alert" className="border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
             {error}
           </p>
         )}
@@ -266,28 +265,25 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
         )}
 
         <div className="flex flex-col gap-3 border border-border p-4">
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Link repo</span>
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !loading) readRepo(); }}
-              className={INPUT}
-              placeholder="https://github.com/owner/repo"
-              aria-label="Link repo"
-            />
-          </label>
+          <Input
+            label="Link repo"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !loading) readRepo(); }}
+            placeholder="https://github.com/owner/repo"
+            aria-label="Link repo"
+          />
           <div className="flex flex-wrap items-end gap-2">
-            <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <span className={LABEL}>Chỉ lấy trong thư mục (tuỳ chọn)</span>
-              <input
+            <div className="min-w-0 flex-1">
+              <Input
+                label="Chỉ lấy trong thư mục (tuỳ chọn)"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                className={`${INPUT} font-mono`}
+                inputClassName="font-mono"
                 placeholder="skills/redteam"
                 aria-label="Thư mục trong repo"
               />
-            </label>
+            </div>
             <Button variant="secondary" onClick={readRepo} loading={loading}>
               {rows.length ? "Đọc lại" : "Đọc repo"}
             </Button>
@@ -319,15 +315,12 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
             </p>
             {asBundle && (
               <div className="flex flex-col gap-3">
-                <label className="flex flex-col gap-1.5">
-                  <span className={LABEL}>Tên bundle</span>
-                  <input
-                    value={bundleName}
-                    onChange={(e) => setBundleName(e.target.value)}
-                    className={INPUT}
-                    placeholder="rea-policy"
-                  />
-                </label>
+                <Input
+                  label="Tên bundle"
+                  value={bundleName}
+                  onChange={(e) => setBundleName(e.target.value)}
+                  placeholder="rea-policy"
+                />
                 <label className="flex flex-col gap-1.5">
                   <span className={LABEL}>Mô tả (khách thấy)</span>
                   <textarea
@@ -347,25 +340,21 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
                     className="w-full border border-border bg-surface px-3 py-2 text-sm text-text-main focus:border-text-main focus:outline-none"
                   />
                 </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className={LABEL}>Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)</span>
-                  <input
-                    value={bundleVersion}
-                    onChange={(e) => setBundleVersion(e.target.value)}
-                    className={`${INPUT} font-mono`}
-                    placeholder="v1.0.0"
-                    maxLength={40}
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className={LABEL}>Installer entrypoint (trong repo, chạy sau khi giải nén engine)</span>
-                  <input
-                    value={bundleEntrypoint}
-                    onChange={(e) => setBundleEntrypoint(e.target.value)}
-                    className={`${INPUT} font-mono`}
-                    placeholder="install.mjs"
-                  />
-                </label>
+                <Input
+                  label="Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)"
+                  value={bundleVersion}
+                  onChange={(e) => setBundleVersion(e.target.value)}
+                  inputClassName="font-mono"
+                  placeholder="v1.0.0"
+                  maxLength={40}
+                />
+                <Input
+                  label="Installer entrypoint (trong repo, chạy sau khi giải nén engine)"
+                  value={bundleEntrypoint}
+                  onChange={(e) => setBundleEntrypoint(e.target.value)}
+                  inputClassName="font-mono"
+                  placeholder="install.mjs"
+                />
               </div>
             )}
           </div>
@@ -404,18 +393,12 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
                     <span className="font-mono text-[11px] text-text-subtle" title={row.path}>
                       {row.path} · {(row.bytes / 1024).toFixed(1)} KB
                     </span>
-                    {exists(row) && (
-                      <span className="border border-border px-2 py-0.5 text-[11px] text-text-muted">Slug đã có</span>
-                    )}
-                    {problem && (
-                      <span role="alert" className="border border-red-500/40 px-2 py-0.5 text-[11px] text-red-700 dark:text-red-400">
-                        {problem}
-                      </span>
-                    )}
+                    {exists(row) && <Badge variant="default" size="xs">Slug đã có</Badge>}
+                    {problem && <Badge variant="error" size="xs">{problem}</Badge>}
                     {row.outcome && (
-                      <span className="border border-border px-2 py-0.5 text-[11px] text-text-main">
+                      <Badge variant={row.outcome.error ? "error" : "default"} size="xs">
                         {OUTCOME[row.outcome.action]}{row.outcome.error ? `: ${row.outcome.error}` : ""}
-                      </span>
+                      </Badge>
                     )}
                     {!done && (
                       <button
@@ -430,29 +413,29 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
                   </div>
                   {!done && (
                     <div className="grid gap-2 sm:grid-cols-[1fr_1fr_2fr]">
-                      <input
+                      <Input
                         value={row.name}
                         onChange={(e) => update(row.key, {
                           name: e.target.value,
                           // Follow the name only while the slug is still the derived one.
                           slug: row.slug === slugFromName(row.name) ? slugFromName(e.target.value) : row.slug,
                         })}
-                        className={INPUT}
+                        inputClassName="h-9 py-0"
                         placeholder="Tên skill"
                         aria-label={`Tên skill (${row.path})`}
                       />
-                      <input
+                      <Input
                         value={row.slug}
                         onChange={(e) => update(row.key, { slug: e.target.value })}
-                        className={`${INPUT} font-mono`}
+                        inputClassName="h-9 py-0 font-mono"
                         placeholder="slug"
                         aria-label={`Slug (${row.path})`}
                       />
-                      <input
+                      <Input
                         value={row.summary}
                         maxLength={200}
                         onChange={(e) => update(row.key, { summary: e.target.value })}
-                        className={INPUT}
+                        inputClassName="h-9 py-0"
                         placeholder="Mô tả ngắn"
                         aria-label={`Mô tả ngắn (${row.path})`}
                       />
@@ -469,33 +452,36 @@ export default function RepoImportModal({ isOpen, existingSlugs, categories, onC
             <span className={LABEL}>Áp dụng cho tất cả skill sẽ thêm</span>
             <RuntimePicker value={targets} onChange={setTargets} />
             <div className="grid gap-4 sm:grid-cols-3">
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Nhóm</span>
-                <input
+              <div>
+                <Input
+                  label="Nhóm"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   list="skill-repo-categories"
-                  className={INPUT}
                   placeholder="Red team"
                 />
                 <datalist id="skill-repo-categories">
                   {categories.map((c) => <option key={c.category} value={c.category} />)}
                 </datalist>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Đối tượng</span>
-                <select value={audience} onChange={(e) => setAudience(e.target.value)} className={INPUT}>
-                  <option value="customer">Khách hàng</option>
-                  <option value="internal">Nội bộ</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Slug đã có</span>
-                <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT}>
-                  <option value="skip">Bỏ qua</option>
-                  <option value="update">Cập nhật nội dung</option>
-                </select>
-              </label>
+              </div>
+              <Select
+                label="Đối tượng"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+                options={[
+                  { value: "customer", label: "Khách hàng" },
+                  { value: "internal", label: "Nội bộ" },
+                ]}
+              />
+              <Select
+                label="Slug đã có"
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                options={[
+                  { value: "skip", label: "Bỏ qua" },
+                  { value: "update", label: "Cập nhật nội dung" },
+                ]}
+              />
             </div>
             <label className="flex items-center gap-2">
               <input

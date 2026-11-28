@@ -3,7 +3,7 @@
 import { useParams, notFound, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Card, Button, Input, Toggle, ModelSelectModal } from "@/shared/components";
+import { Card, Button, Input, Toggle, Badge, ModelSelectModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { AI_PROVIDERS, MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 
@@ -282,14 +282,13 @@ export default function ComboDetailPage() {
             <code className="text-lg font-semibold font-mono">{combo.name}</code>
           </div>
         </div>
-        <Button variant="outline" icon="delete" onClick={handleDelete} className="text-red-500 border-red-200 hover:bg-red-50">
+        <Button variant="danger-outline" icon="delete" onClick={handleDelete}>
           Delete
         </Button>
       </div>
 
       {/* Settings Card */}
-      <Card>
-        <h2 className="text-lg font-semibold mb-3">Settings</h2>
+      <Card title="Settings">
         <div className="flex flex-col gap-4">
           <div>
             <Input label="Combo Name" value={name} onChange={(e) => { setName(e.target.value); validateName(e.target.value); }} onBlur={handleSaveName} error={nameError} />
@@ -306,32 +305,30 @@ export default function ComboDetailPage() {
       </Card>
 
       {combo.kind === "image" && (
-        <Card>
-          <h2 className="text-lg font-semibold mb-1">Price per image</h2>
-          <p className="text-xs text-text-muted mb-3">
-            USD charged to a customer for each image this combo returns. Leave empty or 0 to keep it unavailable to customers.
-          </p>
+        <Card
+          title="Price per image"
+          subtitle="USD charged to a customer for each image this combo returns. Leave empty or 0 to keep it unavailable to customers."
+        >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="sm:w-56">
               <Input label="USD / image" inputMode="decimal" value={imagePrice} onChange={(e) => { setImagePrice(e.target.value); setPriceStatus(null); }} placeholder="0.04" />
             </div>
             <Button size="sm" onClick={handleSaveImagePrice}>Save price</Button>
             {priceStatus && (
-              <span role="status" className={`text-xs ${priceStatus.type === "error" ? "text-red-500" : "text-green-600"}`}>{priceStatus.message}</span>
+              <Badge role="status" variant={priceStatus.type === "error" ? "error" : "success"} size="sm">
+                {priceStatus.message}
+              </Badge>
             )}
           </div>
         </Card>
       )}
 
       {/* Providers Card */}
-      <Card>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
-          <div>
-            <h2 className="text-lg font-semibold">Providers</h2>
-            <p className="text-xs text-text-muted">Tried in order (top-down) or rotated when round-robin is on.</p>
-          </div>
-          <Button size="sm" icon="add" onClick={() => setShowPicker(true)}>Add Provider</Button>
-        </div>
+      <Card
+        title="Providers"
+        subtitle="Tried in order (top-down) or rotated when round-robin is on."
+        action={<Button size="sm" icon="add" onClick={() => setShowPicker(true)}>Add Provider</Button>}
+      >
         {providers.length === 0 ? (
           <div className="text-center py-6 border border-dashed border-border rounded-lg text-text-muted text-sm">
             No providers yet.
@@ -357,15 +354,35 @@ export default function ComboDetailPage() {
                     {model && <code className="text-[10px] text-text-muted font-mono truncate block">{model}</code>}
                   </div>
                   <div className="flex items-center gap-0.5">
-                    <button onClick={() => handleMove(idx, -1)} disabled={idx === 0} className={`p-1 rounded ${idx === 0 ? "text-text-muted/20" : "text-text-muted hover:text-primary hover:bg-black/5"}`} title="Move up">
-                      <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
-                    </button>
-                    <button onClick={() => handleMove(idx, 1)} disabled={idx === providers.length - 1} className={`p-1 rounded ${idx === providers.length - 1 ? "text-text-muted/20" : "text-text-muted hover:text-primary hover:bg-black/5"}`} title="Move down">
-                      <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
-                    </button>
-                    <button onClick={() => handleRemoveProvider(idx)} className="p-1 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10" title="Remove">
-                      <span className="material-symbols-outlined text-[16px]">close</span>
-                    </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="arrow_upward"
+                      onClick={() => handleMove(idx, -1)}
+                      disabled={idx === 0}
+                      title="Move up"
+                      aria-label="Move up"
+                      className="w-7 px-0"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="arrow_downward"
+                      onClick={() => handleMove(idx, 1)}
+                      disabled={idx === providers.length - 1}
+                      title="Move down"
+                      aria-label="Move down"
+                      className="w-7 px-0"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="close"
+                      onClick={() => handleRemoveProvider(idx)}
+                      title="Remove"
+                      aria-label="Remove"
+                      className="w-7 px-0"
+                    />
                   </div>
                 </div>
               );
@@ -376,13 +393,14 @@ export default function ComboDetailPage() {
 
       {/* Test Example Card */}
       {combo.kind && examplePath && (
-        <Card>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
-            <h2 className="text-lg font-semibold">Test Example</h2>
+        <Card
+          title="Test Example"
+          action={
             <Button size="sm" icon="play_arrow" onClick={handleTest} disabled={testing || providers.length === 0}>
               {testing ? "Running..." : "Run"}
             </Button>
-          </div>
+          }
+        >
           <pre className="text-xs font-mono bg-black/[0.03] dark:bg-white/[0.03] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
             {curlExample}
           </pre>
@@ -428,8 +446,7 @@ export default function ComboDetailPage() {
       )}
 
       {/* Usage Logs Card */}
-      <Card>
-        <h2 className="text-lg font-semibold mb-3">Usage Logs</h2>
+      <Card title="Usage Logs">
         {logs.length === 0 ? (
           <p className="text-xs text-text-muted italic">No usage yet.</p>
         ) : (

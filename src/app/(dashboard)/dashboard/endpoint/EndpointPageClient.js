@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Modal, CardSkeleton, Toggle } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, Toggle, Badge, Tooltip } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   TUNNEL_BENEFITS,
@@ -15,7 +15,6 @@ import {
 import { clientPingUrl, clientPingAny } from "./endpointPing";
 import EndpointRow from "./components/EndpointRow";
 import StatusAlert from "./components/StatusAlert";
-import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 export default function APIPageClient({ machineId }) {
   // Customer-owned keys never appear here (they are managed on /dashboard/users);
@@ -681,25 +680,34 @@ export default function APIPageClient({ machineId }) {
           />
           {/* Cloudflare Tunnel */}
           <div className="flex items-center gap-2">
-            <span className={`text-xs font-mono px-1.5 py-0.5 rounded shrink-0 min-w-[88px] text-center ${
-              tunnelEnabled ? "bg-primary/10 text-primary" : "bg-surface-2 text-text-muted"
-            }`}>Tunnel</span>
+            <Badge
+              variant={tunnelEnabled ? "primary" : "default"}
+              size="sm"
+              className="min-w-[88px] shrink-0 justify-center font-mono"
+            >
+              Tunnel
+            </Badge>
             {tunnelEnabled && !tunnelLoading && tunnelReachable ? (
               <>
                 <Input value={`${tunnelPublicUrl || tunnelUrl}/v1`} readOnly className="flex-1 font-mono text-sm" />
-                <button
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => copy(`${tunnelPublicUrl || tunnelUrl}/v1`, "tunnel_url")}
-                  className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors shrink-0"
-                >
-                  <span className="material-symbols-outlined text-[18px]">{copied === "tunnel_url" ? "check" : "content_copy"}</span>
-                </button>
-                <button
+                  aria-label="Sao chép URL tunnel"
+                  icon={copied === "tunnel_url" ? "check" : "content_copy"}
+                />
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => setShowDisableTunnelModal(true)}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Disable Tunnel"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Disable Tunnel"
+                  icon="power_settings_new"
+                />
               </>
             ) : tunnelEnabled && !tunnelLoading && !tunnelReachable ? (
               <>
@@ -707,13 +715,15 @@ export default function APIPageClient({ machineId }) {
                   <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
                   {tunnelEverReachable ? "Tunnel reconnecting..." : "Tunnel checking..."}
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => setShowDisableTunnelModal(true)}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Disable Tunnel"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Disable Tunnel"
+                  icon="power_settings_new"
+                />
               </>
             ) : tunnelLoading ? (
               <>
@@ -721,13 +731,15 @@ export default function APIPageClient({ machineId }) {
                   <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
                   {tunnelProgress || "Creating tunnel..."}
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => { setTunnelLoading(false); setTunnelProgress(""); }}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Stop"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Stop"
+                  icon="power_settings_new"
+                />
               </>
             ) : tunnelStatus?.type === "error" ? (
               <>
@@ -743,13 +755,15 @@ export default function APIPageClient({ machineId }) {
                   <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
                   Checking...
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => setTunnelChecking(false)}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Stop"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Stop"
+                  icon="power_settings_new"
+                />
               </>
             ) : (
               <Button
@@ -773,25 +787,34 @@ export default function APIPageClient({ machineId }) {
           </div>
           {/* Tailscale */}
           <div className="flex items-center gap-2">
-            <span className={`text-xs font-mono px-1.5 py-0.5 rounded shrink-0 min-w-[88px] text-center ${
-              tsEnabled ? "bg-primary/10 text-primary" : "bg-surface-2 text-text-muted"
-            }`}>Tailscale</span>
+            <Badge
+              variant={tsEnabled ? "primary" : "default"}
+              size="sm"
+              className="min-w-[88px] shrink-0 justify-center font-mono"
+            >
+              Tailscale
+            </Badge>
             {tsEnabled && !tsLoading && tsReachable ? (
               <>
                 <Input value={`${tsUrl}/v1`} readOnly className="flex-1 font-mono text-sm" />
-                <button
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => copy(`${tsUrl}/v1`, "ts_url")}
-                  className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors shrink-0"
-                >
-                  <span className="material-symbols-outlined text-[18px]">{copied === "ts_url" ? "check" : "content_copy"}</span>
-                </button>
-                <button
+                  aria-label="Sao chép URL Tailscale"
+                  icon={copied === "ts_url" ? "check" : "content_copy"}
+                />
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => setShowDisableTsModal(true)}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Disable Tailscale"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Disable Tailscale"
+                  icon="power_settings_new"
+                />
               </>
             ) : tsEnabled && !tsLoading && !tsReachable ? (
               <>
@@ -799,13 +822,15 @@ export default function APIPageClient({ machineId }) {
                   <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
                   {tsEverReachable ? "Tailscale reconnecting..." : "Tailscale checking..."}
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => setShowDisableTsModal(true)}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Disable Tailscale"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Disable Tailscale"
+                  icon="power_settings_new"
+                />
               </>
             ) : (tsLoading || tsConnecting) ? (
               <>
@@ -822,13 +847,15 @@ export default function APIPageClient({ machineId }) {
                     {tsAuthLabel || "Open"}
                   </Button>
                 )}
-                <button
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="size-7 shrink-0 px-0"
                   onClick={() => { setTsLoading(false); setTsConnecting(false); setTsProgress(""); clearUserAuth(); }}
-                  className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
-                  title="Stop"
-                >
-                  <span className="material-symbols-outlined text-[18px]">power_settings_new</span>
-                </button>
+                  aria-label="Stop"
+                  icon="power_settings_new"
+                />
               </>
             ) : tsStatus?.type === "error" ? (
               <>
@@ -842,6 +869,7 @@ export default function APIPageClient({ machineId }) {
               <Button
                 size="sm"
                 icon="vpn_lock"
+                variant="info"
                 onClick={() => {
                   if (isLoginUnsafe) {
                     setTsStatus({ type: "error", message: `Security required: ${unsafeReason}` });
@@ -849,7 +877,6 @@ export default function APIPageClient({ machineId }) {
                   }
                   handleOpenTsModal();
                 }}
-                className="bg-linear-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white!"
               >
                 Enable
               </Button>
@@ -901,7 +928,9 @@ export default function APIPageClient({ machineId }) {
             />
             <div className="flex items-center gap-1.5">
               <p className="font-medium text-sm">Allow dashboard access via tunnel</p>
-              <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked." />
+              <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked.">
+                <span className="material-symbols-outlined text-[14px] text-text-muted cursor-help" aria-hidden="true">help</span>
+              </Tooltip>
             </div>
           </div>
         )}
@@ -972,27 +1001,25 @@ export default function APIPageClient({ machineId }) {
         onClose={() => setShowEnableTunnelModal(false)}
       >
         <div className="flex flex-col gap-4">
-          <div className="bg-surface-2 border border-border-subtle rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-primary">cloud_upload</span>
-              <div>
-                <p className="text-sm text-text-main font-medium mb-1">
-                  Cloudflare Tunnel
-                </p>
-                <p className="text-sm text-text-muted">
-                  Expose your local derouter to the internet. No port forwarding, no static IP needed. Share endpoint URL with your team or use it in Cursor, Cline, and other AI tools from anywhere.
-                </p>
-              </div>
+          <Card.Section className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-primary">cloud_upload</span>
+            <div>
+              <p className="text-sm text-text-main font-medium mb-1">
+                Cloudflare Tunnel
+              </p>
+              <p className="text-sm text-text-muted">
+                Expose your local derouter to the internet. No port forwarding, no static IP needed. Share endpoint URL with your team or use it in Cursor, Cline, and other AI tools from anywhere.
+              </p>
             </div>
-          </div>
+          </Card.Section>
 
           <div className="grid grid-cols-2 gap-3">
             {TUNNEL_BENEFITS.map((benefit) => (
-              <div key={benefit.title} className="flex flex-col items-center text-center p-3 rounded-lg bg-sidebar/50">
+              <Card.Section key={benefit.title} className="flex flex-col items-center text-center">
                 <span className="material-symbols-outlined text-xl text-primary mb-1">{benefit.icon}</span>
                 <p className="text-xs font-semibold">{benefit.title}</p>
                 <p className="text-xs text-text-muted">{benefit.desc}</p>
-              </div>
+              </Card.Section>
             ))}
           </div>
 

@@ -1,13 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Button, Modal } from "@/shared/components";
+import { Button, Modal, Input, Select, Badge } from "@/shared/components";
 import { readSkillFrontmatter, slugFromName } from "@/lib/skills/frontmatter.js";
 import { pickSkillFiles, draftFields, draftProblem } from "@/lib/skills/importDrafts.js";
 import RuntimePicker from "./RuntimePicker";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
-const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
 const MAX_ITEMS = 100;
 const OUTCOME = { created: "Đã thêm", updated: "Đã cập nhật", skipped: "Bỏ qua", error: "Lỗi" };
 
@@ -202,7 +201,7 @@ export default function SkillImportModal({ isOpen, existingSlugs, categories, on
     >
       <div className="flex max-h-[70vh] flex-col gap-5 overflow-y-auto pr-1">
         {error && (
-          <p role="alert" className="border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">{error}</p>
+          <p role="alert" className="border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">{error}</p>
         )}
         {notice && <p role="status" className="border border-border bg-surface-2 px-3 py-2 text-sm text-text-main">{notice}</p>}
 
@@ -258,12 +257,12 @@ export default function SkillImportModal({ isOpen, existingSlugs, categories, on
                       className="size-4"
                     />
                     <span className="font-mono text-[11px] text-text-subtle">{it.source} · {(it.bytes / 1024).toFixed(1)} KB</span>
-                    {exists(it) && <span className="border border-border px-2 py-0.5 text-[11px] text-text-muted">Slug đã có</span>}
-                    {problem && <span role="alert" className="border border-red-500/40 px-2 py-0.5 text-[11px] text-red-700 dark:text-red-400">{problem}</span>}
+                    {exists(it) && <Badge variant="default" size="xs">Slug đã có</Badge>}
+                    {problem && <Badge variant="error" size="xs">{problem}</Badge>}
                     {it.outcome && (
-                      <span className="border border-border px-2 py-0.5 text-[11px] text-text-main">
+                      <Badge variant={it.outcome.error ? "error" : "default"} size="xs">
                         {OUTCOME[it.outcome.action]}{it.outcome.error ? `: ${it.outcome.error}` : ""}
-                      </span>
+                      </Badge>
                     )}
                     {!done && (
                       <button type="button" onClick={() => remove(it.key)} aria-label={`Bỏ ${label(it)} khỏi danh sách`} className="ml-auto flex size-7 items-center justify-center border border-border text-text-muted hover:bg-surface-2 hover:text-text-main">
@@ -273,9 +272,9 @@ export default function SkillImportModal({ isOpen, existingSlugs, categories, on
                   </div>
                   {!done && (
                     <div className="grid gap-2 sm:grid-cols-[1fr_1fr_2fr]">
-                      <input value={it.name} onChange={(e) => update(it.key, { name: e.target.value, slug: it.slug === slugFromName(it.name) ? slugFromName(e.target.value) : it.slug })} className={INPUT} placeholder="Tên skill" aria-label={`Tên skill (${label(it)})`} />
-                      <input value={it.slug} onChange={(e) => update(it.key, { slug: e.target.value })} className={`${INPUT} font-mono`} placeholder="slug" aria-label={`Slug (${label(it)})`} />
-                      <input value={it.summary} maxLength={200} onChange={(e) => update(it.key, { summary: e.target.value })} className={INPUT} placeholder="Mô tả ngắn" aria-label={`Mô tả ngắn (${label(it)})`} />
+                      <Input value={it.name} onChange={(e) => update(it.key, { name: e.target.value, slug: it.slug === slugFromName(it.name) ? slugFromName(e.target.value) : it.slug })} placeholder="Tên skill" aria-label={`Tên skill (${label(it)})`} inputClassName="h-9 py-0" />
+                      <Input value={it.slug} onChange={(e) => update(it.key, { slug: e.target.value })} inputClassName="h-9 py-0 font-mono" placeholder="slug" aria-label={`Slug (${label(it)})`} />
+                      <Input value={it.summary} maxLength={200} onChange={(e) => update(it.key, { summary: e.target.value })} inputClassName="h-9 py-0" placeholder="Mô tả ngắn" aria-label={`Mô tả ngắn (${label(it)})`} />
                     </div>
                   )}
                 </div>
@@ -289,25 +288,28 @@ export default function SkillImportModal({ isOpen, existingSlugs, categories, on
             <span className={LABEL}>Áp dụng cho tất cả skill sẽ thêm</span>
             <RuntimePicker value={targets} onChange={setTargets} />
             <div className="grid gap-4 sm:grid-cols-3">
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Nhóm</span>
-                <input value={category} onChange={(e) => setCategory(e.target.value)} list="skill-import-categories" className={INPUT} placeholder="Red team" />
+              <div>
+                <Input label="Nhóm" value={category} onChange={(e) => setCategory(e.target.value)} list="skill-import-categories" placeholder="Red team" />
                 <datalist id="skill-import-categories">{categories.map((c) => <option key={c.category} value={c.category} />)}</datalist>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Đối tượng</span>
-                <select value={audience} onChange={(e) => setAudience(e.target.value)} className={INPUT}>
-                  <option value="customer">Khách hàng</option>
-                  <option value="internal">Nội bộ (khách không thấy)</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Slug đã có</span>
-                <select value={mode} onChange={(e) => setMode(e.target.value)} className={INPUT}>
-                  <option value="skip">Bỏ qua, giữ bản cũ</option>
-                  <option value="update">Chỉ thay nội dung, giữ cài đặt cũ</option>
-                </select>
-              </label>
+              </div>
+              <Select
+                label="Đối tượng"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+                options={[
+                  { value: "customer", label: "Khách hàng" },
+                  { value: "internal", label: "Nội bộ (khách không thấy)" },
+                ]}
+              />
+              <Select
+                label="Slug đã có"
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                options={[
+                  { value: "skip", label: "Bỏ qua, giữ bản cũ" },
+                  { value: "update", label: "Chỉ thay nội dung, giữ cài đặt cũ" },
+                ]}
+              />
             </div>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={isPublished} onChange={(e) => setIsPublished(e.target.checked)} className="size-4" />

@@ -4,6 +4,7 @@ import { getProviderModels, PROVIDER_ID_TO_ALIAS } from "open-sse/config/provide
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { pingModelByKind } from "@/app/api/models/test/ping";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 /**
  * POST /api/providers/[id]/test-models
@@ -11,6 +12,8 @@ import { pingModelByKind } from "@/app/api/models/test/ping";
  * Actual requests go through the internal endpoint that matches each model kind.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const connection = await getProviderConnectionById(id);

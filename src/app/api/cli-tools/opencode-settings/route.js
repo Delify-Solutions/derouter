@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const execAsync = promisify(exec);
 
@@ -88,6 +89,8 @@ export async function GET() {
 
 // POST - Apply derouter as openai-compatible provider (multi-model support)
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { baseUrl, apiKey, model, models, activeModel, subagentModel } = await request.json();
 
@@ -172,6 +175,8 @@ export async function POST(request) {
 
 // PATCH - Update specific settings (e.g., clear active model)
 export async function PATCH(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { clearActiveModel } = await request.json();
     const configPath = getConfigPath();
@@ -207,6 +212,8 @@ export async function PATCH(request) {
 
 // DELETE - Remove derouter provider or specific models from config
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const modelToRemove = searchParams.get("model");

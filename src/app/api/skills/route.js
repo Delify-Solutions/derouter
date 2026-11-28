@@ -5,6 +5,7 @@ import {
   skillInputError,
 } from "@/lib/db/repos/skillsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,8 @@ export async function GET(request) {
 
 // POST /api/skills — publish a new skill.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   try {
     let body = null;
     try {

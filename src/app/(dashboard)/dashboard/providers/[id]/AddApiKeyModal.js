@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Badge, Input, Modal, Select } from "@/shared/components";
+import { Button, Badge, Card, Input, Modal, Select } from "@/shared/components";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { planBulkAdd } from "@/shared/utils/bulkAdd";
 
@@ -211,7 +211,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
 
         {mode === "bulk" && (
           <div className="flex flex-col gap-3">
-            <p className="text-xs text-text-muted">
+            <p className="text-xs text-vx-text-muted">
               {isCloudflareAi
                 ? <>One key per line. Format: <code>name|apiKey|accountId</code> or just <code>apiKey</code> (auto-named by index).</>
                 : provider === "qoder"
@@ -220,13 +220,13 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               }
             </p>
             <textarea
-              className="w-full rounded border border-accent/30 bg-sidebar p-2 text-sm font-mono resize-y min-h-[140px] focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded-vx-md border border-vx-border bg-vx-surface p-2 text-sm font-mono resize-y min-h-[140px] focus:outline-none focus:border-vx-primary focus:ring-2 focus:ring-vx-primary/15"
               placeholder={bulkPlaceholder}
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
             />
             {bulkResult && (
-              <div className={`text-sm font-medium ${bulkResult.failed > 0 ? "text-yellow-400" : "text-green-400"}`}>
+              <div className={`text-sm font-medium ${bulkResult.failed > 0 ? "text-vx-warning" : "text-vx-success"}`}>
                 ✓ {bulkResult.success} added{bulkResult.failed > 0 ? `, ✗ ${bulkResult.failed} failed` : ""}
               </div>
             )}
@@ -280,7 +280,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </div>
         )}
         {isXaiApiKey && (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             Use a direct xAI API key from console.x.ai. This is separate from Grok Build OAuth.
           </p>
         )}
@@ -299,7 +299,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
               placeholder="read from /api/profile when blank"
             />
-            <p className="text-xs text-text-muted">
+            <p className="text-xs text-vx-text-muted">
               The Secret Key authenticates inference; the prepaid balance is only readable
               through the portal session. On portal.deploy.com open DevTools → Application →
               Cookies, copy <code>hive-portal-production</code>, and paste it above. The
@@ -309,12 +309,12 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </>
         )}
         {isCookie && authHint && (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             {authHint}
             {website && (
               <>
                 {" "}
-                <a href={website} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                <a href={website} target="_blank" rel="noopener noreferrer" className="text-vx-primary underline">
                   Open {website.replace(/^https?:\/\//, "")}
                 </a>
               </>
@@ -338,7 +338,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           />
         )}
         {isOllamaLocal && (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             Leave blank to use <code>http://localhost:11434</code>. For remote Ollama, enter the full host URL (e.g. <code>http://192.168.1.10:11434</code>).
           </p>
         )}
@@ -348,15 +348,15 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </Badge>
         )}
         {error && (
-          <p className="text-xs text-red-500 break-words">{error}</p>
+          <p className="text-xs text-vx-danger break-words">{error}</p>
         )}
         {isCompatible && (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             Enter the model ID exactly as your compatible endpoint expects it. This model will be saved as the connection default.
           </p>
         )}
         {isCloudflareAi && (
-          <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
+          <Card.Section>
             <h3 className="font-semibold mb-3 text-sm">Cloudflare Workers AI</h3>
             <Input
               label="Account ID"
@@ -364,13 +364,13 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               onChange={(e) => setCloudflareData({ ...cloudflareData, accountId: e.target.value })}
               placeholder="abc123def456..."
             />
-            <p className="text-xs text-text-muted mt-2">
-              Find your Account ID in the right sidebar of <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" className="text-primary underline">dash.cloudflare.com</a>
+            <p className="text-xs text-vx-text-muted mt-2">
+              Find your Account ID in the right sidebar of <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" className="text-vx-primary underline">dash.cloudflare.com</a>
             </p>
-          </div>
+          </Card.Section>
         )}
         {isAzure && (
-          <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
+          <Card.Section>
             <h3 className="font-semibold mb-3 text-sm">Azure OpenAI Configuration</h3>
             <div className="flex flex-col gap-3">
               <Input
@@ -398,7 +398,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
                 placeholder="Organization ID"
               />
             </div>
-          </div>
+          </Card.Section>
         )}
 
         <Input
@@ -420,12 +420,12 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         />
 
         {(proxyPools || []).length === 0 && (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             No active proxy pools available. Create one in Proxy Pools page first.
           </p>
         )}
 
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-vx-text-muted">
           Legacy manual proxy fields are still accepted by API for backward compatibility.
         </p>
 

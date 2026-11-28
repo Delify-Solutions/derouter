@@ -7,27 +7,27 @@ import { formatResetTime } from "./utils";
 const getColorClasses = (remainingPercentage) => {
   if (remainingPercentage > 70) {
     return {
-      text: "text-green-500",
-      bg: "bg-green-500",
-      bgLight: "bg-green-500/10",
+      text: "text-vx-success",
+      bg: "bg-vx-success",
+      bgLight: "bg-vx-success/10",
       emoji: "🟢"
     };
   }
-  
+
   if (remainingPercentage >= 30) {
     return {
-      text: "text-yellow-500",
-      bg: "bg-yellow-500",
-      bgLight: "bg-yellow-500/10",
+      text: "text-vx-warning",
+      bg: "bg-vx-warning",
+      bgLight: "bg-vx-warning/10",
       emoji: "🟡"
     };
   }
-  
+
   // 0-29% including 0% (out of quota) - show red
   return {
-    text: "text-red-500",
-    bg: "bg-red-500",
-    bgLight: "bg-red-500/10",
+    text: "text-vx-danger",
+    bg: "bg-vx-danger",
+    bgLight: "bg-vx-danger/10",
     emoji: "🔴"
   };
 };
@@ -87,7 +87,7 @@ export default function QuotaProgressBar({
     <div className="space-y-2">
       {/* Label and percentage */}
       <div className="flex items-center justify-between text-sm">
-        <span className="font-semibold text-text-primary">
+        <span className="font-semibold text-vx-text">
           {label}
         </span>
         <div className="flex items-center gap-1.5">
@@ -109,7 +109,7 @@ export default function QuotaProgressBar({
       )}
 
       {/* Usage details and countdown */}
-      <div className="flex items-center justify-between text-xs text-text-muted">
+      <div className="flex items-center justify-between text-xs text-vx-text-muted">
         <span>
           {used.toLocaleString()} / {total.toLocaleString()} requests
         </span>
@@ -123,7 +123,7 @@ export default function QuotaProgressBar({
 
       {/* Reset time display */}
       {resetDisplay && (
-        <div className="text-xs text-text-muted/70">
+        <div className="text-xs text-vx-text-muted/70">
           {resetWord} at {resetDisplay}
         </div>
       )}

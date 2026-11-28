@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Table from "@/shared/components/Table";
+import Button from "@/shared/components/Button";
 import { formatResetTime, getRemainingPercentage } from "./utils";
 
 const PAGE_SIZE = 10;
@@ -45,26 +47,26 @@ function formatResetTimeDisplay(resetTime) {
 function getColorClasses(remainingPercentage) {
   if (remainingPercentage > 70) {
     return {
-      text: "text-green-600 dark:text-green-400",
-      bg: "bg-green-500",
-      bgLight: "bg-green-500/10",
+      text: "text-vx-success",
+      bg: "bg-vx-success",
+      bgLight: "bg-vx-success/10",
       emoji: "🟢",
     };
   }
 
   if (remainingPercentage >= 30) {
     return {
-      text: "text-yellow-600 dark:text-yellow-400",
-      bg: "bg-yellow-500",
-      bgLight: "bg-yellow-500/10",
+      text: "text-vx-warning",
+      bg: "bg-vx-warning",
+      bgLight: "bg-vx-warning/10",
       emoji: "🟡",
     };
   }
 
   return {
-    text: "text-red-600 dark:text-red-400",
-    bg: "bg-red-500",
-    bgLight: "bg-red-500/10",
+    text: "text-vx-danger",
+    bg: "bg-vx-danger",
+    bgLight: "bg-vx-danger/10",
     emoji: "🔴",
   };
 }
@@ -138,124 +140,127 @@ export default function QuotaTable({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] text-text-muted">
+        <div className="text-[10px] text-vx-text-muted">
           {sortedQuotas.length} quota{sortedQuotas.length > 1 ? "s" : ""}
         </div>
         {showSortLabel && (
-          <div className="rounded-md border border-black/10 bg-black/[0.02] px-2 py-1 text-[10px] text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
+          <div className="rounded-vx-sm border border-vx-border bg-vx-surface-2 px-2 py-1 text-[10px] text-vx-text-muted">
             {sortLabel}
           </div>
         )}
       </div>
 
-      <div className="space-y-px">
-        {currentPageRows.map((quota) => {
-          const isUnlimited = quota.unlimited === true;
-          const colors = getColorClasses(quota.remaining);
-          const countdown = formatResetTime(quota.resetAt);
-          const resetDisplay = formatResetTimeDisplay(quota.resetAt);
-          // recurring defaults true: a missing flag means the quota
-          // refreshes at resetAt. Bonus/one-shot packs set recurring:false
-          // and their resetAt is a hard expiry, so word it as "expires".
-          const recurring = quota.recurring !== false;
-          const countdownLabel = recurring ? `in ${countdown}` : `expires in ${countdown}`;
+      <Table bare className="table-fixed">
+        <Table.Body>
+          {currentPageRows.map((quota) => {
+            const isUnlimited = quota.unlimited === true;
+            const colors = getColorClasses(quota.remaining);
+            const countdown = formatResetTime(quota.resetAt);
+            const resetDisplay = formatResetTimeDisplay(quota.resetAt);
+            // recurring defaults true: a missing flag means the quota
+            // refreshes at resetAt. Bonus/one-shot packs set recurring:false
+            // and their resetAt is a hard expiry, so word it as "expires".
+            const recurring = quota.recurring !== false;
+            const countdownLabel = recurring ? `in ${countdown}` : `expires in ${countdown}`;
 
-          return (
-            <div
-              key={`${quota.name}-${quota.index}`}
-              className={`flex items-center gap-2 border-b border-black/5 dark:border-white/5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors ${cellPad}`}
-            >
-              {/* Name */}
-              <div className="flex w-36 min-w-0 items-center gap-1.5">
-                <span className="text-[10px] shrink-0">{colors.emoji}</span>
-                <span className={`${nameText} font-medium text-text-primary truncate`}>
-                  {quota.name}
-                </span>
-              </div>
+            return (
+              <Table.Row key={`${quota.name}-${quota.index}`}>
+                {/* Name */}
+                <Table.Cell className={`w-36 ${cellPad}`}>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="text-[10px] shrink-0">{colors.emoji}</span>
+                    <span className={`${nameText} font-medium text-vx-text truncate`}>
+                      {quota.name}
+                    </span>
+                  </div>
+                </Table.Cell>
 
-              {/* Progress + used/total */}
-              <div className={`min-w-0 flex-1 ${compact ? "space-y-1" : "space-y-1.5"}`}>
-                {!isUnlimited && (
-                <div className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden border ${colors.bgLight} ${
-                  quota.remaining === 0 ? "border-black/10 dark:border-white/10" : "border-transparent"
-                }`}>
-                  <div
-                    className={`h-full transition-all duration-300 ${colors.bg}`}
-                    style={{ width: `${Math.min(quota.remaining, 100)}%` }}
-                  />
-                </div>
-                )}
-
-                <div className={`flex items-center justify-between gap-1 min-w-0 ${compact ? "text-[10px]" : "text-xs"}`}>
-                  <span
-                    className="text-text-muted truncate"
-                    title={
-                      isUnlimited
-                        ? `${quota.used.toLocaleString()} used · Unlimited`
-                        : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
-                    }
-                  >
-                    {isUnlimited
-                      ? `${quota.used.toLocaleString()} used · Unlimited`
-                      : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
-                  </span>
-                  <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : colors.text} shrink-0`}>
-                    {isUnlimited ? "Unlimited" : `${quota.remaining}%`}
-                  </span>
-                </div>
-              </div>
-
-              {/* Reset time */}
-              <div className="min-w-0 shrink">
-                {countdown !== "-" || resetDisplay ? (
-                  compact ? (
-                    <div
-                      className={`${resetPrimary} text-text-primary font-medium truncate`}
-                      title={resetDisplay || ""}
-                    >
-                      {countdown !== "-" ? countdownLabel : resetDisplay}
+                {/* Progress + used/total */}
+                <Table.Cell className={`min-w-0 ${cellPad}`}>
+                  <div className={`min-w-0 ${compact ? "space-y-1" : "space-y-1.5"}`}>
+                    {!isUnlimited && (
+                    <div className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden border ${colors.bgLight} ${
+                      quota.remaining === 0 ? "border-vx-border" : "border-transparent"
+                    }`}>
+                      <div
+                        className={`h-full transition-all duration-300 ${colors.bg}`}
+                        style={{ width: `${Math.min(quota.remaining, 100)}%` }}
+                      />
                     </div>
+                    )}
+
+                    <div className={`flex items-center justify-between gap-1 min-w-0 ${compact ? "text-[10px]" : "text-xs"}`}>
+                      <span
+                        className="text-vx-text-muted truncate"
+                        title={
+                          isUnlimited
+                            ? `${quota.used.toLocaleString()} used · Unlimited`
+                            : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
+                        }
+                      >
+                        {isUnlimited
+                          ? `${quota.used.toLocaleString()} used · Unlimited`
+                          : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
+                      </span>
+                      <span className={`font-medium ${isUnlimited ? "text-vx-success" : colors.text} shrink-0`}>
+                        {isUnlimited ? "Unlimited" : `${quota.remaining}%`}
+                      </span>
+                    </div>
+                  </div>
+                </Table.Cell>
+
+                {/* Reset time */}
+                <Table.Cell className={`min-w-0 w-28 shrink ${cellPad}`}>
+                  {countdown !== "-" || resetDisplay ? (
+                    compact ? (
+                      <div
+                        className={`${resetPrimary} text-vx-text font-medium truncate`}
+                        title={resetDisplay || ""}
+                      >
+                        {countdown !== "-" ? countdownLabel : resetDisplay}
+                      </div>
+                    ) : (
+                      <div className="min-w-0 space-y-0.5">
+                        {countdown !== "-" && (
+                          <div className={`${resetPrimary} text-vx-text font-medium truncate`}>
+                            {countdownLabel}
+                          </div>
+                        )}
+                        {resetDisplay && (
+                          <div className={`${resetSecondary} text-vx-text-muted truncate`}>
+                            {resetDisplay}
+                          </div>
+                        )}
+                      </div>
+                    )
                   ) : (
-                    <div className="min-w-0 space-y-0.5">
-                      {countdown !== "-" && (
-                        <div className={`${resetPrimary} text-text-primary font-medium truncate`}>
-                          {countdownLabel}
-                        </div>
-                      )}
-                      {resetDisplay && (
-                        <div className={`${resetSecondary} text-text-muted truncate`}>
-                          {resetDisplay}
-                        </div>
-                      )}
-                    </div>
-                  )
-                ) : (
-                  <div className={`${resetPrimary} text-text-muted italic`}>N/A</div>
-                )}
-              </div>
+                    <div className={`${resetPrimary} text-vx-text-muted italic`}>N/A</div>
+                  )}
+                </Table.Cell>
 
-              {/* Hide action */}
-              {hasHideAction && (
-                <button
-                  type="button"
-                  onClick={() => onHideQuota(quota)}
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-black/5 hover:text-text-primary dark:hover:bg-white/5"
-                  title="Hide this quota row"
-                  aria-label={`Hide quota ${quota.name}`}
-                >
-                  <span className="material-symbols-outlined text-[15px]">
-                    visibility_off
-                  </span>
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                {/* Hide action */}
+                {hasHideAction && (
+                  <Table.Cell className={`w-8 ${cellPad}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="visibility_off"
+                      onClick={() => onHideQuota(quota)}
+                      title="Hide this quota row"
+                      aria-label={`Hide quota ${quota.name}`}
+                      className="!h-6 !w-6 shrink-0 !p-0"
+                    />
+                  </Table.Cell>
+                )}
+              </Table.Row>
+            );
+          })}
+        </Table.Body>
+      </Table>
 
       {totalPages > 1 && (
-        <div className="rounded-md border border-black/10 bg-black/[0.02] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.03]">
-          <div className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
+        <div className="rounded-vx-sm border border-vx-border bg-vx-surface-2 px-2 py-1.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-vx-text-muted">
             <span>
               Showing {pageStart}-{pageEnd} of {sortedQuotas.length}
             </span>
@@ -264,22 +269,24 @@ export default function QuotaTable({
             </span>
           </div>
           <div className="mt-1.5 flex items-center justify-end gap-1">
-            <button
-              type="button"
+            <Button
+              variant="light-outline"
+              size="sm"
               onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
               disabled={page === 1}
-              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-primary transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
+              className="!h-6 !px-2 !text-[10px]"
             >
               Prev
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="light-outline"
+              size="sm"
               onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))}
               disabled={page === totalPages}
-              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-primary transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
+              className="!h-6 !px-2 !text-[10px]"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       )}

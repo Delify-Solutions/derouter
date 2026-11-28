@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const TIMEOUT_MS = 8000;
 
@@ -86,6 +87,8 @@ async function probeMcp(url) {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { url } = await request.json();
     if (!url || typeof url !== "string") {

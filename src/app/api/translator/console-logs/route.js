@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clearConsoleLogs, getConsoleLogs, initConsoleLogCapture } from "@/lib/consoleLogBuffer";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 initConsoleLogCapture();
 
@@ -13,7 +14,9 @@ export async function GET() {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "console-log", "delete");
+  if (denied) return denied;
   try {
     clearConsoleLogs();
     return NextResponse.json({ success: true });

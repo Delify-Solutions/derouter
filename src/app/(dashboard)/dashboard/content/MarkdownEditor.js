@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
+import { Button } from "@/shared/components";
 import { renderMarkdown } from "@/shared/utils/markdown.js";
 import { applyIndent, applyMarkdownCommand } from "@/shared/utils/markdownCommands.js";
 import DocsTabsEnhancer from "@/app/docs/components/DocsTabsEnhancer";
@@ -154,22 +155,20 @@ export default function MarkdownEditor({ value, onChange, title, summary, sectio
             {TOOLS.map((group, gi) => (
               <div key={gi} className="flex items-center border-r border-border">
                 {group.map((tool) => (
-                  <button
+                  <Button
                     key={tool.cmd}
-                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    icon={tool.icon}
                     title={tool.title}
                     aria-label={tool.title}
                     // Keep the textarea selection: a mouse-down on the button would blur it.
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => run(tool.cmd)}
-                    className="flex size-9 items-center justify-center text-text-muted transition-colors hover:bg-surface-2 hover:text-text-main"
+                    className={tool.icon ? "size-9 px-0" : "size-9 px-0 font-mono text-[12px] font-semibold"}
                   >
-                    {tool.icon ? (
-                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{tool.icon}</span>
-                    ) : (
-                      <span className="font-mono text-[12px] font-semibold">{tool.label}</span>
-                    )}
-                  </button>
+                    {tool.icon ? null : tool.label}
+                  </Button>
                 ))}
               </div>
             ))}

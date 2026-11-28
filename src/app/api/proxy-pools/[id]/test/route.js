@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProxyPoolById, updateProxyPool } from "@/models";
 import { testProxyUrl } from "@/lib/network/proxyTest";
 import { fetch as undiciFetch } from "undici";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 async function testVercelRelay(relayUrl, timeoutMs = 10000) {
   const controller = new AbortController();
@@ -35,6 +36,8 @@ async function testVercelRelay(relayUrl, timeoutMs = 10000) {
 
 // POST /api/proxy-pools/[id]/test - Test proxy pool entry
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const proxyPool = await getProxyPoolById(id);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { importSkills, patchSkills, deleteSkills, MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 // Answers 200 with a result per item even when some fail: the page shows each row's
 // outcome, and a bad row never blocks the others.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   let body = null;
   try {
     body = await request.json();
@@ -45,6 +48,8 @@ export async function POST(request) {
 // PATCH /api/skills/bulk — apply the same change to several skills.
 // Body: { ids: [...], patch: { targets?, isPublished?, audience?, category? } }.
 export async function PATCH(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   let body = null;
   try {
     body = await request.json();
@@ -70,6 +75,8 @@ export async function PATCH(request) {
 // DELETE /api/skills/bulk — delete several skills at once.
 // Body: { ids: [...] }.
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "delete");
+  if (denied) return denied;
   let body = null;
   try {
     body = await request.json();

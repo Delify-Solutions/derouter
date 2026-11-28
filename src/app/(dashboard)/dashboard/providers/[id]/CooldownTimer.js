@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
+import { Badge } from "@/shared/components";
 
 export default function CooldownTimer({ until }) {
   const [remaining, setRemaining] = useState("");
@@ -31,9 +32,9 @@ export default function CooldownTimer({ until }) {
   if (!remaining) return null;
 
   return (
-    <span className="text-xs text-orange-500 font-mono">
-      ⏱ {remaining}
-    </span>
+    <Badge variant="warning" size="sm" icon="timer">
+      {remaining}
+    </Badge>
   );
 }
 

@@ -4,6 +4,7 @@ import { exportDb, getSettings, importDb } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { verifyDashboardPassword } from "@/lib/auth/dashboardSession";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const CLI_TOKEN_HEADER = "x-dr-cli-token";
 const PASSWORD_HEADER = "x-dr-password";
@@ -30,6 +31,8 @@ async function isCliRequest(request) {
 
 export async function GET(request) {
   try {
+    const denied = await requirePagePermission(request, "profile", "edit");
+    if (denied) return denied;
     if (!(await isCliRequest(request)) && !(await verifyDashboardPassword(request.headers.get(PASSWORD_HEADER)))) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });
     }
@@ -42,6 +45,8 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    const denied = await requirePagePermission(request, "profile", "edit");
+    if (denied) return denied;
     const { password, ...payload } = await request.json();
     if (!(await isCliRequest(request)) && !(await verifyDashboardPassword(password))) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });

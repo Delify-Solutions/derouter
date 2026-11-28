@@ -3,13 +3,16 @@ import { getSettings } from "@/lib/localDb";
 import { getInstallInfo, installPxpipe } from "@/lib/pxpipe/install.js";
 import { loadPxpipe } from "@/lib/pxpipe/loader.js";
 import { getPxpipeStatus } from "@/lib/pxpipe/service.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 // "Start" in library mode = warm the in-process transform module.
 // Auto-installs first when the package is missing and pxpipeAutoInstall is on.
-export async function POST() {
+export async function POST(request) {
+  const denied = await requireAnyPagePermission(request, ["pxpipe", "token-saver"], "edit");
+  if (denied) return denied;
   try {
     if (!getInstallInfo().installed) {
       const settings = await getSettings();

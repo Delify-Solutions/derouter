@@ -5,7 +5,9 @@ import Link from "next/link";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Select from "@/shared/components/Select";
+import Badge from "@/shared/components/Badge";
 import Pagination from "@/shared/components/Pagination";
+import Table from "@/shared/components/Table";
 import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { cn } from "@/shared/utils/cn";
@@ -174,10 +176,10 @@ export default function UserUsageTable() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <span className="material-symbols-outlined text-primary" aria-hidden="true">group</span>
+              <span className="material-symbols-outlined text-vx-primary" aria-hidden="true">group</span>
               Usage by user
             </h2>
-            <p className="mt-1 text-sm text-text-muted">
+            <p className="mt-1 text-sm text-vx-text-muted">
               Requests, tokens and cost per customer over all of their keys, for {periodLabel}. Open a row for its keys and models.
             </p>
           </div>
@@ -201,17 +203,17 @@ export default function UserUsageTable() {
           total={items.length}
         />
 
-        <div className="flex flex-col gap-1 text-xs text-text-muted">
+        <div className="flex flex-col gap-1 text-xs text-vx-text-muted">
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="font-medium text-text-main">Tổng kỳ</span>
-            <span><span className="font-mono font-medium text-text-main">{fmtCompact(periodTotals.requests)}</span> requests</span>
-            <span><span className="font-mono font-medium text-text-main">{fmtCost(periodTotals)}</span> cost</span>
+            <span className="font-medium text-vx-text">Tổng kỳ</span>
+            <span><span className="font-mono font-medium text-vx-text">{fmtCompact(periodTotals.requests)}</span> requests</span>
+            <span><span className="font-mono font-medium text-vx-text">{fmtCost(periodTotals)}</span> cost</span>
           </p>
           {partial && (
             <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span className="font-medium text-text-main">Tổng đang hiển thị</span>
-              <span><span className="font-mono font-medium text-text-main">{fmtCompact(shownTotals.requests)}</span> requests</span>
-              <span><span className="font-mono font-medium text-text-main">{fmtCost(shownTotals)}</span> cost</span>
+              <span className="font-medium text-vx-text">Tổng đang hiển thị</span>
+              <span><span className="font-mono font-medium text-vx-text">{fmtCompact(shownTotals.requests)}</span> requests</span>
+              <span><span className="font-mono font-medium text-vx-text">{fmtCost(shownTotals)}</span> cost</span>
             </p>
           )}
         </div>
@@ -220,23 +222,23 @@ export default function UserUsageTable() {
       <Card padding="none">
         <div className="overflow-x-auto" aria-busy={loading}>
           <table className="w-full min-w-[1100px] text-sm">
-            <thead>
-              <tr className="border-b border-border-subtle text-text-muted">
-                <th className="w-8 px-3 py-2 text-left font-medium">#</th>
-                <th className="px-3 py-2 text-left font-medium">User</th>
-                <th className="px-3 py-2 text-right font-medium">Keys</th>
-                <SortableHeader label="Requests" field="requests" state={query} onSort={onHeaderSort} align="right" className="px-3 py-2 font-medium" />
-                <th className="px-3 py-2 text-right font-medium">Input</th>
-                <th className="px-3 py-2 text-right font-medium">Output</th>
-                <th className="px-3 py-2 text-right font-medium">Input cache</th>
-                <SortableHeader label="Cost" field="cost" state={query} onSort={onHeaderSort} align="right" className="px-3 py-2 font-medium" />
-                <th className="px-3 py-2 text-right font-medium">Peak RPM</th>
-                <th className="px-3 py-2 text-right font-medium">Peak TPM</th>
-                <SortableHeader label="Last used" field="lastUsed" state={query} onSort={onHeaderSort} className="px-3 py-2 font-medium whitespace-nowrap" />
-                <th className="w-10 px-3 py-2"><span className="sr-only">Details</span></th>
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell className="w-8">#</Table.HeaderCell>
+                <Table.HeaderCell>User</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Keys</Table.HeaderCell>
+                <SortableHeader label="Requests" field="requests" state={query} onSort={onHeaderSort} align="right" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
+                <Table.HeaderCell className="text-right">Input</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Output</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Input cache</Table.HeaderCell>
+                <SortableHeader label="Cost" field="cost" state={query} onSort={onHeaderSort} align="right" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
+                <Table.HeaderCell className="text-right">Peak RPM</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Peak TPM</Table.HeaderCell>
+                <SortableHeader label="Last used" field="lastUsed" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted whitespace-nowrap" />
+                <Table.HeaderCell className="w-10"><span className="sr-only">Details</span></Table.HeaderCell>
               </tr>
-            </thead>
-            <tbody>
+            </Table.Head>
+            <Table.Body>
               {tableState !== "ready" ? (
                 <TableStateRow
                   state={tableState}
@@ -256,12 +258,12 @@ export default function UserUsageTable() {
                   />
                 ))
               )}
-            </tbody>
+            </Table.Body>
           </table>
         </div>
 
         {tableState === "ready" && filtered.length > 0 && (
-          <div className="border-t border-border-subtle">
+          <div className="border-t border-vx-border">
             <Pagination
               currentPage={currentPage}
               pageSize={pageSize}
@@ -282,115 +284,117 @@ function OwnerRow({ o, rowIdx, isOpen, onToggle }) {
   const detailsId = `owner-details-${rowIdx}`;
   return (
     <Fragment>
-      <tr className={cn("border-b border-border-subtle/50 transition-colors hover:bg-surface-2/50", idle && "text-text-muted")}>
-        <td className="px-3 py-2 text-text-muted">{rowIdx}</td>
-        <td className="px-3 py-2">
+      <Table.Row className={cn(idle && "text-vx-text-muted")}>
+        <Table.Cell className="px-3 py-2 text-vx-text-muted">{rowIdx}</Table.Cell>
+        <Table.Cell className="px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
             {o.kind === "user" && o.userId ? (
-              <Link href={`/dashboard/users/${encodeURIComponent(o.userId)}`} className="font-medium text-text-main underline-offset-2 hover:underline">
+              <Link href={`/dashboard/users/${encodeURIComponent(o.userId)}`} className="font-medium text-vx-text underline-offset-2 hover:underline">
                 {ownerTitle(o)}
               </Link>
             ) : (
-              <span className="font-medium text-text-main">{ownerTitle(o)}</span>
+              <span className="font-medium text-vx-text">{ownerTitle(o)}</span>
             )}
             {o.status && o.status !== "active" && (
-              <span className="border border-border px-1.5 py-0.5 font-mono text-[11px] uppercase text-text-muted">{o.status}</span>
+              <Badge variant="default" size="sm">{o.status}</Badge>
             )}
           </div>
           {(o.displayName || o.group) && (
-            <div className="text-xs text-text-muted">{[o.displayName, o.group].filter(Boolean).join(" · ")}</div>
+            <div className="text-xs text-vx-text-muted">{[o.displayName, o.group].filter(Boolean).join(" · ")}</div>
           )}
-        </td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums" title={`${o.activeKeyCount} active of ${o.keyCount}`}>
+        </Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums" title={`${o.activeKeyCount} active of ${o.keyCount}`}>
           {o.activeKeyCount}/{o.keyCount}
-        </td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.requests ?? 0)}>{fmtCompact(t.requests)}</td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.input ?? 0)}>{fmtCompact(t.input)}</td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.output ?? 0)}>{fmtCompact(t.output)}</td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums">
+        </Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.requests ?? 0)}>{fmtCompact(t.requests)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.input ?? 0)}>{fmtCompact(t.input)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums" title={String(t.output ?? 0)}>{fmtCompact(t.output)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">
           {t.cacheRead > 0 ? `${t.cacheEstimated ? "≈" : ""}${fmtCompact(t.cacheRead)}` : "—"}
-        </td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCost(t)}</td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakRpm)}</td>
-        <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakTpm)}</td>
-        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(o.lastUsedAt)}</td>
-        <td className="px-3 py-2 text-right">
-          <button
+        </Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCost(t)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakRpm)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(o.peakTpm)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(o.lastUsedAt)}</Table.Cell>
+        <Table.Cell className="px-3 py-2 text-right">
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={onToggle}
             aria-expanded={isOpen}
             aria-controls={detailsId}
             aria-label={`${isOpen ? "Hide" : "Show"} keys and models of ${ownerTitle(o)}`}
-            className="flex size-8 items-center justify-center border border-border bg-surface text-text-muted hover:bg-surface-2 hover:text-text-main"
+            className="w-8 border border-vx-border px-0"
           >
             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{isOpen ? "expand_less" : "expand_more"}</span>
-          </button>
-        </td>
-      </tr>
+          </Button>
+        </Table.Cell>
+      </Table.Row>
       {isOpen && (
-        <tr id={detailsId} className="bg-surface-2/30">
+        <tr id={detailsId} className="bg-vx-surface-2/30">
           <td colSpan={COLS} className="p-4">
             <div className="grid gap-6 lg:grid-cols-2">
               <section>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">Keys ({o.keys.length})</h3>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-vx-text-muted">Keys ({o.keys.length})</h3>
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border-subtle text-text-muted">
-                      <th className="px-2 py-1.5 text-left font-medium">Key</th>
-                      <th className="px-2 py-1.5 text-left font-medium">Status</th>
-                      <th className="px-2 py-1.5 text-right font-medium">Requests</th>
-                      <th className="px-2 py-1.5 text-right font-medium">Tokens</th>
-                      <th className="px-2 py-1.5 text-right font-medium">Cost</th>
-                      <th className="px-2 py-1.5 text-left font-medium">Last used</th>
+                  <Table.Head>
+                    <tr>
+                      <Table.HeaderCell className="px-2 py-1.5">Key</Table.HeaderCell>
+                      <Table.HeaderCell className="px-2 py-1.5">Status</Table.HeaderCell>
+                      <Table.HeaderCell className="px-2 py-1.5 text-right">Requests</Table.HeaderCell>
+                      <Table.HeaderCell className="px-2 py-1.5 text-right">Tokens</Table.HeaderCell>
+                      <Table.HeaderCell className="px-2 py-1.5 text-right">Cost</Table.HeaderCell>
+                      <Table.HeaderCell className="px-2 py-1.5">Last used</Table.HeaderCell>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </Table.Head>
+                  <Table.Body>
                     {o.keys.map((k) => (
-                      <tr key={k.id} className="border-b border-border-subtle/40">
-                        <td className="px-2 py-1.5">
-                          <div className="text-text-main">{k.noKey ? "No key (local)" : k.deleted ? "Deleted key" : k.name || "(unnamed)"}</div>
-                          {k.maskedKey && <div className="whitespace-nowrap font-mono text-xs text-text-muted">{k.maskedKey}</div>}
-                        </td>
-                        <td className="px-2 py-1.5 text-xs">{k.noKey ? "—" : k.deleted ? "deleted" : k.active ? "active" : "paused"}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(k.requests)}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(k.tokens)}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCost(k)}</td>
-                        <td className="px-2 py-1.5 font-mono text-xs whitespace-nowrap">{fmtWhen(k.lastUsedAt)}</td>
-                      </tr>
+                      <Table.Row key={k.id}>
+                        <Table.Cell className="px-2 py-1.5">
+                          <div className="text-vx-text">{k.noKey ? "No key (local)" : k.deleted ? "Deleted key" : k.name || "(unnamed)"}</div>
+                          {k.maskedKey && <div className="whitespace-nowrap font-mono text-xs text-vx-text-muted">{k.maskedKey}</div>}
+                        </Table.Cell>
+                        <Table.Cell className="px-2 py-1.5 text-xs">{k.noKey ? "—" : k.deleted ? "deleted" : k.active ? "active" : "paused"}</Table.Cell>
+                        <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(k.requests)}</Table.Cell>
+                        <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(k.tokens)}</Table.Cell>
+                        <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCost(k)}</Table.Cell>
+                        <Table.Cell className="px-2 py-1.5 font-mono text-xs whitespace-nowrap">{fmtWhen(k.lastUsedAt)}</Table.Cell>
+                      </Table.Row>
                     ))}
-                  </tbody>
+                  </Table.Body>
                 </table>
               </section>
               <section>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">Models ({o.byModel.length})</h3>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-vx-text-muted">Models ({o.byModel.length})</h3>
                 {o.byModel.length === 0 ? (
-                  <p className="text-sm text-text-muted">No usage in this period.</p>
+                  <p className="text-sm text-vx-text-muted">No usage in this period.</p>
                 ) : (
                   <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border-subtle text-text-muted">
-                        <th className="px-2 py-1.5 text-left font-medium">Model</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Requests</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Input</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Output</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Input cache</th>
-                        <th className="px-2 py-1.5 text-right font-medium">Cost</th>
+                    <Table.Head>
+                      <tr>
+                        <Table.HeaderCell className="px-2 py-1.5">Model</Table.HeaderCell>
+                        <Table.HeaderCell className="px-2 py-1.5 text-right">Requests</Table.HeaderCell>
+                        <Table.HeaderCell className="px-2 py-1.5 text-right">Input</Table.HeaderCell>
+                        <Table.HeaderCell className="px-2 py-1.5 text-right">Output</Table.HeaderCell>
+                        <Table.HeaderCell className="px-2 py-1.5 text-right">Input cache</Table.HeaderCell>
+                        <Table.HeaderCell className="px-2 py-1.5 text-right">Cost</Table.HeaderCell>
                       </tr>
-                    </thead>
-                    <tbody>
+                    </Table.Head>
+                    <Table.Body>
                       {o.byModel.map((m) => (
-                        <tr key={m.model} className="border-b border-border-subtle/40">
-                          <td className="px-2 py-1.5 font-mono text-text-main">{m.model}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.requests)}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.input)}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.output)}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                        <Table.Row key={m.model}>
+                          <Table.Cell className="px-2 py-1.5 font-mono text-vx-text">{m.model}</Table.Cell>
+                          <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.requests)}</Table.Cell>
+                          <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.input)}</Table.Cell>
+                          <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCompact(m.output)}</Table.Cell>
+                          <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">
                             {m.cacheRead > 0 ? `${m.cacheEstimated ? "≈" : ""}${fmtCompact(m.cacheRead)}` : "—"}
-                          </td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCost(m)}</td>
-                        </tr>
+                          </Table.Cell>
+                          <Table.Cell className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtCost(m)}</Table.Cell>
+                        </Table.Row>
                       ))}
-                    </tbody>
+                    </Table.Body>
                   </table>
                 )}
               </section>

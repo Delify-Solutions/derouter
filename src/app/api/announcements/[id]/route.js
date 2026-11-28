@@ -11,6 +11,7 @@ import {
   removeAnnouncementImage,
   saveAnnouncementImage,
 } from "@/lib/notify/announcementImage.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -21,6 +22,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * the old one; `removeImage` drops it; neither keeps it.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "announcements", "edit");
+  if (denied) return denied;
   const { id } = await params;
   const input = await readAnnouncementRequest(request);
   if (input.error) return NextResponse.json({ error: input.error }, { status: 400, headers: NO_STORE });
@@ -47,6 +50,8 @@ export async function PATCH(request, { params }) {
 
 /** DELETE /api/announcements/[id] */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "announcements", "delete");
+  if (denied) return denied;
   const { id } = await params;
   const db = await getAdapter();
   if (!deleteAnnouncementSync(db, id)) {

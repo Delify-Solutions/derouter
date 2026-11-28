@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Button, Card, Input } from "@/shared/components";
 
 /**
  * Command bot (change telegram-bot-commands): turn the bot's commands on (webhook
@@ -88,7 +88,7 @@ export default function TelegramBotCommandsCard() {
   const enabled = status?.enabled === true;
 
   return (
-    <section className="flex flex-col gap-4 border border-border bg-surface p-5">
+    <Card className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold text-text-main">Lệnh bot</h2>
         <p className="max-w-2xl text-sm text-text-muted">
@@ -157,6 +157,6 @@ export default function TelegramBotCommandsCard() {
           {message.text}
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listGiftCodes, createGiftCode, listGiftPlans, assignGiftCode, getGiftCodeById } from "@/lib/db/repos/giftRepo.js";
 import { getAdminIdentity } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { fireAndForget, notifyGiftAssignments } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,8 @@ export async function GET() {
 // POST /api/gift-codes — mint a code. `amountVnd` gifts that amount of a custom-amount
 // plan; `assignUserIds` gives the new code straight to those accounts (spec gift-codes).
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "gift-codes", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
 

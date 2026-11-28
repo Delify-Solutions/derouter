@@ -39,6 +39,8 @@ import {
   QUOTA_SORT_OPTIONS,
 } from "./utils";
 import Card from "@/shared/components/Card";
+import Badge from "@/shared/components/Badge";
+import Table from "@/shared/components/Table";
 import { ConfirmModal, EditConnectionModal } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -1068,33 +1070,34 @@ export default function ProviderLimits() {
                       ) : null}
                       {/* The account's plan as the provider reports it (e.g. DeepAI Pro / Free). */}
                       {quota?.plan && conn.provider !== "kiro" && !/^\s*unknown\s*$/i.test(String(quota.plan)) ? (
-                        <span className="mt-1 inline-block border border-border px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                        <Badge variant="default" size="xs" className="mt-1 font-mono">
                           Gói: {quota.plan}
-                        </span>
+                        </Badge>
                       ) : null}
                       {conn.provider === "kiro" && (
                         <div className="mt-1 flex flex-wrap items-center gap-1">
-                          <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                          <Badge variant="primary" size="xs">
                             {kiroMethodLabel(conn)}
-                          </span>
+                          </Badge>
                           {kiroRegion(conn) && (
-                            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                            <Badge variant="info" size="xs">
                               {kiroRegion(conn)}
-                            </span>
+                            </Badge>
                           )}
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          <Badge
+                            variant={
                               isInactive
-                                ? "bg-surface-2 text-text-muted"
+                                ? "default"
                                 : conn.testStatus === "active" || conn.testStatus === "success"
-                                  ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                                  ? "success"
                                   : conn.testStatus === "error" || conn.testStatus === "expired" || conn.testStatus === "unavailable"
-                                    ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                                    : "bg-surface-2 text-text-muted"
-                            }`}
+                                    ? "error"
+                                    : "default"
+                            }
+                            size="xs"
                           >
                             {isInactive ? "disabled" : conn.testStatus || "unknown"}
-                          </span>
+                          </Badge>
                           {conn.providerSpecificData?.profileArn && (
                             <button
                               type="button"
@@ -1302,7 +1305,7 @@ export default function ProviderLimits() {
         })}
       </div>
 
-      <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+      <Card padding="none" className="px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-text-muted">{connectionsPageSummary}</span>
             <div className="flex flex-wrap items-center gap-2">
@@ -1423,7 +1426,7 @@ export default function ProviderLimits() {
               </button>
             </div>
           </div>
-        </div>
+      </Card>
 
       <ConfirmModal
         isOpen={Boolean(resetConfirmState)}
@@ -1476,39 +1479,41 @@ export default function ProviderLimits() {
                 </div>
               ) : resetCreditsState.data?.credits?.length ? (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 text-xs text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
+                  <div className="flex items-center justify-between rounded-vx-lg border border-vx-border bg-vx-surface-2 px-3 py-2 text-xs text-vx-text-muted">
                     <span>{resetCreditsState.data.credits.length} reset credit{resetCreditsState.data.credits.length === 1 ? "" : "s"}</span>
                     <span>{resetCreditsState.data.availableCount ?? 0} available</span>
                   </div>
-                  <div className="overflow-x-auto rounded-xl border border-black/10 dark:border-white/10">
-                    <table className="w-full min-w-[560px] text-left text-sm">
-                      <thead className="bg-black/[0.03] text-xs uppercase tracking-wide text-text-muted dark:bg-white/[0.04]">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">Status</th>
-                          <th className="px-3 py-2 font-medium">Granted At</th>
-                          <th className="px-3 py-2 font-medium">Expires At</th>
-                          <th className="px-3 py-2 font-medium">Remaining</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {resetCreditsState.data.credits.map((credit, index) => (
-                          <tr key={`${credit.status}-${credit.expiresAt || index}`} className="border-t border-black/5 dark:border-white/5">
-                            <td className="px-3 py-2">
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                                {credit.status || "unknown"}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-text-muted">{formatCreditDate(credit.grantedAt)}</td>
-                            <td className="px-3 py-2 text-text-primary">{formatCreditDate(credit.expiresAt)}</td>
-                            <td className="px-3 py-2 font-medium text-text-primary">{formatTimeRemaining(credit.expiresAt)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <Table
+                    bare
+                    className="min-w-[560px] text-left"
+                    wrapperClassName="rounded-vx-lg border border-vx-border bg-vx-surface"
+                  >
+                    <Table.Head>
+                      <tr>
+                        <Table.HeaderCell className="px-3 py-2">Status</Table.HeaderCell>
+                        <Table.HeaderCell className="px-3 py-2">Granted At</Table.HeaderCell>
+                        <Table.HeaderCell className="px-3 py-2">Expires At</Table.HeaderCell>
+                        <Table.HeaderCell className="px-3 py-2">Remaining</Table.HeaderCell>
+                      </tr>
+                    </Table.Head>
+                    <Table.Body>
+                      {resetCreditsState.data.credits.map((credit, index) => (
+                        <Table.Row key={`${credit.status}-${credit.expiresAt || index}`}>
+                          <Table.Cell className="px-3 py-2">
+                            <Badge variant="primary" size="sm">
+                              {credit.status || "unknown"}
+                            </Badge>
+                          </Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-vx-text-muted">{formatCreditDate(credit.grantedAt)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 text-vx-text">{formatCreditDate(credit.expiresAt)}</Table.Cell>
+                          <Table.Cell className="px-3 py-2 font-medium text-vx-text">{formatTimeRemaining(credit.expiresAt)}</Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table>
                 </div>
               ) : (
-                <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-8 text-center text-sm text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-vx-lg border border-vx-border bg-vx-surface-2 px-3 py-8 text-center text-sm text-vx-text-muted">
                   No reset credit details returned for this account.
                 </div>
               )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Button, ConfirmModal, Select, Toggle } from "@/shared/components";
+import { Button, ConfirmModal, Select, Toggle, Input, Table, Badge, Card } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { errorFileName, errorReportMarkdown, replayCurl } from "@/lib/errorLog/report.js";
 
@@ -42,32 +42,21 @@ const RANGES = [
   { value: "", label: "Toàn bộ" },
 ];
 
-const SOURCE_STYLE = {
-  upstream: "border-danger/30 bg-danger/10 text-danger",
-  stream: "border-danger/30 bg-danger/10 text-danger",
-  router: "border-warning/30 bg-warning/10 text-warning",
-  request: "border-info/30 bg-info/10 text-info",
-  platform: "border-border bg-surface-2 text-text-muted",
+const SOURCE_VARIANT = {
+  upstream: "error",
+  stream: "error",
+  router: "warning",
+  request: "info",
+  platform: "default",
 };
 
-function Tag({ children, className = "" }) {
-  return (
-    <span className={`inline-flex items-center border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider whitespace-nowrap ${className}`}>
-      {children}
-    </span>
-  );
-}
-
 function StatusTag({ status }) {
-  const style = status >= 500 ? "border-danger/30 bg-danger/10 text-danger"
-    : status >= 400 ? "border-warning/30 bg-warning/10 text-warning"
-      : "border-info/30 bg-info/10 text-info";
+  const variant = status >= 500 ? "error" : status >= 400 ? "warning" : "info";
   const icon = status >= 500 ? "error" : status >= 400 ? "warning" : "info";
   return (
-    <Tag className={style}>
-      <span className="material-symbols-outlined text-[12px] mr-1" aria-hidden="true">{icon}</span>
+    <Badge variant={variant} icon={icon} size="sm">
       {status || "—"}
-    </Tag>
+    </Badge>
   );
 }
 
@@ -203,8 +192,8 @@ function Detail({ detail, onDelete }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusTag status={detail.status} />
-        <Tag className={SOURCE_STYLE[detail.source]}>{detail.source}</Tag>
-        {detail.stream && <Tag className="border-border bg-surface-2 text-text-muted">yêu cầu stream</Tag>}
+        <Badge variant={SOURCE_VARIANT[detail.source] || "default"} size="sm">{detail.source}</Badge>
+        {detail.stream && <Badge variant="default" size="sm">yêu cầu stream</Badge>}
         <span className="font-mono text-[12px] text-text-muted ml-auto">{detail.id}</span>
       </div>
       <p className="text-sm text-text-muted">{SOURCE_HINT[detail.source]}</p>
@@ -258,29 +247,27 @@ function Detail({ detail, onDelete }) {
 
       {data.attempts?.length > 0 && (
         <Block title={`Các lần gọi upstream (${data.attempts.length})`}>
-          <div className="overflow-x-auto border border-border">
-            <table className="w-full min-w-[560px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  {["#", "Mã", "Provider / model", "Kết nối", "Sau", "Lỗi"].map((h) => (
-                    <th key={h} className="meta text-text-subtle font-medium px-3 py-2 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.attempts.map((a, i) => (
-                  <tr key={i} className="border-b border-border last:border-b-0 align-top">
-                    <td className="px-3 py-2 font-mono text-[12px] text-text-muted">{i + 1}</td>
-                    <td className="px-3 py-2"><StatusTag status={a.status} /></td>
-                    <td className="px-3 py-2 font-mono text-[12px] break-all" title={a.provider || ""}>{shortProvider(a.provider) || "—"} / {a.model || "—"}</td>
-                    <td className="px-3 py-2 font-mono text-[12px] text-text-muted">{a.connectionName || String(a.connectionId || "—").slice(0, 8)}</td>
-                    <td className="px-3 py-2 font-mono text-[12px] text-text-muted whitespace-nowrap">{a.afterMs != null ? `${a.afterMs} ms` : "—"}</td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-text-main break-words">{a.error || "—"}</td>
-                  </tr>
+          <Table className="min-w-[560px] text-left">
+            <Table.Head>
+              <Table.Row>
+                {["#", "Mã", "Provider / model", "Kết nối", "Sau", "Lỗi"].map((h) => (
+                  <Table.HeaderCell key={h} className="whitespace-nowrap">{h}</Table.HeaderCell>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </Table.Row>
+            </Table.Head>
+            <Table.Body>
+              {data.attempts.map((a, i) => (
+                <Table.Row key={i} className="align-top">
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">{i + 1}</Table.Cell>
+                  <Table.Cell><StatusTag status={a.status} /></Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] break-all" title={a.provider || ""}>{shortProvider(a.provider) || "—"} / {a.model || "—"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">{a.connectionName || String(a.connectionId || "—").slice(0, 8)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{a.afterMs != null ? `${a.afterMs} ms` : "—"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[11px] text-text-main break-words">{a.error || "—"}</Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         </Block>
       )}
 
@@ -386,18 +373,14 @@ function SettingsPanel({ config, onSaved }) {
   };
 
   const field = (key, label, hint, min, max) => (
-    <label className="flex flex-col gap-1.5">
-      <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">{label}</span>
-      <input
-        type="number" min={min} max={max} value={form[key]} onChange={num(key)}
-        className="h-10 w-full border border-border bg-surface px-3 font-mono text-sm text-text-main focus:border-brand-500 focus:outline-none"
-      />
-      <span className="text-[11px] text-text-subtle">{hint}</span>
-    </label>
+    <Input
+      type="number" min={min} max={max} value={form[key]} onChange={num(key)}
+      label={label} hint={hint}
+    />
   );
 
   return (
-    <div className="border border-border p-6 flex flex-col gap-5">
+    <Card className="flex flex-col gap-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:gap-10">
         <Toggle checked={form.enabled} onChange={(v) => setForm((f) => ({ ...f, enabled: v }))} label="Ghi nhật ký lỗi" description="Tắt thì không lưu thêm mục nào." />
         <Toggle checked={form.storePrompt} onChange={(v) => setForm((f) => ({ ...f, storePrompt: v }))} label="Lưu nội dung prompt" description="Tắt thì chỉ lưu lỗi, model, kích thước và các lần gọi." />
@@ -416,7 +399,7 @@ function SettingsPanel({ config, onSaved }) {
         <Button onClick={save} loading={saving}>Lưu cài đặt</Button>
         {saved && <span className="text-sm text-text-muted" role="status">Đã lưu.</span>}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -620,20 +603,19 @@ export default function ErrorLogClient() {
             <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
               Mã trạng thái {statusTokens.length > 0 && `(${statusTokens.length} đã chọn)`}
             </span>
-            <div className="flex shrink-0 border border-border" role="group" aria-label="Bao gồm hay loại trừ các mã đã chọn">
+            <div className="flex shrink-0 gap-1.5" role="group" aria-label="Bao gồm hay loại trừ các mã đã chọn">
               {[["", "Bao gồm"], ["exclude", "Loại trừ"]].map(([v, label]) => (
-                <button
+                <Button
                   key={v || "include"}
                   type="button"
+                  size="sm"
+                  variant={filters.statusMode === v ? "primary" : "secondary"}
                   onClick={() => setFilters((f) => ({ ...f, statusMode: v }))}
                   aria-pressed={filters.statusMode === v}
                   title={v ? "Hiện mọi lỗi KHÔNG thuộc các mã đã chọn" : "Hiện lỗi thuộc các mã đã chọn"}
-                  className={`h-8 px-2.5 font-mono text-xs transition-colors duration-150 ${
-                    filters.statusMode === v ? "bg-text-main text-bg" : "text-text-muted hover:bg-surface-2"
-                  }`}
                 >
                   {label}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -641,46 +623,52 @@ export default function ErrorLogClient() {
             {STATUS_TOKENS.map((t) => {
               const active = statusTokens.includes(t.value);
               return (
-                <button
+                <Button
                   key={t.value}
                   type="button"
+                  size="sm"
+                  variant={active ? "primary" : "secondary"}
                   onClick={() => toggleStatusToken(t.value)}
                   aria-pressed={active}
-                  className={`h-8 border px-2.5 font-mono text-xs font-medium transition-colors duration-150 ${
-                    active ? "border-text-main bg-text-main text-bg" : "border-border bg-surface text-text-muted hover:text-text-main"
-                  }`}
                 >
                   {t.label}
-                </button>
+                </Button>
               );
             })}
             {statusTokens.length > 0 && (
-              <button
+              <Button
                 type="button"
+                size="sm"
+                variant="ghost"
                 onClick={() => setFilters((f) => ({ ...f, status: "" }))}
-                className="h-8 px-2.5 font-mono text-xs text-text-muted hover:text-text-main"
               >
                 Bỏ chọn mã
-              </button>
+              </Button>
             )}
           </div>
         </div>
         <form onSubmit={applySearch} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <label className="flex flex-col gap-1.5 sm:w-56">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Model</span>
-            <input value={search.model} onChange={(e) => setSearch((s) => ({ ...s, model: e.target.value }))} placeholder="vd. GLM-5.3"
-              className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
-          </label>
-          <label className="flex flex-col gap-1.5 sm:w-56">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Người dùng</span>
-            <input value={search.owner} onChange={(e) => setSearch((s) => ({ ...s, owner: e.target.value }))} placeholder="email hoặc tên key"
-              className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
-          </label>
-          <label className="flex flex-col gap-1.5 flex-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Tìm kiếm</span>
-            <input value={search.q} onChange={(e) => setSearch((s) => ({ ...s, q: e.target.value }))} placeholder="báo lỗi, chủ key hoặc mã lỗi, vd. context_length"
-              className="h-10 border border-border bg-surface px-3 text-sm text-text-main focus:border-brand-500 focus:outline-none" />
-          </label>
+          <Input
+            className="sm:w-56"
+            label="Model"
+            value={search.model}
+            onChange={(e) => setSearch((s) => ({ ...s, model: e.target.value }))}
+            placeholder="vd. GLM-5.3"
+          />
+          <Input
+            className="sm:w-56"
+            label="Người dùng"
+            value={search.owner}
+            onChange={(e) => setSearch((s) => ({ ...s, owner: e.target.value }))}
+            placeholder="email hoặc tên key"
+          />
+          <Input
+            className="flex-1"
+            label="Tìm kiếm"
+            value={search.q}
+            onChange={(e) => setSearch((s) => ({ ...s, q: e.target.value }))}
+            placeholder="báo lỗi, chủ key hoặc mã lỗi, vd. context_length"
+          />
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="secondary" icon="search">Tìm</Button>
             <Button type="button" variant="ghost" icon="refresh" onClick={() => load(filters)}>Làm mới</Button>
@@ -747,59 +735,57 @@ export default function ErrorLogClient() {
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto border border-border">
-          <table className="w-full min-w-[980px] border-collapse">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Thời gian", "Mã", "Nguồn", "Model", "Chủ key", "Báo lỗi", "Kích thước", "Độ trễ", ""].map((h) => (
-                  <th key={h || "open"} className="meta text-text-subtle text-left font-medium px-4 py-2.5 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((r) => (
-                <tr key={r.id} className="border-b border-border last:border-b-0 hover:bg-surface-2/60 transition-colors">
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">{formatTime(r.timestamp)}</td>
-                  <td className="px-4 py-3"><StatusTag status={r.status} /></td>
-                  <td className="px-4 py-3"><Tag className={SOURCE_STYLE[r.source]}>{r.source}</Tag></td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-main whitespace-nowrap">
-                    {r.requestedModel || "—"}
-                    {r.model && r.model !== r.requestedModel && <span className="text-text-subtle"> → {r.model}</span>}
-                  </td>
-                  <td className="px-4 py-3 text-[12px] text-text-muted max-w-[180px] truncate" title={r.owner || ""}>{r.owner || "—"}</td>
-                  <td className="px-4 py-3 text-sm text-text-main max-w-[360px] truncate" title={r.message || ""}>{r.message || "—"}</td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">{kb(r.bodyBytes)} · ~{(r.estTokens || 0).toLocaleString("vi-VN")} tk</td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted whitespace-nowrap">{(r.latencyMs || 0).toLocaleString("vi-VN")} ms</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => exportRow(r.id, "report")}
-                        disabled={rowBusy === `${r.id}:report`}
-                        title="Sao chép báo cáo lỗi (Markdown)"
-                        aria-label={`Sao chép báo cáo lỗi ${r.id}`}
-                        className="flex size-8 items-center justify-center border border-border text-text-muted hover:border-text-main hover:text-text-main disabled:opacity-50"
-                      >
-                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">content_copy</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => exportRow(r.id, "json")}
-                        disabled={rowBusy === `${r.id}:json`}
-                        title="Tải lỗi kèm request (JSON)"
-                        aria-label={`Tải lỗi ${r.id}`}
-                        className="flex size-8 items-center justify-center border border-border text-text-muted hover:border-text-main hover:text-text-main disabled:opacity-50"
-                      >
-                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span>
-                      </button>
-                      <Button size="sm" variant="secondary" onClick={() => openDetail(r.id)} aria-label={`Xem chi tiết lỗi ${r.id}`}>Chi tiết</Button>
-                    </div>
-                  </td>
-                </tr>
+        <Table className="min-w-[980px]">
+          <Table.Head>
+            <Table.Row>
+              {["Thời gian", "Mã", "Nguồn", "Model", "Chủ key", "Báo lỗi", "Kích thước", "Độ trễ", ""].map((h) => (
+                <Table.HeaderCell key={h || "open"} align={h ? "left" : "right"} className="whitespace-nowrap">{h}</Table.HeaderCell>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {items.map((r) => (
+              <Table.Row key={r.id}>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{formatTime(r.timestamp)}</Table.Cell>
+                <Table.Cell><StatusTag status={r.status} /></Table.Cell>
+                <Table.Cell><Badge variant={SOURCE_VARIANT[r.source] || "default"} size="sm">{r.source}</Badge></Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">
+                  {r.requestedModel || "—"}
+                  {r.model && r.model !== r.requestedModel && <span className="text-text-subtle"> → {r.model}</span>}
+                </Table.Cell>
+                <Table.Cell className="text-[12px] text-text-muted max-w-[180px] truncate" title={r.owner || ""}>{r.owner || "—"}</Table.Cell>
+                <Table.Cell className="text-sm text-text-main max-w-[360px] truncate" title={r.message || ""}>{r.message || "—"}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{kb(r.bodyBytes)} · ~{(r.estTokens || 0).toLocaleString("vi-VN")} tk</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{(r.latencyMs || 0).toLocaleString("vi-VN")} ms</Table.Cell>
+                <Table.Cell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon="content_copy"
+                      className="size-8 px-0"
+                      onClick={() => exportRow(r.id, "report")}
+                      disabled={rowBusy === `${r.id}:report`}
+                      title="Sao chép báo cáo lỗi (Markdown)"
+                      aria-label={`Sao chép báo cáo lỗi ${r.id}`}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon="download"
+                      className="size-8 px-0"
+                      onClick={() => exportRow(r.id, "json")}
+                      disabled={rowBusy === `${r.id}:json`}
+                      title="Tải lỗi kèm request (JSON)"
+                      aria-label={`Tải lỗi ${r.id}`}
+                    />
+                    <Button size="sm" variant="secondary" onClick={() => openDetail(r.id)} aria-label={`Xem chi tiết lỗi ${r.id}`}>Chi tiết</Button>
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       <p role="status" aria-live="polite" className="-mt-3 min-h-4 text-xs text-text-muted">{rowNote}</p>

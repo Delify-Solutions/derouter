@@ -12,6 +12,7 @@ import {
 } from "@/lib/skills/repoImport.js";
 import { fetchLatestCommitSha } from "@/lib/skills/bundleUpdateCheck.js";
 import { MAX_IMPORT_ITEMS } from "@/lib/db/repos/skillsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 // The tree walk plus one request per skill: a 40-skill repository takes a few
@@ -30,6 +31,8 @@ export const maxDuration = 60;
  * chosen ones to /api/skills/bulk, so a wrong URL can never publish anything.
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   let body = null;
   try {
     body = await request.json();

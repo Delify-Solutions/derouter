@@ -5,6 +5,7 @@ import {
   pluginInputError,
 } from "@/lib/db/repos/dshPluginsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ export async function GET(request) {
 
 // POST /api/dsh-plugins — publish a plugin row.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "dsh-plugins", "edit");
+  if (denied) return denied;
   try {
     let body = null;
     try {

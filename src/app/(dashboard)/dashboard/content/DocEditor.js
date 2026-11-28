@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Input, Toggle } from "@/shared/components";
+import { Badge, Button, Input, Toast, Toggle } from "@/shared/components";
 import { validateSlug } from "@/lib/content/docsSlug.js";
 import {
   MAX_DOC_FILE_BYTES,
@@ -236,14 +236,14 @@ export default function DocEditor({ editingId, initialDraft, initialWarnings, se
             >
               <span className="hidden md:inline">Tải .md</span>
             </Button>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="close"
+              className="size-9 shrink-0 px-0"
               onClick={requestClose}
               aria-label="Đóng"
-              className="flex size-9 shrink-0 items-center justify-center border border-border text-text-muted transition-colors hover:bg-surface-2 hover:text-text-main"
-            >
-              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
-            </button>
+            />
           </div>
         </div>
 
@@ -262,13 +262,10 @@ export default function DocEditor({ editingId, initialDraft, initialWarnings, se
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 custom-scrollbar sm:p-6">
           {notice && (
-            <p className="flex flex-wrap items-center gap-2 border border-border bg-bg-alt px-3 py-2 text-[12px] text-text-main">
-              <span className="material-symbols-outlined text-[16px] text-brand-700 dark:text-brand-400" aria-hidden="true">check_circle</span>
-              <span className="flex-1">{notice.text}</span>
-              <button type="button" onClick={notice.undo} className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-main underline underline-offset-2">
-                Hoàn tác
-              </button>
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Toast type="success" message={notice.text} dismissible={false} className="flex-1" />
+              <Button variant="ghost" size="sm" onClick={notice.undo}>Hoàn tác</Button>
+            </div>
           )}
           {warnings.length > 0 && (
             <ul className="flex flex-col gap-1 border border-amber-500/50 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-300">
@@ -387,15 +384,9 @@ export default function DocEditor({ editingId, initialDraft, initialWarnings, se
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-6">
           <div className="min-w-0 flex-1">
             {error ? (
-              <p role="alert" className="flex items-center gap-1.5 text-[12px] text-danger">
-                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">error</span>
-                {error}
-              </p>
+              <Toast type="error" message={error} dismissible={false} />
             ) : dirty ? (
-              <p className="flex items-center gap-1.5 font-mono text-[11px] text-text-muted">
-                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">edit_note</span>
-                Có thay đổi chưa lưu
-              </p>
+              <Badge role="status" variant="warning" icon="edit_note">Có thay đổi chưa lưu</Badge>
             ) : null}
           </div>
           <div className="flex items-center gap-2">

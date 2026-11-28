@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
-import { Card, Input, Toggle } from "@/shared/components";
+import { Badge, Card, Input, Toggle } from "@/shared/components";
 import { PromoPopupDialog } from "@/app/landing/components/PromoPopup";
 import {
   DEFAULT_DELAY_SEC,
@@ -15,9 +15,9 @@ import {
 } from "@/shared/utils/promoPopup.js";
 
 const STATUS = {
-  live: { icon: "visibility", text: "Đang hiện trên trang chủ", className: "border-brand-500/40 text-brand-700 dark:text-brand-400" },
-  disabled: { icon: "visibility_off", text: "Đang ẩn: chưa bật popup", className: "border-amber-500/50 text-amber-800 dark:text-amber-300" },
-  empty: { icon: "visibility_off", text: "Đang ẩn: chưa có nội dung", className: "border-amber-500/50 text-amber-800 dark:text-amber-300" },
+  live: { icon: "visibility", text: "Đang hiện trên trang chủ", variant: "success" },
+  disabled: { icon: "visibility_off", text: "Đang ẩn: chưa bật popup", variant: "warning" },
+  empty: { icon: "visibility_off", text: "Đang ẩn: chưa có nội dung", variant: "warning" },
 };
 
 const KEYS = ["popupEnabled", "popupTitle", "popupBody", "popupCode", "popupCta", "popupDelaySec", "popupRepeatMinutes"];
@@ -88,10 +88,9 @@ export default function PopupCard({ copy, saved, onChange }) {
             trang Mã quà tặng với mã đã điền sẵn.
           </p>
         </div>
-        <p role="status" className={`inline-flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[11px] ${status.className}`}>
-          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{status.icon}</span>
+        <Badge role="status" variant={status.variant} icon={status.icon} className="shrink-0">
           {status.text}
-        </p>
+        </Badge>
       </div>
 
       {dirty && (

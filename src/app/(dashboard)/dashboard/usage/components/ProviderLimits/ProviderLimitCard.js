@@ -4,6 +4,7 @@ import { useState } from "react";
 import Card from "@/shared/components/Card";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import Badge from "@/shared/components/Badge";
+import Button from "@/shared/components/Button";
 import QuotaProgressBar from "./QuotaProgressBar";
 import { calculatePercentage } from "./utils";
 
@@ -74,14 +75,11 @@ export default function ProviderLimitCard({
           </div>
 
           <div>
-            <h3 className="font-semibold text-text-primary">
+            <h3 className="font-semibold text-vx-text">
               {name || provider}
             </h3>
             {plan && (
-              <Badge
-                variant={planVariants[plan?.toLowerCase()] || "default"}
-                size="xs"
-              >
+              <Badge variant={planVariant} size="xs">
                 {plan}
               </Badge>
             )}
@@ -89,56 +87,57 @@ export default function ProviderLimitCard({
         </div>
 
         {/* Refresh Button */}
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleRefresh}
           disabled={refreshing || loading}
-          className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Refresh quota"
+          aria-label="Refresh quota"
+          className="!h-9 !w-9 !p-0 text-vx-text-muted"
         >
           <span
-            className={`material-symbols-outlined text-[20px] text-text-muted ${
-              refreshing || loading ? "animate-spin" : ""
-            }`}
+            className={`material-symbols-outlined text-[20px] ${refreshing || loading ? "animate-spin" : ""}`}
           >
             refresh
           </span>
-        </button>
+        </Button>
       </div>
 
       {/* Loading State */}
       {loading && (
         <div className="space-y-4">
           <div className="space-y-2">
-            <div className="h-4 bg-black/5 dark:bg-white/5 rounded animate-pulse" />
-            <div className="h-2 bg-black/5 dark:bg-white/5 rounded animate-pulse" />
+            <div className="h-4 bg-vx-surface-3 rounded-vx-xs animate-pulse" />
+            <div className="h-2 bg-vx-surface-3 rounded-vx-xs animate-pulse" />
           </div>
           <div className="space-y-2">
-            <div className="h-4 bg-black/5 dark:bg-white/5 rounded animate-pulse" />
-            <div className="h-2 bg-black/5 dark:bg-white/5 rounded animate-pulse" />
+            <div className="h-4 bg-vx-surface-3 rounded-vx-xs animate-pulse" />
+            <div className="h-2 bg-vx-surface-3 rounded-vx-xs animate-pulse" />
           </div>
         </div>
       )}
 
       {/* Error State */}
       {!loading && error && (
-        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+        <div className="p-4 rounded-vx-md bg-vx-danger/10 border border-vx-danger/20">
           <div className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-red-500 text-[20px]">
+            <span className="material-symbols-outlined text-vx-danger text-[20px]">
               error
             </span>
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            <p className="text-sm text-vx-danger">{error}</p>
           </div>
         </div>
       )}
 
       {/* Info Message (for providers without API) */}
       {!loading && !error && message && (
-        <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+        <div className="p-4 rounded-vx-md bg-vx-info/10 border border-vx-info/20">
           <div className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-blue-500 text-[20px]">
+            <span className="material-symbols-outlined text-vx-info text-[20px]">
               info
             </span>
-            <p className="text-sm text-blue-600 dark:text-blue-400">
+            <p className="text-sm text-vx-info">
               {message}
             </p>
           </div>
@@ -174,7 +173,7 @@ export default function ProviderLimitCard({
 
       {/* Empty State */}
       {!loading && !error && !message && quotas?.length === 0 && (
-        <div className="text-center py-8 text-text-muted">
+        <div className="text-center py-8 text-vx-text-muted">
           <span className="material-symbols-outlined text-[48px] opacity-20">
             data_usage
           </span>

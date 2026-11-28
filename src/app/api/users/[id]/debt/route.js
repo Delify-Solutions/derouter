@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { clearDebtSync } from "@/lib/billing/adminActions.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -13,6 +14,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * row and the audit entry land together or not at all.
  */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "delete");
+  if (denied) return denied;
   const { id } = await params;
   const user = await getUserById(id);
   if (!user) return NextResponse.json({ error: "Không tìm thấy người dùng" }, { status: 404, headers: NO_STORE });

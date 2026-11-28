@@ -1,4 +1,5 @@
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { NextResponse } from "next/server";
 import { getGiftCodeById, updateGiftCode, deleteGiftCode } from "@/lib/db/repos/giftRepo.js";
 
@@ -20,6 +21,8 @@ export async function GET(request, { params }) {
 // grants (plan / credit / amount / duration), RPM/TPM, limits, dates, flags, note.
 // Applies to later redemptions; earlier ones keep what they received.
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "gift-codes", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -74,6 +77,8 @@ export async function PATCH(request, { params }) {
 // Either way the code is unlinked from the referral default gift, CTV overrides
 // and the promo popup in the same transaction.
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "gift-codes", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const actor = await getAdminActor(request);

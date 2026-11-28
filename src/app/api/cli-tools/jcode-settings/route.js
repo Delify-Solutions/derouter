@@ -7,6 +7,7 @@ import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { parseTOML, stringifyTOML } from "confbox";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const execAsync = promisify(exec);
 
@@ -129,6 +130,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { baseUrl, apiKey, models } = await request.json();
 
@@ -186,7 +189,9 @@ export async function POST(request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const config = await readConfig();
 

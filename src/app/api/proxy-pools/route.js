@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool, getProviderConnections, getProxyPools } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 function toBoolean(value) {
   if (value === "true") return true;
@@ -75,6 +76,8 @@ export async function GET(request) {
 
 // POST /api/proxy-pools - Create proxy pool
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const normalized = normalizeProxyPoolInput(body);

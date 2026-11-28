@@ -5,6 +5,7 @@ import {
   deleteBundle,
   bundleInputError,
 } from "@/lib/db/repos/skillBundlesRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,8 @@ export async function GET(request, { params }) {
 
 // PATCH /api/skills/bundles/{id} — change any subset of the fields.
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await readJson(request);
@@ -57,6 +60,8 @@ export async function PATCH(request, { params }) {
 // DELETE /api/skills/bundles/{id} — remove the bundle row. Detaches, never
 // cascades: every skill that pointed at it keeps existing with no bundle.
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "customer-skills", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const removed = await deleteBundle(id);

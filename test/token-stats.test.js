@@ -208,3 +208,29 @@ test("a back-charge counts at its request's time; unlimited-plan charges take no
   assert.equal(res.totals.chargedNanoUsd, 500, "only the back-charge of the in-range request");
   assert.ok(res.series.every((s) => s.bucket >= "2026-11-01" && s.bucket <= "2026-11-05"), "no bucket outside the range");
 });
+
+test("filter options are sliced (span many 3-hour slices) and still return the right distinct sets", async () => {
+  usage({ ts: "2026-11-01T01:00:00.000Z", provider: "openai", model: "gpt-up", requested: "gpt-5" });
+  usage({ ts: "2026-11-02T10:00:00.000Z", provider: "claude", model: "claude-up", requested: "claude-5" });
+  usage({ ts: "2026-11-04T23:59:00.000Z", provider: "claude", model: "claude-up", requested: "" }); // falls back to upstream model
+  usage({ ts: "2026-11-03T00:00:00.000Z", provider: "platform", model: "refused", requested: "refused" }); // excluded
+  const range = { from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" };
+  const options = await stats.statsFilterOptions(db, range);
+  assert.deepEqual(options.providers, ["claude", "openai"]);
+  assert.deepEqual(options.models, ["claude-5", "claude-up", "gpt-5"]);
+});
+
+test("statsFilterOptionsCached reuses a result within 5 minutes, recomputes after or when the range differs", async () => {
+  usage({ ts: "2026-11-03T03:00:00.000Z", provider: "openai" });
+  const range = { from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" };
+  const t0 = 1_700_000_000_000;
+  const first = await stats.statsFilterOptionsCached(db, range, t0);
+  assert.deepEqual(first.providers, ["openai"]);
+
+  usage({ ts: "2026-11-03T04:00:00.000Z", provider: "claude" });
+  const cached = await stats.statsFilterOptionsCached(db, range, t0 + 60_000);
+  assert.equal(cached, first, "served from cache, the exact same object");
+
+  const afterTtl = await stats.statsFilterOptionsCached(db, range, t0 + 6 * 60_000);
+  assert.deepEqual(afterTtl.providers, ["claude", "openai"], "past the 5-minute window: recomputed");
+});

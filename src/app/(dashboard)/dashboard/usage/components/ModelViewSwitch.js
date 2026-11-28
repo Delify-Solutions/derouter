@@ -34,8 +34,8 @@ export default function ModelViewSwitch({ value, onChange, className }) {
   const labelId = useId();
   return (
     <div role="group" aria-labelledby={labelId} className={cn("inline-flex items-center gap-2", className)}>
-      <span id={labelId} className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">Model:</span>
-      <div className="inline-flex border border-border">
+      <span id={labelId} className="font-mono text-[11px] uppercase tracking-[0.14em] text-vx-text-muted">Model:</span>
+      <div className="inline-flex overflow-hidden rounded-vx-md border border-vx-border">
         {MODEL_VIEW_OPTIONS.map((o, i) => {
           const active = value === o.value;
           return (
@@ -46,10 +46,10 @@ export default function ModelViewSwitch({ value, onChange, className }) {
               onClick={() => onChange(o.value)}
               className={cn(
                 "h-8 px-3 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150",
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
-                i > 0 && "border-l border-border",
-                // brand-600 keeps white text above 4.5:1 in both themes.
-                active ? "bg-brand-600 text-white" : "bg-surface text-text-muted hover:bg-surface-2 hover:text-text-main"
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-vx-primary",
+                i > 0 && "border-l border-vx-border",
+                // vx-primary keeps white text above 4.5:1 in both themes.
+                active ? "bg-vx-primary text-white" : "bg-vx-surface text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-text"
               )}
             >
               {active && <span className="material-symbols-outlined mr-1 align-[-3px] text-[14px]" aria-hidden="true">check</span>}

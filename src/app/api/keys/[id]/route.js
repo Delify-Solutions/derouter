@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Design D15: this surface is for ADMIN keys only. A customer key (row with a
 // userId) is reported as not found rather than forbidden — the id space is not a
@@ -29,6 +30,8 @@ export async function GET(request, { params }) {
 
 // PUT /api/keys/[id] - Update an admin key
 export async function PUT(request, { params }) {
+  const denied = await requirePagePermission(request, "endpoint", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -57,6 +60,8 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/keys/[id] - Delete an admin key
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "endpoint", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
 

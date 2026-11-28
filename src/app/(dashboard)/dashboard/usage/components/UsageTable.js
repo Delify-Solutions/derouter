@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
+import Table from "@/shared/components/Table";
 import { SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { fmtUsd } from "@/shared/utils/money";
@@ -26,16 +27,16 @@ function fmtTime(iso) {
  * "+N" for the rest (their names in the tooltip).
  */
 function ProviderList({ providers = [], highlight = false }) {
-  if (!providers.length) return <span className="text-text-muted">—</span>;
+  if (!providers.length) return <span className="text-vx-text-muted">—</span>;
   const shown = providers.slice(0, 3);
   const rest = providers.slice(3);
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {shown.map((p) => (
-        <Badge key={p.id} variant={highlight ? "primary" : "neutral"} size="sm">{p.name}</Badge>
+        <Badge key={p.id} variant={highlight ? "primary" : "default"} size="sm">{p.name}</Badge>
       ))}
       {rest.length > 0 && (
-        <span className="font-mono text-xs text-text-muted" title={rest.map((p) => p.name).join(", ")}>
+        <span className="font-mono text-xs text-vx-text-muted" title={rest.map((p) => p.name).join(", ")}>
           +{rest.length}
         </span>
       )}
@@ -55,35 +56,35 @@ function ValueCells({ item, viewMode, isSummary = false }) {
   if (viewMode === "tokens") {
     return (
       <>
-        <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+        <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
           {isSummary && item.promptTokens === undefined ? "—" : fmt(item.promptTokens)}
-        </td>
-        <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+        </Table.Cell>
+        <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
           {item.cachedTokens ? fmt(item.cachedTokens) : "—"}
-        </td>
-        <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+        </Table.Cell>
+        <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
           {isSummary && item.completionTokens === undefined ? "—" : fmt(item.completionTokens)}
-        </td>
-        <td className="px-6 py-3 text-right font-mono tabular-nums font-medium">
+        </Table.Cell>
+        <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums font-medium">
           {fmt(item.totalTokens)}
-        </td>
+        </Table.Cell>
       </>
     );
   }
   return (
     <>
-      <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+      <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
         {isSummary && item.inputCost === undefined ? "—" : fmtCost(item.inputCost)}
-      </td>
-      <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+      </Table.Cell>
+      <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
         {item.cachedCost ? fmtCost(item.cachedCost) : "—"}
-      </td>
-      <td className="px-6 py-3 text-right font-mono tabular-nums text-text-muted">
+      </Table.Cell>
+      <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums text-vx-text-muted">
         {isSummary && item.outputCost === undefined ? "—" : fmtCost(item.outputCost)}
-      </td>
-      <td className="px-6 py-3 text-right font-mono tabular-nums font-medium text-warning">
+      </Table.Cell>
+      <Table.Cell className="px-6 py-3 text-right font-mono tabular-nums font-medium text-vx-warning">
         {fmtCost(item.totalCost || item.cost)}
-      </td>
+      </Table.Cell>
     </>
   );
 }
@@ -94,7 +95,7 @@ ValueCells.propTypes = {
   isSummary: PropTypes.bool,
 };
 
-const HEAD_CELL = "px-6 py-3 font-medium";
+const HEAD_CELL = "px-6 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted";
 
 /**
  * Usage table with expandable group rows. Sorting, search, filters and Top N are applied
@@ -192,62 +193,56 @@ export default function UsageTable({
       className={HEAD_CELL}
     />
   ) : (
-    <th key={col.field} scope="col" className={`${HEAD_CELL} ${align === "right" ? "text-right" : "text-left"}`}>{col.label}</th>
+    <Table.HeaderCell key={col.field} className={`${HEAD_CELL} ${align === "right" ? "text-right" : "text-left"}`}>{col.label}</Table.HeaderCell>
   ));
 
   return (
-    <Card className="overflow-hidden">
+    <Card padding="none" className="overflow-hidden">
       {(title || toolbar) && (
-        <div className="flex flex-col gap-3 p-4 border-b border-border bg-bg-subtle/50">
+        <div className="flex flex-col gap-3 p-4 border-b border-vx-border bg-vx-surface-2/50">
           {title && <h3 className="font-semibold">{title}</h3>}
           {toolbar}
         </div>
       )}
       <div className="overflow-x-auto" aria-busy={tableState === "loading"}>
         <table className="w-full text-sm text-left">
-          <thead className="bg-bg-subtle/30 text-text-muted uppercase text-xs">
+          <Table.Head>
             <tr>
               {columns.map((col) => headerCell(col, col.align === "right" ? "right" : "left"))}
               {valueColumns.map((col) => headerCell(col, "right"))}
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
+          </Table.Head>
+          <Table.Body>
             {tableState === "ready" && groupedData.map((group) => {
               const isOpen = expanded.has(group.groupKey);
               return (
                 <Fragment key={group.groupKey}>
                   {/* Group summary row */}
-                  <tr
-                    className="group-summary cursor-pointer hover:bg-bg-subtle/50 transition-colors"
-                    onClick={() => toggleGroup(group.groupKey)}
-                  >
-                    <td className="px-6 py-3">
+                  <Table.Row onClick={() => toggleGroup(group.groupKey)}>
+                    <Table.Cell className="px-6 py-3">
                       <button
                         type="button"
                         aria-expanded={isOpen}
                         onClick={(e) => { e.stopPropagation(); toggleGroup(group.groupKey); }}
-                        className="flex items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+                        className="flex items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-vx-primary"
                       >
-                        <span className={`material-symbols-outlined text-[18px] text-text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden="true">
+                        <span className={`material-symbols-outlined text-[18px] text-vx-text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden="true">
                           chevron_right
                         </span>
-                        <span className={`font-medium transition-colors ${group.summary.pending > 0 ? "text-primary" : ""}`}>
+                        <span className={`font-medium transition-colors ${group.summary.pending > 0 ? "text-vx-primary" : ""}`}>
                           {group.groupKey}
                         </span>
                       </button>
-                    </td>
+                    </Table.Cell>
                     {renderSummaryCells(group)}
                     <ValueCells item={group.summary} viewMode={viewMode} isSummary />
-                  </tr>
+                  </Table.Row>
                   {/* Detail rows */}
                   {isOpen && group.items.map((item) => (
-                    <tr
-                      key={`detail-${item.key}`}
-                      className="group-detail hover:bg-bg-subtle/20 transition-colors"
-                    >
+                    <Table.Row key={`detail-${item.key}`}>
                       {renderDetailCells(item)}
                       <ValueCells item={item} viewMode={viewMode} />
-                    </tr>
+                    </Table.Row>
                   ))}
                 </Fragment>
               );
@@ -259,7 +254,7 @@ export default function UsageTable({
               onRetry={onRetry}
               onClearFilters={onClearFilters}
             />
-          </tbody>
+          </Table.Body>
         </table>
       </div>
     </Card>

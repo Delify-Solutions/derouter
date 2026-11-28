@@ -5,6 +5,7 @@ import { execSync } from "child_process";
 import { installTailscale, loadState, generateShortId } from "@/lib/tunnel";
 import { getCachedPassword, loadEncryptedPassword, initDbHooks } from "@/mitm/manager";
 import { getSettings, updateSettings } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 initDbHooks(getSettings, updateSettings);
 
@@ -15,6 +16,8 @@ function hasBrew() {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "endpoint", "edit");
+  if (denied) return denied;
   const body = await request.json().catch(() => ({}));
   const platform = os.platform();
   const isWindows = platform === "win32";

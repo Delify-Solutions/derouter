@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Modal } from "@/shared/components";
+import { Button, Modal, Input, Select } from "@/shared/components";
 import { slugFromName } from "@/lib/skills/frontmatter.js";
 import RuntimePicker from "./RuntimePicker";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
-const INPUT = "h-10 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
 
 const EMPTY = {
   name: "",
@@ -97,30 +96,26 @@ export default function SkillEditorModal({ isOpen, editing, initial, categories,
     >
       <div className="flex max-h-[70vh] flex-col gap-5 overflow-y-auto pr-1">
         {error && (
-          <p role="alert" className="border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+          <p role="alert" className="border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
             {error}
           </p>
         )}
 
-        <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>Tên skill <span className="text-red-600">*</span></span>
-          <input
-            value={form.name}
-            onChange={(e) => {
-              const name = e.target.value;
-              set(slugTouched ? { name } : { name, slug: slugFromName(name) });
-            }}
-            className={INPUT}
-            placeholder="rt-recon-pipeline"
-          />
-          <span className="font-mono text-[11px] text-text-subtle">
-            Tên thư mục trên máy khách: {form.slug || slugFromName(form.name) || "…"}
-          </span>
-        </label>
+        <Input
+          label="Tên skill"
+          required
+          value={form.name}
+          onChange={(e) => {
+            const name = e.target.value;
+            set(slugTouched ? { name } : { name, slug: slugFromName(name) });
+          }}
+          placeholder="rt-recon-pipeline"
+          hint={`Tên thư mục trên máy khách: ${form.slug || slugFromName(form.name) || "…"}`}
+        />
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3">
-            <span className={LABEL}>Nội dung markdown <span className="text-red-600">*</span></span>
+            <span className={LABEL}>Nội dung markdown <span className="text-danger">*</span></span>
             <span className="font-mono text-[11px] text-text-subtle">{lines} dòng · {kb.toFixed(1)} KB</span>
           </div>
           <textarea
@@ -146,28 +141,28 @@ export default function SkillEditorModal({ isOpen, editing, initial, categories,
           </summary>
           <div className="flex flex-col gap-4 border-t border-border p-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Slug (tên thư mục)</span>
-                <input
-                  value={form.slug}
-                  onChange={(e) => { setSlugTouched(true); set({ slug: e.target.value }); }}
-                  className={`${INPUT} font-mono`}
-                  placeholder="rt-recon-pipeline"
+              <Input
+                label="Slug (tên thư mục)"
+                value={form.slug}
+                onChange={(e) => { setSlugTouched(true); set({ slug: e.target.value }); }}
+                inputClassName="font-mono"
+                placeholder="rt-recon-pipeline"
+              />
+              <div>
+                <Input
+                  label="Nhóm"
+                  value={form.category}
+                  onChange={(e) => set({ category: e.target.value })}
+                  list="skill-categories"
+                  placeholder="Red team"
                 />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Nhóm</span>
-                <input value={form.category} onChange={(e) => set({ category: e.target.value })} list="skill-categories" className={INPUT} placeholder="Red team" />
                 <datalist id="skill-categories">
                   {categories.map((c) => <option key={c.category} value={c.category} />)}
                 </datalist>
-              </label>
+              </div>
             </div>
 
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Mô tả ngắn (hiện trên thẻ)</span>
-              <input value={form.summary} maxLength={200} onChange={(e) => set({ summary: e.target.value })} className={INPUT} />
-            </label>
+            <Input label="Mô tả ngắn (hiện trên thẻ)" value={form.summary} maxLength={200} onChange={(e) => set({ summary: e.target.value })} />
 
             <label className="flex flex-col gap-1.5">
               <span className={LABEL}>Mô tả đầy đủ (hiện trên thẻ, dưới mô tả ngắn)</span>
@@ -191,30 +186,24 @@ export default function SkillEditorModal({ isOpen, editing, initial, categories,
             </label>
 
             <div className="grid gap-4 sm:grid-cols-4">
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Thứ tự (nhỏ lên trước)</span>
-                <input
-                  type="number"
-                  value={form.sortOrder}
-                  onChange={(e) => set({ sortOrder: e.target.value === "" ? 0 : Number(e.target.value) })}
-                  className={`${INPUT} font-mono`}
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Đối tượng</span>
-                <select value={form.audience} onChange={(e) => set({ audience: e.target.value })} className={INPUT}>
-                  <option value="customer">Khách hàng</option>
-                  <option value="internal">Nội bộ (khách không thấy)</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Phiên bản</span>
-                <input value={form.version} onChange={(e) => set({ version: e.target.value })} className={`${INPUT} font-mono`} placeholder="1.0.0" />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Tên file</span>
-                <input value={form.fileName} onChange={(e) => set({ fileName: e.target.value })} className={`${INPUT} font-mono`} placeholder="SKILL.md" />
-              </label>
+              <Input
+                label="Thứ tự (nhỏ lên trước)"
+                type="number"
+                value={form.sortOrder}
+                onChange={(e) => set({ sortOrder: e.target.value === "" ? 0 : Number(e.target.value) })}
+                inputClassName="font-mono"
+              />
+              <Select
+                label="Đối tượng"
+                value={form.audience}
+                onChange={(e) => set({ audience: e.target.value })}
+                options={[
+                  { value: "customer", label: "Khách hàng" },
+                  { value: "internal", label: "Nội bộ (khách không thấy)" },
+                ]}
+              />
+              <Input label="Phiên bản" value={form.version} onChange={(e) => set({ version: e.target.value })} inputClassName="font-mono" placeholder="1.0.0" />
+              <Input label="Tên file" value={form.fileName} onChange={(e) => set({ fileName: e.target.value })} inputClassName="font-mono" placeholder="SKILL.md" />
             </div>
           </div>
         </details>

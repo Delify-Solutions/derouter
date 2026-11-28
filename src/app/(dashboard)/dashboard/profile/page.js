@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, Button, Toggle, Input, Select } from "@/shared/components";
+import { Card, Button, Toggle, Input, Select, Toast } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { useTheme } from "@/shared/hooks/useTheme";
@@ -929,12 +929,12 @@ export default function ProfilePage() {
             </div>
           </div>
           <div className="flex flex-col gap-3 pt-4 border-t border-border">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-bg border border-border gap-2">
+            <Card.Section className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
                 <p className="font-medium text-sm sm:text-base">Database Location</p>
                 <p className="text-xs sm:text-sm text-text-muted font-mono break-all">~/.derouter/db/data.sqlite</p>
               </div>
-            </div>
+            </Card.Section>
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 variant="secondary"
@@ -963,7 +963,7 @@ export default function ProfilePage() {
               />
             </div>
             {dbStatus.message && (
-              <p className={`text-sm ${dbStatus.type === "error" ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+              <p className={`text-sm ${dbStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                 {dbStatus.message}
               </p>
             )}
@@ -1057,7 +1057,7 @@ export default function ProfilePage() {
                 </div>
 
                 {passStatus.message && (
-                  <p className={`text-xs sm:text-sm ${passStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                  <p className={`text-xs sm:text-sm ${passStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                     {passStatus.message}
                   </p>
                 )}
@@ -1232,7 +1232,7 @@ export default function ProfilePage() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                          <div className="p-3 rounded border border-border bg-bg/50 flex flex-col gap-1.5">
+                          <Card.Section className="flex flex-col gap-1.5">
                             <p className="font-semibold text-text-main flex items-center gap-1.5">
                               <span>☁️</span> AWS IAM Identity Center
                             </p>
@@ -1243,9 +1243,9 @@ export default function ProfilePage() {
                               <li>Under <i>Attribute mappings</i>, map <code className="text-text-main font-mono">Subject</code> or <code className="text-text-main font-mono">email</code> to <code className="text-text-main font-mono">${`{user:email}`}</code>.</li>
                               <li>Download <b>IAM Identity Center SAML metadata XML</b> file and use 1-Click Import below!</li>
                             </ol>
-                          </div>
+                          </Card.Section>
 
-                          <div className="p-3 rounded border border-border bg-bg/50 flex flex-col gap-1.5">
+                          <Card.Section className="flex flex-col gap-1.5">
                             <p className="font-semibold text-text-main flex items-center gap-1.5">
                               <span>🔷</span> Microsoft Entra ID (Azure AD)
                             </p>
@@ -1256,9 +1256,9 @@ export default function ProfilePage() {
                               <li><b>Reply URL (ACS):</b> <code className="text-text-main font-mono">{samlAcsUrl}</code></li>
                               <li>Download <b>Federation Metadata XML</b> and import or copy X.509 Certificate.</li>
                             </ol>
-                          </div>
+                          </Card.Section>
 
-                          <div className="p-3 rounded border border-border bg-bg/50 flex flex-col gap-1.5">
+                          <Card.Section className="flex flex-col gap-1.5">
                             <p className="font-semibold text-text-main flex items-center gap-1.5">
                               <span>🟢</span> Okta / Auth0
                             </p>
@@ -1269,9 +1269,9 @@ export default function ProfilePage() {
                               <li>Name ID format: <i>EmailAddress</i>.</li>
                               <li>Download Identity Provider metadata XML or copy the X.509 cert.</li>
                             </ol>
-                          </div>
+                          </Card.Section>
 
-                          <div className="p-3 rounded border border-border bg-bg/50 flex flex-col gap-1.5">
+                          <Card.Section className="flex flex-col gap-1.5">
                             <p className="font-semibold text-text-main flex items-center gap-1.5">
                               <span>🛡️</span> Keycloak / Authentik
                             </p>
@@ -1281,7 +1281,7 @@ export default function ProfilePage() {
                               <li><b>Master SAML Processing URL:</b> <code className="text-text-main font-mono">{samlAcsUrl}</code></li>
                               <li>Export SAML Descriptor XML or copy IDP Certificate PEM.</li>
                             </ol>
-                          </div>
+                          </Card.Section>
                         </div>
                       </div>
                     )}
@@ -1396,7 +1396,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-bg text-xs sm:text-sm text-text-muted">
+                  <Card.Section className="flex flex-col gap-2 text-xs sm:text-sm text-text-muted">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="font-medium text-text-main">ACS Callback URL</p>
@@ -1431,7 +1431,7 @@ export default function ProfilePage() {
                         Download XML
                       </a>
                     </div>
-                  </div>
+                  </Card.Section>
 
                   <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/50">
                     <Button
@@ -1455,13 +1455,13 @@ export default function ProfilePage() {
                   </div>
 
                   {samlTestStatus.message && (
-                    <p className={`text-xs sm:text-sm ${samlTestStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                    <p className={`text-xs sm:text-sm ${samlTestStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                       {samlTestStatus.message}
                     </p>
                   )}
 
                   {samlStatus.message && (
-                    <p className={`text-xs sm:text-sm ${samlStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                    <p className={`text-xs sm:text-sm ${samlStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                       {samlStatus.message}
                     </p>
                   )}
@@ -1523,10 +1523,10 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-border bg-bg p-3 text-xs sm:text-sm text-text-muted">
+                  <Card.Section className="text-xs sm:text-sm text-text-muted">
                     <p className="font-medium text-text-main mb-1">Redirect URI</p>
                     <code className="block break-all font-mono">{oidcRedirectUri}</code>
-                  </div>
+                  </Card.Section>
 
                   <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/50">
                     <Button type="button" variant="primary" loading={oidcLoading} onClick={() => saveOidcSettings()} className="w-full sm:w-auto">
@@ -1538,13 +1538,13 @@ export default function ProfilePage() {
                   </div>
 
                   {oidcTestStatus.message && (
-                    <p className={`text-xs sm:text-sm ${oidcTestStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                    <p className={`text-xs sm:text-sm ${oidcTestStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                       {oidcTestStatus.message}
                     </p>
                   )}
 
                   {oidcStatus.message && (
-                    <p className={`text-xs sm:text-sm ${oidcStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                    <p className={`text-xs sm:text-sm ${oidcStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                       {oidcStatus.message}
                     </p>
                   )}
@@ -1552,13 +1552,13 @@ export default function ProfilePage() {
               )}
 
               {settings.authMode === "oidc" || settings.authMode === "saml" || settings.authMode === "sso" ? (
-                <p className="text-xs sm:text-sm text-amber-600 dark:text-amber-400">
+                <p className="text-xs sm:text-sm text-vx-warning">
                   SSO login ({settings.ssoType === "saml" ? "SAML 2.0" : "OIDC"}) is currently active. Password login is disabled until you switch back.
                 </p>
               ) : null}
 
               {settings.authMode === "both" && (
-                <p className="text-xs sm:text-sm text-amber-600 dark:text-amber-400">
+                <p className="text-xs sm:text-sm text-vx-warning">
                   Password and SSO login ({settings.ssoType === "saml" ? "SAML 2.0" : "OIDC"}) are both active.
                 </p>
               )}
@@ -1722,7 +1722,7 @@ export default function ProfilePage() {
             )}
 
             {proxyStatus.message && (
-              <p className={`text-xs sm:text-sm ${proxyStatus.type === "error" ? "text-red-500" : "text-green-500"} pt-2 border-t border-border/50`}>
+              <p className={`text-xs sm:text-sm ${proxyStatus.type === "error" ? "text-vx-danger" : "text-vx-success"} pt-2 border-t border-border/50`}>
                 {proxyStatus.message}
               </p>
             )}
@@ -1820,16 +1820,11 @@ export default function ProfilePage() {
               />
 
               {notifyForm.requireEmailVerification && !String(notifyForm.smtpRelayUrl || "").trim() && (
-                <div
-                  role="alert"
-                  className="border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300"
-                >
-                  <span className="material-symbols-outlined text-[18px] shrink-0" aria-hidden="true">warning</span>
-                  <span>
-                    Đang bật xác minh email nhưng chưa cấu hình mail relay — khách mới sẽ không nhận
-                    được mail xác minh. Cấu hình relay hoặc tắt xác minh email.
-                  </span>
-                </div>
+                <Toast
+                  type="warning"
+                  message="Đang bật xác minh email nhưng chưa cấu hình mail relay — khách mới sẽ không nhận được mail xác minh. Cấu hình relay hoặc tắt xác minh email."
+                  dismissible={false}
+                />
               )}
             </div>
 
@@ -1946,12 +1941,12 @@ export default function ProfilePage() {
             </div>
 
             {notifyTestStatus.message && (
-              <p className={`text-xs ${notifyTestStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+              <p className={`text-xs ${notifyTestStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                 {notifyTestStatus.message}
               </p>
             )}
             {notifyStatus.message && (
-              <p className={`text-xs ${notifyStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+              <p className={`text-xs ${notifyStatus.type === "error" ? "text-vx-danger" : "text-vx-success"}`}>
                 {notifyStatus.message}
               </p>
             )}
@@ -1961,11 +1956,10 @@ export default function ProfilePage() {
         {/* Account actions */}
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
-            variant="outline"
+            variant="danger-outline"
             fullWidth
             icon="power_settings_new"
             onClick={() => setShutdownOpen(true)}
-            className="text-red-500 border-red-200 hover:bg-red-50 hover:border-red-300"
           >
             Shutdown
           </Button>

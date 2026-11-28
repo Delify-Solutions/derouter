@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Input } from "@/shared/components";
+import { Button, Card, Input } from "@/shared/components";
 
 /**
  * The public Telegram channel link (change models-notifications D6). Shown to
@@ -80,7 +80,7 @@ export default function TelegramChannelCard() {
   const dirty = value.trim() !== saved || chatId.trim() !== savedChatId;
 
   return (
-    <section className="flex flex-col gap-4 border border-border bg-surface p-5">
+    <Card className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold text-text-main">Kênh Telegram công khai</h2>
         <p className="max-w-2xl text-sm text-text-muted">
@@ -124,6 +124,6 @@ export default function TelegramChannelCard() {
           {message.text}
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }

@@ -8,6 +8,7 @@ import {
   replyToCustomer,
 } from "@/lib/notify/supportChat.js";
 import { loadTelegramLinkConfig } from "@/lib/telegram/config.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -51,6 +52,8 @@ export async function GET(request) {
 // message goes to the customer's Telegram chat, exactly like a reply typed in the
 // admin chat, so both paths leave the same trail.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "telegram", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

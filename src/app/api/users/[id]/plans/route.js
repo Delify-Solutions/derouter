@@ -5,6 +5,7 @@ import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { getQueueSync, getPlanHistorySync } from "@/lib/db/repos/accountPlansRepo.js";
 import { grantPlanSync, grantCreditSync } from "@/lib/billing/adminActions.js";
 import { fireAndForget, notifyPlanReceived } from "@/lib/notify/customerTelegram.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -37,6 +38,8 @@ export async function GET(request, { params }) {
  * or not at all.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id } = await params;
   const user = await getUserById(id);
   if (!user) {

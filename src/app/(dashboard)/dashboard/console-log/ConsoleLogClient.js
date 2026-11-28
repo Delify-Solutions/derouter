@@ -69,28 +69,26 @@ export default function ConsoleLogClient() {
   }, [logs]);
 
   return (
-    <div className="">
-      <Card>
-        <div className="flex items-center justify-end px-4 pt-3 pb-2">
-          <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
-            Clear
-          </Button>
-        </div>
-        <div
-          ref={logRef}
-          className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
-        >
-          {logs.length === 0 ? (
-            <span className="text-text-muted">No console logs yet.</span>
-          ) : (
-            <div className="space-y-0.5">
-              {logs.map((line, i) => (
-                <div key={i}>{colorLine(line)}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
+    <Card padding="none" className="overflow-hidden">
+      <div className="flex items-center justify-end px-4 pt-3 pb-2">
+        <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
+          Clear
+        </Button>
+      </div>
+      <div
+        ref={logRef}
+        className="bg-black p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
+      >
+        {logs.length === 0 ? (
+          <span className="text-vx-text-muted">No console logs yet.</span>
+        ) : (
+          <div className="space-y-0.5">
+            {logs.map((line, i) => (
+              <div key={i}>{colorLine(line)}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

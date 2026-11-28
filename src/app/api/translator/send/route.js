@@ -1,5 +1,6 @@
 import { getProviderConnections, updateProviderConnection } from "@/lib/localDb.js";
 import { getExecutor } from "open-sse/index.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 async function persistRefreshedCredentials(connection, newCredentials) {
   const updateData = {};
@@ -33,6 +34,8 @@ async function persistRefreshedCredentials(connection, newCredentials) {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "translator", "edit");
+  if (denied) return denied;
   try {
     const { provider, model, body } = await request.json();
 

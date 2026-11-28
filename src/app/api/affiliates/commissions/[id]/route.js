@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { actOnCommission } from "@/lib/db/repos/affiliateRepo.js";
 import { validateReason } from "@/lib/billing/adminActions.js";
 
@@ -20,6 +21,8 @@ const ERRORS = {
  * now; `reverse` cancels the commission and needs a reason. Both are audited.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "affiliates", "edit");
+  if (denied) return denied;
   const { id } = await params;
   const actor = await getAdminActor(request);
 

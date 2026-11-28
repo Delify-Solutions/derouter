@@ -4,6 +4,7 @@ import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { validateReason } from "@/lib/billing/adminActions.js";
 import { adminUnlinkTelegramSync, getTelegramLinkSync } from "@/lib/db/repos/telegramLinkRepo.js";
 import { messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -20,6 +21,9 @@ const ERRORS = {
  * first, while the link still exists; the removal is audited.
  */
 export async function DELETE(request, { params }) {
+  // Also called from the Telegram page's linked-accounts list.
+  const denied = await requireAnyPagePermission(request, ["users", "telegram"], "delete");
+  if (denied) return denied;
   const { id } = await params;
   const actor = await getAdminActor(request);
 

@@ -3,6 +3,7 @@ import { getCombos, createCombo } from "@/lib/localDb";
 import { findComboByNameIgnoringCase } from "@/lib/db/repos/combosRepo.js";
 import { updateComboPricing } from "@/lib/db/repos/comboPricingRepo.js";
 import { CACHE_ESTIMATION_ERROR, isValidCacheEstimationInput, withCacheEstimation } from "@/lib/combos/cacheEstimation.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ export async function GET() {
 
 // POST /api/combos - Create new combo
 export async function POST(request) {
+  // Shared by three dashboard pages (Combo, CLI Tools quick-create, Media
+  // Providers): edit on any one of them is enough.
+  const denied = await requireAnyPagePermission(request, ["combos", "cli-tools", "media-providers"], "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { name, models, kind, pricing, capabilities, cacheEstimation } = body;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listPlans, createPlan, validatePlanInput, planStats } from "@/lib/db/repos/billingRepo.js";
 import { getKeyGroups } from "@/lib/db/repos/keyGroupsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -44,6 +45,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "plans", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

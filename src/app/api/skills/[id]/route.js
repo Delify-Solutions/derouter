@@ -5,6 +5,7 @@ import {
   deleteSkill,
   skillInputError,
 } from "@/lib/db/repos/skillsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export async function GET(request, { params }) {
 
 // PATCH /api/skills/{id} — change any subset of the fields.
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await readJson(request);
@@ -60,6 +63,8 @@ export async function PATCH(request, { params }) {
 // DELETE /api/skills/{id} — remove the row. A customer who already downloaded a
 // copy keeps it; only the published listing goes away.
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "customer-skills", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const removed = await deleteSkill(id);

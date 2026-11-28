@@ -5,6 +5,7 @@ import { callBotApi } from "@/lib/telegram/botApi.js";
 import { CUSTOMER_COMMANDS } from "@/lib/telegram/bot/customer.js";
 import { ADMIN_COMMANDS, adminIdsOf } from "@/lib/telegram/bot/admin.js";
 import { newWebhookSecret, normalizeBaseUrl, botBaseUrlOf } from "@/lib/telegram/bot/config.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -54,6 +55,8 @@ export async function GET() {
 // Enable = point the bot's webhook here with a fresh secret and publish the
 // command menus (customer menu for everyone, plus admin commands for each admin).
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "telegram", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

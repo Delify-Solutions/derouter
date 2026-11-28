@@ -5,7 +5,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
-import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, DiscountsModal } from "@/shared/components";
+import { Card, Button, Modal, Input, Badge, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle, DiscountsModal } from "@/shared/components";
 import PreviewThumb from "@/shared/components/PreviewThumb";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
@@ -549,9 +549,9 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             <div className="flex min-w-0 items-center gap-2">
               <code className="block truncate font-mono text-sm font-medium" title={combo.name}>{combo.name}</code>
               {inMaintenance && (
-                <span className="shrink-0 border border-amber-700/60 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-amber-800 dark:text-amber-300" data-testid="combo-maintenance-badge">
+                <Badge variant="warning" size="sm" className="shrink-0" data-testid="combo-maintenance-badge">
                   Đang bảo trì
-                </span>
+                </Badge>
               )}
             </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
@@ -569,14 +569,9 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
               )}
               {isImage && (
-                <span
-                  className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
-                    imagePrice > 0 ? "border-green-500/40 text-green-600 dark:text-green-400" : "border-red-500/40 text-red-500"
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[12px]">{imagePrice > 0 ? "sell" : "warning"}</span>
+                <Badge variant={imagePrice > 0 ? "success" : "error"} size="sm" icon={imagePrice > 0 ? "sell" : "warning"}>
                   {imagePrice > 0 ? `$${imagePrice} / image` : "No price: refused for customers"}
-                </span>
+                </Badge>
               )}
             </div>
             {/* Fusion: judge picker (Auto = first model) */}
@@ -1329,13 +1324,16 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kind 
             )}
 
             {/* Add Model button */}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="add"
+              fullWidth
               onClick={() => setShowModelSelect(true)}
-              className="w-full mt-2 py-2 border border-dashed border-black/10 dark:border-white/10 rounded-lg text-xs text-primary font-medium hover:text-primary hover:border-primary/50 transition-colors flex items-center justify-center gap-1"
+              className="mt-2 border border-dashed border-vx-border hover:border-vx-primary/50 hover:text-vx-primary"
             >
-              <span className="material-symbols-outlined text-[16px]">add</span>
               Add Model
-            </button>
+            </Button>
           </div>
 
           {/* Image combos are priced per generated image, not per token. A combo with

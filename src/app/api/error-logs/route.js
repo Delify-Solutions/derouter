@@ -7,6 +7,7 @@ import {
   deleteErrorLogsByFilter,
   getErrorLogConfig,
 } from "../../../lib/db/repos/errorLogsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Admin only: /api/error-logs is not a public path, so the dashboard guard applies.
 export const dynamic = "force-dynamic";
@@ -43,6 +44,8 @@ export async function GET(request) {
 // DELETE /api/error-logs?olderThanDays=7                         -> rows older than N days
 // DELETE /api/error-logs?source=&status=&statusMode=&owner=&...  -> only rows matching this filter
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "errors", "delete");
+  if (denied) return denied;
   const p = new URL(request.url).searchParams;
   const filter = filterFromQuery(p);
   const hasFilter = Object.values(filter).some((v) => v !== undefined);

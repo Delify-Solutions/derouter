@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Card, Button, Input, Select, Modal, ConfirmModal, CardSkeleton } from "@/shared/components";
+import { Card, Button, Input, Select, Modal, ConfirmModal, CardSkeleton, Table, Badge } from "@/shared/components";
 import Pagination from "@/shared/components/Pagination";
 import { PRICING_FIELDS, EMPTY_PRICING, parsePricingDraft, pricingToDraft } from "@/shared/utils/pricingMatch";
 
@@ -263,92 +263,88 @@ export default function PricingPageClient() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-text-muted border-b border-border-subtle">
-                <th className="text-left font-medium px-2 py-2">Provider</th>
-                <th className="text-left font-medium px-2 py-2">Model</th>
-                {PRICING_FIELDS.map((f) => (
-                  <th key={f.key} className="text-right font-medium px-2 py-2 whitespace-nowrap">{f.label.replace(" ($/1M)", "")}</th>
-                ))}
-                <th className="text-right font-medium px-2 py-2 w-20">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-center text-text-muted py-10">
-                    No prices match the current filter.
-                  </td>
-                </tr>
-              )}
-              {pageRows.map((row) => {
-                const isEditing = editing?.provider === row.provider && editing?.model === row.model;
-                return (
-                  <tr key={`${row.provider}/${row.model}`} className="border-b border-border-subtle/50 hover:bg-surface-2/50">
-                    <td className="px-2 py-2 text-text-muted whitespace-nowrap">{row.provider}</td>
-                    <td className="px-2 py-2 font-medium text-text-main whitespace-nowrap">
-                      {row.model}
-                      {row.isOverride && (
-                        <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 align-middle">
-                          <span className="material-symbols-outlined text-[12px]">edit</span>override
-                        </span>
-                      )}
-                    </td>
-                    {isEditing ? (
-                      <>
-                        {PRICING_FIELDS.map((f) => (
-                          <td key={f.key} className="px-1 py-1 text-right">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={editDraft[f.key]}
-                              onChange={(e) => setEditDraft({ ...editDraft, [f.key]: e.target.value })}
-                              placeholder="0"
-                              className="w-20 px-2 py-1 text-right text-sm bg-surface-2 border border-border rounded-[8px] focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                            />
-                          </td>
-                        ))}
-                        <td className="px-2 py-2 text-right whitespace-nowrap">
-                          <Button size="sm" onClick={saveEdit} disabled={savingRow} loading={savingRow}>Save</Button>
-                          <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={savingRow} className="ml-1">Cancel</Button>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        {PRICING_FIELDS.map((f) => (
-                          <td key={f.key} className={`px-2 py-2 text-right tabular-nums ${row.isOverride ? "text-text-main font-medium" : "text-text-muted"}`}>
-                            {Number(row[f.key]) > 0 ? Number(row[f.key]).toFixed(row[f.key] < 1 ? 4 : 2) : "—"}
-                          </td>
-                        ))}
-                        <td className="px-2 py-2 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => startEdit(row)}
-                            title="Edit"
-                            className="p-1.5 rounded hover:bg-surface-3 text-text-muted hover:text-text-main"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">edit</span>
-                          </button>
-                          {row.isOverride && (
-                            <button
-                              onClick={() => setConfirmReset({ provider: row.provider, model: row.model })}
-                              title="Reset to built-in"
-                              className="p-1.5 rounded hover:bg-surface-3 text-text-muted hover:text-red-500 ml-1"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">restart_alt</span>
-                            </button>
-                          )}
-                        </td>
-                      </>
+        <Table bare className="min-w-[860px]">
+          <Table.Head>
+            <Table.Row>
+              <Table.HeaderCell>Provider</Table.HeaderCell>
+              <Table.HeaderCell>Model</Table.HeaderCell>
+              {PRICING_FIELDS.map((f) => (
+                <Table.HeaderCell key={f.key} align="right" className="whitespace-nowrap">{f.label.replace(" ($/1M)", "")}</Table.HeaderCell>
+              ))}
+              <Table.HeaderCell align="right" className="w-20">Actions</Table.HeaderCell>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {pageRows.length === 0 && (
+              <Table.Empty colSpan={8}>No prices match the current filter.</Table.Empty>
+            )}
+            {pageRows.map((row) => {
+              const isEditing = editing?.provider === row.provider && editing?.model === row.model;
+              return (
+                <Table.Row key={`${row.provider}/${row.model}`}>
+                  <Table.Cell className="text-vx-text-muted whitespace-nowrap">{row.provider}</Table.Cell>
+                  <Table.Cell className="font-medium text-vx-text whitespace-nowrap">
+                    {row.model}
+                    {row.isOverride && (
+                      <Badge variant="warning" size="xs" icon="edit" className="ml-2 align-middle">override</Badge>
                     )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  </Table.Cell>
+                  {isEditing ? (
+                    <>
+                      {PRICING_FIELDS.map((f) => (
+                        <Table.Cell key={f.key} className="py-1 text-right">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={editDraft[f.key]}
+                            onChange={(e) => setEditDraft({ ...editDraft, [f.key]: e.target.value })}
+                            placeholder="0"
+                            className="w-20 px-2 py-1 text-right text-sm bg-vx-surface-2 border border-vx-border rounded-vx-md focus:outline-none focus:ring-2 focus:ring-vx-primary/30"
+                          />
+                        </Table.Cell>
+                      ))}
+                      <Table.Cell className="text-right whitespace-nowrap">
+                        <Button size="sm" onClick={saveEdit} disabled={savingRow} loading={savingRow}>Save</Button>
+                        <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={savingRow} className="ml-1">Cancel</Button>
+                      </Table.Cell>
+                    </>
+                  ) : (
+                    <>
+                      {PRICING_FIELDS.map((f) => (
+                        <Table.Cell key={f.key} className={`text-right tabular-nums ${row.isOverride ? "text-vx-text font-medium" : "text-vx-text-muted"}`}>
+                          {Number(row[f.key]) > 0 ? Number(row[f.key]).toFixed(row[f.key] < 1 ? 4 : 2) : "—"}
+                        </Table.Cell>
+                      ))}
+                      <Table.Cell className="text-right whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="edit"
+                          title="Edit"
+                          aria-label="Edit"
+                          className="w-9 px-0"
+                          onClick={() => startEdit(row)}
+                        />
+                        {row.isOverride && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon="restart_alt"
+                            title="Reset to built-in"
+                            aria-label="Reset to built-in"
+                            className="w-9 px-0 ml-1 hover:text-vx-danger"
+                            onClick={() => setConfirmReset({ provider: row.provider, model: row.model })}
+                          />
+                        )}
+                      </Table.Cell>
+                    </>
+                  )}
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table>
 
         {totalItems > pageSize && (
           <Pagination

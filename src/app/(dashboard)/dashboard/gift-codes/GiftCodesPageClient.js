@@ -8,6 +8,8 @@ import {
   ConfirmModal,
   Badge,
   CardSkeleton,
+  Table,
+  Toggle,
 } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -267,22 +269,19 @@ export default function GiftCodesPageClient() {
 
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
-          <button
+          <Button
             key={f.value}
             type="button"
+            variant={filter === f.value ? "primary" : "outline"}
+            size="sm"
             onClick={() => setFilter(f.value)}
             aria-pressed={filter === f.value}
-            className={`h-8 border px-3 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors duration-150 ${
-              filter === f.value
-                ? "border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-400"
-                : "border-border text-text-muted hover:border-text-subtle hover:text-text-main"
-            }`}
           >
             {f.label}
-            <span className="ml-2 text-text-subtle">
+            <span className="ml-1 opacity-70">
               {codes.filter((g) => matchesFilter(g, f.value)).length}
             </span>
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -317,154 +316,131 @@ export default function GiftCodesPageClient() {
           {codes.length === 0 && <Button variant="secondary" icon="add" onClick={openCreate}>New code</Button>}
         </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[860px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="meta px-4 py-3 text-text-muted">Code</th>
-                <th className="meta px-4 py-3 text-text-muted">Grant</th>
-                <th className="meta px-4 py-3 text-text-muted">Redeemed</th>
-                <th className="meta px-4 py-3 text-text-muted">Validity</th>
-                <th className="meta px-4 py-3 text-text-muted">Status</th>
-                <th className="meta px-4 py-3 text-right text-text-muted">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((gift) => {
-                const status = giftStatus(gift);
-                const busy = rowBusyId === gift.id;
-                return (
-                  <tr key={gift.id} className="border-b border-border last:border-b-0 hover:bg-surface-2">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="whitespace-nowrap font-mono text-sm tracking-wider text-text-main">
-                          {gift.displayCode || gift.code}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => copy(gift.displayCode || gift.code, gift.id)}
-                          aria-label={`Copy code ${gift.displayCode || gift.code}`}
-                          className="flex size-7 items-center justify-center border border-border text-text-muted transition-colors duration-150 hover:border-brand-500 hover:text-brand-600"
-                        >
-                          <span className="material-symbols-outlined text-[15px]">
-                            {copied === gift.id ? "check" : "content_copy"}
-                          </span>
-                        </button>
-                      </div>
+        <Table className="min-w-[860px]">
+          <Table.Head>
+            <Table.Row>
+              <Table.HeaderCell>Code</Table.HeaderCell>
+              <Table.HeaderCell>Grant</Table.HeaderCell>
+              <Table.HeaderCell>Redeemed</Table.HeaderCell>
+              <Table.HeaderCell>Validity</Table.HeaderCell>
+              <Table.HeaderCell>Status</Table.HeaderCell>
+              <Table.HeaderCell align="right">Actions</Table.HeaderCell>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {visible.map((gift) => {
+              const status = giftStatus(gift);
+              const busy = rowBusyId === gift.id;
+              return (
+                <Table.Row key={gift.id}>
+                  <Table.Cell>
+                    <div className="flex items-center gap-2">
+                      <span className="whitespace-nowrap font-mono text-sm tracking-wider text-vx-text">
+                        {gift.displayCode || gift.code}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="size-7 px-0"
+                        onClick={() => copy(gift.displayCode || gift.code, gift.id)}
+                        aria-label={`Copy code ${gift.displayCode || gift.code}`}
+                        icon={copied === gift.id ? "check" : "content_copy"}
+                      />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
                       {gift.newUserOnly && (
-                        <span className="mt-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
-                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">person_add</span>
-                          Người mới
-                        </span>
+                        <Badge variant="default" size="sm" icon="person_add">Người mới</Badge>
                       )}
                       {gift.channelJoinOnly && (
-                        <span className="mt-1 inline-flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
-                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">campaign</span>
-                          Tham gia kênh
-                        </span>
+                        <Badge variant="default" size="sm" icon="campaign">Tham gia kênh</Badge>
                       )}
                       {gift.listed && (
-                        <span className="mt-1 ml-1 inline-flex items-center gap-1 whitespace-nowrap border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
-                          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">visibility</span>
-                          Hiện cho khách
-                        </span>
+                        <Badge variant="default" size="sm" icon="visibility">Hiện cho khách</Badge>
                       )}
-                      {gift.note && <p className="mt-1 text-xs text-text-subtle">{gift.note}</p>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-sm text-text-main">{grantLabel(gift)}</span>
-                      {gift.grantKind === "credit" && gift.durationDays ? (
-                        <p className="text-xs text-text-subtle">{gift.durationDays} days</p>
-                      ) : null}
-                      {(gift.rpm != null || gift.tpm != null) && (
-                        <p className="font-mono text-[11px] text-text-subtle whitespace-nowrap">
-                          RPM {giftRateText(gift, gift.rpm)} · TPM {giftRateText(gift, gift.tpm)}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="whitespace-nowrap font-mono text-sm text-text-main">
-                        {usesLabel(gift)}
-                      </span>
-                      <p className="text-xs text-text-subtle">per user {gift.perUserLimit ?? 1}</p>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="font-mono text-xs text-text-muted">
-                        {gift.startsAt && gift.expiresAt
-                          ? `${fmtDate(gift.startsAt)} → ${fmtDate(gift.expiresAt)}`
-                          : gift.expiresAt
-                            ? `Until ${fmtDate(gift.expiresAt)}`
-                            : gift.startsAt
-                              ? `From ${fmtDate(gift.startsAt)}`
-                              : "No expiry"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">{statusBadge(status)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={gift.isActive}
-                          aria-label={gift.isActive ? "Disable code" : "Enable code"}
-                          disabled={busy}
-                          onClick={() => toggleActive(gift)}
-                          className={`h-6 w-11 shrink-0 border transition-colors duration-150 ${
-                            gift.isActive
-                              ? "border-brand-500 bg-brand-500/20"
-                              : "border-border bg-surface-2"
-                          } ${busy ? "opacity-50" : ""}`}
-                        >
-                          <span
-                            className={`block size-4 bg-text-main transition-transform duration-150 ${
-                              gift.isActive ? "translate-x-6" : "translate-x-1"
-                            }`}
-                          />
-                        </button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon="edit"
-                          disabled={busy}
-                          onClick={() => setEditFor(gift)}
-                        >
-                          Sửa
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon="person_add"
-                          disabled={!gift.isActive || status === "exhausted" || status === "expired"}
-                          onClick={() => setAssignFor(gift)}
-                        >
-                          Gắn cho user
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon="list_alt"
-                          onClick={() => openRedemptions(gift)}
-                        >
-                          Redemptions
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon="delete"
-                          className="text-danger hover:bg-red-500/10"
-                          disabled={busy}
-                          onClick={() => setConfirmState({ gift })}
-                        >
-                          Xóa
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                    {gift.note && <p className="mt-1 text-xs text-vx-text-subtle">{gift.note}</p>}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <span className="font-mono text-sm text-vx-text">{grantLabel(gift)}</span>
+                    {gift.grantKind === "credit" && gift.durationDays ? (
+                      <p className="text-xs text-vx-text-subtle">{gift.durationDays} days</p>
+                    ) : null}
+                    {(gift.rpm != null || gift.tpm != null) && (
+                      <p className="font-mono text-[11px] text-vx-text-subtle whitespace-nowrap">
+                        RPM {giftRateText(gift, gift.rpm)} · TPM {giftRateText(gift, gift.tpm)}
+                      </p>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <span className="whitespace-nowrap font-mono text-sm text-vx-text">
+                      {usesLabel(gift)}
+                    </span>
+                    <p className="text-xs text-vx-text-subtle">per user {gift.perUserLimit ?? 1}</p>
+                  </Table.Cell>
+                  <Table.Cell className="whitespace-nowrap">
+                    <span className="font-mono text-xs text-vx-text-muted">
+                      {gift.startsAt && gift.expiresAt
+                        ? `${fmtDate(gift.startsAt)} → ${fmtDate(gift.expiresAt)}`
+                        : gift.expiresAt
+                          ? `Until ${fmtDate(gift.expiresAt)}`
+                          : gift.startsAt
+                            ? `From ${fmtDate(gift.startsAt)}`
+                            : "No expiry"}
+                    </span>
+                  </Table.Cell>
+                  <Table.Cell>{statusBadge(status)}</Table.Cell>
+                  <Table.Cell>
+                    <div className="flex items-center justify-end gap-2">
+                      <Toggle
+                        checked={gift.isActive}
+                        onChange={() => toggleActive(gift)}
+                        disabled={busy}
+                        aria-label={gift.isActive ? "Disable code" : "Enable code"}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="edit"
+                        disabled={busy}
+                        onClick={() => setEditFor(gift)}
+                      >
+                        Sửa
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="person_add"
+                        disabled={!gift.isActive || status === "exhausted" || status === "expired"}
+                        onClick={() => setAssignFor(gift)}
+                      >
+                        Gắn cho user
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="list_alt"
+                        onClick={() => openRedemptions(gift)}
+                      >
+                        Redemptions
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="delete"
+                        className="text-vx-danger hover:bg-vx-danger/10"
+                        disabled={busy}
+                        onClick={() => setConfirmState({ gift })}
+                      >
+                        Xóa
+                      </Button>
+                    </div>
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table>
       )}
 
       {editFor && (
@@ -584,42 +560,40 @@ export default function GiftCodesPageClient() {
           ) : redemptions.length === 0 ? (
             <p className="text-sm text-text-muted">This code has not been redeemed yet.</p>
           ) : (
-            <div className="border border-border">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="meta px-3 py-2 text-text-muted">User</th>
-                    <th className="meta px-3 py-2 text-text-muted">Cách nhận</th>
-                    <th className="meta px-3 py-2 text-text-muted">Telegram</th>
-                    <th className="meta px-3 py-2 text-text-muted">Redeemed</th>
-                    <th className="meta px-3 py-2 text-text-muted">Expires</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {redemptions.map((r) => (
-                    <tr key={r.id} className="border-b border-border last:border-b-0">
-                      <td className="px-3 py-2 font-mono text-xs text-text-main break-all">
-                        {r.userEmail || r.userId}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
-                        {r.assignedBy ? "Admin gắn" : "Tự nhập mã"}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
-                        {r.telegramUserId
-                          ? `${r.telegramUsername ? `@${r.telegramUsername} · ` : ""}${r.telegramUserId}`
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
-                        {fmtDateTime(r.redeemedAt)}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
-                        {fmtDate(r.planExpiresAt)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table>
+              <Table.Head>
+                <Table.Row>
+                  <Table.HeaderCell>User</Table.HeaderCell>
+                  <Table.HeaderCell>Cách nhận</Table.HeaderCell>
+                  <Table.HeaderCell>Telegram</Table.HeaderCell>
+                  <Table.HeaderCell>Redeemed</Table.HeaderCell>
+                  <Table.HeaderCell>Expires</Table.HeaderCell>
+                </Table.Row>
+              </Table.Head>
+              <Table.Body>
+                {redemptions.map((r) => (
+                  <Table.Row key={r.id}>
+                    <Table.Cell className="font-mono text-xs break-all">
+                      {r.userEmail || r.userId}
+                    </Table.Cell>
+                    <Table.Cell className="text-xs text-vx-text-muted whitespace-nowrap">
+                      {r.assignedBy ? "Admin gắn" : "Tự nhập mã"}
+                    </Table.Cell>
+                    <Table.Cell className="font-mono text-xs text-vx-text-muted whitespace-nowrap">
+                      {r.telegramUserId
+                        ? `${r.telegramUsername ? `@${r.telegramUsername} · ` : ""}${r.telegramUserId}`
+                        : "—"}
+                    </Table.Cell>
+                    <Table.Cell className="font-mono text-xs text-vx-text-muted whitespace-nowrap">
+                      {fmtDateTime(r.redeemedAt)}
+                    </Table.Cell>
+                    <Table.Cell className="font-mono text-xs text-vx-text-muted whitespace-nowrap">
+                      {fmtDate(r.planExpiresAt)}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
           )}
         </div>
       </Drawer>

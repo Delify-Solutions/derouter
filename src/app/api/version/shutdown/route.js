@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { killAppProcesses } from "@/lib/appUpdater";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Shutdown app to release file locks for manual update
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "profile", "edit");
+  if (denied) return denied;
   try {
     await killAppProcesses();
   } catch { /* best effort */ }

@@ -5,6 +5,7 @@ import { getProviderConnectionById } from "@/lib/localDb";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "../route.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
 
@@ -119,6 +120,8 @@ export async function GET(_request, { params }) {
 }
 
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "usage", "edit");
+  if (denied) return denied;
   let connection;
   try {
     const { connectionId } = await params;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Select, Button } from "@/shared/components";
 
 const STORAGE_KEY = "derouter.cliToolEndpointPresets";
 
@@ -88,40 +89,46 @@ export default function EndpointPresetControl({
     writePresets(nextPresets);
   };
 
+  const presetOptions = [
+    { value: "", label: "Manual / current endpoint" },
+    ...presets.map((preset) => ({
+      value: preset.name,
+      label: `${preset.name} - ${preset.baseUrl} (${maskApiKey(preset.apiKey)})`,
+    })),
+  ];
+
   return (
     <div className="flex items-center gap-2">
-      <span className="w-32 shrink-0 text-sm font-semibold text-text-main text-right">Preset</span>
-      <span className="material-symbols-outlined text-text-muted text-[14px]">arrow_forward</span>
-      <select
+      <span className="w-32 shrink-0 text-sm font-semibold text-vx-text text-right">Preset</span>
+      <span className="material-symbols-outlined text-vx-text-muted text-[14px]">arrow_forward</span>
+      <Select
         value={selectedName}
         onChange={(event) => handleSelect(event.target.value)}
-        className="flex-1 px-2 py-1.5 bg-surface rounded text-xs border border-border focus:outline-none focus:ring-1 focus:ring-primary/50"
-      >
-        <option value="">Manual / current endpoint</option>
-        {presets.map((preset) => (
-          <option key={preset.name} value={preset.name}>
-            {preset.name} - {preset.baseUrl} ({maskApiKey(preset.apiKey)})
-          </option>
-        ))}
-      </select>
-      <button
+        options={presetOptions}
+        className="flex-1"
+      />
+      <Button
         type="button"
+        variant="light-outline"
+        size="sm"
         onClick={handleSave}
         disabled={!baseUrl || !apiKey}
-        className="px-2 py-1.5 rounded border text-xs bg-surface border-border text-text-main hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
         title="Save current Base URL and API key as a browser-local preset"
+        className="shrink-0"
       >
         Save
-      </button>
+      </Button>
       {selectedPreset && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          icon="delete"
           onClick={handleDelete}
-          className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
+          aria-label="Delete selected preset"
           title="Delete selected preset"
-        >
-          <span className="material-symbols-outlined text-[14px]">delete</span>
-        </button>
+          className="text-red-600 hover:bg-red-500/10"
+        />
       )}
     </div>
   );

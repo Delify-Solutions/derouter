@@ -3,12 +3,16 @@ import { getCombos, getCustomModels } from "@/lib/localDb";
 import { getProviderNodes } from "@/lib/db/repos/nodesRepo.js";
 import { detectModelKind } from "@/lib/models/modelKind.js";
 import { pingModelByKind } from "./ping";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 // POST /api/models/test - Ping a single model via the endpoint that matches its kind.
 // `kind` may be omitted or "auto": the kind is then taken from what is recorded for the
 // model (custom model type, combo kind, image-only node) and finally from its name, so
 // one test button works for text and image models alike. The result names the kind used.
 export async function POST(request) {
+  // Shared by the Providers and Combo pages (both ping a model to test it).
+  const denied = await requireAnyPagePermission(request, ["providers", "combos"], "edit");
+  if (denied) return denied;
   try {
     const { model, kind } = await request.json();
     if (!model) return NextResponse.json({ error: "Model required" }, { status: 400 });

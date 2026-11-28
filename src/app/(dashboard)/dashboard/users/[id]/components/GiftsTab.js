@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Card, Table } from "@/shared/components";
 import { fmtUsdNano, UNLIMITED_CREDIT_LABEL } from "@/shared/utils/money";
 import { dateOf } from "@/shared/components/billing";
 
@@ -36,36 +37,34 @@ export default function GiftsTab({ userId }) {
       {error && <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</p>}
 
       {redemptions.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Chưa nhập mã quà tặng nào</p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[600px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Mã</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Loại</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Giá trị</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Số ngày</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Nhập lúc</th>
-              </tr>
-            </thead>
-            <tbody>
-              {redemptions.map((row) => (
-                <tr key={row.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-main">{row.code || "—"}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{KIND_LABEL[row.grantKind] || row.grantKind || "—"}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                    {row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : row.creditNanoUsd == null ? "—" : fmtUsdNano(row.creditNanoUsd)}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.durationDays ?? "—"}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(row.redeemedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[600px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell>Mã</Table.HeaderCell>
+              <Table.HeaderCell>Loại</Table.HeaderCell>
+              <Table.HeaderCell>Giá trị</Table.HeaderCell>
+              <Table.HeaderCell>Số ngày</Table.HeaderCell>
+              <Table.HeaderCell>Nhập lúc</Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {redemptions.map((row) => (
+              <Table.Row key={row.id}>
+                <Table.Cell className="font-mono text-[12px] text-text-main">{row.code || "—"}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{KIND_LABEL[row.grantKind] || row.grantKind || "—"}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main">
+                  {row.unlimitedCredit ? UNLIMITED_CREDIT_LABEL : row.creditNanoUsd == null ? "—" : fmtUsdNano(row.creditNanoUsd)}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{row.durationDays ?? "—"}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{dateOf(row.redeemedAt)}</Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
     </div>
   );

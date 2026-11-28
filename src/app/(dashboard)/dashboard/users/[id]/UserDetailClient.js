@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Button, CardSkeleton } from "@/shared/components";
+import { Button, Card, CardSkeleton } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 import OverviewTab from "./components/OverviewTab";
@@ -104,7 +104,7 @@ export default function UserDetailClient() {
 
   if (notFound) {
     return (
-      <div className="flex flex-col items-start gap-3 border border-border bg-surface px-6 py-14">
+      <Card padding="lg" className="flex flex-col items-start gap-3">
         <span className="material-symbols-outlined text-[28px] text-text-muted" aria-hidden="true">person_off</span>
         <p className="font-medium text-text-main">Không tìm thấy người dùng này</p>
         <p className="max-w-md text-sm text-text-muted">
@@ -117,7 +117,7 @@ export default function UserDetailClient() {
         >
           Về danh sách người dùng
         </Link>
-      </div>
+      </Card>
     );
   }
 

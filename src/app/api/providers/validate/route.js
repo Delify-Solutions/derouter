@@ -8,6 +8,7 @@ import { resolveQoderCredentials, resolveQoderModels } from "open-sse/services/q
 import { normalizeProviderId } from "@/lib/providerNormalization";
 import { fetchPublic } from "@/shared/utils/ssrfGuard";
 import { isLocalRequest } from "@/dashboardGuard";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // fetchPublic rejects private/internal targets (incl. redirect hops) with
 // "Blocked URL: ..." errors. Those are user input problems, so surface them as
@@ -106,6 +107,8 @@ async function probeMediaProvider(provider, apiKey, guardedFetch) {
 
 // POST /api/providers/validate - Validate API key with provider
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const provider = normalizeProviderId(body.provider);

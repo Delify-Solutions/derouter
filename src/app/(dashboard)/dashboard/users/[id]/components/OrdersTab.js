@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/shared/components";
+import { Button, Card, Table } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 
 const STATUS_LABEL = {
@@ -76,58 +76,56 @@ export default function OrdersTab({ userId }) {
       {error && <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</p>}
 
       {orders.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Chưa có đơn hàng</p>
           <p className="mt-1 text-sm text-text-muted">Đơn xuất hiện ở đây khi khách mua gói.</p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[720px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Gói</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Số tiền</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Credit</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Trạng thái</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Tạo lúc</th>
-                <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2 text-sm text-text-main">
-                    {order.planName || order.planCode || "—"}
-                    {order.emailSnapshot && !order.userEmail && (
-                      <span className="block font-mono text-[10px] text-text-subtle">{order.emailSnapshot}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-main">{fmtUsdNano(order.amountNanoUsd)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{fmtCreditNano(order.creditNanoUsd, order.unlimitedCredit)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{STATUS_LABEL[order.status] || order.status}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
-                    {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex items-center justify-end gap-1">
-                      {(ACTIONS[order.status] || []).map((item) => (
-                        <Button
-                          key={item.action}
-                          size="sm"
-                          variant={item.variant}
-                          disabled={busyId === order.id}
-                          onClick={() => act(order, item.action)}
-                        >
-                          {item.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[720px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell>Gói</Table.HeaderCell>
+              <Table.HeaderCell>Số tiền</Table.HeaderCell>
+              <Table.HeaderCell>Credit</Table.HeaderCell>
+              <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+              <Table.HeaderCell>Tạo lúc</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">Thao tác</Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {orders.map((order) => (
+              <Table.Row key={order.id}>
+                <Table.Cell className="text-sm text-text-main">
+                  {order.planName || order.planCode || "—"}
+                  {order.emailSnapshot && !order.userEmail && (
+                    <span className="block font-mono text-[10px] text-text-subtle">{order.emailSnapshot}</span>
+                  )}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main">{fmtUsdNano(order.amountNanoUsd)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{fmtCreditNano(order.creditNanoUsd, order.unlimitedCredit)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{STATUS_LABEL[order.status] || order.status}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">
+                  {order.createdAt ? new Date(order.createdAt).toLocaleDateString("vi-VN") : "—"}
+                </Table.Cell>
+                <Table.Cell>
+                  <div className="flex items-center justify-end gap-1">
+                    {(ACTIONS[order.status] || []).map((item) => (
+                      <Button
+                        key={item.action}
+                        size="sm"
+                        variant={item.variant}
+                        disabled={busyId === order.id}
+                        onClick={() => act(order, item.action)}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
     </div>
   );

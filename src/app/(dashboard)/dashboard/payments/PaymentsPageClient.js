@@ -8,6 +8,11 @@ import {
   Modal,
   ConfirmModal,
   CardSkeleton,
+  Card,
+  Badge,
+  Table,
+  Pagination,
+  Toast,
 } from "@/shared/components";
 import Drawer from "@/shared/components/Drawer";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -50,10 +55,13 @@ const STATUS_LABEL = {
   resolved: "Đã xử lý",
 };
 
-const STATUS_STYLE = {
-  matched: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400",
-  needs_review: "border-warning/30 bg-warning/10 text-warning",
-  resolved: "border-border bg-surface-2 text-text-muted",
+// Badge variant for each transaction/dry-run status — "matched" was always
+// rendered in brand green (a success state), "needs_review" in warning,
+// everything else neutral.
+const STATUS_BADGE_VARIANT = {
+  matched: "success",
+  needs_review: "warning",
+  resolved: "default",
 };
 
 const REASON_LABEL = {
@@ -505,31 +513,11 @@ export default function PaymentsPageClient() {
       />
 
       {notice && (
-        <div
-          className={`flex items-start gap-2 border px-4 py-3 ${
-            notice.type === "error" ? "border-danger/40 bg-danger/5" : "border-brand-500/30 bg-brand-500/5"
-          }`}
-          role="status"
-        >
-          <span
-            className={`material-symbols-outlined text-[18px] ${
-              notice.type === "error" ? "text-danger" : "text-brand-600 dark:text-brand-400"
-            }`}
-            aria-hidden="true"
-          >
-            {notice.type === "error" ? "error" : "check_circle"}
-          </span>
-          <p className={`flex-1 text-sm ${notice.type === "error" ? "text-danger" : "text-text-main"}`}>
-            {notice.message}
-          </p>
-          <button
-            type="button"
-            onClick={() => setNotice(null)}
-            className="font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-main"
-          >
-            Đóng
-          </button>
-        </div>
+        <Toast
+          type={notice.type === "error" ? "error" : "success"}
+          message={notice.message}
+          onDismiss={() => setNotice(null)}
+        />
       )}
 
       {freshKey && (
@@ -610,72 +598,44 @@ export default function PaymentsPageClient() {
  */
 function PaymentSettingsPanel({ settings, errors, error, dirty, saving, onChange, onSave }) {
   return (
-    <section className="flex flex-col gap-4 border border-border bg-surface p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <span className="meta text-text-subtle">Cài đặt thanh toán</span>
-          <p className="max-w-2xl text-sm text-text-muted">
-            Áp dụng cho đơn tạo mới. Đơn đã tạo giữ nguyên mã, số tiền và hạn của nó.
-          </p>
-        </div>
-        <Button onClick={onSave} loading={saving} disabled={!dirty}>
-          Lưu cài đặt
-        </Button>
-      </div>
-
+    <Card
+      title="Cài đặt thanh toán"
+      subtitle="Áp dụng cho đơn tạo mới. Đơn đã tạo giữ nguyên mã, số tiền và hạn của nó."
+      action={<Button onClick={onSave} loading={saving} disabled={!dirty}>Lưu cài đặt</Button>}
+      className="flex flex-col gap-4"
+    >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="payment-code-prefix"
-            className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted"
-          >
-            Tiền tố mã thanh toán
-          </label>
-          <input
-            id="payment-code-prefix"
-            value={settings.paymentCodePrefix}
-            onChange={(event) => onChange("paymentCodePrefix", event.target.value.toUpperCase())}
-            maxLength={6}
-            aria-invalid={!!(errors.paymentCodePrefix && dirty)}
-            className={`w-full border bg-surface px-3 py-2 font-mono text-sm uppercase tracking-[0.08em] text-text-main transition-colors focus:outline-none ${
-              errors.paymentCodePrefix && dirty ? "border-danger" : "border-border focus:border-brand-500"
-            }`}
-            placeholder="DR"
-          />
-          <p className={`text-[11px] ${errors.paymentCodePrefix && dirty ? "text-danger" : "text-text-muted"}`}>
-            {errors.paymentCodePrefix && dirty
-              ? errors.paymentCodePrefix
-              : "2–6 chữ cái in hoa, đứng trước 8 ký tự của mã trong nội dung chuyển khoản."}
-          </p>
-        </div>
+        <Input
+          label="Tiền tố mã thanh toán"
+          value={settings.paymentCodePrefix}
+          onChange={(event) => onChange("paymentCodePrefix", event.target.value.toUpperCase())}
+          maxLength={6}
+          placeholder="DR"
+          inputClassName="font-mono uppercase tracking-[0.08em]"
+          error={errors.paymentCodePrefix && dirty ? errors.paymentCodePrefix : ""}
+          hint={
+            errors.paymentCodePrefix && dirty
+              ? undefined
+              : "2–6 chữ cái in hoa, đứng trước 8 ký tự của mã trong nội dung chuyển khoản."
+          }
+        />
 
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="payment-order-ttl"
-            className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted"
-          >
-            Hạn thanh toán (phút)
-          </label>
-          <input
-            id="payment-order-ttl"
-            type="number"
-            min={10}
-            max={1440}
-            step={1}
-            inputMode="numeric"
-            value={settings.paymentOrderTtlMinutes}
-            onChange={(event) => onChange("paymentOrderTtlMinutes", event.target.value)}
-            aria-invalid={!!(errors.paymentOrderTtlMinutes && dirty)}
-            className={`w-full border bg-surface px-3 py-2 font-mono text-sm text-text-main transition-colors focus:outline-none ${
-              errors.paymentOrderTtlMinutes && dirty ? "border-danger" : "border-border focus:border-brand-500"
-            }`}
-          />
-          <p className={`text-[11px] ${errors.paymentOrderTtlMinutes && dirty ? "text-danger" : "text-text-muted"}`}>
-            {errors.paymentOrderTtlMinutes && dirty
-              ? errors.paymentOrderTtlMinutes
-              : "10–1440 phút. Hết hạn thì đơn chuyển sang trạng thái hết hạn và không tính vào hạn mức tháng."}
-          </p>
-        </div>
+        <Input
+          label="Hạn thanh toán (phút)"
+          type="number"
+          min={10}
+          max={1440}
+          step={1}
+          inputMode="numeric"
+          value={settings.paymentOrderTtlMinutes}
+          onChange={(event) => onChange("paymentOrderTtlMinutes", event.target.value)}
+          error={errors.paymentOrderTtlMinutes && dirty ? errors.paymentOrderTtlMinutes : ""}
+          hint={
+            errors.paymentOrderTtlMinutes && dirty
+              ? undefined
+              : "10–1440 phút. Hết hạn thì đơn chuyển sang trạng thái hết hạn và không tính vào hạn mức tháng."
+          }
+        />
 
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
@@ -697,12 +657,18 @@ function PaymentSettingsPanel({ settings, errors, error, dirty, saving, onChange
       </div>
 
       {/* NC-3: operational truth, not a caveat hidden in code. */}
-      <p className="border border-border bg-surface-2 px-3 py-2 text-[11px] text-text-muted">
-        Hết hạn đơn và việc dò giao dịch đều chạy trong tiến trình nền. Nếu bạn đặt{" "}
-        <code className="font-mono text-text-main">DISABLE_PAYMENT_POLLER</code>, đơn chưa thanh toán sẽ
-        không tự chuyển sang &quot;hết hạn&quot; và không có giao dịch nào được dò — khi đó phải tự hủy đơn
-        hoặc bật lại tiến trình.
-      </p>
+      <Toast
+        type="info"
+        dismissible={false}
+        message={
+          <>
+            Hết hạn đơn và việc dò giao dịch đều chạy trong tiến trình nền. Nếu bạn đặt{" "}
+            <code className="font-mono text-text-main">DISABLE_PAYMENT_POLLER</code>, đơn chưa thanh toán sẽ
+            không tự chuyển sang &quot;hết hạn&quot; và không có giao dịch nào được dò — khi đó phải tự hủy đơn
+            hoặc bật lại tiến trình.
+          </>
+        }
+      />
 
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
@@ -710,7 +676,7 @@ function PaymentSettingsPanel({ settings, errors, error, dirty, saving, onChange
           {error}
         </p>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -747,27 +713,21 @@ function CopyRow({ label, value, mono = true }) {
 function FreshKeyBox({ webhookKey, onDismiss }) {
   if (!webhookKey) return null;
   return (
-    <section className="border border-warning/40 bg-warning/5 p-4" aria-live="polite">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <span className="meta text-warning">Webhook key mới — chỉ hiện một lần</span>
-          <p className="text-sm text-text-muted">
-            Dán key này vào SePay (chọn xác thực &quot;API Key&quot;). Sau khi đóng, hệ thống
-            chỉ còn hiện 4 ký tự cuối.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-main"
-        >
-          Đóng
-        </button>
-      </div>
+    <Card
+      padding="sm"
+      className="border-l-4 border-vx-warning"
+      aria-live="polite"
+      title="Webhook key mới — chỉ hiện một lần"
+      action={<Button variant="ghost" size="sm" onClick={onDismiss}>Đóng</Button>}
+    >
+      <p className="text-sm text-text-muted">
+        Dán key này vào SePay (chọn xác thực &quot;API Key&quot;). Sau khi đóng, hệ thống
+        chỉ còn hiện 4 ký tự cuối.
+      </p>
       <div className="mt-3">
         <CopyRow label="Webhook key" value={webhookKey} />
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -782,15 +742,14 @@ function ProvidersTab({
   return (
     <div className="flex flex-col gap-6">
       {error && (
-        <div className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-4 py-3">
-          <span className="material-symbols-outlined text-[18px] text-danger" aria-hidden="true">error</span>
-          <p className="flex-1 text-sm text-danger">{error}</p>
+        <div className="flex items-start gap-3">
+          <Toast type="error" message={error} dismissible={false} className="flex-1" />
           <Button size="sm" variant="ghost" onClick={onRetry}>Thử lại</Button>
         </div>
       )}
 
       {providers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 border border-border px-6 py-16 text-center">
+        <Card padding="lg" className="flex flex-col items-center gap-3 py-16 text-center">
           <span className="material-symbols-outlined text-[32px] text-text-subtle" aria-hidden="true">
             account_balance
           </span>
@@ -804,11 +763,11 @@ function ProvidersTab({
               Webhook SePay sẽ là: {webhookUrl}
             </p>
           )}
-        </div>
+        </Card>
       ) : (
-        <ul className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           {providers.map((provider) => (
-            <li key={provider.id} className="border border-border bg-surface">
+            <Card key={provider.id} padding="none" className="overflow-hidden">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-6 py-4">
                 <div className="flex min-w-0 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -816,15 +775,9 @@ function ProvidersTab({
                       {KIND_LABEL[provider.kind] || provider.kind}
                     </span>
                     {/* Status is a word, never only a tint. */}
-                    <span
-                      className={`border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
-                        provider.isActive
-                          ? "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400"
-                          : "border-border bg-surface-2 text-text-muted"
-                      }`}
-                    >
+                    <Badge variant={provider.isActive ? "success" : "default"} dot>
                       {provider.isActive ? "Đang hoạt động" : "Đang tắt"}
-                    </span>
+                    </Badge>
                     <span className="font-mono text-[10px] text-text-subtle">thứ tự {provider.sortOrder}</span>
                   </div>
                   <h2 className="truncate text-base font-semibold text-text-main">{provider.name}</h2>
@@ -847,9 +800,7 @@ function ProvidersTab({
               <div className="grid grid-cols-1 gap-4 px-6 py-4 lg:grid-cols-2">
                 <div className="flex flex-col gap-3">
                   {provider.kind === "acb" && (
-                    <p className="border border-warning/40 bg-warning/5 px-3 py-2 text-[12px] text-warning">
-                      {ACB_WARNING}
-                    </p>
+                    <Toast type="warning" message={ACB_WARNING} dismissible={false} />
                   )}
 
                   {provider.kind === "binance" ? (
@@ -879,9 +830,11 @@ function ProvidersTab({
                     <Field label="Lần dò cuối" value={fmtDateTime(provider.lastPolledAt)} />
                   </div>
                   {provider.lastError && (
-                    <p className="border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] break-words text-danger">
-                      Lỗi gần nhất: {provider.lastError}
-                    </p>
+                    <Toast
+                      type="error"
+                      message={`Lỗi gần nhất: ${provider.lastError}`}
+                      dismissible={false}
+                    />
                   )}
                   <ul className="flex flex-col gap-1">
                     {Object.entries(provider.secretsSet || {}).map(([key, state]) => (
@@ -916,9 +869,9 @@ function ProvidersTab({
               {testState?.providerId === provider.id && (
                 <DryRunResults state={testState} />
               )}
-            </li>
+            </Card>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -970,56 +923,54 @@ function DryRunResults({ state }) {
         <span className="meta text-text-subtle">Kết quả chạy thử</span>
         <span className="font-mono text-[10px] text-text-subtle">không ghi gì vào DB</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse">
-          <thead>
-            <tr className="border-y border-border bg-surface-2">
-              {["Thời gian", "Số tiền", "Nội dung", "Kết quả", "Đơn"].map((header) => (
-                <th key={header} className="meta px-4 py-2 text-left font-medium text-text-subtle whitespace-nowrap">
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {state.results.map((row) => (
-              <tr key={row.externalId} className="border-b border-border last:border-b-0">
-                <td className="px-4 py-2 font-mono text-[11px] text-text-muted whitespace-nowrap">
-                  {fmtDateTime(row.occurredAt)}
-                </td>
-                <td className="px-4 py-2 font-mono text-[12px] text-text-main whitespace-nowrap">
-                  {row.amountText}
-                </td>
-                <td className="max-w-[280px] truncate px-4 py-2 text-[12px] text-text-muted" title={row.content || ""}>
-                  {row.content || "—"}
-                </td>
-                <td className="px-4 py-2 whitespace-nowrap">
-                  <span
-                    className={`inline-flex border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
-                      row.outcome === "matched"
-                        ? STATUS_STYLE.matched
-                        : row.outcome === "duplicate"
-                          ? STATUS_STYLE.resolved
-                          : STATUS_STYLE.needs_review
-                    }`}
-                  >
-                    {row.outcome === "matched"
-                      ? "Sẽ khớp"
+      <Table className="min-w-[720px]" wrapperClassName="rounded-none shadow-none">
+        <Table.Head>
+          <Table.Row>
+            <Table.HeaderCell className="whitespace-nowrap">Thời gian</Table.HeaderCell>
+            <Table.HeaderCell className="whitespace-nowrap">Số tiền</Table.HeaderCell>
+            <Table.HeaderCell>Nội dung</Table.HeaderCell>
+            <Table.HeaderCell className="whitespace-nowrap">Kết quả</Table.HeaderCell>
+            <Table.HeaderCell>Đơn</Table.HeaderCell>
+          </Table.Row>
+        </Table.Head>
+        <Table.Body>
+          {state.results.map((row) => (
+            <Table.Row key={row.externalId}>
+              <Table.Cell className="font-mono text-[11px] text-text-muted whitespace-nowrap">
+                {fmtDateTime(row.occurredAt)}
+              </Table.Cell>
+              <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">
+                {row.amountText}
+              </Table.Cell>
+              <Table.Cell className="max-w-[280px] truncate text-[12px] text-text-muted" title={row.content || ""}>
+                {row.content || "—"}
+              </Table.Cell>
+              <Table.Cell className="whitespace-nowrap">
+                <Badge
+                  variant={
+                    row.outcome === "matched"
+                      ? STATUS_BADGE_VARIANT.matched
                       : row.outcome === "duplicate"
-                        ? "Đã có"
-                        : row.outcome === "ignored"
-                          ? "Bỏ qua"
-                          : REASON_LABEL[row.reason] || "Cần kiểm tra"}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-[11px] text-text-muted">
-                  {row.order ? `${row.order.planName || row.order.planCode} · ${row.order.email || ""}` : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                        ? STATUS_BADGE_VARIANT.resolved
+                        : STATUS_BADGE_VARIANT.needs_review
+                  }
+                >
+                  {row.outcome === "matched"
+                    ? "Sẽ khớp"
+                    : row.outcome === "duplicate"
+                      ? "Đã có"
+                      : row.outcome === "ignored"
+                        ? "Bỏ qua"
+                        : REASON_LABEL[row.reason] || "Cần kiểm tra"}
+                </Badge>
+              </Table.Cell>
+              <Table.Cell className="text-[11px] text-text-muted">
+                {row.order ? `${row.order.planName || row.order.planCode} · ${row.order.email || ""}` : "—"}
+              </Table.Cell>
+            </Table.Row>
+          ))}
+        </Table.Body>
+      </Table>
     </div>
   );
 }
@@ -1061,9 +1012,7 @@ function ProviderForm({ draft, editing, error, onField, onConfig, onSecret }) {
       </div>
 
       {isAcb && (
-        <p className="border border-warning/40 bg-warning/5 px-3 py-2 text-[12px] text-warning">
-          {ACB_WARNING}
-        </p>
+        <Toast type="warning" message={ACB_WARNING} dismissible={false} />
       )}
 
       {kind !== "binance" ? (
@@ -1286,13 +1235,11 @@ function TransactionsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const pages = Math.max(1, Math.ceil(data.total / 50));
-
   return (
     <div className="flex flex-col gap-4">
       {/* Filters. Explicit labels, so a screen reader announces which control
           narrows what. */}
-      <div className="grid grid-cols-1 gap-3 border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <Card padding="sm" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Select
           label="Trạng thái"
           value={status}
@@ -1328,12 +1275,11 @@ function TransactionsTab() {
           value={to}
           onChange={(event) => { setTo(event.target.value); setPage(1); }}
         />
-      </div>
+      </Card>
 
       {error && (
-        <div className="flex items-start gap-2 border border-danger/40 bg-danger/5 px-4 py-3">
-          <span className="material-symbols-outlined text-[18px] text-danger" aria-hidden="true">error</span>
-          <p className="flex-1 text-sm text-danger">{error}</p>
+        <div className="flex items-start gap-3">
+          <Toast type="error" message={error} dismissible={false} className="flex-1" />
           <Button size="sm" variant="ghost" onClick={load}>Thử lại</Button>
         </div>
       )}
@@ -1341,7 +1287,7 @@ function TransactionsTab() {
       {loading ? (
         <CardSkeleton />
       ) : data.transactions.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 border border-border px-6 py-16 text-center">
+        <Card padding="lg" className="flex flex-col items-center gap-2 py-16 text-center">
           <span className="material-symbols-outlined text-[32px] text-text-subtle" aria-hidden="true">
             receipt_long
           </span>
@@ -1349,111 +1295,86 @@ function TransactionsTab() {
           <p className="max-w-md text-sm text-text-muted">
             Giao dịch xuất hiện ở đây ngay khi webhook hoặc lượt dò kế tiếp nhận được tiền.
           </p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border">
-          <table className="w-full min-w-[900px] border-collapse">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Thời gian", "Nguồn", "Số tiền", "Nội dung", "Trạng thái", "Đơn / khách", ""].map((header) => (
-                  <th key={header || "actions"} className="meta px-4 py-2.5 text-left font-medium text-text-subtle whitespace-nowrap">
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.transactions.map((tx) => (
-                <tr key={tx.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2.5 font-mono text-[11px] text-text-muted whitespace-nowrap">
-                    {fmtDateTime(tx.occurredAt || tx.receivedAt)}
-                    {tx.via && (
-                      <span className="ml-1 text-text-subtle">({tx.via === "webhook" ? "webhook" : "dò"})</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[11px] text-text-muted whitespace-nowrap">
-                    {KIND_LABEL[tx.kind] || tx.kind}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">
-                    {amountText(tx)}
-                  </td>
-                  <td className="max-w-[260px] px-4 py-2.5 text-[12px] text-text-muted">
-                    <span className="block truncate" title={tx.content || ""}>{tx.content || "—"}</span>
-                    {tx.status === "needs_review" && tx.reason && (
-                      <span className="mt-0.5 block text-[11px] text-warning">
-                        {REASON_LABEL[tx.reason] || tx.reason}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <span
-                      className={`inline-flex border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
-                        STATUS_STYLE[tx.status] || STATUS_STYLE.resolved
-                      }`}
-                    >
-                      {STATUS_LABEL[tx.status] || tx.status}
+        <Table className="min-w-[900px]">
+          <Table.Head>
+            <Table.Row>
+              <Table.HeaderCell className="whitespace-nowrap">Thời gian</Table.HeaderCell>
+              <Table.HeaderCell className="whitespace-nowrap">Nguồn</Table.HeaderCell>
+              <Table.HeaderCell className="whitespace-nowrap">Số tiền</Table.HeaderCell>
+              <Table.HeaderCell>Nội dung</Table.HeaderCell>
+              <Table.HeaderCell className="whitespace-nowrap">Trạng thái</Table.HeaderCell>
+              <Table.HeaderCell>Đơn / khách</Table.HeaderCell>
+              <Table.HeaderCell className="text-right"><span className="sr-only">Hành động</span></Table.HeaderCell>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {data.transactions.map((tx) => (
+              <Table.Row key={tx.id}>
+                <Table.Cell className="font-mono text-[11px] text-text-muted whitespace-nowrap">
+                  {fmtDateTime(tx.occurredAt || tx.receivedAt)}
+                  {tx.via && (
+                    <span className="ml-1 text-text-subtle">({tx.via === "webhook" ? "webhook" : "dò"})</span>
+                  )}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[11px] text-text-muted whitespace-nowrap">
+                  {KIND_LABEL[tx.kind] || tx.kind}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">
+                  {amountText(tx)}
+                </Table.Cell>
+                <Table.Cell className="max-w-[260px] text-[12px] text-text-muted">
+                  <span className="block truncate" title={tx.content || ""}>{tx.content || "—"}</span>
+                  {tx.status === "needs_review" && tx.reason && (
+                    <span className="mt-0.5 block text-[11px] text-warning">
+                      {REASON_LABEL[tx.reason] || tx.reason}
                     </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-[11px] text-text-muted">
-                    {tx.order ? (
-                      <>
-                        <span className="block text-text-main">{tx.order.planName || tx.order.planCode}</span>
-                        <span className="block">{tx.order.userEmail || "—"}</span>
-                      </>
-                    ) : (
-                      "—"
+                  )}
+                </Table.Cell>
+                <Table.Cell className="whitespace-nowrap">
+                  <Badge variant={STATUS_BADGE_VARIANT[tx.status] || STATUS_BADGE_VARIANT.resolved}>
+                    {STATUS_LABEL[tx.status] || tx.status}
+                  </Badge>
+                </Table.Cell>
+                <Table.Cell className="text-[11px] text-text-muted">
+                  {tx.order ? (
+                    <>
+                      <span className="block text-text-main">{tx.order.planName || tx.order.planCode}</span>
+                      <span className="block">{tx.order.userEmail || "—"}</span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </Table.Cell>
+                <Table.Cell className="text-right whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setDetail(tx)}>Xem</Button>
+                    {tx.status === "needs_review" && (
+                      <Button size="sm" variant="primary" onClick={() => setResolveState({ tx, action: "assign" })}>
+                        Gán vào đơn
+                      </Button>
                     )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setDetail(tx)}
-                        className="h-8 border border-border px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-main"
-                      >
-                        Xem
-                      </button>
-                      {tx.status === "needs_review" && (
-                        <button
-                          type="button"
-                          onClick={() => setResolveState({ tx, action: "assign" })}
-                          className="h-8 border border-brand-500 bg-brand-500 px-2 font-mono text-[10px] uppercase tracking-wider text-white transition-colors hover:bg-brand-600"
-                        >
-                          Gán vào đơn
-                        </button>
-                      )}
-                      {tx.status === "needs_review" && (
-                        <button
-                          type="button"
-                          onClick={() => setResolveState({ tx, action: "resolve" })}
-                          className="h-8 border border-border px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-main"
-                        >
-                          Đã xử lý
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    {tx.status === "needs_review" && (
+                      <Button size="sm" variant="ghost" onClick={() => setResolveState({ tx, action: "resolve" })}>
+                        Đã xử lý
+                      </Button>
+                    )}
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
-      {pages > 1 && (
-        <div className="flex items-center justify-between gap-3">
-          <span className="font-mono text-[11px] text-text-muted">
-            {data.total} giao dịch · trang {page}/{pages}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-              Trước
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages}>
-              Sau
-            </Button>
-          </div>
-        </div>
+      {data.total > 50 && (
+        <Pagination
+          currentPage={page}
+          pageSize={50}
+          totalItems={data.total}
+          onPageChange={setPage}
+        />
       )}
 
       <Drawer
@@ -1500,16 +1421,7 @@ function TransactionsTab() {
       />
 
       {pendingPayment && (
-        <div className="border border-brand-500/30 bg-brand-500/5 px-4 py-3" role="status">
-          <p className="text-sm text-text-main">{pendingPayment}</p>
-          <button
-            type="button"
-            onClick={() => setPendingPayment(null)}
-            className="mt-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-main"
-          >
-            Đóng
-          </button>
-        </div>
+        <Toast type="success" message={pendingPayment} onDismiss={() => setPendingPayment(null)} />
       )}
     </div>
   );
@@ -1616,13 +1528,13 @@ function ResolveModal({ state, onClose, onDone }) {
     >
       <div className="flex flex-col gap-4">
         {state && (
-          <div className="flex flex-col gap-1 border border-border bg-surface-2 px-4 py-3">
+          <Card.Section className="flex flex-col gap-1">
             <span className="font-mono text-[14px] text-text-main">{amountText(state.tx)}</span>
             <span className="text-[12px] text-text-muted">{state.tx.content || "—"}</span>
             <span className="text-[11px] text-warning">
               {REASON_LABEL[state.tx.reason] || state.tx.reason}
             </span>
-          </div>
+          </Card.Section>
         )}
 
         {isAssign && (

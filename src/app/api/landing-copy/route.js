@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { LANDING_COPY_BOOLEAN_KEYS, LANDING_COPY_DEFAULTS, mergeLandingCopy } from "@/lib/db/repos/contentRepo.js";
 import { popupFieldError, storedPopupValue } from "@/shared/utils/promoPopup.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -24,6 +25,8 @@ export async function GET() {
 }
 
 export async function PATCH(request) {
+  const denied = await requirePagePermission(request, "content", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

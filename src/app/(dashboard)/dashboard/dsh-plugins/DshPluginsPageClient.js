@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, Button, Modal, ConfirmModal, Badge, CardSkeleton, Toggle } from "@/shared/components";
+import { Card, Button, Modal, ConfirmModal, Badge, CardSkeleton, Toggle, Input, Select, Toast } from "@/shared/components";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
-const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
-const MONO = `${INPUT} font-mono`;
+const AUDIENCE_OPTIONS = [
+  { value: "customer", label: "Khách hàng" },
+  { value: "internal", label: "Nội bộ" },
+];
 
 const FILTERS = [
   { value: "all", label: "Tất cả" },
@@ -252,15 +254,13 @@ export default function DshPluginsPageClient() {
           <Toggle checked={navEnabled} onChange={() => handleNavEnabled(!navEnabled)} />
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
-          <label className="flex-1 min-w-[200px] flex flex-col gap-1.5">
-            <span className={LABEL}>Tên hiển thị trong menu</span>
-            <input
-              value={navLabelDraft}
-              onChange={(e) => setNavLabelDraft(e.target.value)}
-              className={INPUT}
-              placeholder="Plugin DSH"
-            />
-          </label>
+          <Input
+            label="Tên hiển thị trong menu"
+            value={navLabelDraft}
+            onChange={(e) => setNavLabelDraft(e.target.value)}
+            placeholder="Plugin DSH"
+            className="flex-1 min-w-[200px]"
+          />
           <Button
             size="sm"
             variant="secondary"
@@ -274,29 +274,34 @@ export default function DshPluginsPageClient() {
       </Card>
 
       {error && (
-        <p role="alert" className="border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-          {error}{" "}
-          <button type="button" onClick={load} className="underline">Thử lại</button>
-        </p>
+        <div className="flex items-start gap-3">
+          <Toast type="error" message={error} dismissible={false} className="flex-1" />
+          <Button size="sm" variant="ghost" onClick={load}>Thử lại</Button>
+        </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            onClick={() => setFilter(item.value)}
-            aria-pressed={filter === item.value}
-            className={`h-8 border px-3 font-mono text-xs font-medium transition-colors duration-150 ${
-              filter === item.value
-                ? "border-text-main bg-text-main text-bg"
-                : "border-border bg-surface text-text-muted hover:text-text-main"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-        <span className="ml-auto font-mono text-xs text-text-muted">{visible.length} plugin</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-1 rounded-vx-md bg-vx-surface-2 p-1 w-fit">
+          {FILTERS.map((item) => {
+            const active = filter === item.value;
+            return (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setFilter(item.value)}
+                aria-pressed={active}
+                className={`px-4 h-8 rounded-vx-sm text-xs font-medium transition-colors ${
+                  active
+                    ? "bg-vx-primary text-white"
+                    : "text-vx-text-muted hover:text-vx-text hover:bg-vx-surface-3"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+        <span className="font-mono text-xs text-text-muted">{visible.length} plugin</span>
       </div>
 
       {loading ? (
@@ -310,7 +315,7 @@ export default function DshPluginsPageClient() {
       ) : (
         <div className="flex flex-col gap-2">
           {visible.map((plugin) => (
-            <div key={plugin.id} className="flex flex-wrap items-start gap-3 border border-border bg-surface p-4">
+            <Card key={plugin.id} padding="sm" className="flex flex-wrap items-start gap-3">
               <span className="flex size-9 shrink-0 items-center justify-center border border-border bg-surface-2 text-text-muted">
                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">widgets</span>
               </span>
@@ -352,7 +357,7 @@ export default function DshPluginsPageClient() {
                   Xoá
                 </Button>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -370,103 +375,86 @@ export default function DshPluginsPageClient() {
         }
       >
         <div className="flex max-h-[70vh] flex-col gap-5 overflow-y-auto pr-1">
-          {formError && (
-            <p role="alert" className="border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">
-              {formError}
-            </p>
-          )}
+          {formError && <Toast type="error" message={formError} dismissible={false} />}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Tên plugin <span className="text-red-600">*</span></span>
-              <input
-                value={form.name}
-                onChange={(e) => {
-                  const name = e.target.value;
-                  setForm((prev) => ({
-                    ...prev,
-                    name,
-                    slug: prev.slug && prev.slug !== suggestSlug(prev.name) ? prev.slug : suggestSlug(name),
-                  }));
-                }}
-                className={INPUT}
-                placeholder="dsh-purge-safe"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Slug</span>
-              <input
-                value={form.slug}
-                onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))}
-                className={MONO}
-                placeholder="dsh-purge-safe"
-              />
-            </label>
+            <Input
+              label="Tên plugin"
+              required
+              value={form.name}
+              onChange={(e) => {
+                const name = e.target.value;
+                setForm((prev) => ({
+                  ...prev,
+                  name,
+                  slug: prev.slug && prev.slug !== suggestSlug(prev.name) ? prev.slug : suggestSlug(name),
+                }));
+              }}
+              placeholder="dsh-purge-safe"
+            />
+            <Input
+              label="Slug"
+              value={form.slug}
+              onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))}
+              inputClassName="font-mono"
+              placeholder="dsh-purge-safe"
+            />
           </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Tên package npm <span className="text-red-600">*</span></span>
-            <input
-              value={form.packageName}
-              onChange={(e) => setForm((prev) => ({ ...prev, packageName: e.target.value }))}
-              className={MONO}
-              placeholder="dsh-purge-safe hoặc git+https://github.com/a/b.git"
-            />
-            <span className="text-xs leading-5 text-text-subtle">
-              Nhận tên registry, tên có version (<code>pkg@2.0.1</code>), scope (<code>@scope/pkg</code>),
-              hoặc spec <code>git+…</code> / <code>https://…</code> / <code>file:…</code>.
-            </span>
-          </label>
+          <Input
+            label="Tên package npm"
+            required
+            value={form.packageName}
+            onChange={(e) => setForm((prev) => ({ ...prev, packageName: e.target.value }))}
+            inputClassName="font-mono"
+            placeholder="dsh-purge-safe hoặc git+https://github.com/a/b.git"
+            hint={
+              <>
+                Nhận tên registry, tên có version (<code>pkg@2.0.1</code>), scope (<code>@scope/pkg</code>),
+                hoặc spec <code>git+…</code> / <code>https://…</code> / <code>file:…</code>.
+              </>
+            }
+          />
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Phiên bản</span>
-              <input
-                value={form.version}
-                onChange={(e) => setForm((prev) => ({ ...prev, version: e.target.value }))}
-                className={MONO}
-                placeholder="2.0.1"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>DSH target</span>
-              <input
-                value={form.dshTarget}
-                onChange={(e) => setForm((prev) => ({ ...prev, dshTarget: e.target.value }))}
-                className={MONO}
-                placeholder="0.2.2-rc.3"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Thứ tự</span>
-              <input
-                type="number"
-                value={form.sortOrder}
-                onChange={(e) => setForm((prev) => ({ ...prev, sortOrder: Number(e.target.value) }))}
-                className={MONO}
-              />
-            </label>
+            <Input
+              label="Phiên bản"
+              value={form.version}
+              onChange={(e) => setForm((prev) => ({ ...prev, version: e.target.value }))}
+              inputClassName="font-mono"
+              placeholder="2.0.1"
+            />
+            <Input
+              label="DSH target"
+              value={form.dshTarget}
+              onChange={(e) => setForm((prev) => ({ ...prev, dshTarget: e.target.value }))}
+              inputClassName="font-mono"
+              placeholder="0.2.2-rc.3"
+            />
+            <Input
+              label="Thứ tự"
+              type="number"
+              value={form.sortOrder}
+              onChange={(e) => setForm((prev) => ({ ...prev, sortOrder: Number(e.target.value) }))}
+              inputClassName="font-mono"
+            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Link repo</span>
-              <input
-                value={form.repoUrl}
-                onChange={(e) => setForm((prev) => ({ ...prev, repoUrl: e.target.value }))}
-                className={MONO}
-                placeholder="https://github.com/owner/repo"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Link tài liệu</span>
-              <input
-                value={form.docsUrl}
-                onChange={(e) => setForm((prev) => ({ ...prev, docsUrl: e.target.value }))}
-                className={MONO}
-                placeholder="https://…"
-              />
-            </label>
+            <Input
+              label="Link repo"
+              value={form.repoUrl}
+              onChange={(e) => setForm((prev) => ({ ...prev, repoUrl: e.target.value }))}
+              inputClassName="font-mono"
+              placeholder="https://github.com/owner/repo"
+            />
+            <Input
+              label="Link tài liệu"
+              value={form.docsUrl}
+              onChange={(e) => setForm((prev) => ({ ...prev, docsUrl: e.target.value }))}
+              inputClassName="font-mono"
+              placeholder="https://…"
+            />
           </div>
 
           <label className="flex flex-col gap-1.5">
@@ -495,27 +483,19 @@ export default function DshPluginsPageClient() {
             </span>
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={LABEL}>Đối tượng</span>
-              <select
-                value={form.audience}
-                onChange={(e) => setForm((prev) => ({ ...prev, audience: e.target.value }))}
-                className={INPUT}
-              >
-                <option value="customer">Khách hàng</option>
-                <option value="internal">Nội bộ</option>
-              </select>
-            </label>
-            <label className="flex items-end gap-2 pb-2">
-              <input
-                type="checkbox"
-                checked={form.isPublished}
-                onChange={(e) => setForm((prev) => ({ ...prev, isPublished: e.target.checked }))}
-                className="size-4"
-              />
-              <span className="text-sm text-text-main">Phát hành ngay</span>
-            </label>
+          <div className="grid gap-4 sm:grid-cols-2 items-end">
+            <Select
+              label="Đối tượng"
+              value={form.audience}
+              onChange={(e) => setForm((prev) => ({ ...prev, audience: e.target.value }))}
+              options={AUDIENCE_OPTIONS}
+            />
+            <Toggle
+              checked={form.isPublished}
+              onChange={(value) => setForm((prev) => ({ ...prev, isPublished: value }))}
+              label="Phát hành ngay"
+              className="pb-2"
+            />
           </div>
         </div>
       </Modal>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const DENO_V2_API = "https://api.deno.com/v2";
 
@@ -45,6 +46,8 @@ const DENO_RELAY_CODE = `Deno.serve(async (request) => {
 });`;
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const denoToken = body.denoToken?.trim();

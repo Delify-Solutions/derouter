@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/shared/components";
+import { Badge, Button, Card, Table } from "@/shared/components";
 import { dateOf } from "@/shared/components/billing";
 import ReasonModal from "./ReasonModal";
 
@@ -101,68 +101,66 @@ export default function KeysTab({ userId }) {
       )}
 
       {keys.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Khách chưa tạo API key nào</p>
           <p className="mt-1 text-sm text-text-muted">Khách tự tạo key ở trang API key của họ.</p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[680px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Tên</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Prefix</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Tạo</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Dùng gần nhất</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Trạng thái</th>
-                <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((key) => (
-                <tr key={key.id} className="border-b border-border last:border-b-0">
-                  <td className="max-w-[200px] truncate px-4 py-2 text-sm text-text-main" title={key.name || ""}>
-                    {key.name || "—"}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{key.keyPrefix ? `${key.keyPrefix}…` : "—"}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(key.createdAt)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{dateOf(key.lastUsedAt)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px]">
-                    <span className={key.isActive ? "text-brand-700 dark:text-brand-400" : "text-text-muted"}>
-                      {key.isActive ? "Đang dùng" : "Đã tắt"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => copyKey(key)}
-                        disabled={copyState[key.id] === "loading"}
-                        aria-busy={copyState[key.id] === "loading"}
-                      >
-                        {copyState[key.id] === "copied" ? "Đã sao chép" : copyState[key.id] === "loading" ? "Đang lấy…" : "Sao chép"}
-                        <span className="sr-only"> key {key.name || key.keyPrefix || ""}</span>
-                        <span className="sr-only" role="status">{copyState[key.id] === "copied" ? "Đã sao chép key" : ""}</span>
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => setAction({ type: "toggle", key })}>
-                        {key.isActive ? "Tắt" : "Bật"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-danger hover:bg-red-500/10"
-                        onClick={() => setAction({ type: "delete", key })}
-                      >
-                        Xóa
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[680px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell>Tên</Table.HeaderCell>
+              <Table.HeaderCell>Prefix</Table.HeaderCell>
+              <Table.HeaderCell>Tạo</Table.HeaderCell>
+              <Table.HeaderCell>Dùng gần nhất</Table.HeaderCell>
+              <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">Thao tác</Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {keys.map((key) => (
+              <Table.Row key={key.id}>
+                <Table.Cell className="max-w-[200px] truncate text-sm text-text-main" title={key.name || ""}>
+                  {key.name || "—"}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{key.keyPrefix ? `${key.keyPrefix}…` : "—"}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{dateOf(key.createdAt)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{dateOf(key.lastUsedAt)}</Table.Cell>
+                <Table.Cell>
+                  <Badge variant={key.isActive ? "success" : "default"} dot>
+                    {key.isActive ? "Đang dùng" : "Đã tắt"}
+                  </Badge>
+                </Table.Cell>
+                <Table.Cell>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => copyKey(key)}
+                      disabled={copyState[key.id] === "loading"}
+                      aria-busy={copyState[key.id] === "loading"}
+                    >
+                      {copyState[key.id] === "copied" ? "Đã sao chép" : copyState[key.id] === "loading" ? "Đang lấy…" : "Sao chép"}
+                      <span className="sr-only"> key {key.name || key.keyPrefix || ""}</span>
+                      <span className="sr-only" role="status">{copyState[key.id] === "copied" ? "Đã sao chép key" : ""}</span>
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setAction({ type: "toggle", key })}>
+                      {key.isActive ? "Tắt" : "Bật"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-danger hover:bg-red-500/10"
+                      onClick={() => setAction({ type: "delete", key })}
+                    >
+                      Xóa
+                    </Button>
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       <ReasonModal

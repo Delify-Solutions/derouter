@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getErrorLogConfig, setErrorLogConfig } from "../../../../lib/db/repos/errorLogsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,8 @@ export async function GET() {
 
 // PUT { enabled, storePrompt, retentionDays, maxRows, maxBodyKB } — any subset; values are clamped.
 export async function PUT(request) {
+  const denied = await requirePagePermission(request, "errors", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

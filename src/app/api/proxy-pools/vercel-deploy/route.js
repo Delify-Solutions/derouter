@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const VERCEL_API = "https://api.vercel.com";
 
@@ -57,6 +58,8 @@ async function pollDeployment(deploymentId, token, maxMs = 120000) {
 
 // POST /api/proxy-pools/vercel-deploy
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const vercelToken = body.vercelToken;

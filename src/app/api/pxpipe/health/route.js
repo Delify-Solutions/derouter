@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { runHealthCheck } from "@/lib/pxpipe/service.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+async function handle() {
   try {
     const result = await runHealthCheck();
     return NextResponse.json(result);
@@ -12,5 +13,12 @@ export async function POST() {
   }
 }
 
-// GET mirrors POST so the card can probe on page load without a mutation call.
-export const GET = POST;
+export async function POST(request) {
+  const denied = await requireAnyPagePermission(request, ["pxpipe", "token-saver"], "edit");
+  if (denied) return denied;
+  return handle();
+}
+
+// GET mirrors POST so the card can probe on page load without a mutation call —
+// a read-only health check, so it stays reachable with plain `view` permission.
+export const GET = handle;
