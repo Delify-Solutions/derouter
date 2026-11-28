@@ -36,6 +36,7 @@ const NAV = [
   { href: "/account/plugins", label: "Plugin DSH", icon: "widgets", navKey: "dshPlugins" },
   { href: "/account/storage", label: "CDN ảnh", icon: "cloud_upload" },
   { href: "/account/usage", label: "Lịch sử dùng", icon: "monitoring" },
+  { href: "/account/cache-refunds", label: "Hoàn tiền cache", icon: "cached" },
   { href: "/account/notifications", label: "Thông báo", icon: "notifications", badge: "unread" },
   { href: "/account/settings", label: "Tài khoản", icon: "manage_accounts" },
 ];

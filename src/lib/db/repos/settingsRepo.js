@@ -15,6 +15,11 @@ const DEFAULT_SETTINGS = {
   tailscaleEnabled: false,
   tailscaleUrl: "",
   stickyRoundRobinLimit: 3,
+  // Daily per-user cap on AUTOMATIC cache-miss refunds (change cache-miss-auto-refund,
+  // capability cache-miss-refund "Daily capped auto-refund"). Default $10. Detections
+  // beyond the cap for a user that day stay pending for admin approval instead of
+  // posting automatically — never silently dropped.
+  cacheMissRefundDailyCapNanoUsd: 10_000_000_000,
   providerStrategies: {},
   quotaVisibility: {},
   comboStrategy: "fallback",

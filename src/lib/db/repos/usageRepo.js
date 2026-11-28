@@ -6,6 +6,8 @@ import { costFromTokensNano, costFromImagesNano, nanoToUsd } from "../../../shar
 import { resolveApiKeyOwner } from "./billingRepo.js";
 import { chargeSync, ratePlanIdSync } from "../../billing/planQueue.js";
 import { applyRequestDiscountSync } from "../../billing/discounts.js";
+import { evaluateCacheMissCandidate } from "../../billing/cacheMissDetection.js";
+import { insertCacheMissDetectionSync } from "./cacheMissRepo.js";
 import { hashApiKey } from "./apiKeysRepo.js";
 import {
   scheduleRollup, planRollupRange, forEachRollupSlice, rollupEpoch, readProviderRollup, readKeyRollup, readOwnerPeakRollup,
@@ -486,6 +488,30 @@ export async function saveRequestUsage(entry) {
     // Carried on the entry so the daily rollup records the same identity.
     entry.apiKeyId = apiKeyId;
 
+    // Cache-miss detection candidate (spec cache-miss-refund), evaluated here because
+    // pricing resolution is async — the transaction below only does the synchronous
+    // INSERT, once the usageHistory row's id exists and the real charged amount (the
+    // final cap) is known. `entry.promptText` is the provider-bound prompt text
+    // (open-sse's promptTextForCache), threaded in by the chatCore handlers; admin/
+    // local keys (no owner) are never candidates.
+    let cacheMissCandidate = null;
+    if (owner?.userId && apiKeyId && entry.promptText) {
+      try {
+        cacheMissCandidate = await evaluateCacheMissCandidate({
+          apiKeyId,
+          provider: entry.provider,
+          model: entry.model,
+          requestedModel: entry.requestedModel,
+          promptText: entry.promptText,
+          promptTokens,
+          cacheReadTokens: tokens.cached_tokens || tokens.cache_read_input_tokens || tokens.prompt_tokens_details?.cached_tokens || 0,
+          costNanoUsd: entry.costNanoUsd || 0,
+        });
+      } catch (e) {
+        console.error("[cache-miss] detection failed (swallowed):", e?.message || e);
+      }
+    }
+
     let inserted = false;
 
     // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
@@ -653,6 +679,27 @@ export async function saveRequestUsage(entry) {
         }
       }
 
+      // Cache-miss detection row (spec cache-miss-refund), finalized against the REAL
+      // charge: a request fully covered by an unlimited plan took no real money, so
+      // chargedNanoUsd is 0 and nothing is recorded — there is nothing to refund.
+      // `usageHistoryId UNIQUE` is the idempotency guard against ever double-recording.
+      if (cacheMissCandidate && chargedNanoUsd > 0) {
+        const refundNanoUsd = Math.min(cacheMissCandidate.refundNanoUsd, chargedNanoUsd);
+        if (refundNanoUsd > 0) {
+          insertCacheMissDetectionSync(db, {
+            usageHistoryId: insertedUsage.lastInsertRowid,
+            userId: owner.userId,
+            apiKeyId,
+            provider: entry.provider || null,
+            model: entry.model || null,
+            requestedModel: entry.requestedModel || null,
+            overlapTokens: cacheMissCandidate.overlapTokens,
+            refundNanoUsd,
+            detectedAt: entry.timestamp,
+          });
+        }
+      }
+
       const dateKey = getLocalDateKey(entry.timestamp);
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       // A day created by this write has every one of its requests counted here, so its
@@ -709,7 +756,7 @@ export async function getUsageHistory(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, costNanoUsd, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
+  const rows = db.all(`SELECT id, timestamp, provider, model, connectionId, apiKey, endpoint, cost, costNanoUsd, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
 
   // Post-005 rows carry apiKeyId and no raw key, so derive the mask from the
   // caller's own key: a key holder's receipt must still identify the key.
@@ -722,6 +769,10 @@ export async function getUsageHistory(filter = {}) {
     // the key holder called, not the internal pool/fallback model the proxy resolved to.
     const requestedModel = meta.requestedModel || null;
     return {
+      // usageHistory.id — lets a caller (e.g. the account usage page) join this row
+      // against `cacheMissDetections.usageHistoryId` for the cache-miss indicator
+      // (spec cache-miss-refund "Customer visibility").
+      usageHistoryId: r.id,
       timestamp: r.timestamp, provider: r.provider,
       model: requestedModel || r.model, // display model: combo name if known, else resolved
       resolvedModel: r.model,            // internal fallback model (kept for cost/accuracy)

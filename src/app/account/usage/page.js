@@ -9,6 +9,7 @@ import { Empty, Page, ButtonLink } from "@/app/account/components/ui";
 import AccountUsageTable from "./AccountUsageTable";
 import { getSettings } from "@/lib/db/repos/settingsRepo.js";
 import { hideUpstreamModelsEnabled } from "@/lib/models/customerModels.js";
+import { listFlaggedUsageHistoryIds } from "@/lib/db/repos/cacheMissRepo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ function normalizeStatus(s) {
   return String(s);
 }
 
-function toRow(r, hide, labels = new Map()) {
+function toRow(r, hide, labels = new Map(), flaggedIds = null) {
   const t = r.tokens || {};
   const input = t.prompt_tokens ?? t.input_tokens ?? 0;
   const output = t.completion_tokens ?? t.output_tokens ?? 0;
@@ -44,6 +45,9 @@ function toRow(r, hide, labels = new Map()) {
   const ttftMs = Number.isFinite(r.meta?.ttftMs) ? r.meta.ttftMs : null;
   return {
     timestamp: r.timestamp,
+    // Flagged by cache-miss-refund (spec cache-miss-refund "Usage history cache-miss
+    // indicator"): never names the internal cause, only that the discount was missed.
+    cacheMiss: flaggedIds ? flaggedIds.has(r.usageHistoryId) : false,
     // The combo the customer called; the upstream model only when the
     // protection is off (spec model-privacy). Old rows without a combo read "—".
     model: (hide ? r.requestedModel : r.model) || "—",
@@ -109,7 +113,13 @@ export default async function AccountUsagePage({ searchParams }) {
     } catch {
       labels = new Map();
     }
-    history = shown.map((row) => toRow(row, hide, labels));
+    let flaggedIds = null;
+    try {
+      flaggedIds = await listFlaggedUsageHistoryIds(claims.userId);
+    } catch {
+      flaggedIds = null;
+    }
+    history = shown.map((row) => toRow(row, hide, labels, flaggedIds));
   }
 
   const keysView = keys.map((key) => ({

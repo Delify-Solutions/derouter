@@ -21,6 +21,7 @@ export const ADMIN_PAGES = [
   { key: "basic-chat", label: "Basic Chat", pathPrefix: "/dashboard/basic-chat" },
   { key: "combos", label: "Combo & Vision Adapter", pathPrefix: "/dashboard/combos" },
   { key: "usage", label: "Usage", pathPrefix: "/dashboard/usage" },
+  { key: "cache-refunds", label: "Hoàn tiền cache", pathPrefix: "/dashboard/cache-refunds" },
   { key: "stats", label: "Thống kê", pathPrefix: "/dashboard/stats" },
   { key: "quota", label: "Quota Tracker", pathPrefix: "/dashboard/quota" },
   { key: "token-saver", label: "Token Saver", pathPrefix: "/dashboard/token-saver" },

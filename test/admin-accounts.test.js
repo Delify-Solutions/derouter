@@ -229,8 +229,11 @@ test("the registry lists every page key named in spec admin-accounts (32 existin
   // (dashboard, affiliates, ..., users) plus this capability's own
   // admin-accounts — 33 keys total. (tasks.md's "31 existing pages" summary
   // undercounts its own enumerated list by one; the enumerated list is ground truth.)
-  assert.equal(PAGE_KEYS.length, 33);
-  assert.equal(new Set(PAGE_KEYS).size, 33);
+  // +1 (34): change cache-miss-auto-refund registered its own admin page
+  // ("cache-refunds") after this spec was written — the count here tracks the
+  // registry as it stands, not a frozen historical total.
+  assert.equal(PAGE_KEYS.length, 34);
+  assert.equal(new Set(PAGE_KEYS).size, 34);
   assert.ok(PAGE_KEYS.includes("admin-accounts"));
 });
 

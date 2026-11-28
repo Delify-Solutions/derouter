@@ -5,7 +5,7 @@ import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.j
 import { filterUsageForFormat, claudeUsageFromOpenAI } from "../../utils/usageTracking.js";
 import { toOpenAIUsage, responsesUsageFromChat } from "../../translator/concerns/usage.js";
 import { createErrorResult } from "../../utils/error.js";
-import { applyEstimatedCache } from "../../utils/cacheEstimator.js";
+import { applyEstimatedCache, promptTextForCache } from "../../utils/cacheEstimator.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
@@ -409,7 +409,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
   let usageSavePromise = Promise.resolve(null);
   const recordUsage = () => {
     appendLog({ tokens: usage, status: "200 OK" });
-    usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: usageLatencyMs, silent: true });
+    usageSavePromise = saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, clientIp: clientRawRequest?.clientIp, requestedModel, latencyMs: usageLatencyMs, promptText: promptTextForCache(finalBody || translatedBody || body), silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: usageLatencyMs } }));
   };
   if (!deferUsage) {

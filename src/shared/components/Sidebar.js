@@ -34,6 +34,7 @@ const navItems = [
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat", key: "basic-chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers", key: "combos" },
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart", key: "usage" },
+  { href: "/dashboard/cache-refunds", label: "Hoàn tiền cache", icon: "cached", key: "cache-refunds" },
   // Token statistics by time, model, provider and customer (change usage-analytics).
   { href: "/dashboard/stats", label: "Thống kê", icon: "query_stats", key: "stats" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage", key: "quota" },

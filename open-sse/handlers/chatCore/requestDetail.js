@@ -148,7 +148,7 @@ export function formatDoneLine({ usage, latency }) {
  * carry the one real figure instead of a guess — see the callers in
  * nonStreamingHandler.js / streamingHandler.js / sseToJsonHandler.js.
  */
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, clientIp, label = "USAGE", silent = false }) {
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, requestedModel, latencyMs, ttftMs, clientIp, promptText, label = "USAGE", silent = false }) {
   if (!tokens || typeof tokens !== "object") return Promise.resolve(null);
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -185,7 +185,14 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     // Time to the first bytes from the upstream stream, in ms. Streams only; null otherwise.
     ttftMs: Number.isFinite(ttftMs) ? ttftMs : null,
     // Trusted client IP of the request (spec activity-ip-log), or null.
-    clientIp: clientIp || null
+    clientIp: clientIp || null,
+    // Provider-bound prompt text (open-sse's promptTextForCache), for cache-miss
+    // detection only (spec cache-miss-refund) — never persisted, never sent to a
+    // client; saveRequestUsage uses it to compare against the same key's immediately
+    // preceding request and discards it once the comparison has run. Withheld for an
+    // ESTIMATED usage report (the upstream reported nothing at all): "zero cache-read
+    // tokens" must be what the upstream actually reported, never our own guess.
+    promptText: normalized.estimated === true ? null : (promptText || null)
   }).catch(() => null);
 }
 
