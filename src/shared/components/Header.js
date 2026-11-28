@@ -221,6 +221,17 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
     };
   }, []);
 
+  const handleLogout = async () => {
+    try {
+      const res = await fetch("/api/auth/logout", { method: "POST" });
+      if (res.ok) {
+        window.location.assign("/admin/ss");
+      }
+    } catch (err) {
+      console.error("Failed to logout:", err);
+    }
+  };
+
   return (
     <header className="sticky top-0 z-20 shrink-0 flex items-center justify-between gap-3 h-vx-navbar px-4 lg:px-8 bg-vx-surface/90 backdrop-blur-xl shadow-vx-xs">
       {/* Mobile menu button */}
@@ -323,6 +334,15 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         </button>
         <ThemeToggle />
         <HeaderLanguage />
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center justify-center p-2 rounded-vx-md text-vx-text-muted hover:bg-vx-danger/10 hover:text-vx-danger transition-colors"
+          aria-label="Đăng xuất"
+          title="Đăng xuất"
+        >
+          <span className="material-symbols-outlined text-[20px]">logout</span>
+        </button>
       </div>
       <ChangePasswordModal isOpen={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </header>
