@@ -5,10 +5,9 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import PropTypes from "prop-types";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import HeaderMenu from "@/shared/components/HeaderMenu";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import ThemeToggle from "@/shared/components/ThemeToggle";
-import DonateModal from "@/shared/components/DonateModal";
+import ChangePasswordModal from "@/shared/components/ChangePasswordModal";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
@@ -190,7 +189,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   const pathname = usePathname();
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
-  const [donateOpen, setDonateOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   // Memoize page info to prevent unnecessary recalculations
   const pageInfo = useMemo(() => getPageInfo(pathname), [pathname]);
@@ -221,17 +220,6 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
       cancelled = true;
     };
   }, []);
-
-  const handleLogout = async () => {
-    try {
-      const res = await fetch("/api/auth/logout", { method: "POST" });
-      if (res.ok) {
-        window.location.assign("/admin/ss");
-      }
-    } catch (err) {
-      console.error("Failed to logout:", err);
-    }
-  };
 
   return (
     <header className="sticky top-0 z-20 shrink-0 flex items-center justify-between gap-3 h-vx-navbar px-4 lg:px-8 bg-vx-surface/90 backdrop-blur-xl shadow-vx-xs">
@@ -325,18 +313,18 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         )}
         <HeaderSearch />
         <button
-          onClick={() => setDonateOpen(true)}
-          className="flex items-center gap-1.5 px-3 h-8 rounded-vx-md text-xs font-medium text-vx-text-muted hover:bg-vx-primary/10 hover:text-vx-primary transition-colors"
-          aria-label="Donate"
+          type="button"
+          onClick={() => setChangePasswordOpen(true)}
+          className="flex items-center justify-center p-2 rounded-vx-md text-vx-text-muted hover:bg-vx-primary/10 hover:text-vx-primary transition-colors"
+          aria-label="Đổi mật khẩu"
+          title="Đổi mật khẩu"
         >
-          <span className="material-symbols-outlined text-[18px]">volunteer_activism</span>
-          <span className="hidden sm:inline">Donate</span>
+          <span className="material-symbols-outlined text-[20px]">password</span>
         </button>
         <ThemeToggle />
         <HeaderLanguage />
-        <HeaderMenu onLogout={handleLogout} />
       </div>
-      <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
+      <ChangePasswordModal isOpen={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </header>
   );
 }
