@@ -501,6 +501,7 @@ export async function handleNonStreamingResponse({ compat = false, cacheCtx = nu
     endpoint: clientRawRequest?.endpoint || null,
     costNanoUsd: usageResult?.costNanoUsd ?? null,
     chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+    vendorCostNanoUsd: usageResult?.vendorCostNanoUsd ?? null,
   }))).catch(err => {
     console.error("[RequestDetail] Failed to save:", err.message);
   });

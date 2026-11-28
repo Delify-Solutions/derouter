@@ -23,6 +23,7 @@ import ConnectionRow from "./ConnectionRow";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
+import VendorCostModal from "./VendorCostModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
 
@@ -74,6 +75,10 @@ export default function ProviderDetailPage() {
   const [modelsTestError, setModelsTestError] = useState("");
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
+  // Admin-only vendor cost (spec vendor-cost-pricing): which of this provider's models
+  // already have a vendor-cost record set, and which one (if any) the admin is editing.
+  const [vendorCostModelIds, setVendorCostModelIds] = useState(new Set());
+  const [editingVendorCostModelId, setEditingVendorCostModelId] = useState(null);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
@@ -307,6 +312,16 @@ export default function ProviderDetailPage() {
     }
   }, []);
 
+  const fetchVendorCostModels = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/vendor-cost?provider=${encodeURIComponent(providerStorageAlias)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok) setVendorCostModelIds(new Set(Object.keys(data.records || {})));
+    } catch (error) {
+      console.error("Error fetching vendor cost models:", error);
+    }
+  }, [providerStorageAlias]);
+
   // Fetch free models from Kilo API for kilocode provider
   useEffect(() => {
     if (providerId !== "kilocode") return;
@@ -515,7 +530,8 @@ export default function ProviderDetailPage() {
     fetchAliases();
     fetchCustomModels();
     fetchDisabledModels();
-  }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
+    fetchVendorCostModels();
+  }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels, fetchVendorCostModels]);
 
   // Cursor's, DeepAI's and Qoder's model lists are account-specific and change frequently.
   // Load the active account's live catalog for the dashboard; the static
@@ -600,6 +616,35 @@ export default function ProviderDetailPage() {
       }
     } catch (error) {
       console.error("Error adding custom model:", error);
+    }
+  };
+
+  // Admin-only vendor (upstream) cost for one (provider, model) pair (spec
+  // vendor-cost-pricing) — entirely separate from customer-facing pricing. `record` is
+  // { rate, offPeak? } from vendorCostMatch.vendorCostDraftToRecord, or null/undefined
+  // to clear it.
+  const handleSaveVendorCost = async (modelId, record, providerAliasOverride = providerStorageAlias) => {
+    try {
+      if (!record) {
+        await fetch(`/api/vendor-cost?provider=${encodeURIComponent(providerAliasOverride)}&model=${encodeURIComponent(modelId)}`, { method: "DELETE" });
+        await fetchVendorCostModels();
+        return true;
+      }
+      const res = await fetch("/api/vendor-cost", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerAliasOverride, model: modelId, ...record }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Failed to save vendor cost");
+        return false;
+      }
+      await fetchVendorCostModels();
+      return true;
+    } catch (error) {
+      console.error("Error saving vendor cost:", error);
+      return false;
     }
   };
 
@@ -1195,6 +1240,8 @@ export default function ProviderDetailPage() {
             isTesting={testingModelIds.has(model.id)}
             isCustom
             isFree={false}
+            onEditVendorCost={() => setEditingVendorCostModelId(model.id)}
+            hasVendorCost={vendorCostModelIds.has(model.id)}
             caps={getCaps(`${providerId}/${model.id}`)}
             thinkingSuffix={resolveThinkingSuffix(model.id)}
           />
@@ -1868,11 +1915,21 @@ export default function ProviderDetailPage() {
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}
           providerDisplayAlias={providerDisplayAlias}
-          onSave={async (modelId, caps) => {
+          onSave={async (modelId, caps, vendorCostRecord) => {
             await handleAddCustomModel(modelId, "llm", providerStorageAlias, caps);
+            if (vendorCostRecord) await handleSaveVendorCost(modelId, vendorCostRecord, providerStorageAlias);
             setShowAddCustomModel(false);
           }}
           onClose={() => setShowAddCustomModel(false)}
+        />
+      )}
+      {editingVendorCostModelId && (
+        <VendorCostModal
+          isOpen={!!editingVendorCostModelId}
+          provider={providerStorageAlias}
+          model={editingVendorCostModelId}
+          onSave={(record) => handleSaveVendorCost(editingVendorCostModelId, record, providerStorageAlias)}
+          onClose={() => setEditingVendorCostModelId(null)}
         />
       )}
 

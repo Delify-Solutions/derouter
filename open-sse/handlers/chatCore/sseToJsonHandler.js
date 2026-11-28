@@ -263,6 +263,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
         endpoint: clientRawRequest?.endpoint || null,
         costNanoUsd: usageResult?.costNanoUsd ?? null,
         chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+        vendorCostNanoUsd: usageResult?.vendorCostNanoUsd ?? null,
       }))).catch(() => {});
 
       // Client is Responses API → return as-is
@@ -388,6 +389,7 @@ export async function handleForcedSSEToJson({ compat = false, cacheCtx = null, p
       endpoint: clientRawRequest?.endpoint || null,
       costNanoUsd: usageResult?.costNanoUsd ?? null,
       chargedNanoUsd: usageResult?.chargedNanoUsd ?? null,
+      vendorCostNanoUsd: usageResult?.vendorCostNanoUsd ?? null,
     }))).catch(() => {});
 
     // `parsed.usage` is the upstream's own usage object, untouched: the client can tell a

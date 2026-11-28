@@ -569,6 +569,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                 <SortableHeader label="Timestamp" field="time" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
                 <Table.HeaderCell>{modelView === "requested" ? "Model (khách gọi)" : "Model (gốc)"}</Table.HeaderCell>
                 <Table.HeaderCell>Provider</Table.HeaderCell>
+                <Table.HeaderCell>Account</Table.HeaderCell>
                 <Table.HeaderCell>Người dùng / Key</Table.HeaderCell>
                 <Table.HeaderCell>Status</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">Input Tokens</Table.HeaderCell>
@@ -595,6 +596,12 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                 >
                   Đã trừ
                 </Table.HeaderCell>
+                <Table.HeaderCell
+                  className="text-right"
+                  title="Đã trừ trừ giá vốn (spec vendor-cost-pricing) — không ảnh hưởng tới hóa đơn khách hàng"
+                >
+                  Lợi nhuận
+                </Table.HeaderCell>
                 <SortableHeader label="Latency" field="latency" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
                 <Table.HeaderCell className="text-center">Action</Table.HeaderCell>
               </tr>
@@ -603,7 +610,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               {tableState !== "ready" ? (
                 <TableStateRow
                   state={tableState}
-                  colSpan={14}
+                  colSpan={16}
                   emptyMessage="No request details found"
                   onRetry={() => setReloadTick((t) => t + 1)}
                   onClearFilters={clearAllFilters}
@@ -622,6 +629,9 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </Table.Cell>
+                    <Table.Cell className="max-w-[180px] truncate text-vx-text-muted">
+                      {detail.accountName || "—"}
+                    </Table.Cell>
                     <Table.Cell className="max-w-[240px]">
                       <KeyOwner
                         apiKey={detail.apiKey}
@@ -672,6 +682,11 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                     </Table.Cell>
                     <Table.Cell className="text-right font-mono">
                       {Number.isFinite(detail.chargedNanoUsd) ? fmtUsdNano(detail.chargedNanoUsd) : "—"}
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
+                      {Number.isFinite(detail.vendorCostNanoUsd)
+                        ? fmtUsdNano((detail.chargedNanoUsd || 0) - detail.vendorCostNanoUsd)
+                        : <span className="text-vx-text-muted text-xs font-sans">Chưa có dữ liệu giá vốn</span>}
                     </Table.Cell>
                     <Table.Cell className="text-vx-text-muted">
                       <div className="flex flex-col gap-0.5">
@@ -729,6 +744,16 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                  <span className="text-vx-text-muted">Provider:</span>{" "}
                  <span className="text-vx-text font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
                </div>
+              <div>
+                <span className="text-vx-text-muted">Account:</span>{" "}
+                <span className="text-vx-text">{selectedDetail.accountName || "—"}</span>
+              </div>
+              <div>
+                <span className="text-vx-text-muted">Lợi nhuận:</span>{" "}
+                {Number.isFinite(selectedDetail.vendorCostNanoUsd)
+                  ? <span className="text-vx-text font-mono">{fmtUsdNano((selectedDetail.chargedNanoUsd || 0) - selectedDetail.vendorCostNanoUsd)}</span>
+                  : <span className="text-xs text-vx-text-muted">Chưa có dữ liệu giá vốn</span>}
+              </div>
               <div>
                 <span className="text-vx-text-muted">Người dùng / Key:</span>{" "}
                 <span className="inline-flex max-w-full align-top"><KeyOwner apiKey={selectedDetail.apiKey} info={selectedDetail.keyInfo} compact={false} /></span>

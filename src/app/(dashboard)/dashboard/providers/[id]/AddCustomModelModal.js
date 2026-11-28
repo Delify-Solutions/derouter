@@ -4,19 +4,26 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Button, Modal, Toggle } from "@/shared/components";
 import { CAPACITY_META } from "@/shared/constants/models";
+import VendorCostFields from "./VendorCostFields";
+import { emptyVendorCostDraft, vendorCostDraftToRecord } from "@/shared/utils/vendorCostMatch";
 
 const defaultCaps = () => Object.fromEntries(Object.keys(CAPACITY_META).map((key) => [key, false]));
 
 export default function AddCustomModelModal({ isOpen, providerAlias, providerDisplayAlias, onSave, onClose }) {
   const [modelId, setModelId] = useState("");
   const [caps, setCaps] = useState(defaultCaps);
+  const [vendorCostDraft, setVendorCostDraft] = useState(emptyVendorCostDraft);
+  const [vendorCostError, setVendorCostError] = useState("");
   const [testStatus, setTestStatus] = useState(null); // null | "testing" | "ok" | "error"
   const [testError, setTestError] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Reset state when modal opens
   useEffect(() => {
-    if (isOpen) { setModelId(""); setCaps(defaultCaps()); setTestStatus(null); setTestError(""); }
+    if (isOpen) {
+      setModelId(""); setCaps(defaultCaps()); setTestStatus(null); setTestError("");
+      setVendorCostDraft(emptyVendorCostDraft()); setVendorCostError("");
+    }
   }, [isOpen]);
 
   // Strip provider's own alias prefix (e.g. "cc/model" -> "model" for cc provider)
@@ -48,9 +55,17 @@ export default function AddCustomModelModal({ isOpen, providerAlias, providerDis
   const handleSave = async () => {
     const cleanId = stripAlias(modelId.trim());
     if (!cleanId || saving) return;
+    let vendorCostRecord;
+    try {
+      vendorCostRecord = vendorCostDraftToRecord(vendorCostDraft);
+    } catch (e) {
+      setVendorCostError(e.message);
+      return;
+    }
+    setVendorCostError("");
     setSaving(true);
     try {
-      await onSave(cleanId, caps);
+      await onSave(cleanId, caps, vendorCostRecord);
     } finally {
       setSaving(false);
     }
@@ -61,7 +76,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias, providerDis
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Custom Model">
+    <Modal isOpen={isOpen} onClose={onClose} title="Add Custom Model" size="lg">
       <div className="flex flex-col gap-4">
         <div>
           <label className="text-sm font-medium mb-1.5 block">Model ID</label>
@@ -105,6 +120,14 @@ export default function AddCustomModelModal({ isOpen, providerAlias, providerDis
             ))}
           </div>
         </div>
+
+        <VendorCostFields draft={vendorCostDraft} onChange={setVendorCostDraft} />
+        {vendorCostError && (
+          <div className="flex items-start gap-2 text-sm text-vx-danger">
+            <span className="material-symbols-outlined text-base shrink-0">cancel</span>
+            <span>{vendorCostError}</span>
+          </div>
+        )}
 
         {/* Test result */}
         {testStatus === "ok" && (
