@@ -3,6 +3,8 @@
 import { cn } from "@/shared/utils/cn";
 import Button from "./Button";
 
+// Vuexy pagination shape (change admin-accounts-rbac-vuexy, group 7): rounded
+// page controls and select, same prop API/behavior as before.
 export default function Pagination({
   currentPage,
   pageSize,
@@ -43,10 +45,10 @@ export default function Pagination({
     >
       {/* Info text */}
       {totalItems > 0 && (
-        <div className="max-w-full text-center text-sm text-text-muted tabular-nums sm:text-left">
-          Showing <span className="font-medium text-text-main">{startItem}</span> to{" "}
-          <span className="font-medium text-text-main">{endItem}</span> of{" "}
-          <span className="font-medium text-text-main">{totalItems}</span> results
+        <div className="max-w-full text-center text-sm text-vx-text-muted tabular-nums sm:text-left">
+          Hiển thị <span className="font-medium text-vx-text">{startItem}</span>–{" "}
+          <span className="font-medium text-vx-text">{endItem}</span> trong tổng{" "}
+          <span className="font-medium text-vx-text">{totalItems}</span> kết quả
         </div>
       )}
 
@@ -54,13 +56,13 @@ export default function Pagination({
         {/* Page size selector */}
         {onPageSizeChange && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text-muted">Rows:</span>
+            <span className="text-sm text-vx-text-muted">Số dòng:</span>
             <select
               value={pageSize}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
               className={cn(
-                "h-9 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "h-9 rounded-vx-md border border-vx-border bg-vx-surface",
+                "text-sm text-vx-text focus:outline-none focus:ring-2 focus:ring-vx-primary/20",
                 "cursor-pointer"
               )}
               style={{ colorScheme: 'auto' }}
@@ -97,7 +99,7 @@ export default function Pagination({
                   1
                 </Button>
                 {pageNumbers[0] > 2 && (
-                  <span className="text-text-muted px-1 hidden sm:inline">...</span>
+                  <span className="text-vx-text-muted px-1 hidden sm:inline">...</span>
                 )}
               </>
             )}
@@ -120,7 +122,7 @@ export default function Pagination({
             {pageNumbers[pageNumbers.length - 1] < totalPages && (
               <>
                 {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && (
-                  <span className="text-text-muted px-1 hidden sm:inline">...</span>
+                  <span className="text-vx-text-muted px-1 hidden sm:inline">...</span>
                 )}
                 <Button
                   variant="ghost"

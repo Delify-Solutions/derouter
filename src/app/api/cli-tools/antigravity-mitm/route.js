@@ -13,6 +13,7 @@ import {
   isSudoPasswordRequired,
   initDbHooks,
 } from "@/mitm/manager";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { getSettings, updateSettings } from "@/lib/localDb";
 
 initDbHooks(getSettings, updateSettings);
@@ -92,6 +93,8 @@ export async function GET() {
 
 // POST - Start MITM server (cert + server, no DNS)
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { apiKey, sudoPassword, mitmRouterBaseUrl, forceKillPort443 } = await request.json();
     const pwd = getPassword(sudoPassword) || await loadEncryptedPassword() || "";
@@ -139,6 +142,8 @@ export async function POST(request) {
 
 // DELETE - Stop MITM server (removes all DNS first, then kills server)
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => ({}));
     const { sudoPassword } = body;
@@ -159,6 +164,8 @@ export async function DELETE(request) {
 
 // PATCH - Toggle DNS for a specific tool (enable/disable)
 export async function PATCH(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { tool, action, sudoPassword } = await request.json();
     const pwd = getPassword(sudoPassword) || await loadEncryptedPassword() || "";

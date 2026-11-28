@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Input, Select } from "@/shared/components";
+import { Button, Card, Input, Select } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import ReasonModal from "./ReasonModal";
 import ReferrerPanel from "./ReferrerPanel";
@@ -84,7 +84,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
         </p>
       )}
 
-      <section className="border border-border bg-surface">
+      <Card padding="none">
         <dl className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-surface px-5 py-4"><Field label="Credit khả dụng">{summary?.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(summary?.availableNanoUsd ?? 0)}</Field></div>
           <div className="bg-surface px-5 py-4">
@@ -104,10 +104,10 @@ export default function OverviewTab({ user, summary, onChanged }) {
           <div className="bg-surface px-5 py-4"><Field label="Nhóm">{user.groupName || "—"}</Field></div>
           <div className="bg-surface px-5 py-4"><Field label="Trạng thái">{user.status}</Field></div>
         </dl>
-      </section>
+      </Card>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="flex flex-col gap-3 border border-border bg-surface p-5">
+        <Card className="flex flex-col gap-3">
           <h2 className="meta text-text-muted">Nhóm</h2>
           <p className="text-xs text-text-muted">Nhóm quyết định credit và model khách gọi được. Đổi nhóm có hiệu lực từ request kế tiếp.</p>
           <Select
@@ -123,9 +123,9 @@ export default function OverviewTab({ user, summary, onChanged }) {
           >
             Đổi nhóm
           </Button>
-        </div>
+        </Card>
 
-        <div className="flex flex-col gap-3 border border-border bg-surface p-5">
+        <Card className="flex flex-col gap-3">
           <h2 className="meta text-text-muted">Trạng thái</h2>
           <p className="text-xs text-text-muted">Khóa hoặc chưa xác minh sẽ hủy mọi phiên và chặn API ngay lập tức.</p>
           <Select
@@ -141,9 +141,9 @@ export default function OverviewTab({ user, summary, onChanged }) {
           >
             Đổi trạng thái
           </Button>
-        </div>
+        </Card>
 
-        <div className="flex flex-col gap-3 border border-border bg-surface p-5">
+        <Card className="flex flex-col gap-3">
           <h2 className="meta text-text-muted">Hồ sơ</h2>
           <Input label="Email" value={draft.email} onChange={(event) => setDraft((d) => ({ ...d, email: event.target.value }))} />
           <Input
@@ -160,9 +160,9 @@ export default function OverviewTab({ user, summary, onChanged }) {
           >
             Lưu hồ sơ
           </Button>
-        </div>
+        </Card>
 
-        <div className="flex flex-col gap-3 border border-border bg-surface p-5">
+        <Card className="flex flex-col gap-3">
           <h2 className="meta text-text-muted">Mật khẩu</h2>
           <Input
             label="Mật khẩu mới"
@@ -179,14 +179,14 @@ export default function OverviewTab({ user, summary, onChanged }) {
           >
             Đặt lại mật khẩu
           </Button>
-        </div>
+        </Card>
       </section>
 
       <ReferrerPanel user={user} onChanged={onChanged} />
 
       <TelegramPanel user={user} onChanged={onChanged} />
 
-      <section className="flex flex-col gap-3 border border-border bg-surface p-5">
+      <Card className="flex flex-col gap-3">
         <h2 className="meta text-text-muted">Ghi chú nội bộ</h2>
         <p className="text-xs text-text-muted">
           Chỉ admin thấy. Không cần lý do: nội dung này không thay đổi gì với khách.
@@ -205,7 +205,7 @@ export default function OverviewTab({ user, summary, onChanged }) {
           </Button>
           {noteError && <span className="text-[11px] text-danger">{noteError}</span>}
         </div>
-      </section>
+      </Card>
 
       {/* Debt write-off (change debt-clear): the amount on screen is sent back, so a
           debt that grew meanwhile is refused instead of cleared unseen. */}

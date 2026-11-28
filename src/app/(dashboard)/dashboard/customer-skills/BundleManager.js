@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Modal, ConfirmModal, Badge, Card } from "@/shared/components";
+import { Button, Modal, ConfirmModal, Badge, Card, Input, Select } from "@/shared/components";
 import { renderBundleMarkdown, excerptFromMarkdown } from "@/app/account/skills/renderBundleMarkdown";
 import SkillRow from "./SkillRow";
 
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted";
-const INPUT = "h-9 w-full border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none";
 
 function fmtDate(value) {
   const ms = Date.parse(value || "");
@@ -78,32 +77,24 @@ function BundleEditorModal({ bundle, onClose, onSaved }) {
     >
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
         {error && (
-          <p role="alert" className="border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+          <p role="alert" className="border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
             {error}
           </p>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Tên bundle</span>
-            <input value={form.name} onChange={(e) => set({ name: e.target.value })} className={INPUT} />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Slug</span>
-            <input value={form.slug} onChange={(e) => set({ slug: e.target.value })} className={`${INPUT} font-mono`} />
-          </label>
+          <Input label="Tên bundle" value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          <Input label="Slug" value={form.slug} onChange={(e) => set({ slug: e.target.value })} inputClassName="font-mono" />
         </div>
 
-        <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)</span>
-          <input
-            value={form.version}
-            onChange={(e) => set({ version: e.target.value })}
-            className={`${INPUT} font-mono`}
-            placeholder="v1.0.0"
-            maxLength={40}
-          />
-        </label>
+        <Input
+          label="Phiên bản (tự đặt — repo này không có git tag/release để lấy tự động)"
+          value={form.version}
+          onChange={(e) => set({ version: e.target.value })}
+          inputClassName="font-mono"
+          placeholder="v1.0.0"
+          maxLength={40}
+        />
 
         <label className="flex flex-col gap-1.5">
           <span className={LABEL}>Mô tả (khách thấy)</span>
@@ -126,38 +117,33 @@ function BundleEditorModal({ bundle, onClose, onSaved }) {
         </label>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Installer entrypoint</span>
-            <input
-              value={form.installerEntrypoint}
-              onChange={(e) => set({ installerEntrypoint: e.target.value })}
-              className={`${INPUT} font-mono`}
-              placeholder="install.mjs"
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Nhánh/ref nguồn</span>
-            <input value={form.sourceRef} onChange={(e) => set({ sourceRef: e.target.value })} className={`${INPUT} font-mono`} />
-          </label>
+          <Input
+            label="Installer entrypoint"
+            value={form.installerEntrypoint}
+            onChange={(e) => set({ installerEntrypoint: e.target.value })}
+            inputClassName="font-mono"
+            placeholder="install.mjs"
+          />
+          <Input label="Nhánh/ref nguồn" value={form.sourceRef} onChange={(e) => set({ sourceRef: e.target.value })} inputClassName="font-mono" />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Đối tượng</span>
-            <select value={form.audience} onChange={(e) => set({ audience: e.target.value })} className={INPUT}>
-              <option value="customer">Khách hàng</option>
-              <option value="internal">Nội bộ</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>Thứ tự (nhỏ lên trước)</span>
-            <input
-              type="number"
-              value={form.sortOrder}
-              onChange={(e) => set({ sortOrder: e.target.value === "" ? 0 : Number(e.target.value) })}
-              className={`${INPUT} font-mono`}
-            />
-          </label>
+          <Select
+            label="Đối tượng"
+            value={form.audience}
+            onChange={(e) => set({ audience: e.target.value })}
+            options={[
+              { value: "customer", label: "Khách hàng" },
+              { value: "internal", label: "Nội bộ" },
+            ]}
+          />
+          <Input
+            label="Thứ tự (nhỏ lên trước)"
+            type="number"
+            value={form.sortOrder}
+            onChange={(e) => set({ sortOrder: e.target.value === "" ? 0 : Number(e.target.value) })}
+            inputClassName="font-mono"
+          />
           <label className="mt-6 flex items-center gap-2">
             <input type="checkbox" checked={form.isPublished} onChange={(e) => set({ isPublished: e.target.checked })} className="size-4" />
             <span className="text-sm text-text-main">Phát hành</span>
@@ -297,7 +283,7 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
       </div>
 
       {error && (
-        <p role="alert" className="border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+        <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
@@ -343,7 +329,7 @@ export default function BundleManager({ skills = [], busyId, onTogglePublished, 
                     {bundle.isPublished ? "Ẩn" : "Phát hành"}
                   </Button>
                   <Button variant="secondary" size="sm" onClick={() => setEditing(bundle)} disabled={bundleBusyId === bundle.id}>Sửa</Button>
-                  <Button variant="ghost" size="sm" onClick={() => setDeleting(bundle)} disabled={bundleBusyId === bundle.id} className="text-red-600 hover:bg-red-500/10">Xoá</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setDeleting(bundle)} disabled={bundleBusyId === bundle.id} className="text-danger hover:bg-red-500/10">Xoá</Button>
                 </div>
               </div>
 

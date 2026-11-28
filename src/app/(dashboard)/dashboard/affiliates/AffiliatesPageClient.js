@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Input, Modal, Select, Badge, CardSkeleton, Toggle } from "@/shared/components";
+import { Button, Input, Modal, Select, Badge, CardSkeleton, Toggle, Card, Table, Pagination, Toast } from "@/shared/components";
 import { fmtUsdNano, NANO } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { parseCountInput, parseSignedAmountInput, parseUsdInput, parseVndInput } from "@/lib/affiliate/amountInput.js";
@@ -100,16 +100,11 @@ export default function AffiliatesPageClient({ initialTab = "", initialQuery = "
       </header>
 
       {notice && (
-        <p
-          role="status"
-          className={`border px-4 py-2 text-sm ${
-            notice.tone === "error"
-              ? "border-danger/40 bg-danger/5 text-danger"
-              : "border-brand-500/40 bg-brand-500/5 text-brand-700 dark:text-brand-400"
-          }`}
-        >
-          {notice.text}
-        </p>
+        <Toast
+          type={notice.tone === "error" ? "error" : "success"}
+          message={notice.text}
+          dismissible={false}
+        />
       )}
 
       <div role="tablist" aria-label="Affiliate" className="flex items-stretch border-b border-border -mt-4">
@@ -299,7 +294,7 @@ function SettingsTab({ onNotice }) {
 
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-      <div className="flex flex-col gap-5 border border-border bg-surface p-6">
+      <Card className="flex flex-col gap-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium text-text-main">Bật chương trình</p>
@@ -435,9 +430,9 @@ function SettingsTab({ onNotice }) {
         <div>
           <Button onClick={save} loading={saving}>Lưu cài đặt</Button>
         </div>
-      </div>
+      </Card>
 
-      <aside className="flex flex-col gap-3 border border-border bg-surface p-6">
+      <Card className="flex flex-col gap-3">
         <p className="meta text-text-muted">Cách tính</p>
         <p className="text-sm leading-6 text-text-muted">
           Hoa hồng = số tiền khách thực trả × tỷ lệ, làm tròn xuống, giữ nguyên đơn vị tiền khách trả.
@@ -455,7 +450,7 @@ function SettingsTab({ onNotice }) {
           Hoa hồng không rút ra tiền mặt. CTV đổi thành credit (theo tỷ giá, giới hạn tốc độ của gói khuôn,
           mỗi lần một khoản có hạn riêng) hoặc tạo voucher dùng một lần để trừ vào giá gói khi thanh toán.
         </p>
-      </aside>
+      </Card>
     </section>
   );
 }
@@ -500,8 +495,6 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -539,77 +532,74 @@ function AffiliatesTab({ onNotice, onShowReferrals, initialQuery = "" }) {
           Chưa có CTV nào có mã giới thiệu.
         </p>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[1180px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["CTV", "Mã", "Trạng thái", "Lượt mở", "Đăng ký", "Đã mua", "Tỷ lệ / N", "Số dư", "Tổng nhận", ""].map((label) => (
-                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.userId} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2.5">
-                    <p className="font-mono text-[12px] text-text-main">{row.email}</p>
-                    <p className="text-xs text-text-muted">
-                      {row.displayName || "—"}
-                      {row.sharedIp ? " · trùng IP với người được giới thiệu" : ""}
-                    </p>
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.code}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap gap-1.5">
-                      <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
-                        {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
-                      </Badge>
-                      {row.invitedAt ? <Badge variant="info">Được mời</Badge> : null}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.clickCount}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.signups}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.payingReferrals}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">
-                    {row.rateBp == null ? `mặc định (${(row.effective.rateBp / 100).toFixed(2)}%)` : `${(row.effective.rateBp / 100).toFixed(2)}%`}
-                    {" / "}
-                    {row.maxOrders == null ? `mặc định (${row.effective.maxOrders})` : row.effective.maxOrders}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap">
-                    <span className={row.wallet?.VND?.available < 0 ? "text-danger" : "text-text-main"}>
-                      {money("VND", row.wallet?.VND?.available ?? 0)}
-                    </span>
-                    <span className="text-text-muted"> · </span>
-                    <span className={row.wallet?.USD?.available < 0 ? "text-danger" : "text-text-main"}>
-                      {money("USD", row.wallet?.USD?.available ?? 0)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">
-                    {money("VND", row.earned.VND)} · {money("USD", row.earned.USD)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => onShowReferrals(row)}>Đã giới thiệu</Button>
-                      <Button size="sm" variant="secondary" onClick={() => setEditing(row)}>Quản lý</Button>
-                    </div>
-                  </td>
-                </tr>
+        <Table className="min-w-[1180px] text-left">
+          <Table.Head>
+            <tr>
+              {["CTV", "Mã", "Trạng thái", "Lượt mở", "Đăng ký", "Đã mua", "Tỷ lệ / N", "Số dư", "Tổng nhận", ""].map((label) => (
+                <Table.HeaderCell key={label || "actions"} className="whitespace-nowrap">
+                  {label}
+                </Table.HeaderCell>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((row) => (
+              <Table.Row key={row.userId}>
+                <Table.Cell>
+                  <p className="font-mono text-[12px] text-text-main">{row.email}</p>
+                  <p className="text-xs text-text-muted">
+                    {row.displayName || "—"}
+                    {row.sharedIp ? " · trùng IP với người được giới thiệu" : ""}
+                  </p>
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{row.code}</Table.Cell>
+                <Table.Cell>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant={row.status === "blocked" ? "error" : "success"} dot>
+                      {row.status === "blocked" ? "Đã khóa" : "Hoạt động"}
+                    </Badge>
+                    {row.invitedAt ? <Badge variant="info">Được mời</Badge> : null}
+                  </div>
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{row.clickCount}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{row.signups}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{row.payingReferrals}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">
+                  {row.rateBp == null ? `mặc định (${(row.effective.rateBp / 100).toFixed(2)}%)` : `${(row.effective.rateBp / 100).toFixed(2)}%`}
+                  {" / "}
+                  {row.maxOrders == null ? `mặc định (${row.effective.maxOrders})` : row.effective.maxOrders}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] whitespace-nowrap">
+                  <span className={row.wallet?.VND?.available < 0 ? "text-danger" : "text-text-main"}>
+                    {money("VND", row.wallet?.VND?.available ?? 0)}
+                  </span>
+                  <span className="text-text-muted"> · </span>
+                  <span className={row.wallet?.USD?.available < 0 ? "text-danger" : "text-text-main"}>
+                    {money("USD", row.wallet?.USD?.available ?? 0)}
+                  </span>
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">
+                  {money("VND", row.earned.VND)} · {money("USD", row.earned.USD)}
+                </Table.Cell>
+                <Table.Cell className="text-right whitespace-nowrap">
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => onShowReferrals(row)}>Đã giới thiệu</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(row)}>Quản lý</Button>
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} CTV · trang {page}/{totalPages}</p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
-            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={page}
+          pageSize={PAGE_SIZE}
+          totalItems={total}
+          onPageChange={setPage}
+        />
       )}
 
       {inviting && (
@@ -985,8 +975,6 @@ function CommissionsTab({ onNotice }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -1019,54 +1007,51 @@ function CommissionsTab({ onNotice }) {
           Chưa có hoa hồng nào.
         </p>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[900px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Ngày", "CTV", "Người mua", "Đơn", "Tỷ lệ", "Hoa hồng", "Trạng thái", "Khả dụng từ", ""].map((label) => (
-                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const state = COMMISSION_STATUS[row.status] || { label: row.status, tone: "neutral" };
-                return (
-                  <tr key={row.id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.createdAt)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.affiliateEmail || row.affiliateUserId}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{row.buyerEmail || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{money(row.currency, row.baseAmount)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{(row.rateBp / 100).toFixed(2)}%</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.availableAt)}</td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      {row.status !== "reversed" && (
-                        <div className="flex justify-end gap-2">
-                          {row.status === "pending" && (
-                            <Button size="sm" variant="secondary" onClick={() => setActing({ row, action: "release" })}>Duyệt ngay</Button>
-                          )}
-                          <Button size="sm" variant="ghost" onClick={() => setActing({ row, action: "reverse" })}>Hủy</Button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[900px] text-left">
+          <Table.Head>
+            <tr>
+              {["Ngày", "CTV", "Người mua", "Đơn", "Tỷ lệ", "Hoa hồng", "Trạng thái", "Khả dụng từ", ""].map((label) => (
+                <Table.HeaderCell key={label || "actions"} className="whitespace-nowrap">{label}</Table.HeaderCell>
+              ))}
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((row) => {
+              const state = COMMISSION_STATUS[row.status] || { label: row.status, tone: "neutral" };
+              return (
+                <Table.Row key={row.id}>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.createdAt)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">{row.affiliateEmail || row.affiliateUserId}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{row.buyerEmail || "—"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{money(row.currency, row.baseAmount)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{(row.rateBp / 100).toFixed(2)}%</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</Table.Cell>
+                  <Table.Cell className="whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.availableAt)}</Table.Cell>
+                  <Table.Cell className="text-right whitespace-nowrap">
+                    {row.status !== "reversed" && (
+                      <div className="flex justify-end gap-2">
+                        {row.status === "pending" && (
+                          <Button size="sm" variant="secondary" onClick={() => setActing({ row, action: "release" })}>Duyệt ngay</Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => setActing({ row, action: "reverse" })}>Hủy</Button>
+                      </div>
+                    )}
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table>
       )}
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} dòng · trang {page}/{totalPages}</p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
-            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={page}
+          pageSize={PAGE_SIZE}
+          totalItems={total}
+          onPageChange={setPage}
+        />
       )}
       {acting && (
         <CommissionActionModal
@@ -1215,8 +1200,6 @@ function ReferralsTab({ affiliate, onClearAffiliate, onNotice }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -1230,14 +1213,14 @@ function ReferralsTab({ affiliate, onClearAffiliate, onNotice }) {
           <div className="flex h-9 items-center gap-2 border border-border px-3 text-sm">
             <span className="text-text-muted">CTV:</span>
             <span className="font-mono text-[12px] text-text-main">{affiliate.email}</span>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="close"
               onClick={() => { onClearAffiliate(); setPage(1); }}
-              className="text-text-muted hover:text-text-main"
               aria-label="Bỏ lọc theo CTV"
-            >
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>
-            </button>
+              className="size-8 px-0 text-text-muted hover:text-text-main"
+            />
           </div>
         )}
         <Button variant="secondary" onClick={load} icon="refresh">Tải lại</Button>
@@ -1252,58 +1235,55 @@ function ReferralsTab({ affiliate, onClearAffiliate, onNotice }) {
           Chưa có tài khoản nào đăng ký qua lời giới thiệu.
         </p>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[860px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Người được giới thiệu", "CTV", "Gắn từ", "Đơn đã trả", "Hoa hồng", ""].map((label) => (
-                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const earned = referralEarnings(row.commissions);
-                return (
-                  <tr key={row.userId} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2.5">
-                      <a href={`/dashboard/users/${encodeURIComponent(row.userId)}`} className="font-mono text-[12px] text-text-main underline-offset-2 hover:underline">
-                        {row.email}
-                      </a>
-                      <p className="text-xs text-text-muted">
-                        Đăng ký {fmtDate(row.signedUpAt)}
-                        {row.userStatus && row.userStatus !== "active" ? ` · ${USER_STATUS_LABEL[row.userStatus] || "không hoạt động"}` : ""}
-                      </p>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <p className="font-mono text-[12px] text-text-main">{row.affiliateEmail || row.affiliateUserId}</p>
-                      <p className="font-mono text-[11px] text-text-muted">{row.affiliateCode || "—"}</p>
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.referredAt || row.signedUpAt)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted">{row.paidOrders}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap">
-                      <p className="text-text-muted">Đang giữ {money("VND", earned.VND.pending)} · {money("USD", earned.USD.pending)}</p>
-                      <p className="text-text-main">Khả dụng {money("VND", earned.VND.available)} · {money("USD", earned.USD.available)}</p>
-                    </td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => setDetaching(row)}>Gỡ giới thiệu</Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[860px] text-left">
+          <Table.Head>
+            <tr>
+              {["Người được giới thiệu", "CTV", "Gắn từ", "Đơn đã trả", "Hoa hồng", ""].map((label) => (
+                <Table.HeaderCell key={label || "actions"} className="whitespace-nowrap">{label}</Table.HeaderCell>
+              ))}
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((row) => {
+              const earned = referralEarnings(row.commissions);
+              return (
+                <Table.Row key={row.userId}>
+                  <Table.Cell>
+                    <a href={`/dashboard/users/${encodeURIComponent(row.userId)}`} className="font-mono text-[12px] text-text-main underline-offset-2 hover:underline">
+                      {row.email}
+                    </a>
+                    <p className="text-xs text-text-muted">
+                      Đăng ký {fmtDate(row.signedUpAt)}
+                      {row.userStatus && row.userStatus !== "active" ? ` · ${USER_STATUS_LABEL[row.userStatus] || "không hoạt động"}` : ""}
+                    </p>
+                  </Table.Cell>
+                  <Table.Cell>
+                    <p className="font-mono text-[12px] text-text-main">{row.affiliateEmail || row.affiliateUserId}</p>
+                    <p className="font-mono text-[11px] text-text-muted">{row.affiliateCode || "—"}</p>
+                  </Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.referredAt || row.signedUpAt)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">{row.paidOrders}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] whitespace-nowrap">
+                    <p className="text-text-muted">Đang giữ {money("VND", earned.VND.pending)} · {money("USD", earned.USD.pending)}</p>
+                    <p className="text-text-main">Khả dụng {money("VND", earned.VND.available)} · {money("USD", earned.USD.available)}</p>
+                  </Table.Cell>
+                  <Table.Cell className="text-right whitespace-nowrap">
+                    <Button size="sm" variant="ghost" onClick={() => setDetaching(row)}>Gỡ giới thiệu</Button>
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table>
       )}
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} tài khoản · trang {page}/{totalPages}</p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
-            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={page}
+          pageSize={PAGE_SIZE}
+          totalItems={total}
+          onPageChange={setPage}
+        />
       )}
 
       {detaching && (
@@ -1422,8 +1402,6 @@ function VouchersTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -1450,44 +1428,41 @@ function VouchersTab() {
           Chưa có voucher nào.
         </p>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[900px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Ngày tạo", "Mã", "CTV", "Giá trị", "Trạng thái", "Người dùng", "Đơn", "Lúc dùng"].map((label) => (
-                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const state = VOUCHER_STATUS[row.status] || { label: row.status, tone: "neutral" };
-                return (
-                  <tr key={row.id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.createdAt)}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.code}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{row.ownerEmail || row.ownerUserId}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedByEmail || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedOrderId ? row.usedOrderId.slice(0, 8) : "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.usedAt)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[900px] text-left">
+          <Table.Head>
+            <tr>
+              {["Ngày tạo", "Mã", "CTV", "Giá trị", "Trạng thái", "Người dùng", "Đơn", "Lúc dùng"].map((label) => (
+                <Table.HeaderCell key={label} className="whitespace-nowrap">{label}</Table.HeaderCell>
+              ))}
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((row) => {
+              const state = VOUCHER_STATUS[row.status] || { label: row.status, tone: "neutral" };
+              return (
+                <Table.Row key={row.id}>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.createdAt)}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">{row.code}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">{row.ownerEmail || row.ownerUserId}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main whitespace-nowrap">{money(row.currency, row.amount)}</Table.Cell>
+                  <Table.Cell className="whitespace-nowrap"><Badge variant={BADGE_TONE[state.tone] || "default"} dot>{state.label}</Badge></Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedByEmail || "—"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{row.usedOrderId ? row.usedOrderId.slice(0, 8) : "—"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmtDate(row.usedAt)}</Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table>
       )}
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} dòng · trang {page}/{totalPages}</p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
-            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={page}
+          pageSize={PAGE_SIZE}
+          totalItems={total}
+          onPageChange={setPage}
+        />
       )}
     </section>
   );

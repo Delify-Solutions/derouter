@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Button, Input, ConfirmModal, Badge } from "@/shared/components";
+import { Card, Button, Input, ConfirmModal, Badge, Table, Toast, CardSkeleton } from "@/shared/components";
 import BannerCard from "./BannerCard";
 import PopupCard from "./PopupCard";
 import DocEditor, { EMPTY_DOC, downloadDocFile, draftFromFile, readMarkdownFile } from "./DocEditor";
@@ -278,9 +278,9 @@ export default function ContentPageClient() {
 
           {!copy ? (
             copyError ? (
-              <p className="text-[12px] text-danger">{copyError}</p>
+              <Toast type="error" message={copyError} dismissible={false} />
             ) : (
-              <p className="text-[12px] text-text-muted">Đang tải…</p>
+              <CardSkeleton />
             )
           ) : (
             <>
@@ -329,22 +329,13 @@ export default function ContentPageClient() {
               <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-2 border-t border-border bg-bg px-1 py-3">
                 <Button onClick={saveCopy} loading={copySaving}>Lưu nội dung</Button>
                 {copyDirty ? (
-                  <span role="status" className="inline-flex items-center gap-1.5 font-mono text-[11px] text-amber-800 dark:text-amber-300">
-                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">edit_note</span>
-                    Có thay đổi chưa lưu
-                  </span>
+                  <Badge role="status" variant="warning" icon="edit_note">Có thay đổi chưa lưu</Badge>
                 ) : null}
                 {copySaved && !copyDirty ? (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-brand-700 dark:text-brand-400">
-                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">check_circle</span>
-                    Đã lưu. Tải lại trang chủ để xem.
-                  </span>
+                  <Badge role="status" variant="success" icon="check_circle">Đã lưu. Tải lại trang chủ để xem.</Badge>
                 ) : null}
                 {copyError ? (
-                  <span role="alert" className="inline-flex items-center gap-1.5 text-[11px] text-danger">
-                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">error</span>
-                    {copyError}
-                  </span>
+                  <Toast type="error" message={copyError} dismissible={false} />
                 ) : null}
                 <a
                   href="/"
@@ -390,78 +381,86 @@ export default function ContentPageClient() {
           </div>
 
           {docsError && (
-            <p role="alert" className="flex items-center gap-1.5 text-[12px] text-danger">
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">error</span>
-              {docsError}
-            </p>
+            <Toast type="error" message={docsError} dismissible={false} />
           )}
 
           {docsLoading ? (
-            <p className="text-[12px] text-text-muted">Đang tải…</p>
-          ) : docs.length === 0 ? (
-            <p className="border border-border bg-surface p-6 text-sm text-text-muted">
-              Chưa có trang nào.
-            </p>
+            <CardSkeleton />
           ) : (
-            <ul className="flex flex-col gap-px border border-border bg-border">
-              {docs.map((doc) => (
-                <li key={doc.id} className="flex flex-wrap items-center gap-3 bg-surface px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-text-main">{doc.title}</span>
-                      <Badge variant={doc.isPublished ? "primary" : "default"} className="shrink-0">
-                        {doc.isPublished ? "Đã đăng" : "Nháp"}
-                      </Badge>
-                    </div>
-                    <p className="mt-0.5 truncate font-mono text-[11px] text-text-subtle">
-                      {doc.section ? `${doc.section} · ` : ""}/docs/{doc.slug} · cập nhật {fmtDate(doc.updatedAt)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {doc.isPublished && (
-                      <a
-                        href={`/docs/${doc.slug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
-                        aria-label={`Xem ${doc.title}`}
-                      >
-                        <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => exportDoc(doc)}
-                      aria-label={`Tải ${doc.title} dưới dạng .md`}
-                      title="Tải .md"
-                      className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">download</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openEdit(doc.id)}
-                      aria-label={`Sửa ${doc.title}`}
-                      className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">edit</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirm({
-                        title: "Xóa trang",
-                        message: `Xóa "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động. Nếu đây là trang mặc định của hệ thống, nó sẽ được tạo lại khi khởi động; muốn ẩn thì bỏ đăng thay vì xóa.`,
-                        onConfirm: () => { setConfirm(null); removeDoc(doc); },
-                      })}
-                      aria-label={`Xóa ${doc.title}`}
-                      className="size-8 flex items-center justify-center border border-border text-danger hover:border-danger transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <Table>
+              <Table.Head>
+                <Table.Row>
+                  <Table.HeaderCell>Trang</Table.HeaderCell>
+                  <Table.HeaderCell>Đường dẫn</Table.HeaderCell>
+                  <Table.HeaderCell align="right"><span className="sr-only">Hành động</span></Table.HeaderCell>
+                </Table.Row>
+              </Table.Head>
+              <Table.Body>
+                {docs.length === 0 ? (
+                  <Table.Empty colSpan={3}>Chưa có trang nào.</Table.Empty>
+                ) : (
+                  docs.map((doc) => (
+                    <Table.Row key={doc.id}>
+                      <Table.Cell>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-medium text-vx-text">{doc.title}</span>
+                          <Badge variant={doc.isPublished ? "primary" : "default"} size="sm" className="shrink-0">
+                            {doc.isPublished ? "Đã đăng" : "Nháp"}
+                          </Badge>
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="whitespace-nowrap font-mono text-[11px] text-vx-text-subtle">
+                        {doc.section ? `${doc.section} · ` : ""}/docs/{doc.slug} · cập nhật {fmtDate(doc.updatedAt)}
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {doc.isPublished && (
+                            <a
+                              href={`/docs/${doc.slug}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex size-9 items-center justify-center text-vx-text-muted transition-colors hover:text-vx-text"
+                              aria-label={`Xem ${doc.title}`}
+                            >
+                              <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                            </a>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon="download"
+                            className="size-9 px-0"
+                            onClick={() => exportDoc(doc)}
+                            aria-label={`Tải ${doc.title} dưới dạng .md`}
+                            title="Tải .md"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon="edit"
+                            className="size-9 px-0"
+                            onClick={() => openEdit(doc.id)}
+                            aria-label={`Sửa ${doc.title}`}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon="delete"
+                            className="size-9 px-0 text-vx-danger hover:bg-vx-danger/10"
+                            onClick={() => setConfirm({
+                              title: "Xóa trang",
+                              message: `Xóa "${doc.title}"? Đường dẫn /docs/${doc.slug} sẽ ngừng hoạt động. Nếu đây là trang mặc định của hệ thống, nó sẽ được tạo lại khi khởi động; muốn ẩn thì bỏ đăng thay vì xóa.`,
+                              onConfirm: () => { setConfirm(null); removeDoc(doc); },
+                            })}
+                            aria-label={`Xóa ${doc.title}`}
+                          />
+                        </div>
+                      </Table.Cell>
+                    </Table.Row>
+                  ))
+                )}
+              </Table.Body>
+            </Table>
           )}
         </div>
       )}

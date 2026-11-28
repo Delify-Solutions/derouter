@@ -52,8 +52,8 @@ export default function CLIToolsPageClient({ machineId }) {
       </div>
       <div className="flex flex-col gap-3 sm:gap-4">
         <div className="flex items-center gap-2 px-1">
-          <span className="material-symbols-outlined text-[18px] text-primary">security</span>
-          <h2 className="text-sm font-semibold text-text-main">MITM Tools</h2>
+          <span className="material-symbols-outlined text-[18px] text-vx-primary">security</span>
+          <h2 className="text-sm font-semibold text-vx-text">MITM Tools</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {mitmTools.map(([toolId, tool]) => (

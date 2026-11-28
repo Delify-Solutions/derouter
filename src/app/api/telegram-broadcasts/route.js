@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { audienceStatsSync, listBroadcastsSync, startBroadcast, MAX_BROADCAST_LENGTH } from "@/lib/notify/broadcast.js";
 import { loadTelegramLinkConfig } from "@/lib/telegram/config.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -28,6 +29,8 @@ export async function GET() {
 // POST /api/telegram-broadcasts { text } — send an announcement to every linked
 // customer who keeps announcements on. Runs in the background; poll GET.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "telegram", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

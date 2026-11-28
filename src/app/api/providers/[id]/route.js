@@ -5,6 +5,7 @@ import {
   updateProviderConnection,
   deleteProviderConnection,
 } from "@/models";
+import { requirePagePermission, requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -84,6 +85,9 @@ export async function GET(request, { params }) {
 
 // PUT /api/providers/[id] - Update connection
 export async function PUT(request, { params }) {
+  // Also called from the Usage page's inline provider-limits panel.
+  const denied = await requireAnyPagePermission(request, ["providers", "usage"], "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -171,6 +175,8 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/providers/[id] - Delete connection
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "providers", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
 

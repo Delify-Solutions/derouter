@@ -6,6 +6,7 @@ import {
   updateKeyGroup,
   deleteKeyGroup,
 } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -37,6 +38,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "groups", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -52,6 +55,8 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "groups", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const result = await deleteKeyGroup(id);

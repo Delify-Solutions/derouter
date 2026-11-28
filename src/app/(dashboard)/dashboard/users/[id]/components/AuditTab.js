@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Pagination } from "@/shared/components";
+import { Button, Card, Pagination } from "@/shared/components";
 import { dateOf, timeOf } from "@/shared/components/billing";
 
 const ACTION_LABEL = {
@@ -81,14 +81,14 @@ export default function AuditTab({ userId }) {
       {error && <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-2 text-sm text-danger">{error}</p>}
 
       {data.entries.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Chưa có ghi chép nào</p>
           <p className="mt-1 text-sm text-text-muted">Mọi thao tác của admin lên tài khoản này sẽ hiện ở đây.</p>
-        </div>
+        </Card>
       ) : (
-        <ul className="flex flex-col gap-px border border-border bg-border">
+        <Card padding="sm">
           {data.entries.map((entry) => (
-            <li key={entry.id} className="bg-surface px-4 py-3">
+            <Card.Row key={entry.id}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className="font-mono text-[12px] text-text-main">
@@ -117,9 +117,9 @@ export default function AuditTab({ userId }) {
                   )}
                 </>
               )}
-            </li>
+            </Card.Row>
           ))}
-        </ul>
+        </Card>
       )}
 
       <div className="flex items-center justify-between gap-3">

@@ -14,6 +14,7 @@ import {
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { notifyAdminLogin } from "@/lib/notify/telegram";
 import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
+import { getSuperAdminAccount } from "@/lib/auth/adminUsers";
 
 function clearOidcCookies(cookieStore) {
   cookieStore.delete("oidc_state");
@@ -83,11 +84,17 @@ export async function GET(request) {
     });
 
     clearOidcCookies(cookieStore);
+    // Per-account SSO identity mapping is out of scope (design.md Non-Goals):
+    // every successful OIDC sign-in resolves to the Super Admin account.
+    const superAdmin = await getSuperAdminAccount();
     await setDashboardAuthCookie(cookieStore, request, {
       oidc: true,
       oidcSub: payload.sub || null,
       oidcEmail: pickOidcEmail(payload) || null,
       oidcName: pickOidcDisplayName(payload),
+      adminUserId: superAdmin?.id || null,
+      username: superAdmin?.username || null,
+      role: "super_admin",
     });
     notifyAdminLogin({
       method: "oidc",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card } from "@/shared/components";
+import { Card, Button, Input, Select } from "@/shared/components";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getModelKind } from "@/shared/constants/models";
 import { getModelsByProviderId } from "@/shared/constants/models";
@@ -110,29 +110,24 @@ export function SttExampleCard({ providerId }) {
   const resultStr = typeof result === "string" ? result : (result ? JSON.stringify(result, null, 2) : `{\n  "text": "Hello world..."\n}`);
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold mb-4">Example</h2>
+    <Card title="Example">
       <div className="flex flex-col gap-2.5">
         {/* Model */}
         {sttModels.length > 0 ? (
           <Row label="Model">
-            <select
+            <Select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
-            >
-              {sttModels.map((m) => (
-                <option key={m.id} value={m.id}>{m.name || m.id}</option>
-              ))}
-            </select>
+              options={sttModels.map((m) => ({ value: m.id, label: m.name || m.id }))}
+            />
           </Row>
         ) : (
           <Row label="Model">
-            <input
+            <Input
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               placeholder="Enter model id"
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary font-mono"
+              inputClassName="font-mono"
             />
           </Row>
         )}
@@ -140,28 +135,29 @@ export function SttExampleCard({ providerId }) {
         {/* Endpoint */}
         <Row label="Endpoint">
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <span className="w-full min-w-0 flex-1 px-3 py-1.5 text-sm font-mono text-text-main bg-sidebar rounded-lg truncate">
+            <span className="w-full min-w-0 flex-1 px-3 py-1.5 text-sm font-mono text-vx-text bg-vx-page rounded-vx-md truncate">
               {endpoint}/v1/audio/transcriptions
             </span>
             {tunnelEndpoint && (
-              <button
-                onClick={() => setUseTunnel((v) => !v)}
+              <Button
+                type="button"
+                size="sm"
+                variant={useTunnel ? "primary-outline" : "light-outline"}
+                icon="wifi_tethering"
+                className="shrink-0"
                 title={useTunnel ? "Using tunnel" : "Using local"}
-                className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border shrink-0 transition-colors ${
-                  useTunnel ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"
-                }`}
+                onClick={() => setUseTunnel((v) => !v)}
               >
-                <span className="material-symbols-outlined text-[14px]">wifi_tethering</span>
                 Tunnel
-              </button>
+              </Button>
             )}
           </div>
         </Row>
 
         {/* API Key */}
         <Row label="API Key">
-          <span className="px-3 py-1.5 text-sm font-mono text-text-main bg-sidebar rounded-lg truncate block">
-            {apiKey ? `${apiKey.slice(0, 8)}${"\u2022".repeat(Math.min(20, Math.max(0, apiKey.length - 8)))}` : <span className="text-text-muted italic">No key configured</span>}
+          <span className="px-3 py-1.5 text-sm font-mono text-vx-text bg-vx-page rounded-vx-md truncate block">
+            {apiKey ? `${apiKey.slice(0, 8)}${"•".repeat(Math.min(20, Math.max(0, apiKey.length - 8)))}` : <span className="text-vx-text-muted italic">No key configured</span>}
           </span>
         </Row>
 
@@ -172,10 +168,10 @@ export function SttExampleCard({ providerId }) {
               type="file"
               accept="audio/*,video/mp4,.m4a,.mp3,.wav,.ogg,.flac,.webm,.opus"
               onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
-              className="w-full text-xs text-text-muted file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border file:border-border file:bg-background file:text-text-main hover:file:bg-sidebar file:cursor-pointer"
+              className="w-full text-xs text-vx-text-muted file:mr-2 file:py-1 file:px-2.5 file:rounded-vx-md file:border file:border-vx-border file:bg-vx-surface file:text-vx-text hover:file:bg-vx-surface-2 file:cursor-pointer"
             />
             {audioFile && (
-              <span className="text-xs text-text-muted font-mono">
+              <span className="text-xs text-vx-text-muted font-mono">
                 {audioFile.name} · {(audioFile.size / 1024).toFixed(1)} KB
               </span>
             )}
@@ -185,11 +181,11 @@ export function SttExampleCard({ providerId }) {
         {/* Language (if model supports) */}
         {allowedParams.includes("language") && (
           <Row label="Language">
-            <input
+            <Input
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
               placeholder="e.g. en, vi, ja (auto-detect if empty)"
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary font-mono"
+              inputClassName="font-mono"
             />
           </Row>
         )}
@@ -197,11 +193,10 @@ export function SttExampleCard({ providerId }) {
         {/* Prompt (if model supports) */}
         {allowedParams.includes("prompt") && (
           <Row label="Prompt">
-            <input
+            <Input
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="optional context to improve accuracy"
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
             />
           </Row>
         )}
@@ -209,7 +204,7 @@ export function SttExampleCard({ providerId }) {
         {/* Temperature (if model supports) */}
         {allowedParams.includes("temperature") && (
           <Row label="Temperature">
-            <input
+            <Input
               type="number"
               step="0.1"
               min="0"
@@ -217,7 +212,6 @@ export function SttExampleCard({ providerId }) {
               value={temperature}
               onChange={(e) => setTemperature(e.target.value)}
               placeholder="0 - 1 (default 0)"
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
             />
           </Row>
         )}
@@ -225,66 +219,71 @@ export function SttExampleCard({ providerId }) {
         {/* Response format (if model supports) */}
         {allowedParams.includes("response_format") && (
           <Row label="Response Format">
-            <select
+            <Select
               value={responseFormat}
               onChange={(e) => setResponseFormat(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
-            >
-              <option value="json">json</option>
-              <option value="text">text</option>
-              <option value="srt">srt</option>
-              <option value="verbose_json">verbose_json</option>
-              <option value="vtt">vtt</option>
-            </select>
+              options={[
+                { value: "json", label: "json" },
+                { value: "text", label: "text" },
+                { value: "srt", label: "srt" },
+                { value: "verbose_json", label: "verbose_json" },
+                { value: "vtt", label: "vtt" },
+              ]}
+            />
           </Row>
         )}
 
         {/* Curl + Run */}
         <div className="mt-1">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1.5">
-            <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Request</span>
+            <span className="text-xs font-semibold text-vx-text-muted uppercase tracking-wider">Request</span>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon={copiedCurl ? "check" : "content_copy"}
                 onClick={() => copyCurl(curlSnippet)}
-                className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedCurl ? "check" : "content_copy"}</span>
                 {copiedCurl ? "Copied" : "Copy"}
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                icon="play_arrow"
+                loading={running}
+                disabled={!audioFile || !modelFull}
                 onClick={handleRun}
-                disabled={running || !audioFile || !modelFull}
-                className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-                  play_arrow
-                </span>
                 {running ? "Transcribing..." : "Run"}
-              </button>
+              </Button>
             </div>
           </div>
-          <pre className="bg-sidebar rounded-lg px-3 py-2.5 text-xs font-mono text-text-main overflow-x-auto whitespace-pre-wrap break-all">{curlSnippet}</pre>
+          <pre className="bg-vx-page rounded-vx-md px-3 py-2.5 text-xs font-mono text-vx-text overflow-x-auto whitespace-pre-wrap break-all">{curlSnippet}</pre>
         </div>
 
-        {error && <p className="text-xs text-red-500 break-words">{error}</p>}
+        {error && <p className="text-xs text-vx-danger break-words">{error}</p>}
 
         {/* Response */}
         <div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1.5">
-            <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+            <span className="text-xs font-semibold text-vx-text-muted uppercase tracking-wider">
               Response {result && latency && <span className="font-normal normal-case">&#9889; {latency}ms</span>}
             </span>
             {result && (
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon={copiedRes ? "check" : "content_copy"}
                 onClick={() => copyRes(resultStr)}
-                className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedRes ? "check" : "content_copy"}</span>
                 {copiedRes ? "Copied" : "Copy"}
-              </button>
+              </Button>
             )}
           </div>
-          <pre className="bg-sidebar rounded-lg px-3 py-2.5 text-xs font-mono text-text-main overflow-x-auto whitespace-pre-wrap break-all opacity-70">
+          <pre className="bg-vx-page rounded-vx-md px-3 py-2.5 text-xs font-mono text-vx-text overflow-x-auto whitespace-pre-wrap break-all opacity-70">
             {resultStr}
           </pre>
         </div>

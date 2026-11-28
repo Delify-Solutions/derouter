@@ -4,6 +4,9 @@ import { getSettings } from "@/lib/localDb";
 import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
+import { isSuperAdminSession } from "@/lib/auth/adminUsers";
+import { viewablePageKeys } from "@/lib/auth/adminAccess";
+import { PAGE_KEYS } from "@/lib/auth/adminPages";
 
 export async function GET() {
   try {
@@ -11,6 +14,9 @@ export async function GET() {
     const cookieStore = await cookies();
     const session = await getDashboardAuthSession(cookieStore.get("auth_token")?.value);
     const requireLogin = settings.requireLogin !== false;
+    const isSuperAdmin = isSuperAdminSession(session);
+    const accountUsername = session?.username || null;
+    const viewablePages = session ? await viewablePageKeys(session, PAGE_KEYS) : [];
     const authMode = settings.authMode || "password";
     const ssoType = settings.ssoType || "oidc";
     const oidcName = String(session?.oidcName || "").trim();
@@ -23,6 +29,7 @@ export async function GET() {
       samlEmail ||
       oidcName ||
       oidcEmail ||
+      accountUsername ||
       (session?.saml ? "SAML user" : session?.oidc ? "OIDC user" : "Password user");
 
     const loginMethod = session?.saml ? "SAML" : session?.oidc ? "OIDC" : "Password";
@@ -45,6 +52,12 @@ export async function GET() {
       samlName: samlName || null,
       samlEmail: samlEmail || null,
       samlLogin: !!session?.saml,
+      // Admin accounts (spec admin-accounts): which account is signed in and
+      // which pages it may view, for the sidebar and account-switch UI.
+      username: accountUsername,
+      isSuperAdmin,
+      mustChangePassword: !!session?.mustChangePassword,
+      viewablePages,
     });
   } catch {
     return NextResponse.json({
@@ -65,6 +78,10 @@ export async function GET() {
       samlName: null,
       samlEmail: null,
       samlLogin: false,
+      username: null,
+      isSuperAdmin: false,
+      mustChangePassword: false,
+      viewablePages: [],
     });
   }
 }

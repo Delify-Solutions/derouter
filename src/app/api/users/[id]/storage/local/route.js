@@ -5,6 +5,7 @@ import { getUserById } from "@/lib/localDb";
 import { insertAuditSync } from "@/lib/billing/audit.js";
 import { isLocalImageUserSync, setLocalImageUserSync } from "@/lib/storage/localImages.js";
 import { storageViewSync } from "@/lib/storage/userStorage.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -14,6 +15,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * keep this customer's generated images on the router's disk instead of any CDN.
  */
 export async function PUT(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id } = await params;
   if (!(await getUserById(id))) {
     return NextResponse.json({ error: "Không tìm thấy người dùng" }, { status: 404, headers: NO_STORE });

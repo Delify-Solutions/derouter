@@ -5,8 +5,11 @@ import { FORMATS } from "open-sse/translator/formats.js";
 import { getModelInfo } from "@/sse/services/model.js";
 import { getProviderConnections } from "@/lib/localDb.js";
 import { getExecutor } from "open-sse/executors/index.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "translator", "edit");
+  if (denied) return denied;
   try {
     const { step, body } = await request.json();
 

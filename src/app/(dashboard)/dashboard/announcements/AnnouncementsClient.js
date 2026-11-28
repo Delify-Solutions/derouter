@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, CardSkeleton, ConfirmModal, Input, Modal, Toggle } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, ConfirmModal, Input, Modal, Toast, Toggle } from "@/shared/components";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
 const EMPTY = { title: "", body: "", important: false, sendTelegram: false };
@@ -72,20 +72,23 @@ export default function AnnouncementsClient() {
       </div>
 
       {notice ? (
-        <p role="status" className="border border-brand-500/40 bg-brand-500/5 px-4 py-2 text-sm text-brand-700 dark:text-brand-400">{notice}</p>
+        <Toast type="success" message={notice} onDismiss={() => setNotice("")} />
       ) : null}
-      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+      {error ? <Toast type="error" message={error} onDismiss={() => setError("")} /> : null}
 
       {loading ? (
         <CardSkeleton />
       ) : rows.length === 0 ? (
-        <p className="border border-dashed border-border px-6 py-12 text-center text-sm text-text-muted">
-          Chưa có thông báo nào. Bấm &quot;Thông báo mới&quot; để đăng.
-        </p>
+        <Card padding="none" className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <span className="material-symbols-outlined text-[32px] text-vx-text-subtle">campaign</span>
+          <p className="text-sm text-vx-text-muted">
+            Chưa có thông báo nào. Bấm &quot;Thông báo mới&quot; để đăng.
+          </p>
+        </Card>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           {rows.map((row) => (
-            <li key={row.id} className="flex flex-col gap-3 border border-border bg-surface p-5">
+            <Card key={row.id} className="flex flex-col gap-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -110,9 +113,9 @@ export default function AnnouncementsClient() {
                 />
               ) : null}
               <p className="whitespace-pre-line text-sm text-text-muted [overflow-wrap:anywhere]">{row.body}</p>
-            </li>
+            </Card>
           ))}
-        </ul>
+        </div>
       )}
 
       {editing ? (
@@ -289,7 +292,7 @@ function AnnouncementModal({ row, onClose, onSaved }) {
         ) : (
           <p className="text-xs text-text-muted">Sửa (kể cả ảnh) chỉ đổi bản trên web; tin đã gửi qua Telegram giữ nguyên.</p>
         )}
-        {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+        {error ? <Toast type="error" message={error} dismissible={false} /> : null}
       </div>
     </Modal>
   );

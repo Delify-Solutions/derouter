@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Input, Modal, Pagination, Select, CardSkeleton } from "@/shared/components";
+import { Button, Input, Modal, Pagination, Select, CardSkeleton, Table, Badge, Card } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano } from "@/shared/utils/money";
 import { cn } from "@/shared/utils/cn";
 
@@ -43,11 +43,7 @@ const EMPTY_SUMMARY = {
   bySource: { purchase: 0, gift: 0, admin: 0, affiliate: 0, referral_bonus: 0 },
 };
 
-const STATUS_STYLES = {
-  active: "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400",
-  unverified: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  suspended: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
-};
+const STATUS_VARIANT = { active: "success", unverified: "warning", suspended: "error" };
 
 const STATUS_LABEL = { active: "Hoạt động", unverified: "Chưa xác minh", suspended: "Đang khóa" };
 
@@ -90,12 +86,10 @@ function SummaryKpis({ summary }) {
 }
 
 function StatusBadge({ status }) {
-  const cls = STATUS_STYLES[status] || "border-border bg-surface-2 text-text-muted";
   return (
-    <span className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${cls}`}>
-      <span className="size-1.5 bg-current" aria-hidden="true" />
+    <Badge variant={STATUS_VARIANT[status] || "default"} dot>
       {STATUS_LABEL[status] || status}
-    </span>
+    </Badge>
   );
 }
 
@@ -457,7 +451,7 @@ export default function UsersPageClient() {
       {loading ? (
         <CardSkeleton />
       ) : data.users.length === 0 ? (
-        <div className="flex flex-col items-start gap-3 border border-border bg-surface px-6 py-14">
+        <Card padding="lg" className="flex flex-col items-start gap-3">
           <span className="material-symbols-outlined text-[28px] text-text-muted" aria-hidden="true">group</span>
           <p className="font-medium text-text-main">
             {data.total === 0 && !hasAnyFilter
@@ -481,7 +475,7 @@ export default function UsersPageClient() {
               Xóa bộ lọc
             </Button>
           )}
-        </div>
+        </Card>
       ) : (
         <>
         {selected.size > 0 && (
@@ -502,107 +496,104 @@ export default function UsersPageClient() {
             </div>
           </div>
         )}
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[1480px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="w-10 px-4 py-2.5">
+        <Table className="min-w-[1480px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell className="w-10">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-brand-500"
+                  checked={allOnPageSelected}
+                  onChange={toggleAllOnPage}
+                  aria-label="Chọn tất cả tài khoản trên trang này"
+                />
+              </Table.HeaderCell>
+              <Table.HeaderCell>Email</Table.HeaderCell>
+              <Table.HeaderCell>Nhóm</Table.HeaderCell>
+              <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+              <Table.HeaderCell>Gói</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">
+                <button type="button" onClick={() => toggleSort("available")} className="hover:text-text-main">
+                  Credit khả dụng{sortLabel("available")}
+                </button>
+              </Table.HeaderCell>
+              {SOURCES.map((s) => (
+                <Table.HeaderCell key={s.id} className="text-right" title={s.label}>
+                  {s.short}
+                </Table.HeaderCell>
+              ))}
+              <Table.HeaderCell className="text-right">
+                <button type="button" onClick={() => toggleSort("spend30d")} className="hover:text-text-main">
+                  Chi 30 ngày{sortLabel("spend30d")}
+                </button>
+              </Table.HeaderCell>
+              <Table.HeaderCell>Dùng gần nhất</Table.HeaderCell>
+              <Table.HeaderCell>
+                <button type="button" onClick={() => toggleSort("createdAt")} className="hover:text-text-main">
+                  Tạo{sortLabel("createdAt")}
+                </button>
+              </Table.HeaderCell>
+              <Table.HeaderCell>
+                <button type="button" onClick={() => toggleSort("lastLoginAt")} className="hover:text-text-main">
+                  Đăng nhập{sortLabel("lastLoginAt")}
+                </button>
+              </Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {data.users.map((user) => (
+              <Table.Row
+                key={user.id}
+                onClick={() => router.push(`/dashboard/users/${user.id}`)}
+              >
+                <Table.Cell onClick={(event) => event.stopPropagation()}>
                   <input
                     type="checkbox"
                     className="size-4 accent-brand-500"
-                    checked={allOnPageSelected}
-                    onChange={toggleAllOnPage}
-                    aria-label="Chọn tất cả tài khoản trên trang này"
+                    checked={selected.has(user.id)}
+                    onChange={() => toggleOne(user.id)}
+                    aria-label={`Chọn ${user.email}`}
                   />
-                </th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Email</th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Nhóm</th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Trạng thái</th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Gói</th>
-                <th scope="col" className="meta px-4 py-2.5 text-right font-medium text-text-muted">
-                  <button type="button" onClick={() => toggleSort("available")} className="hover:text-text-main">
-                    Credit khả dụng{sortLabel("available")}
-                  </button>
-                </th>
-                {SOURCES.map((s) => (
-                  <th key={s.id} scope="col" className="meta px-3 py-2.5 text-right font-medium text-text-muted" title={s.label}>
-                    {s.short}
-                  </th>
-                ))}
-                <th scope="col" className="meta px-4 py-2.5 text-right font-medium text-text-muted">
-                  <button type="button" onClick={() => toggleSort("spend30d")} className="hover:text-text-main">
-                    Chi 30 ngày{sortLabel("spend30d")}
-                  </button>
-                </th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Dùng gần nhất</th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">
-                  <button type="button" onClick={() => toggleSort("createdAt")} className="hover:text-text-main">
-                    Tạo{sortLabel("createdAt")}
-                  </button>
-                </th>
-                <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">
-                  <button type="button" onClick={() => toggleSort("lastLoginAt")} className="hover:text-text-main">
-                    Đăng nhập{sortLabel("lastLoginAt")}
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.users.map((user) => (
-                <tr
-                  key={user.id}
-                  onClick={() => router.push(`/dashboard/users/${user.id}`)}
-                  className="cursor-pointer border-b border-border last:border-b-0 transition-colors duration-150 hover:bg-surface-2/60"
-                >
-                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-brand-500"
-                      checked={selected.has(user.id)}
-                      onChange={() => toggleOne(user.id)}
-                      aria-label={`Chọn ${user.email}`}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/dashboard/users/${user.id}`}
-                      onClick={(event) => event.stopPropagation()}
-                      className="block font-mono text-[12px] text-text-main break-all hover:underline"
-                    >
-                      {user.email}
-                    </Link>
-                    {user.displayName && <span className="text-xs text-text-muted">{user.displayName}</span>}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{user.groupName || "—"}</td>
-                  <td className="px-4 py-3"><StatusBadge status={user.status} /></td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-main">{user.queuedPlans}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[12px] text-text-main">
-                    {user.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(user.availableNanoUsd)}
-                    {user.debtNanoUsd > 0 && (
-                      <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">
-                        nợ {fmtUsdNano(user.debtNanoUsd)}
-                      </span>
-                    )}
-                  </td>
-                  {SOURCES.map((s) => {
-                    const amount = user.bySource?.[s.id] ?? 0;
-                    return (
-                      <td key={s.id} className="px-3 py-3 text-right font-mono text-[12px] text-text-muted">
-                        {amount > 0 ? fmtUsdNano(amount) : "—"}
-                      </td>
-                    );
-                  })}
-                  <td className="px-4 py-3 text-right font-mono text-[12px] text-text-muted">
-                    {fmtUsdNano(user.spend30dNanoUsd)}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.lastUsageAt)}</td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.createdAt)}</td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-text-muted">{formatDate(user.lastLoginAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </Table.Cell>
+                <Table.Cell>
+                  <Link
+                    href={`/dashboard/users/${user.id}`}
+                    onClick={(event) => event.stopPropagation()}
+                    className="block font-mono text-[12px] text-text-main break-all hover:underline"
+                  >
+                    {user.email}
+                  </Link>
+                  {user.displayName && <span className="text-xs text-text-muted">{user.displayName}</span>}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{user.groupName || "—"}</Table.Cell>
+                <Table.Cell><StatusBadge status={user.status} /></Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main">{user.queuedPlans}</Table.Cell>
+                <Table.Cell className="text-right font-mono text-[12px] text-text-main">
+                  {user.hasUnlimitedCredit ? fmtCreditNano(0, true) : fmtUsdNano(user.availableNanoUsd)}
+                  {user.debtNanoUsd > 0 && (
+                    <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400">
+                      nợ {fmtUsdNano(user.debtNanoUsd)}
+                    </span>
+                  )}
+                </Table.Cell>
+                {SOURCES.map((s) => {
+                  const amount = user.bySource?.[s.id] ?? 0;
+                  return (
+                    <Table.Cell key={s.id} className="text-right font-mono text-[12px] text-text-muted">
+                      {amount > 0 ? fmtUsdNano(amount) : "—"}
+                    </Table.Cell>
+                  );
+                })}
+                <Table.Cell className="text-right font-mono text-[12px] text-text-muted">
+                  {fmtUsdNano(user.spend30dNanoUsd)}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{formatDate(user.lastUsageAt)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{formatDate(user.createdAt)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{formatDate(user.lastLoginAt)}</Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
         </>
       )}
 

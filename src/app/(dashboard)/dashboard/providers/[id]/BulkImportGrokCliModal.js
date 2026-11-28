@@ -181,7 +181,7 @@ export default function BulkImportGrokCliModal({ isOpen, onClose, onSuccess }) {
     <Modal isOpen={isOpen} title={translate("Bulk Add Grok CLI Accounts")} onClose={handleClose}>
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-vx-text-muted">
             {translate("Upload multiple .json files or paste JSON array / object.")}
           </p>
           <input
@@ -208,14 +208,14 @@ export default function BulkImportGrokCliModal({ isOpen, onClose, onSuccess }) {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`relative rounded border transition-colors ${
+          className={`relative rounded-vx-md border transition-colors ${
             isDragging
-              ? "border-primary bg-primary/10 ring-2 ring-primary/30"
-              : "border-accent/30 bg-sidebar"
+              ? "border-vx-primary bg-vx-primary/10 ring-2 ring-vx-primary/30"
+              : "border-vx-border bg-vx-surface"
           }`}
         >
           <textarea
-            className="w-full rounded bg-transparent p-2.5 text-sm font-mono resize-y min-h-[240px] focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full rounded-vx-md bg-transparent p-2.5 text-sm font-mono resize-y min-h-[240px] focus:outline-none focus:ring-2 focus:ring-vx-primary/15"
             placeholder={PLACEHOLDER}
             value={jsonText}
             onChange={(e) => {
@@ -226,9 +226,9 @@ export default function BulkImportGrokCliModal({ isOpen, onClose, onSuccess }) {
           />
 
           {isDragging && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-sidebar/90 rounded pointer-events-none backdrop-blur-xs">
-              <span className="material-symbols-outlined text-3xl text-primary mb-1">upload_file</span>
-              <span className="text-sm font-medium text-primary">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-vx-surface/90 rounded-vx-md pointer-events-none backdrop-blur-xs">
+              <span className="material-symbols-outlined text-3xl text-vx-primary mb-1">upload_file</span>
+              <span className="text-sm font-medium text-vx-primary">
                 {translate("Drop .json files here")}
               </span>
             </div>
@@ -236,7 +236,7 @@ export default function BulkImportGrokCliModal({ isOpen, onClose, onSuccess }) {
         </div>
 
         {fileCountInfo && (
-          <div className="flex items-center gap-1.5 text-xs text-green-400 font-medium bg-green-500/10 border border-green-500/20 px-2.5 py-1.5 rounded">
+          <div className="flex items-center gap-1.5 text-xs text-vx-success font-medium bg-vx-success/10 border border-vx-success/20 px-2.5 py-1.5 rounded-vx-md">
             <span className="material-symbols-outlined text-sm">check_circle</span>
             <span>
               {translate("Loaded")} {fileCountInfo.accountsCount} {translate("account(s) from")}{" "}
@@ -246,18 +246,18 @@ export default function BulkImportGrokCliModal({ isOpen, onClose, onSuccess }) {
         )}
 
         {parseError && (
-          <p className="text-xs text-red-500 break-words">{parseError}</p>
+          <p className="text-xs text-vx-danger break-words">{parseError}</p>
         )}
 
         {result && result.failed > 0 && (
           <div className="flex flex-col gap-2">
-            <div className="text-sm font-medium text-yellow-400">
+            <div className="text-sm font-medium text-vx-warning">
               ✗ {result.failed} {translate("failed")}
             </div>
             {failedItems.length > 0 && (
-              <ul className="rounded border border-accent/20 bg-sidebar/50 p-2 text-xs font-mono max-h-40 overflow-y-auto">
+              <ul className="rounded-vx-md border border-vx-border bg-vx-surface-2 p-2 text-xs font-mono max-h-40 overflow-y-auto">
                 {failedItems.map((item) => (
-                  <li key={item.index} className="text-red-400">
+                  <li key={item.index} className="text-vx-danger">
                     [{item.index}] {item.error}
                   </li>
                 ))}

@@ -92,5 +92,8 @@ graphify-out/*
 
 # Kiro local workspace state
 .kiro/
+
+# Licensed third-party design reference (Vuexy) — local design reference only, never committed
+vuexy-html-admin-template/
 # Local-only compose override (e.g. http://localhost testing).
 docker-compose.override.yml

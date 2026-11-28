@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { Button, Card, Input, Select, Table, Toast } from "@/shared/components";
 import { fmtUsdNano } from "@/shared/utils/money";
 import { cn } from "@/shared/utils/cn";
 
@@ -70,7 +71,7 @@ function bucketLabel(bucket, granularity) {
 
 function Segmented({ options, value, onChange, label }) {
   return (
-    <div role="group" aria-label={label} className="inline-flex flex-wrap border border-border">
+    <div role="group" aria-label={label} className="inline-flex flex-wrap items-center gap-1 rounded-vx-md bg-vx-surface-2 p-1">
       {options.map((option) => (
         <button
           key={option.value}
@@ -78,8 +79,8 @@ function Segmented({ options, value, onChange, label }) {
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "h-8 border-r border-border px-3 text-xs font-medium last:border-r-0 transition-colors duration-150",
-            value === option.value ? "bg-text-main text-bg" : "bg-surface text-text-muted hover:bg-surface-2 hover:text-text-main"
+            "h-8 rounded-vx-sm px-3 text-xs font-medium transition-colors duration-150",
+            value === option.value ? "bg-vx-primary text-white" : "text-vx-text-muted hover:bg-vx-surface-3 hover:text-vx-text"
           )}
         >
           {option.label}
@@ -91,11 +92,11 @@ function Segmented({ options, value, onChange, label }) {
 
 function Kpi({ label, value, hint }) {
   return (
-    <div className="flex flex-col gap-1 bg-surface px-4 py-3">
-      <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">{label}</span>
-      <span className="font-mono text-xl font-semibold tabular-nums text-text-main">{value}</span>
-      {hint ? <span className="text-xs text-text-muted">{hint}</span> : null}
-    </div>
+    <Card padding="sm" className="flex min-w-0 flex-col gap-1">
+      <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-vx-text-muted">{label}</span>
+      <span className="font-mono text-xl font-semibold tabular-nums text-vx-text [overflow-wrap:anywhere]">{value}</span>
+      {hint ? <span className="text-xs text-vx-text-muted">{hint}</span> : null}
+    </Card>
   );
 }
 
@@ -121,37 +122,46 @@ function UserFilter({ value, onChange }) {
 
   if (value) {
     return (
-      <div className="flex h-8 items-center gap-2 border border-border bg-surface-2 px-2 text-xs">
-        <span className="font-mono text-text-main">{value.email}</span>
-        <button type="button" onClick={() => onChange(null)} aria-label="Bỏ lọc khách hàng" className="text-text-muted hover:text-text-main">
-          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>
-        </button>
+      <div className="flex h-9 items-center gap-2 rounded-vx-md border border-vx-border bg-vx-surface-2 pl-3 pr-1 text-xs">
+        <span className="font-mono text-vx-text">{value.email}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange(null)}
+          aria-label="Bỏ lọc khách hàng"
+          className="size-7 px-0"
+          icon="close"
+        />
       </div>
     );
   }
   return (
-    <div className="relative">
-      <input
+    <div className="relative w-52">
+      <Input
         value={query}
         onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim().length < 2) setResults([]); }}
         placeholder="Lọc khách (email)…"
         aria-label="Lọc theo khách hàng"
-        className="h-8 w-52 border border-border bg-surface px-2 text-xs text-text-main placeholder:text-text-subtle focus:border-text-main focus:outline-none"
+        className="gap-0"
+        inputClassName="h-9"
       />
       {results.length > 0 ? (
-        <ul className="absolute left-0 top-9 z-20 w-72 border border-border bg-surface">
-          {results.map((user) => (
-            <li key={user.id}>
-              <button
-                type="button"
-                onClick={() => { onChange({ id: user.id, email: user.email }); setQuery(""); setResults([]); }}
-                className="block w-full truncate px-2 py-1.5 text-left font-mono text-xs text-text-main hover:bg-surface-2"
-              >
-                {user.email}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <Card padding="none" className="absolute left-0 top-10 z-20 w-72 overflow-hidden">
+          <ul>
+            {results.map((user) => (
+              <li key={user.id}>
+                <button
+                  type="button"
+                  onClick={() => { onChange({ id: user.id, email: user.email }); setQuery(""); setResults([]); }}
+                  className="block w-full truncate px-3 py-2 text-left font-mono text-xs text-vx-text hover:bg-vx-surface-2"
+                >
+                  {user.email}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
       ) : null}
     </div>
   );
@@ -161,14 +171,14 @@ function ChartTooltip({ active, payload, label, names }) {
   if (!active || !payload?.length) return null;
   const total = payload.reduce((sum, p) => sum + (Number(p.value) || 0), 0);
   return (
-    <div className="border border-border bg-surface px-3 py-2 text-xs">
-      <p className="mb-1 text-text-muted">{label}</p>
-      <p className="mb-1 font-mono font-semibold text-text-main">{fmtTokens(total)} token</p>
+    <div className="rounded-vx-md border border-vx-border bg-vx-surface px-3 py-2 text-xs shadow-vx-md">
+      <p className="mb-1 text-vx-text-muted">{label}</p>
+      <p className="mb-1 font-mono font-semibold text-vx-text">{fmtTokens(total)} token</p>
       {[...payload].reverse().map((p) => (
         <p key={p.dataKey} className="flex items-center gap-2">
           <span className="inline-block h-0.5 w-3" style={{ background: p.color }} aria-hidden="true" />
-          <span className="font-mono text-text-main">{fmtTokens(p.value)}</span>
-          <span className="text-text-muted">{names[p.dataKey] || p.dataKey}</span>
+          <span className="font-mono text-vx-text">{fmtTokens(p.value)}</span>
+          <span className="text-vx-text-muted">{names[p.dataKey] || p.dataKey}</span>
         </p>
       ))}
     </div>
@@ -306,106 +316,101 @@ export default function StatsClient() {
       </div>
 
       {/* Filters: one block above everything they scope. */}
-      <section className="flex flex-col gap-3 border border-border bg-surface p-4">
+      <Card padding="sm" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Segmented label="Khoảng thời gian" options={PRESETS} value={preset} onChange={pickPreset} />
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">Từ</span>
-            <input
-              type="datetime-local"
-              value={toLocalInput(range.from)}
-              onChange={(e) => { const ms = fromLocalInput(e.target.value); if (ms != null) { setPreset(""); setRange((r) => ({ ...r, from: ms })); } }}
-              className="h-8 border border-border bg-surface px-2 font-mono text-xs text-text-main focus:border-text-main focus:outline-none"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">Đến</span>
-            <input
-              type="datetime-local"
-              value={toLocalInput(range.to)}
-              onChange={(e) => { const ms = fromLocalInput(e.target.value); if (ms != null) { setPreset(""); setRange((r) => ({ ...r, to: ms })); } }}
-              className="h-8 border border-border bg-surface px-2 font-mono text-xs text-text-main focus:border-text-main focus:outline-none"
-            />
-          </label>
+          <Input
+            label="Từ"
+            type="datetime-local"
+            value={toLocalInput(range.from)}
+            onChange={(e) => { const ms = fromLocalInput(e.target.value); if (ms != null) { setPreset(""); setRange((r) => ({ ...r, from: ms })); } }}
+            inputClassName="h-9 font-mono"
+          />
+          <Input
+            label="Đến"
+            type="datetime-local"
+            value={toLocalInput(range.to)}
+            onChange={(e) => { const ms = fromLocalInput(e.target.value); if (ms != null) { setPreset(""); setRange((r) => ({ ...r, to: ms })); } }}
+            inputClassName="h-9 font-mono"
+          />
           <div className="flex flex-col gap-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">Theo</span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-vx-text-muted">Theo</span>
             <Segmented label="Đơn vị thời gian" options={GRANULARITIES} value={granularity} onChange={setGranularity} />
           </div>
           <div className="flex flex-col gap-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">Chia theo</span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-vx-text-muted">Chia theo</span>
             <Segmented label="Chia theo" options={GROUP_BYS} value={groupBy} onChange={setGroupBy} />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-vx-border pt-3">
           <UserFilter value={user} onChange={setUser} />
-          <select
+          <Select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             aria-label="Lọc theo nhà cung cấp"
-            className="h-8 border border-border bg-surface px-2 text-xs text-text-main focus:border-text-main focus:outline-none"
-          >
-            <option value="">Mọi nhà cung cấp</option>
-            {(data?.options?.providers || []).concat(provider && !(data?.options?.providers || []).includes(provider) ? [provider] : [])
-              .map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <select
+            className="w-auto"
+            selectClassName="h-9"
+            options={[
+              { value: "", label: "Mọi nhà cung cấp" },
+              ...(data?.options?.providers || []).concat(provider && !(data?.options?.providers || []).includes(provider) ? [provider] : [])
+                .map((p) => ({ value: p, label: p })),
+            ]}
+          />
+          <Select
             value={model}
             onChange={(e) => setModel(e.target.value)}
             aria-label="Lọc theo model"
-            className="h-8 max-w-[260px] border border-border bg-surface px-2 text-xs text-text-main focus:border-text-main focus:outline-none"
-          >
-            <option value="">Mọi model</option>
-            {(data?.options?.models || []).concat(model && !(data?.options?.models || []).includes(model) ? [model] : [])
-              .map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
+            className="w-auto max-w-[260px]"
+            selectClassName="h-9"
+            options={[
+              { value: "", label: "Mọi model" },
+              ...(data?.options?.models || []).concat(model && !(data?.options?.models || []).includes(model) ? [model] : [])
+                .map((m) => ({ value: m, label: m })),
+            ]}
+          />
           {(user || provider || model) ? (
-            <button type="button" onClick={() => { setUser(null); setProvider(""); setModel(""); }} className="h-8 px-2 text-xs text-text-muted underline underline-offset-4 hover:text-text-main">
+            <Button type="button" variant="ghost" size="sm" onClick={() => { setUser(null); setProvider(""); setModel(""); }}>
               Bỏ lọc
-            </button>
+            </Button>
           ) : null}
           <span className="ml-auto" />
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={!hasData}
-            className="inline-flex h-8 items-center gap-1 border border-border px-3 text-xs text-text-main hover:bg-surface-2 disabled:opacity-50"
-          >
-            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">download</span>
+          <Button type="button" variant="outline" size="sm" icon="download" onClick={exportCsv} disabled={!hasData}>
             Xuất CSV
-          </button>
+          </Button>
         </div>
-        {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+        {error ? <Toast type="error" message={error} dismissible={false} /> : null}
         {data?.retention?.truncated ? (
-          <p role="status" className="flex items-start gap-2 text-xs text-text-muted">
-            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">info</span>
-            Chi tiết request chỉ được giữ {data.retention.days} ngày: trước {new Date(data.retention.retainedFrom).toLocaleDateString("vi-VN")} chỉ còn số credit đã trừ, không còn token.
-          </p>
+          <Toast
+            type="info"
+            dismissible={false}
+            message={`Chi tiết request chỉ được giữ ${data.retention.days} ngày: trước ${new Date(data.retention.retainedFrom).toLocaleDateString("vi-VN")} chỉ còn số credit đã trừ, không còn token.`}
+          />
         ) : null}
-      </section>
+      </Card>
 
       <div className={cn("flex flex-col gap-6 transition-opacity duration-150", loading && data ? "opacity-60" : "")} aria-busy={loading}>
-        <section className="grid grid-cols-2 gap-px border border-border bg-border md:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
           <Kpi label="Request" value={fmtInt(t?.requests)} hint={t?.errors ? `${fmtInt(t.errors)} lỗi` : null} />
           <Kpi label="Tổng token" value={fmtTokens(t?.total)} hint={`${fmtTokens(t?.input)} vào · ${fmtTokens(t?.output)} ra`} />
           <Kpi label="Token cache" value={fmtTokens(t?.cached)} hint={t?.input ? `${((t.cached / t.input) * 100).toFixed(1)}% token vào` : null} />
           <Kpi label="Đã trừ credit" value={fmtUsdNano(t?.chargedNanoUsd)} hint={`Giá trị theo bảng giá ${fmtUsdNano(t?.costNanoUsd)}`} />
         </section>
 
-        <section className="flex flex-col gap-3 border border-border bg-surface p-4">
-          <h2 className="text-sm font-semibold text-text-main">Token theo {GRANULARITIES.find((g) => g.value === (data?.query?.granularity || granularity))?.label.toLowerCase()}</h2>
+        <Card padding="sm" className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-vx-text">Token theo {GRANULARITIES.find((g) => g.value === (data?.query?.granularity || granularity))?.label.toLowerCase()}</h2>
           {!data ? (
             <div className="h-64" aria-hidden="true" />
           ) : !hasData ? (
-            <p className="flex h-64 items-center justify-center text-sm text-text-muted">Không có request nào trong khoảng này.</p>
+            <p className="flex h-64 items-center justify-center text-sm text-vx-text-muted">Không có request nào trong khoảng này.</p>
           ) : (
             <>
               <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Chú thích">
                 {seriesKeys.map((key, i) => (
                   <li key={key} className="flex items-center gap-1.5">
                     <span className="inline-block size-2.5" style={{ background: colorOf(key, i) }} aria-hidden="true" />
-                    <span className="max-w-[220px] truncate text-text-main" title={names[key]}>{names[key] || key}</span>
+                    <span className="max-w-[220px] truncate text-vx-text" title={names[key]}>{names[key] || key}</span>
                   </li>
                 ))}
               </ul>
@@ -433,56 +438,54 @@ export default function StatsClient() {
               </div>
             </>
           )}
-        </section>
+        </Card>
 
         <section className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-semibold text-text-main">Theo {GROUP_BYS.find((g) => g.value === groupBy)?.label.toLowerCase()}</h2>
-            <span className="text-xs text-text-muted">Bấm một dòng để lọc theo nó.</span>
+            <h2 className="text-sm font-semibold text-vx-text">Theo {GROUP_BYS.find((g) => g.value === groupBy)?.label.toLowerCase()}</h2>
+            <span className="text-xs text-vx-text-muted">Bấm một dòng để lọc theo nó.</span>
           </div>
-          <div className="overflow-x-auto border border-border bg-surface">
-            <table className="w-full min-w-[880px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  {["Tên", "Request", "Lỗi", "Input", "Output", "Cache", "Tổng token", "Tỉ lệ", "Giá trị", "Đã trừ credit"].map((h, i) => (
-                    <th key={h} scope="col" className={cn("px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-text-muted", i > 0 && "text-right")}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.groups || []).length === 0 ? (
-                  <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-text-muted">Không có dữ liệu.</td></tr>
-                ) : data.groups.map((g) => {
-                  const topIndex = data.topKeys.indexOf(g.key);
-                  return (
-                    <tr key={g.key || "∅"} className="border-b border-border last:border-b-0 hover:bg-surface-2">
-                      <td className="max-w-[280px] px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => drill(g)}
-                          disabled={!g.key}
-                          className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
-                          title={g.key ? `Lọc theo ${g.label}` : undefined}
-                        >
-                          <span
-                            className="inline-block size-2.5 shrink-0"
-                            style={{ background: topIndex >= 0 ? colorOf(g.key, topIndex) : "var(--viz-other)" }}
-                            aria-hidden="true"
-                          />
-                          <span className="truncate font-mono text-xs text-text-main">{g.label}</span>
-                        </button>
-                      </td>
-                      {[fmtInt(g.requests), fmtInt(g.errors), fmtInt(g.input), fmtInt(g.output), fmtInt(g.cached), fmtInt(g.total),
-                        `${(g.share * 100).toFixed(1)}%`, fmtUsdNano(g.costNanoUsd), fmtUsdNano(g.chargedNanoUsd)].map((v, i) => (
-                        <td key={i} className="px-3 py-2 text-right font-mono text-xs tabular-nums text-text-main whitespace-nowrap">{v}</td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-text-muted">
+          <Table className="min-w-[880px]">
+            <Table.Head>
+              <tr>
+                {["Tên", "Request", "Lỗi", "Input", "Output", "Cache", "Tổng token", "Tỉ lệ", "Giá trị", "Đã trừ credit"].map((h, i) => (
+                  <Table.HeaderCell key={h} align={i > 0 ? "right" : "left"}>{h}</Table.HeaderCell>
+                ))}
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {(data?.groups || []).length === 0 ? (
+                <Table.Empty colSpan={10}>Không có dữ liệu.</Table.Empty>
+              ) : data.groups.map((g) => {
+                const topIndex = data.topKeys.indexOf(g.key);
+                return (
+                  <Table.Row key={g.key || "∅"}>
+                    <Table.Cell className="max-w-[280px]">
+                      <button
+                        type="button"
+                        onClick={() => drill(g)}
+                        disabled={!g.key}
+                        className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
+                        title={g.key ? `Lọc theo ${g.label}` : undefined}
+                      >
+                        <span
+                          className="inline-block size-2.5 shrink-0"
+                          style={{ background: topIndex >= 0 ? colorOf(g.key, topIndex) : "var(--viz-other)" }}
+                          aria-hidden="true"
+                        />
+                        <span className="truncate font-mono text-xs text-vx-text">{g.label}</span>
+                      </button>
+                    </Table.Cell>
+                    {[fmtInt(g.requests), fmtInt(g.errors), fmtInt(g.input), fmtInt(g.output), fmtInt(g.cached), fmtInt(g.total),
+                      `${(g.share * 100).toFixed(1)}%`, fmtUsdNano(g.costNanoUsd), fmtUsdNano(g.chargedNanoUsd)].map((v, i) => (
+                      <Table.Cell key={i} className="text-right font-mono text-xs tabular-nums text-vx-text whitespace-nowrap">{v}</Table.Cell>
+                    ))}
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table>
+          <p className="text-xs text-vx-text-muted">
             Giá trị: theo bảng giá của request. Đã trừ credit: số khách thật sự bị trừ (sau giảm giá, gồm cả phần thành nợ; không tính request trả bằng gói không giới hạn).
           </p>
         </section>

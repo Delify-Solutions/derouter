@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Select, Input, Button } from "@/shared/components";
 import { readKeyPresets, upsertKeyPreset, deleteKeyPreset, subscribeKeyPresets } from "./cliEndpointPresets";
 
 const CUSTOM_VALUE = "__custom__";
@@ -72,38 +73,44 @@ export default function ApiKeySelect({ value, onChange, apiKeys = [], cloudEnabl
 
   if (noKeys) {
     return (
-      <span className={`min-w-0 rounded bg-surface/40 px-2 py-2 text-xs text-text-muted sm:py-1.5 ${className}`}>
+      <span className={`min-w-0 rounded-vx-md bg-vx-surface-2/40 px-2 py-2 text-xs text-vx-text-muted sm:py-1.5 ${className}`}>
         {cloudEnabled ? "No API keys - Create one in Keys page" : "sk_derouter (default)"}
       </span>
     );
   }
 
+  const selectOptions = canSave
+    ? [...options, { value: SAVE_VALUE, label: "+ Save current as..." }]
+    : options;
+
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <div className="flex items-center gap-2">
-        <select
+        <Select
           value={mode}
           onChange={handleSelect}
-          className="flex-1 min-w-0 px-2 py-2 bg-surface rounded text-xs border border-border focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-          {canSave && <option value={SAVE_VALUE}>+ Save current as...</option>}
-        </select>
+          options={selectOptions}
+          className="flex-1 min-w-0"
+        />
         {isSaved && (
-          <button type="button" onClick={handleDeleteSaved} className="p-1 text-text-muted hover:text-red-500 rounded transition-colors shrink-0" title="Delete saved key">
-            <span className="material-symbols-outlined text-[14px]">delete</span>
-          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon="delete"
+            onClick={handleDeleteSaved}
+            aria-label="Delete saved key"
+            title="Delete saved key"
+            className="shrink-0 text-red-600 hover:bg-red-500/10"
+          />
         )}
       </div>
       {isCustom && (
-        <input
+        <Input
           type="text"
           value={inputValue}
           onChange={handleCustomInput}
           placeholder="sk-..."
-          className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
         />
       )}
     </div>

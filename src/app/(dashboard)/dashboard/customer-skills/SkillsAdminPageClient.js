@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, Button, Input, Toggle, ConfirmModal, CardSkeleton } from "@/shared/components";
+import { Card, Button, Input, Select, Toggle, ConfirmModal, CardSkeleton } from "@/shared/components";
 import RuntimePicker from "./RuntimePicker";
 import SkillEditorModal, { formFromSkill } from "./SkillEditorModal";
 import SkillImportModal from "./SkillImportModal";
@@ -266,12 +266,10 @@ export default function SkillsAdminPageClient() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-mono text-2xl font-semibold tracking-tight text-text-main">
-            <span className="mr-2 text-text-subtle" aria-hidden="true">{"//"}</span>
-            Skill khách hàng
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-text-muted">
+        <div className="flex flex-col gap-1.5">
+          <span className="meta text-text-subtle">Skill</span>
+          <h1 className="text-2xl font-semibold tracking-tight text-text-main">Skill khách hàng</h1>
+          <p className="max-w-2xl text-sm leading-6 text-text-muted">
             Skill markdown khách tải về hoặc cài bằng một lệnh vào agent của họ (Claude Code, Codex, Cursor).
             Mỗi skill chọn được nhiều agent. Skill đánh dấu nội bộ thì khách không thấy.
           </p>
@@ -316,7 +314,7 @@ export default function SkillsAdminPageClient() {
       </Card>
 
       {error && (
-        <p role="alert" className="border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+        <p role="alert" className="border border-danger/40 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}{" "}
           <button type="button" onClick={load} className="underline">Thử lại</button>
         </p>
@@ -331,38 +329,38 @@ export default function SkillsAdminPageClient() {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Tìm theo tên, slug, nhóm…"
           aria-label="Tìm skill"
-          className="h-8 w-56 border border-border bg-surface px-3 text-sm text-text-main focus:border-text-main focus:outline-none"
+          icon="search"
+          className="w-56"
+          inputClassName="h-9 py-0"
         />
         {FILTERS.map((item) => (
-          <button
+          <Button
             key={item.value}
             type="button"
+            size="sm"
+            variant={filter === item.value ? "primary" : "outline"}
             onClick={() => setFilter(item.value)}
             aria-pressed={filter === item.value}
-            className={`h-8 border px-3 font-mono text-xs font-medium transition-colors duration-150 ${
-              filter === item.value
-                ? "border-text-main bg-text-main text-bg"
-                : "border-border bg-surface text-text-muted hover:text-text-main"
-            }`}
           >
             {item.label}
-          </button>
+          </Button>
         ))}
         {categories.length > 0 && (
-          <select
+          <Select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             aria-label="Lọc theo nhóm"
-            className="h-8 border border-border bg-surface px-2 text-xs text-text-main focus:border-text-main focus:outline-none"
-          >
-            <option value="">Mọi nhóm</option>
-            {categories.map((c) => <option key={c.category} value={c.category}>{c.category} ({c.count})</option>)}
-          </select>
+            className="w-48"
+            options={[
+              { value: "", label: "Mọi nhóm" },
+              ...categories.map((c) => ({ value: c.category, label: `${c.category} (${c.count})` })),
+            ]}
+          />
         )}
         <span className="ml-auto font-mono text-xs text-text-muted">{visible.length} / {standalone.length} skill</span>
       </div>
@@ -377,7 +375,7 @@ export default function SkillsAdminPageClient() {
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBulkTargets(selectedRows[0]?.allAgents ? [] : (selectedRows[0]?.targets || []))}>Đặt agent</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: true })}>Phát hành</Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => bulk({ isPublished: false })}>Ẩn</Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setBulkDeleting(true)} className="text-red-600 hover:bg-red-500/10">Xoá tất cả</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setBulkDeleting(true)} className="text-danger hover:bg-red-500/10">Xoá tất cả</Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSelected(new Set()); setBulkTargets(null); }}>Bỏ chọn</Button>
           </div>
           {bulkTargets && (
@@ -411,18 +409,20 @@ export default function SkillsAdminPageClient() {
             <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} className="size-4" />
             Chọn tất cả {Math.min(visible.length, 100)} skill đang hiện{visible.length > 100 ? " (tối đa 100 mỗi lần)" : ""}
           </label>
-          {visible.map((row) => (
-            <SkillRow
-              key={row.id}
-              row={row}
-              busy={busyId === row.id}
-              checked={selected.has(row.id)}
-              onToggleChecked={toggleOne}
-              onTogglePublished={togglePublished}
-              onEdit={openEdit}
-              onDelete={setDeleting}
-            />
-          ))}
+          <Card padding="sm">
+            {visible.map((row) => (
+              <SkillRow
+                key={row.id}
+                row={row}
+                busy={busyId === row.id}
+                checked={selected.has(row.id)}
+                onToggleChecked={toggleOne}
+                onTogglePublished={togglePublished}
+                onEdit={openEdit}
+                onDelete={setDeleting}
+              />
+            ))}
+          </Card>
         </div>
       )}
 

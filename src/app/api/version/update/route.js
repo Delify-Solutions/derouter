@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { killAppProcesses, spawnUpdaterAndExit } from "@/lib/appUpdater";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "profile", "edit");
+  if (denied) return denied;
   if (process.env.NODE_ENV !== "production") {
     return NextResponse.json(
       { success: false, message: "Update is only available in production build (derouter CLI)" },

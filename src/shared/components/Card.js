@@ -2,6 +2,12 @@
 
 import { cn } from "@/shared/utils/cn";
 
+// Vuexy card shape (change admin-accounts-rbac-vuexy, group 7): no border by
+// default (Vuexy's $card-border-width is 0), rounded corners, a soft
+// elevation shadow instead of a border carrying the hierarchy. `elev` was an
+// existing prop that previously had no visual effect (the old className
+// builder never read it) — wiring it up here is a visual-only fix, not a new
+// prop.
 export default function Card({
   children,
   title,
@@ -25,8 +31,9 @@ export default function Card({
   return (
     <div
       className={cn(
-        "rounded-none border border-border bg-surface",
-        hover && "hover:border-brand-500/40 transition-colors cursor-pointer",
+        "rounded-vx-lg bg-vx-surface shadow-vx-xs",
+        hover && "hover:shadow-vx-sm transition-shadow cursor-pointer",
+        elev && "shadow-vx-md",
         paddings[padding],
         className
       )}
@@ -36,16 +43,16 @@ export default function Card({
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             {icon && (
-              <div className="flex items-center justify-center size-8 border border-border text-text-muted">
-                <span className="material-symbols-outlined text-[18px]">{icon}</span>
+              <div className="flex items-center justify-center size-10 rounded-vx-md bg-vx-primary/10 text-vx-primary">
+                <span className="material-symbols-outlined text-[20px]">{icon}</span>
               </div>
             )}
             <div>
               {title && (
-                <h3 className="text-text-main font-semibold">{title}</h3>
+                <h3 className="text-vx-heading font-semibold">{title}</h3>
               )}
               {subtitle && (
-                <p className="text-sm text-text-muted">{subtitle}</p>
+                <p className="text-sm text-vx-text-muted">{subtitle}</p>
               )}
             </div>
           </div>
@@ -61,8 +68,7 @@ Card.Section = function CardSection({ children, className, ...props }) {
   return (
     <div
       className={cn(
-        "p-4 rounded-none",
-        "bg-bg-alt border border-border",
+        "p-4 rounded-vx-md bg-vx-page",
         className
       )}
       {...props}
@@ -77,8 +83,8 @@ Card.Row = function CardRow({ children, className, ...props }) {
     <div
       className={cn(
         "p-3 -mx-3 px-3 transition-colors",
-        "border-b border-border last:border-b-0",
-        "hover:bg-surface-2/50",
+        "border-b border-vx-border last:border-b-0",
+        "hover:bg-vx-surface-2/60",
         className
       )}
       {...props}
@@ -98,8 +104,8 @@ Card.ListItem = function CardListItem({
     <div
       className={cn(
         "group flex items-center justify-between p-3 -mx-3 px-3",
-        "border-b border-border last:border-b-0",
-        "hover:bg-surface-2/50 transition-colors",
+        "border-b border-vx-border last:border-b-0",
+        "hover:bg-vx-surface-2/60 transition-colors",
         className
       )}
       {...props}

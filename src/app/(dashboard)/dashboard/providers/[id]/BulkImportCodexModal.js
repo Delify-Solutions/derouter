@@ -86,14 +86,14 @@ export default function BulkImportCodexModal({ isOpen, onClose, onSuccess }) {
   return (
     <Modal isOpen={isOpen} title={translate("Bulk Add Codex Accounts")} onClose={handleClose}>
       <div className="flex flex-col gap-4">
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-vx-text-muted">
           {translate(
             "Paste an array of codex account JSON objects. Each must include accessToken (and ideally refreshToken, idToken)."
           )}
         </p>
 
         <textarea
-          className="w-full rounded border border-accent/30 bg-sidebar p-2 text-sm font-mono resize-y min-h-[240px] focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded-vx-md border border-vx-border bg-vx-surface p-2 text-sm font-mono resize-y min-h-[240px] focus:outline-none focus:border-vx-primary focus:ring-2 focus:ring-vx-primary/15"
           placeholder={PLACEHOLDER}
           value={jsonText}
           onChange={(e) => setJsonText(e.target.value)}
@@ -101,23 +101,23 @@ export default function BulkImportCodexModal({ isOpen, onClose, onSuccess }) {
         />
 
         {parseError && (
-          <p className="text-xs text-red-500 break-words">{parseError}</p>
+          <p className="text-xs text-vx-danger break-words">{parseError}</p>
         )}
 
         {result && (
           <div className="flex flex-col gap-2">
             <div
               className={`text-sm font-medium ${
-                result.failed > 0 ? "text-yellow-400" : "text-green-400"
+                result.failed > 0 ? "text-vx-warning" : "text-vx-success"
               }`}
             >
               ✓ {result.success} {translate("added")}
               {result.failed > 0 ? `, ✗ ${result.failed} ${translate("failed")}` : ""}
             </div>
             {failedItems.length > 0 && (
-              <ul className="rounded border border-accent/20 bg-sidebar/50 p-2 text-xs font-mono max-h-40 overflow-y-auto">
+              <ul className="rounded-vx-md border border-vx-border bg-vx-surface-2 p-2 text-xs font-mono max-h-40 overflow-y-auto">
                 {failedItems.map((item) => (
-                  <li key={item.index} className="text-red-400">
+                  <li key={item.index} className="text-vx-danger">
                     [{item.index}] {item.error}
                   </li>
                 ))}

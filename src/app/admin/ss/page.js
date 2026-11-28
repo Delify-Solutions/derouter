@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, Button, Input } from "@/shared/components";
 
 export default function LoginPage() {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [resetHint, setResetHint] = useState("");
@@ -16,7 +17,13 @@ export default function LoginPage() {
   const [oidcLoginLabel, setOidcLoginLabel] = useState("Sign in with OIDC");
   const [samlConfigured, setSamlConfigured] = useState(false);
   const [samlLoginLabel, setSamlLoginLabel] = useState("Sign in with SAML SSO");
+  // true only for the legacy fresh-install bootstrap (login/route.js's
+  // legacyMustChange branch) — no account is known yet, so the new password is
+  // set through the existing local-only PATCH /api/settings flow.
   const [mustChange, setMustChange] = useState(false);
+  // true for a per-account forced reset (spec "Forced change on first login") —
+  // username + current password are already known, so only the new password is asked.
+  const [forcedAccountReset, setForcedAccountReset] = useState(false);
   const [newPassword, setNewPassword] = useState("");
 
   // Countdown for rate-limit
@@ -75,22 +82,25 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.mustChangePassword) {
-          setMustChange(true);
-          return;
-        }
+      const data = await res.json();
+      if (res.ok && data.success) {
         window.location.assign("/dashboard");
-      } else {
-        const data = await res.json();
-        setError(data.error || "Invalid password");
-        if (data.resetHint) setResetHint(data.resetHint);
-        if (data.retryAfter) setRetryAfter(Number(data.retryAfter));
+        return;
       }
+      if (data.mustChangePassword) {
+        // Distinguish the legacy fresh-install bootstrap (no account known,
+        // PATCH /api/settings) from a per-account forced reset (username +
+        // current password already proven, only the new password is asked).
+        if (data.username) setForcedAccountReset(true);
+        else setMustChange(true);
+        return;
+      }
+      setError(data.error || "Invalid username or password");
+      if (data.resetHint) setResetHint(data.resetHint);
+      if (data.retryAfter) setRetryAfter(Number(data.retryAfter));
     } catch (err) {
       setError("An error occurred. Please try again.");
     } finally {
@@ -98,7 +108,8 @@ export default function LoginPage() {
     }
   };
 
-  // Force a new password before entering the dashboard (default + remote).
+  // Legacy fresh-install bootstrap: force a new password before entering the
+  // dashboard (default password used remotely). No account is known yet.
   const handleSetNewPassword = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -114,6 +125,31 @@ export default function LoginPage() {
       } else {
         const data = await res.json();
         setError(data.error || "Failed to set password");
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Per-account forced reset (spec "Forced change on first login"): the
+  // temporary password already proved identity at the login attempt above.
+  const handleForcedAccountReset = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/force-password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, currentPassword: password, newPassword }),
+      });
+      if (res.ok) {
+        window.location.assign("/dashboard");
+      } else {
+        const data = await res.json();
+        setError(data.error || "Đổi mật khẩu thất bại");
       }
     } catch (err) {
       setError("An error occurred. Please try again.");
@@ -193,6 +229,27 @@ export default function LoginPage() {
                 Set password
               </Button>
             </form>
+          ) : forcedAccountReset ? (
+            <form onSubmit={handleForcedAccountReset} className="flex flex-col gap-4">
+              <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
+                Cần đặt mật khẩu mới cho tài khoản <b>{username}</b> trước khi tiếp tục.
+              </p>
+              <div className="flex flex-col gap-2">
+                <label className="meta text-text-muted">Mật khẩu mới</label>
+                <Input
+                  type="password"
+                  placeholder="Tối thiểu 8 ký tự"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  autoFocus
+                />
+                {error && <p className="text-xs text-red-500">{error}</p>}
+              </div>
+              <Button type="submit" variant="primary" className="w-full" loading={loading} disabled={newPassword.length < 8}>
+                Đặt mật khẩu
+              </Button>
+            </form>
           ) : (
           <div className="flex flex-col gap-4">
             {samlAvailable && (
@@ -224,6 +281,19 @@ export default function LoginPage() {
                 )}
 
                 <div className="flex flex-col gap-2">
+                  <label className="meta text-text-muted">Tên đăng nhập</label>
+                  <Input
+                    type="text"
+                    placeholder="admin"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    autoFocus={!oidcAvailable}
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
                   <label className="meta text-text-muted">Password</label>
                   <Input
                     type="password"
@@ -231,7 +301,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    autoFocus={!oidcAvailable}
+                    autoComplete="current-password"
                   />
                   {error && <p className="text-xs text-red-500">{error}</p>}
                   {retryAfter > 0 && (

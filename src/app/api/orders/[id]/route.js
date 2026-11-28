@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getOrderById, approveOrder, refundOrder, updateOrderStatus } from "@/lib/db/repos/billingRepo.js";
 import { getAdminIdentity } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { fireAndForget, notifyOrderApproved } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "orders", "edit");
+  if (denied) return denied;
   const { id } = await params;
 
   let body;

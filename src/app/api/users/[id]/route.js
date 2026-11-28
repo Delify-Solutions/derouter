@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { getKeyGroupById, getUserById, deleteUser, normalizeEmail, listUsers } from "@/lib/localDb";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { validatePassword } from "@/lib/users/register";
 import { getUserSummary } from "@/lib/db/repos/adminUsersRepo.js";
 import { fireAndForget, messages, notifyCustomer } from "@/lib/notify/customerTelegram.js";
@@ -61,6 +62,8 @@ export async function GET(request, { params }) {
  * untouched.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id } = await params;
   const existing = await getUserById(id);
   if (!existing) {
@@ -238,6 +241,8 @@ export async function PATCH(request, { params }) {
  * `user_deleted` audit entry with this admin as the actor.
  */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "delete");
+  if (denied) return denied;
   const { id } = await params;
   const existing = await getUserById(id);
   if (!existing) {

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Select from "@/shared/components/Select";
+import Table from "@/shared/components/Table";
 import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { applyTableQuery, nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
@@ -81,7 +82,7 @@ function sumProviders(list) {
 
 function TotalsRow({ label, count, t }) {
   return (
-    <tr className="border-t-2 border-border-subtle font-medium bg-surface-2/30">
+    <tr className="border-t-2 border-vx-border font-medium bg-vx-surface-2/30">
       <td className="px-3 py-2"></td>
       <td className="px-3 py-2">{label} (<span className="font-mono tabular-nums">{count}</span>)</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(t.requests)}</td>
@@ -153,7 +154,7 @@ export default function ProviderUsageTable() {
 
   const tableState = tableStateOf({ loading, error, total: items.length, matched: result.matched, filtersActive: hasActiveQuery(query) });
   const onSort = (field) => setQuery((s) => nextSortState(s, field, { ascFirst: ["name"] }));
-  const headerProps = { state: query, onSort, className: "font-medium px-3 py-2" };
+  const headerProps = { state: query, onSort, className: "px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" };
 
   // "Tổng kỳ" is the whole period whatever the search, filters or Top N; when those hide
   // providers, "Tổng đang hiển thị" adds the shown rows alone.
@@ -169,10 +170,10 @@ export default function ProviderUsageTable() {
         <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
           <div>
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary" aria-hidden="true">dns</span>
+              <span className="material-symbols-outlined text-vx-primary" aria-hidden="true">dns</span>
               Provider Usage
             </h2>
-            <p className="text-sm text-text-muted mt-1">
+            <p className="text-sm text-vx-text-muted mt-1">
               Per-provider live RPM/TPM (last 60s), peak RPM/TPM/Tok-s, token volume, cost and requests for {periodLabel}.
             </p>
           </div>
@@ -196,9 +197,9 @@ export default function ProviderUsageTable() {
       <Card padding="none">
         <div className="overflow-x-auto" aria-busy={loading}>
           <table className="w-full min-w-[1100px] text-sm">
-            <thead>
-              <tr className="border-b border-border-subtle text-text-muted">
-                <th className="text-left font-medium px-3 py-2 w-8">#</th>
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell className="w-8">#</Table.HeaderCell>
                 <SortableHeader label="Provider" field="name" {...headerProps} />
                 <SortableHeader label="Requests" field="requests" align="right" {...headerProps} />
                 <SortableHeader label="Input" field="input" align="right" {...headerProps} />
@@ -206,13 +207,13 @@ export default function ProviderUsageTable() {
                 <SortableHeader label="Cost" field="cost" align="right" {...headerProps} />
                 <SortableHeader label="RPM" field="liveRpm" align="right" {...headerProps} />
                 <SortableHeader label="TPM" field="liveTpm" align="right" {...headerProps} />
-                <th className="text-right font-medium px-3 py-2">Peak RPM</th>
-                <th className="text-right font-medium px-3 py-2">Peak TPM</th>
-                <th className="text-right font-medium px-3 py-2">Peak Tok/s</th>
+                <Table.HeaderCell className="text-right">Peak RPM</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Peak TPM</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Peak Tok/s</Table.HeaderCell>
                 <SortableHeader label="Last used" field="lastUsed" {...headerProps} />
               </tr>
-            </thead>
-            <tbody>
+            </Table.Head>
+            <Table.Body>
               {tableState !== "ready" ? (
                 <TableStateRow
                   state={tableState}
@@ -224,29 +225,29 @@ export default function ProviderUsageTable() {
               ) : (
                 <>
                   {sorted.map((it, idx) => (
-                    <tr key={it.provider} className="border-b border-border-subtle/50 hover:bg-surface-2/50">
-                      <td className="px-3 py-2 text-text-muted">{idx + 1}</td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-text-main">{providerName(it)}</div>
-                        <div className="font-mono text-xs text-text-muted">{it.provider}</div>
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.requests)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.input)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.output)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(it))}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveRpm)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveTpm)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakRpm)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTpm)}</td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTokS)}</td>
-                      <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(it.lastUsed)}</td>
-                    </tr>
+                    <Table.Row key={it.provider}>
+                      <Table.Cell className="px-3 py-2 text-vx-text-muted">{idx + 1}</Table.Cell>
+                      <Table.Cell className="px-3 py-2">
+                        <div className="font-medium text-vx-text">{providerName(it)}</div>
+                        <div className="font-mono text-xs text-vx-text-muted">{it.provider}</div>
+                      </Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.requests)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.input)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.output)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCostNano(costNanoOf(it))}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveRpm)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.liveTpm)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakRpm)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTpm)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 text-right font-mono tabular-nums">{fmtCompact(it.peakTokS)}</Table.Cell>
+                      <Table.Cell className="px-3 py-2 font-mono text-xs whitespace-nowrap">{fmtWhen(it.lastUsed)}</Table.Cell>
+                    </Table.Row>
                   ))}
                   {partial && <TotalsRow label="Tổng đang hiển thị" count={sorted.length} t={shownTotals} />}
                   <TotalsRow label="Tổng kỳ" count={items.length} t={periodTotals} />
                 </>
               )}
-            </tbody>
+            </Table.Body>
           </table>
         </div>
       </Card>

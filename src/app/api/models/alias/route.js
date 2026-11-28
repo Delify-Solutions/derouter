@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getModelAliases, setModelAlias, deleteModelAlias } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ export async function GET() {
 
 // PUT /api/models/alias - Set model alias
 export async function PUT(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { model, alias } = body;
@@ -33,6 +36,8 @@ export async function PUT(request) {
 
 // DELETE /api/models/alias?alias=xxx - Delete alias
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "providers", "delete");
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const alias = searchParams.get("alias");

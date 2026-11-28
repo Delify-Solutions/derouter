@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "translator", "edit");
+  if (denied) return denied;
   try {
     const { file, content } = await request.json();
 

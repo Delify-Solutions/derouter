@@ -4,6 +4,7 @@ import {
   getComboPricing, updateComboPricing, resetComboPricing, resetAllComboPricing,
 } from "@/lib/localDb.js";
 import { getDefaultPricing } from "open-sse/providers/pricing.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const VALID_FIELDS = ["input", "output", "cached", "reasoning", "cache_creation", "image"];
 
@@ -50,6 +51,8 @@ export async function GET(request) {
  * The combo field is mutually exclusive with provider fields.
  */
 export async function PATCH(request) {
+  const denied = await requirePagePermission(request, "pricing", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     if (typeof body !== "object" || body === null) {
@@ -92,6 +95,8 @@ export async function PATCH(request) {
  * ?provider=xxx&model=yyy resets a pooled model (legacy). No params resets all per-pool.
  */
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "pricing", "delete");
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const combo = searchParams.get("combo");

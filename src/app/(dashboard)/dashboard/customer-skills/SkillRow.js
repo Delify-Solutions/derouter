@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Badge } from "@/shared/components";
+import { Button, Badge, Card } from "@/shared/components";
 import { runtimeLabel } from "@/lib/skills/runtimes.js";
 
 function fmtDate(value) {
@@ -12,11 +12,13 @@ function fmtDate(value) {
 /**
  * One skill, as a row: the shape the flat admin list and a bundle's expanded skill
  * list both use, so "hide", "edit" and "delete" look and behave the same everywhere
- * a skill shows up.
+ * a skill shows up. Renders as a `Card.Row` — the parent supplies the surrounding
+ * `Card` (the flat list wraps every row in one `Card`; a bundle's expanded list sits
+ * directly inside the bundle's own `Card`).
  */
 export default function SkillRow({ row, busy, onTogglePublished, onEdit, onDelete, checked, onToggleChecked }) {
   return (
-    <div className="flex flex-wrap items-start gap-3 border border-border bg-surface p-4">
+    <Card.Row className="flex flex-wrap items-start gap-3">
       {onToggleChecked && (
         <input
           type="checkbox"
@@ -36,10 +38,10 @@ export default function SkillRow({ row, busy, onTogglePublished, onEdit, onDelet
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {row.allAgents ? (
-            <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">Mọi agent</span>
+            <Badge variant="default" size="xs">Mọi agent</Badge>
           ) : (
             (row.targets || []).map((id) => (
-              <span key={id} className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">{runtimeLabel(id)}</span>
+              <Badge key={id} variant="default" size="xs">{runtimeLabel(id)}</Badge>
             ))
           )}
         </div>
@@ -53,8 +55,8 @@ export default function SkillRow({ row, busy, onTogglePublished, onEdit, onDelet
           {row.isPublished ? "Ẩn" : "Phát hành"}
         </Button>
         <Button variant="secondary" size="sm" onClick={() => onEdit(row)} disabled={busy}>Sửa</Button>
-        <Button variant="ghost" size="sm" onClick={() => onDelete(row)} disabled={busy} className="text-red-600 hover:bg-red-500/10">Xoá</Button>
+        <Button variant="ghost" size="sm" onClick={() => onDelete(row)} disabled={busy} className="text-danger hover:bg-red-500/10">Xoá</Button>
       </div>
-    </div>
+    </Card.Row>
   );
 }

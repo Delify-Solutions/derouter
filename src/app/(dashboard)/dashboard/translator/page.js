@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Card, Button } from "@/shared/components";
+import { Card, Button, Badge } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import dynamic from "next/dynamic";
 
@@ -288,16 +288,17 @@ export default function TranslatorPage() {
   );
 }
 
+const META_BADGE_VARIANTS = {
+  blue: "info",
+  orange: "warning",
+  green: "success",
+  purple: "primary",
+};
+
 function MetaBadge({ label, value, color }) {
-  const colors = {
-    blue: "bg-blue-500/10 text-blue-500",
-    orange: "bg-orange-500/10 text-orange-500",
-    green: "bg-green-500/10 text-green-500",
-    purple: "bg-purple-500/10 text-purple-500",
-  };
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${colors[color]}`}>
-      <span className="text-text-muted/70 font-sans text-[10px]">{label}:</span>{value}
-    </span>
+    <Badge variant={META_BADGE_VARIANTS[color] || "default"} size="sm" className="font-mono">
+      <span className="text-vx-text-muted/70 font-sans text-[10px]">{label}:</span>{value}
+    </Badge>
   );
 }

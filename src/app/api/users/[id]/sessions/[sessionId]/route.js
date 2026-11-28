@@ -4,12 +4,15 @@ import { getUserById, revokeSessionById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { insertAuditSync } from "@/lib/billing/audit.js";
 import { validateReason } from "@/lib/billing/adminActions.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /** DELETE — revoke ONE session. Scoped to the account, so a foreign id is a 404. */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id, sessionId } = await params;
   const user = await getUserById(id);
   if (!user) {

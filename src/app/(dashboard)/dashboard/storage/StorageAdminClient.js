@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Badge from "@/shared/components/Badge";
-import Button from "@/shared/components/Button";
+import { Badge, Button, Card, CardSkeleton, Table, Toast } from "@/shared/components";
 import StorageConfigPanel from "@/shared/components/StorageConfigPanel";
 import { cn } from "@/shared/utils/cn";
 
@@ -103,25 +102,25 @@ export default function StorageAdminClient() {
 
       <StorageConfigPanel apiBase="/api/storage/system" audience="system" onChange={load} />
 
-      <section className="flex flex-col gap-4 border border-border bg-surface p-5">
+      <Card padding="sm" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex max-w-2xl flex-col gap-1">
-            <h2 className="meta text-text-muted">Lưu trên máy chủ</h2>
-            <p className="text-sm text-text-muted">
+            <h2 className="meta text-vx-text-muted">Lưu trên máy chủ</h2>
+            <p className="text-sm text-vx-text-muted">
               Khách được chọn có ảnh lưu trên ổ đĩa máy chủ (thư mục dữ liệu) và nhận link của hệ thống, bỏ qua mọi CDN.
               Bật hoặc tắt ở tab CDN ảnh của từng khách. Link dùng địa chỉ công khai trong Cài đặt (publicBaseUrl).
               Ảnh không tự xoá; khi ổ còn dưới 2 GB trống, hệ thống ngừng ghi ảnh và khách không bị tính phí lượt đó.
             </p>
           </div>
           {data ? (
-            <span className="font-mono text-[12px] text-text-muted">
+            <span className="font-mono text-[12px] text-vx-text-muted">
               <span title={`${data.localUsage?.bytes ?? 0} byte`}>
                 {data.localUsage?.files ?? 0} ảnh · {formatBytes(data.localUsage?.bytes ?? 0)}
               </span>
               {data.localUsage?.freeBytes != null ? (
                 <span
                   title={`${data.localUsage.freeBytes} byte`}
-                  className={data.localUsage.freeBytes < data.localUsage.minFreeBytes ? " text-red-700 dark:text-red-400" : ""}
+                  className={data.localUsage.freeBytes < data.localUsage.minFreeBytes ? " text-vx-danger" : ""}
                 >
                   {" "}· còn trống {formatBytes(data.localUsage.freeBytes)}
                   {data.localUsage.freeBytes < data.localUsage.minFreeBytes ? " (dưới mức tối thiểu, đã ngừng ghi ảnh)" : ""}
@@ -131,35 +130,39 @@ export default function StorageAdminClient() {
           ) : null}
         </div>
         {data?.localUsers?.length ? (
-          <ul className="flex flex-col divide-y divide-border border border-border">
+          <ul className="flex flex-col divide-y divide-vx-border rounded-vx-md border border-vx-border">
             {data.localUsers.map((u) => (
               <li key={u.userId} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-                <Link href={`/dashboard/users/${encodeURIComponent(u.userId)}?tab=storage`} className="text-text-main underline-offset-2 hover:underline">
+                <Link href={`/dashboard/users/${encodeURIComponent(u.userId)}?tab=storage`} className="text-vx-text underline-offset-2 hover:underline">
                   {u.email}
                 </Link>
-                {u.name ? <span className="text-xs text-text-muted">{u.name}</span> : null}
+                {u.name ? <span className="text-xs text-vx-text-muted">{u.name}</span> : null}
               </li>
             ))}
           </ul>
         ) : data ? (
-          <p className="text-sm text-text-muted">Chưa chọn khách nào.</p>
+          <p className="text-sm text-vx-text-muted">Chưa chọn khách nào.</p>
         ) : null}
-      </section>
+      </Card>
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="meta text-text-muted">CDN của khách</h2>
+          <h2 className="meta text-vx-text-muted">CDN của khách</h2>
           {data ? (
-            <p className="text-sm text-text-muted">
-              <span className="font-mono text-text-main">{data.storages.length}</span> khách đã cấu hình,{" "}
-              <span className="font-mono text-text-main">{Math.max(0, data.customers - (counts.ok ?? 0) - (data.localUsers?.length ?? 0))}</span> khách chưa có CDN riêng
+            <p className="text-sm text-vx-text-muted">
+              <span className="font-mono text-vx-text">{data.storages.length}</span> khách đã cấu hình,{" "}
+              <span className="font-mono text-vx-text">{Math.max(0, data.customers - (counts.ok ?? 0) - (data.localUsers?.length ?? 0))}</span> khách chưa có CDN riêng
               hoạt động (chưa kết nối, lỗi, chưa kiểm tra hoặc đang tắt)
               {data.systemActive ? ": đang dùng CDN hệ thống." : ": không dùng được model ảnh."}
             </p>
           ) : null}
         </div>
 
-        <div role="group" aria-label="Lọc theo trạng thái" className="flex flex-wrap gap-2">
+        <div
+          role="group"
+          aria-label="Lọc theo trạng thái"
+          className="flex flex-wrap items-center gap-1 rounded-vx-md bg-vx-surface-2 p-1 w-fit"
+        >
           {FILTERS.map((f) => {
             const n = f.id === "all" ? data?.storages?.length : counts[f.id];
             const active = filter === f.id;
@@ -170,8 +173,8 @@ export default function StorageAdminClient() {
                 aria-pressed={active}
                 onClick={() => setFilter(f.id)}
                 className={cn(
-                  "flex h-8 items-center gap-2 border px-3 font-mono text-[12px]",
-                  active ? "border-text-main bg-surface-2 text-text-main" : "border-border text-text-muted hover:text-text-main"
+                  "flex h-8 items-center gap-2 rounded-vx-sm px-3 text-xs font-medium transition-colors",
+                  active ? "bg-vx-primary text-white" : "text-vx-text-muted hover:text-vx-text hover:bg-vx-surface-3"
                 )}
               >
                 {f.label}
@@ -181,85 +184,81 @@ export default function StorageAdminClient() {
           })}
         </div>
 
-        {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+        {error ? <Toast type="error" message={error} dismissible={false} /> : null}
         {rowNotice ? (
-          <p
-            role="status"
-            className={rowNotice.ok
-              ? "border border-brand-500/40 bg-brand-500/5 px-4 py-2 text-sm text-brand-700 dark:text-brand-400"
-              : "border border-red-500/40 bg-red-500/5 px-4 py-2 text-sm text-red-700 dark:text-red-400"}
-          >
-            {rowNotice.text}
-          </p>
+          <Toast
+            type={rowNotice.ok ? "success" : "error"}
+            message={rowNotice.text}
+            onDismiss={() => setRowNotice(null)}
+          />
         ) : null}
 
-        {!data && !error ? (
-          <div className="h-40 animate-pulse bg-surface-2" aria-busy="true" aria-label="Đang tải" />
-        ) : null}
+        {!data && !error ? <CardSkeleton /> : null}
 
         {data && !rows.length ? (
-          <p className="border border-border px-4 py-6 text-center text-sm text-text-muted">
-            {filter === "all" ? "Chưa khách nào kết nối CDN." : "Không có khách nào ở trạng thái này."}
-          </p>
+          <Card padding="none" className="flex flex-col items-center text-center gap-3 px-6 py-16">
+            <span className="material-symbols-outlined text-[32px] text-vx-text-subtle">cloud_off</span>
+            <p className="text-sm text-vx-text-muted">
+              {filter === "all" ? "Chưa khách nào kết nối CDN." : "Không có khách nào ở trạng thái này."}
+            </p>
+          </Card>
         ) : null}
 
         {rows.length ? (
-          <div className="overflow-x-auto border border-border">
-            <table className="w-full min-w-[900px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Khách</th>
-                  <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Kho</th>
-                  <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Trạng thái</th>
-                  <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Kiểm tra gần nhất</th>
-                  <th scope="col" className="meta px-4 py-2.5 font-medium text-text-muted">Lỗi</th>
-                  <th scope="col" className="px-4 py-2.5"><span className="sr-only">Thao tác</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const status = STATUS[row.status] || STATUS.untested;
-                  return (
-                    <tr key={row.userId} className="border-b border-border last:border-b-0 align-top">
-                      <td className="px-4 py-3 text-sm">
-                        {row.email ? (
-                          <Link href={`/dashboard/users/${encodeURIComponent(row.userId)}?tab=storage`} className="text-text-main underline-offset-2 hover:underline">
-                            {row.email}
-                          </Link>
-                        ) : (
-                          <span className="font-mono text-[12px] text-text-muted">{row.userId} (đã xoá)</span>
-                        )}
-                        {row.name ? <div className="text-xs text-text-muted">{row.name}</div> : null}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-[12px] text-text-main [overflow-wrap:anywhere]">
-                        {row.bucket}
-                        <div className="text-text-muted">{row.endpoint}</div>
-                        <div className="text-text-muted">{row.publicBaseUrl || "link ký sẵn 7 ngày"}</div>
-                      </td>
-                      <td className="px-4 py-3"><Badge variant={status.variant} dot>{status.label}</Badge></td>
-                      <td className="px-4 py-3 font-mono text-[12px] text-text-muted">
-                        {row.lastTestAt ? DATE.format(new Date(row.lastTestAt)) : "—"}
-                      </td>
-                      <td className="max-w-[260px] px-4 py-3 text-xs text-red-700 dark:text-red-400 [overflow-wrap:anywhere]">
-                        {row.lastError || <span className="text-text-muted">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => retest(row)}
-                          loading={testing === row.userId}
-                          disabled={Boolean(testing)}
-                        >
-                          Kiểm tra lại
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-[900px]">
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell>Khách</Table.HeaderCell>
+                <Table.HeaderCell>Kho</Table.HeaderCell>
+                <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+                <Table.HeaderCell>Kiểm tra gần nhất</Table.HeaderCell>
+                <Table.HeaderCell>Lỗi</Table.HeaderCell>
+                <Table.HeaderCell><span className="sr-only">Thao tác</span></Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {rows.map((row) => {
+                const status = STATUS[row.status] || STATUS.untested;
+                return (
+                  <Table.Row key={row.userId} className="align-top">
+                    <Table.Cell className="text-sm">
+                      {row.email ? (
+                        <Link href={`/dashboard/users/${encodeURIComponent(row.userId)}?tab=storage`} className="text-vx-text underline-offset-2 hover:underline">
+                          {row.email}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-[12px] text-vx-text-muted">{row.userId} (đã xoá)</span>
+                      )}
+                      {row.name ? <div className="text-xs text-vx-text-muted">{row.name}</div> : null}
+                    </Table.Cell>
+                    <Table.Cell className="font-mono text-[12px] text-vx-text [overflow-wrap:anywhere]">
+                      {row.bucket}
+                      <div className="text-vx-text-muted">{row.endpoint}</div>
+                      <div className="text-vx-text-muted">{row.publicBaseUrl || "link ký sẵn 7 ngày"}</div>
+                    </Table.Cell>
+                    <Table.Cell><Badge variant={status.variant} dot>{status.label}</Badge></Table.Cell>
+                    <Table.Cell className="font-mono text-[12px] text-vx-text-muted">
+                      {row.lastTestAt ? DATE.format(new Date(row.lastTestAt)) : "—"}
+                    </Table.Cell>
+                    <Table.Cell className="max-w-[260px] text-xs text-vx-danger [overflow-wrap:anywhere]">
+                      {row.lastError || <span className="text-vx-text-muted">—</span>}
+                    </Table.Cell>
+                    <Table.Cell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => retest(row)}
+                        loading={testing === row.userId}
+                        disabled={Boolean(testing)}
+                      >
+                        Kiểm tra lại
+                      </Button>
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table>
         ) : null}
       </section>
     </div>

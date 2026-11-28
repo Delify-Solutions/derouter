@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listAllDocs, createDoc } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -18,6 +19,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "content", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

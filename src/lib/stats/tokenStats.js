@@ -362,29 +362,45 @@ function labelsFor(db, groupBy, keys) {
 const optionsCache = new Map();
 
 /** Filter choices for the page, cached. */
-export function statsFilterOptionsCachedSync(db, range, now = Date.now()) {
+export async function statsFilterOptionsCached(db, range, now = Date.now()) {
   const key = `${range.from.slice(0, 13)}|${range.to.slice(0, 13)}`;
   const hit = optionsCache.get(key);
   if (hit && now - hit.at < 5 * 60 * 1000) return hit.value;
-  const value = statsFilterOptionsSync(db, range);
+  const value = await statsFilterOptions(db, range);
   if (optionsCache.size > 50) optionsCache.clear();
   optionsCache.set(key, { at: now, value });
   return value;
 }
 
-/** Filter choices for the page: providers and models seen in the range. */
-export function statsFilterOptionsSync(db, { from, to }) {
-  const providers = db.all(
-    `SELECT DISTINCT provider FROM usageHistory
-      WHERE timestamp >= ? AND timestamp <= ? AND provider IS NOT NULL AND provider != 'platform'
-      ORDER BY provider LIMIT 200`,
-    [from, to]
-  ).map((row) => row.provider);
-  const models = db.all(
-    `SELECT DISTINCT COALESCE(json_extract(meta, '$.requestedModel'), model) AS m FROM usageHistory
-      WHERE timestamp >= ? AND timestamp <= ? AND COALESCE(provider, '') != 'platform'
-      ORDER BY m LIMIT 500`,
-    [from, to]
-  ).map((row) => row.m).filter(Boolean);
-  return { providers, models };
+// Filter choices for the page: distinct providers and models seen in the range.
+// Sliced the same way tokenStats() above slices its own scan (same SLICE_MS,
+// yielding to the event loop between slices): this used to run as one
+// unsliced `json_extract` scan over the whole range — unindexed, and (unlike
+// tokenStats' own queries) not sliced at all — which blocked the single Node
+// event loop for as long as a wide, uncached range took to scan, freezing
+// every other request on the server. The exact failure class documented
+// above for /dashboard/usage before its rollup fix (see memory
+// usage-dashboard-perf), just reached by this page's own separate query.
+export async function statsFilterOptions(db, { from, to }) {
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  const providers = new Set();
+  const models = new Set();
+  await forEachSlice(db, {
+    fromMs, toMs,
+    sql: (isLast) => `SELECT DISTINCT provider AS provider,
+            COALESCE(json_extract(meta, '$.requestedModel'), model) AS m
+       FROM usageHistory
+      WHERE timestamp >= ? AND timestamp ${isLast ? "<=" : "<"} ? AND COALESCE(provider, '') != 'platform'`,
+    timeParams: (sliceFrom, sliceTo) => [sliceFrom, sliceTo],
+  }, (rows) => {
+    for (const row of rows) {
+      if (row.provider) providers.add(row.provider);
+      if (row.m) models.add(row.m);
+    }
+  });
+  return {
+    providers: [...providers].sort().slice(0, 200),
+    models: [...models].sort().slice(0, 500),
+  };
 }

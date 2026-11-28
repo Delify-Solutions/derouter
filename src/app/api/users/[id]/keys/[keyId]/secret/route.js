@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { revealKeySecretSync } from "@/lib/billing/adminActions.js";
 import { hitLimit } from "@/lib/auth/actionLimiter";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store", Pragma: "no-cache" };
@@ -24,6 +25,8 @@ const SECRET_LIMIT = { limit: 30, windowMs: 60_000 };
  * Never log the response: it is the secret.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id, keyId } = await params;
   const user = await getUserById(id);
   if (!user) {

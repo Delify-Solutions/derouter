@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Card, Button, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Modal, Toggle, ConfirmModal, Badge } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { getCurrentLocale, onLocaleChange } from "@/i18n/runtime";
 import {
@@ -475,10 +475,6 @@ export default function TokenSaverClient() {
           : pxpipeStatus.running
             ? "Running"
             : "Stopped";
-  const pxpipeChipClass =
-    pxpipeHealthy || pxpipeStatus.running
-      ? "bg-success/15 text-success"
-      : "bg-warning/15 text-warning";
 
   return (
     <div className="space-y-6 p-6">
@@ -547,11 +543,9 @@ export default function TokenSaverClient() {
                   (Headroom)
                 </a>
               </p>
-              <span
-                className={`text-xs px-2 py-0.5 rounded ${headroomRunning ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}
-              >
+              <Badge variant={headroomRunning ? "success" : "warning"} size="sm">
                 {headroomStatusLabel}
-              </span>
+              </Badge>
               <button
                 type="button"
                 onClick={() => setShowHeadroomInstallModal(true)}
@@ -634,15 +628,14 @@ export default function TokenSaverClient() {
                 );
               })}
               {pendingExtras.length > 0 && (
-                <button
+                <Button
+                  size="sm"
                   onClick={handleInstallExtras}
                   disabled={extrasActionLoading}
-                  className="text-xs px-2.5 py-1 rounded bg-primary text-white hover:opacity-90 disabled:opacity-50"
+                  loading={extrasActionLoading}
                 >
-                  {extrasActionLoading
-                    ? "Installing…"
-                    : `Install [proxy,${pendingExtras.join(",")}]`}
-                </button>
+                  {`Install [proxy,${pendingExtras.join(",")}]`}
+                </Button>
               )}
             </div>
             {extrasActionError && (
@@ -689,18 +682,15 @@ export default function TokenSaverClient() {
               <div className="flex flex-col items-end gap-1">
                 <div className="flex items-center gap-1.5">
                   {visibleCavemanLevels.map((lvl) => (
-                    <button
+                    <Button
                       key={lvl.id}
+                      size="sm"
+                      variant={cavemanLevel === lvl.id ? "primary" : "light-outline"}
                       onClick={() => handleCavemanLevel(lvl.id)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
-                        cavemanLevel === lvl.id
-                          ? "bg-primary text-white border-primary"
-                          : "bg-transparent border-border text-text-muted hover:bg-surface-2"
-                      }`}
                       title={lvl.desc}
                     >
                       {lvl.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 <p className="text-xs text-primary">
@@ -740,18 +730,15 @@ export default function TokenSaverClient() {
               <div className="flex flex-col items-end gap-1">
                 <div className="flex items-center gap-1.5">
                   {PONYTAIL_LEVELS.map((lvl) => (
-                    <button
+                    <Button
                       key={lvl.id}
+                      size="sm"
+                      variant={ponytailLevel === lvl.id ? "primary" : "light-outline"}
                       onClick={() => handlePonytailLevel(lvl.id)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
-                        ponytailLevel === lvl.id
-                          ? "bg-primary text-white border-primary"
-                          : "bg-transparent border-border text-text-muted hover:bg-surface-2"
-                      }`}
                       title={lvl.desc}
                     >
                       {lvl.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 <p className="text-xs text-primary">
@@ -784,9 +771,9 @@ export default function TokenSaverClient() {
                   (PXPIPE)
                 </a>
               </p>
-              <span className={`text-xs px-2 py-0.5 rounded ${pxpipeChipClass}`}>
+              <Badge variant={pxpipeHealthy || pxpipeStatus.running ? "success" : "warning"} size="sm">
                 {pxpipeStatusLabel}
-              </span>
+              </Badge>
               <button
                 type="button"
                 onClick={() => setShowPxpipeModal(true)}

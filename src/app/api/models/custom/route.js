@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
 import { CAPACITY_META } from "@/shared/constants/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,8 @@ export async function GET() {
 
 // POST /api/models/custom - Add custom model
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const { providerAlias, id, type, name, caps } = await request.json();
     if (!providerAlias || !id) {
@@ -41,6 +44,8 @@ export async function POST(request) {
 
 // DELETE /api/models/custom?providerAlias=xxx&id=yyy&type=zzz
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "providers", "delete");
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");

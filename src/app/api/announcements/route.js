@@ -11,6 +11,7 @@ import {
 } from "@/lib/notify/inbox.js";
 import { startBroadcast } from "@/lib/notify/broadcast.js";
 import { readAnnouncementRequest, saveAnnouncementImage } from "@/lib/notify/announcementImage.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -33,6 +34,8 @@ export async function GET(request) {
  * does not undo the announcement: `telegram.error` says why.
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "announcements", "edit");
+  if (denied) return denied;
   const actor = await getAdminActor(request);
   const input = await readAnnouncementRequest(request);
   if (input.error) return NextResponse.json({ error: input.error }, { status: 400, headers: NO_STORE });

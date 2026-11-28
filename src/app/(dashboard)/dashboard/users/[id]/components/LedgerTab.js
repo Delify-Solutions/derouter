@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Pagination, Select } from "@/shared/components";
+import { Button, Card, Pagination, Select, Table } from "@/shared/components";
 import { dateOf, timeOf } from "@/shared/components/billing";
 import { fmtUsdNano } from "@/shared/utils/money";
 
@@ -88,65 +88,63 @@ export default function LedgerTab({ userId }) {
       {loading ? (
         <div className="h-40 border border-border bg-surface" aria-hidden="true" />
       ) : data.entries.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Không có dòng sổ cái nào</p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[760px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Thời điểm</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Loại</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Gói</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Model</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Token</th>
-                <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Thay đổi</th>
-                <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Số dư sau</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.entries.map((entry) => (
-                <tr key={entry.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">
-                    {dateOf(entry.createdAt)} {timeOf(entry.createdAt)}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                    {entry.deltaImages
-                      ? IMAGE_KIND_LABEL[entry.kind] || KIND_LABEL[entry.kind] || entry.kind
-                      : KIND_LABEL[entry.kind] || entry.kind}
-                    {entry.backfill && <span className="ml-1 text-[10px] text-text-subtle">truy trừ</span>}
-                    {entry.debtNote && <span className="ml-1 text-[10px] text-text-subtle">{entry.debtNote}</span>}
-                  </td>
-                  <td className="px-4 py-2 text-sm text-text-main">{entry.planName || "—"}</td>
-                  <td className="max-w-[200px] truncate px-4 py-2 font-mono text-[12px] text-text-muted" title={[entry.model, entry.upstreamModel].filter(Boolean).join(" → ")}>
-                    {entry.model || entry.upstreamModel || "—"}
-                    {entry.upstreamModel && entry.upstreamModel !== entry.model ? (
-                      <span className="block truncate text-[11px] text-text-subtle">{entry.upstreamModel}</span>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">
-                    {entry.promptTokens == null ? "—" : `${entry.promptTokens} / ${entry.completionTokens ?? 0}`}
-                  </td>
-                  {/* An image-plan row moves images, not money: "$0.00" would read as
-                      a free charge. */}
-                  <td className="px-4 py-2 text-right font-mono text-[12px] text-text-main">
-                    {entry.deltaImages
-                      ? `${entry.deltaImages > 0 ? "+" : ""}${entry.deltaImages.toLocaleString("vi-VN")} ảnh`
-                      : `${entry.deltaNanoUsd > 0 ? "+" : ""}${fmtUsdNano(entry.deltaNanoUsd)}`}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">
-                    {entry.deltaImages
-                      ? entry.balanceAfterImages == null
-                        ? "—"
-                        : `${entry.balanceAfterImages.toLocaleString("vi-VN")} ảnh`
-                      : entry.balanceAfterUsd ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[760px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell>Thời điểm</Table.HeaderCell>
+              <Table.HeaderCell>Loại</Table.HeaderCell>
+              <Table.HeaderCell>Gói</Table.HeaderCell>
+              <Table.HeaderCell>Model</Table.HeaderCell>
+              <Table.HeaderCell>Token</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">Thay đổi</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">Số dư sau</Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {data.entries.map((entry) => (
+              <Table.Row key={entry.id}>
+                <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">
+                  {dateOf(entry.createdAt)} {timeOf(entry.createdAt)}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main">
+                  {entry.deltaImages
+                    ? IMAGE_KIND_LABEL[entry.kind] || KIND_LABEL[entry.kind] || entry.kind
+                    : KIND_LABEL[entry.kind] || entry.kind}
+                  {entry.backfill && <span className="ml-1 text-[10px] text-text-subtle">truy trừ</span>}
+                  {entry.debtNote && <span className="ml-1 text-[10px] text-text-subtle">{entry.debtNote}</span>}
+                </Table.Cell>
+                <Table.Cell className="text-sm text-text-main">{entry.planName || "—"}</Table.Cell>
+                <Table.Cell className="max-w-[200px] truncate font-mono text-[12px] text-text-muted" title={[entry.model, entry.upstreamModel].filter(Boolean).join(" → ")}>
+                  {entry.model || entry.upstreamModel || "—"}
+                  {entry.upstreamModel && entry.upstreamModel !== entry.model ? (
+                    <span className="block truncate text-[11px] text-text-subtle">{entry.upstreamModel}</span>
+                  ) : null}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">
+                  {entry.promptTokens == null ? "—" : `${entry.promptTokens} / ${entry.completionTokens ?? 0}`}
+                </Table.Cell>
+                {/* An image-plan row moves images, not money: "$0.00" would read as
+                    a free charge. */}
+                <Table.Cell className="text-right font-mono text-[12px] text-text-main">
+                  {entry.deltaImages
+                    ? `${entry.deltaImages > 0 ? "+" : ""}${entry.deltaImages.toLocaleString("vi-VN")} ảnh`
+                    : `${entry.deltaNanoUsd > 0 ? "+" : ""}${fmtUsdNano(entry.deltaNanoUsd)}`}
+                </Table.Cell>
+                <Table.Cell className="text-right font-mono text-[12px] text-text-muted">
+                  {entry.deltaImages
+                    ? entry.balanceAfterImages == null
+                      ? "—"
+                      : `${entry.balanceAfterImages.toLocaleString("vi-VN")} ảnh`
+                    : entry.balanceAfterUsd ?? "—"}
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       {data.total > 25 && (

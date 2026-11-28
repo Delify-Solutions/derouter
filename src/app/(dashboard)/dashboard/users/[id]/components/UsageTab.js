@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Button, SegmentedControl } from "@/shared/components";
+import { Button, Card, SegmentedControl, Table } from "@/shared/components";
 import { fmtUsdNano } from "@/shared/utils/money";
 
 /**
@@ -66,7 +66,7 @@ export default function UsageTab({ userId }) {
         <div className="h-64 border border-border bg-surface" aria-hidden="true" />
       ) : (
         <>
-          <section className="border border-border bg-surface p-5">
+          <Card>
             <h2 className="meta text-text-muted">Chi phí mỗi ngày</h2>
             {chartData.length === 0 ? (
               <p className="mt-4 text-sm text-text-muted">Không có lưu lượng trong khoảng này.</p>
@@ -86,41 +86,39 @@ export default function UsageTab({ userId }) {
                 </ResponsiveContainer>
               </div>
             )}
-          </section>
+          </Card>
 
           <section className="flex flex-col gap-3">
             <h2 className="meta text-text-muted">Theo model</h2>
             {data.byModel.length === 0 ? (
-              <div className="border border-border bg-surface px-6 py-8">
+              <Card padding="lg">
                 <p className="text-sm text-text-muted">Chưa có request nào trong khoảng này.</p>
-              </div>
+              </Card>
             ) : (
-              <div className="overflow-x-auto border border-border bg-surface">
-                <table className="w-full min-w-[600px] border-collapse text-left">
-                  <thead>
-                    <tr className="border-b border-border bg-surface-2">
-                      <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Model</th>
-                      <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Request</th>
-                      <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Token vào</th>
-                      <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Token ra</th>
-                      <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Chi phí</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.byModel.map((row) => (
-                      <tr key={row.model} className="border-b border-border last:border-b-0">
-                        <td className="max-w-[260px] truncate px-4 py-2 font-mono text-[12px] text-text-main" title={row.model}>
-                          {row.model}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">{row.requests}</td>
-                        <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">{row.promptTokens}</td>
-                        <td className="px-4 py-2 text-right font-mono text-[12px] text-text-muted">{row.completionTokens}</td>
-                        <td className="px-4 py-2 text-right font-mono text-[12px] text-text-main">{fmtUsdNano(row.costNanoUsd)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table className="min-w-[600px] text-left">
+                <Table.Head>
+                  <tr>
+                    <Table.HeaderCell>Model</Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">Request</Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">Token vào</Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">Token ra</Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">Chi phí</Table.HeaderCell>
+                  </tr>
+                </Table.Head>
+                <Table.Body>
+                  {data.byModel.map((row) => (
+                    <Table.Row key={row.model}>
+                      <Table.Cell className="max-w-[260px] truncate font-mono text-[12px] text-text-main" title={row.model}>
+                        {row.model}
+                      </Table.Cell>
+                      <Table.Cell className="text-right font-mono text-[12px] text-text-muted">{row.requests}</Table.Cell>
+                      <Table.Cell className="text-right font-mono text-[12px] text-text-muted">{row.promptTokens}</Table.Cell>
+                      <Table.Cell className="text-right font-mono text-[12px] text-text-muted">{row.completionTokens}</Table.Cell>
+                      <Table.Cell className="text-right font-mono text-[12px] text-text-main">{fmtUsdNano(row.costNanoUsd)}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
             )}
           </section>
         </>

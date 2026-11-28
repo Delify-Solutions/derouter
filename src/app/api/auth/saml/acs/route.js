@@ -12,6 +12,7 @@ import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { checkLock, recordFail, recordSuccess, getClientIp, adminIpBucket } from "@/lib/auth/loginLimiter";
 import { notifyAdminLogin } from "@/lib/notify/telegram";
 import { getRequestIp, getRequestUserAgent } from "@/lib/auth/clientIp.js";
+import { getSuperAdminAccount } from "@/lib/auth/adminUsers";
 
 export async function POST(request) {
   const settings = await getSettings();
@@ -68,10 +69,16 @@ export async function POST(request) {
 
     recordSuccess(limiterKey);
 
+    // Per-account SSO identity mapping is out of scope (design.md Non-Goals):
+    // every successful SAML sign-in resolves to the Super Admin account.
+    const superAdmin = await getSuperAdminAccount();
     await setDashboardAuthCookie(cookieStore, request, {
       saml: true,
       samlEmail,
       samlName,
+      adminUserId: superAdmin?.id || null,
+      username: superAdmin?.username || null,
+      role: "super_admin",
     });
     notifyAdminLogin({
       method: "saml",

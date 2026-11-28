@@ -160,32 +160,32 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   };
 
   return (
-    <div className={`group flex min-w-0 flex-col gap-3 rounded-lg p-2 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between ${connection.isActive === false ? "opacity-60" : ""}`}>
+    <div className={`group flex min-w-0 flex-col gap-3 rounded-vx-md p-2 transition-colors hover:bg-vx-surface-2/60 sm:flex-row sm:items-center sm:justify-between ${connection.isActive === false ? "opacity-60" : ""}`}>
       <div className="flex min-w-0 flex-1 items-start gap-2 sm:items-center sm:gap-3">
         {/* Priority arrows */}
         <div className="flex shrink-0 flex-col">
           <button
             onClick={onMoveUp}
             disabled={isFirst}
-            className={`p-0.5 rounded ${isFirst ? "text-text-muted/30 cursor-not-allowed" : "hover:bg-sidebar text-text-muted hover:text-primary"}`}
+            className={`p-0.5 rounded-vx-sm ${isFirst ? "text-vx-text-muted/30 cursor-not-allowed" : "hover:bg-vx-surface-2 text-vx-text-muted hover:text-vx-primary"}`}
           >
             <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
           </button>
           <button
             onClick={onMoveDown}
             disabled={isLast}
-            className={`p-0.5 rounded ${isLast ? "text-text-muted/30 cursor-not-allowed" : "hover:bg-sidebar text-text-muted hover:text-primary"}`}
+            className={`p-0.5 rounded-vx-sm ${isLast ? "text-vx-text-muted/30 cursor-not-allowed" : "hover:bg-vx-surface-2 text-vx-text-muted hover:text-vx-primary"}`}
           >
             <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
           </button>
         </div>
-        <span className="material-symbols-outlined shrink-0 text-base text-text-muted">
+        <span className="material-symbols-outlined shrink-0 text-base text-vx-text-muted">
           {authIcon}
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate">{displayName}</p>
           {secondaryDisplayName && (
-            <p className="text-xs text-text-muted truncate">{secondaryDisplayName}</p>
+            <p className="text-xs text-vx-text-muted truncate">{secondaryDisplayName}</p>
           )}
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
             <Badge variant={getStatusVariant()} size="sm" dot>
@@ -201,13 +201,13 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             )}
             {isCooldown && connection.isActive !== false && <CooldownTimer until={modelLockUntil} />}
             {connection.lastError && connection.isActive !== false && (
-              <span className="max-w-full truncate text-xs text-red-500 sm:max-w-[300px]" title={connection.lastError}>
+              <span className="max-w-full truncate text-xs text-vx-danger sm:max-w-[300px]" title={connection.lastError}>
                 {connection.lastError}
               </span>
             )}
-            <span className="text-xs text-text-muted">#{connection.priority}</span>
+            <span className="text-xs text-vx-text-muted">#{connection.priority}</span>
             {connection.globalPriority && (
-              <span className="text-xs text-text-muted">Auto: {connection.globalPriority}</span>
+              <span className="text-xs text-vx-text-muted">Auto: {connection.globalPriority}</span>
             )}
             {getOneByOneLabel() && (
               <Badge variant={getOneByOneVariant()} size="sm">
@@ -218,17 +218,17 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
           {rowAuthType !== "oauth" && (revealedKey !== null || revealError) && (
             <div className="mt-1 flex items-center gap-2 flex-wrap">
               {revealError ? (
-                <span className="text-[11px] text-red-500">Không hiện được key.</span>
+                <span className="text-[11px] text-vx-danger">Không hiện được key.</span>
               ) : (
                 <>
-                  <code className="max-w-full truncate rounded bg-black/5 px-1 py-0.5 font-mono text-[10px] text-text-main dark:bg-white/5 sm:max-w-[420px]">
+                  <code className="max-w-full truncate rounded-vx-sm bg-vx-surface-2 px-1 py-0.5 font-mono text-[10px] text-vx-text sm:max-w-[420px]">
                     {revealedKey || "(trống)"}
                   </code>
                   {revealedKey && (
                     <button
                       type="button"
                       onClick={() => copy(revealedKey, connection.id)}
-                      className="text-[11px] text-text-muted hover:text-primary"
+                      className="text-[11px] text-vx-text-muted hover:text-vx-primary"
                     >
                       {copied === connection.id ? "Đã chép" : "Chép"}
                     </button>
@@ -239,16 +239,16 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
           )}
           {hasAnyProxy && (
             <div className="mt-1 flex items-center gap-2 flex-wrap">
-              <span className="max-w-full truncate text-[11px] text-text-muted sm:max-w-[420px]" title={proxyDisplayText}>
+              <span className="max-w-full truncate text-[11px] text-vx-text-muted sm:max-w-[420px]" title={proxyDisplayText}>
                 {proxyDisplayText}
               </span>
               {maskedProxyUrl && (
-                <code className="max-w-full truncate rounded bg-black/5 px-1 py-0.5 font-mono text-[10px] text-text-muted dark:bg-white/5 sm:max-w-[260px]">
+                <code className="max-w-full truncate rounded-vx-sm bg-vx-surface-2 px-1 py-0.5 font-mono text-[10px] text-vx-text-muted sm:max-w-[260px]">
                   {maskedProxyUrl}
                 </code>
               )}
               {noProxyText && (
-                <span className="max-w-full truncate text-[11px] text-text-muted sm:max-w-[320px]" title={noProxyText}>
+                <span className="max-w-full truncate text-[11px] text-vx-text-muted sm:max-w-[320px]" title={noProxyText}>
                   no_proxy: {noProxyText}
                 </span>
               )}
@@ -263,7 +263,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               <button
                 onClick={toggleReveal}
                 disabled={revealing}
-                className="flex w-full flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+                className="flex w-full flex-col items-center rounded-vx-sm px-2 py-1 text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-primary"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   {revealing ? "progress_activity" : revealedKey !== null ? "visibility_off" : "visibility"}
@@ -277,7 +277,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             <div className="relative" ref={proxyDropdownRef}>
               <button
                 onClick={() => setShowProxyDropdown((v) => !v)}
-                className={`flex w-full flex-col items-center rounded px-2 py-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${hasAnyProxy ? "text-primary" : "text-text-muted hover:text-primary"}`}
+                className={`flex w-full flex-col items-center rounded-vx-sm px-2 py-1 transition-colors hover:bg-vx-surface-2 ${hasAnyProxy ? "text-vx-primary" : "text-vx-text-muted hover:text-vx-primary"}`}
                 disabled={updatingProxy}
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -286,10 +286,10 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
                 <span className="text-[10px] leading-tight">Proxy</span>
               </button>
               {showProxyDropdown && (
-                <div className="absolute right-0 top-full z-50 mt-1 max-w-[78vw] min-w-[160px] rounded-lg border border-border bg-bg py-1 shadow-lg">
+                <div className="absolute right-0 top-full z-50 mt-1 max-w-[78vw] min-w-[160px] rounded-vx-md border border-vx-border bg-vx-surface py-1 shadow-vx-sm">
                   <button
                     onClick={() => handleSelectProxy("__none__")}
-                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 ${!boundProxyPoolId ? "text-primary font-medium" : "text-text-main"}`}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-vx-surface-2 ${!boundProxyPoolId ? "text-vx-primary font-medium" : "text-vx-text"}`}
                   >
                     None
                   </button>
@@ -297,7 +297,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
                     <button
                       key={pool.id}
                       onClick={() => handleSelectProxy(pool.id)}
-                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 ${boundProxyPoolId === pool.id ? "text-primary font-medium" : "text-text-main"}`}
+                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-vx-surface-2 ${boundProxyPoolId === pool.id ? "text-vx-primary font-medium" : "text-vx-text"}`}
                     >
                       {pool.name}
                     </button>
@@ -310,26 +310,26 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             <Tooltip text={autoPingTooltip}>
               <button
                 onClick={() => autoPing.onToggle(!autoPing.on)}
-                className={`flex w-full flex-col items-center rounded px-2 py-1 transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${autoPing.on ? "text-primary" : "text-text-muted hover:text-primary"}`}
+                className={`flex w-full flex-col items-center rounded-vx-sm px-2 py-1 transition-colors hover:bg-vx-surface-2 ${autoPing.on ? "text-vx-primary" : "text-vx-text-muted hover:text-vx-primary"}`}
               >
                 <span className="material-symbols-outlined text-[18px]">bolt</span>
                 <span className="text-[10px] leading-tight">Auto-ping</span>
               </button>
             </Tooltip>
           )}
-          <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
+          <button onClick={onEdit} className="flex flex-col items-center rounded-vx-sm px-2 py-1 text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-primary">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
           </button>
           {onClone && (
             <Tooltip text="Duplicate this connection (endpoint, API key, model config) into a new one">
-              <button onClick={onClone} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
+              <button onClick={onClone} className="flex flex-col items-center rounded-vx-sm px-2 py-1 text-vx-text-muted hover:bg-vx-surface-2 hover:text-vx-primary">
                 <span className="material-symbols-outlined text-[18px]">content_copy</span>
                 <span className="text-[10px] leading-tight">Clone</span>
               </button>
             </Tooltip>
           )}
-          <button onClick={onDelete} className="flex flex-col items-center rounded px-2 py-1 text-red-500 hover:bg-red-500/10">
+          <button onClick={onDelete} className="flex flex-col items-center rounded-vx-sm px-2 py-1 text-vx-danger hover:bg-vx-danger/10">
             <span className="material-symbols-outlined text-[18px]">delete</span>
             <span className="text-[10px] leading-tight">Delete</span>
           </button>

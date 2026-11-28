@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Relay worker source code deployed to Cloudflare
 const RELAY_WORKER_CODE = `
@@ -48,6 +49,8 @@ export default {
 
 // POST /api/proxy-pools/cloudflare-deploy
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const accountId = body.accountId?.trim();

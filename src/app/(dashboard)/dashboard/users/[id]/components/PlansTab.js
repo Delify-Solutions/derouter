@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, CardSkeleton, Input, Select } from "@/shared/components";
+import { Button, CardSkeleton, Input, Select, Table } from "@/shared/components";
 import { PlanQueue } from "@/shared/components/billing";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 
@@ -253,36 +253,34 @@ export default function PlansTab({ userId, onChanged }) {
       {data.history.length > 0 && (
         <section className="flex flex-col gap-3">
           <h2 className="meta text-text-muted">Lịch sử gói ({data.history.length})</h2>
-          <div className="overflow-x-auto border border-border bg-surface">
-            <table className="w-full min-w-[600px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Gói</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Nguồn</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Đã nhận</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Hết hạn</th>
-                  <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Trạng thái</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.history.map((row) => (
-                  <tr key={row.id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2 text-sm text-text-main">{row.planName || row.planCode || "Gói"}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.source}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-main">
-                      {row.kind === "image"
-                        ? `${Number(row.imageTotal || 0).toLocaleString("vi-VN")} ảnh`
-                        : fmtCreditNano(row.creditTotalNanoUsd, row.unlimitedCredit)}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-muted">
-                      {row.expiresAt ? new Date(row.expiresAt).toLocaleDateString("vi-VN") : "—"}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{row.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-[600px] text-left">
+            <Table.Head>
+              <tr>
+                <Table.HeaderCell>Gói</Table.HeaderCell>
+                <Table.HeaderCell>Nguồn</Table.HeaderCell>
+                <Table.HeaderCell>Đã nhận</Table.HeaderCell>
+                <Table.HeaderCell>Hết hạn</Table.HeaderCell>
+                <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {data.history.map((row) => (
+                <Table.Row key={row.id}>
+                  <Table.Cell className="text-sm text-text-main">{row.planName || row.planCode || "Gói"}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">{row.source}</Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-main">
+                    {row.kind === "image"
+                      ? `${Number(row.imageTotal || 0).toLocaleString("vi-VN")} ảnh`
+                      : fmtCreditNano(row.creditTotalNanoUsd, row.unlimitedCredit)}
+                  </Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">
+                    {row.expiresAt ? new Date(row.expiresAt).toLocaleDateString("vi-VN") : "—"}
+                  </Table.Cell>
+                  <Table.Cell className="font-mono text-[12px] text-text-muted">{row.status}</Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         </section>
       )}
 

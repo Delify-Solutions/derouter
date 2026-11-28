@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { findPython310, getInstalledHeadroomExtras, HEADROOM_COMPRESSION_EXTRAS } from "@/lib/headroom/detect";
 import { installHeadroomExtras, uninstallHeadroomExtras, getInstallLogTail } from "@/lib/headroom/process";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  const denied = await requirePagePermission(req, "token-saver", "edit");
+  if (denied) return denied;
   try {
     const body = await req.json().catch(() => ({}));
     const requested = Array.isArray(body?.extras) ? body.extras : [];
@@ -34,6 +37,8 @@ export async function POST(req) {
 }
 
 export async function DELETE(req) {
+  const denied = await requirePagePermission(req, "token-saver", "delete");
+  if (denied) return denied;
   try {
     const body = await req.json().catch(() => ({}));
     const requested = Array.isArray(body?.extras) ? body.extras : [];

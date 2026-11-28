@@ -8,8 +8,9 @@ import m004 from "./004-gift-redemption-repeat.js";
 import m005 from "./005-usage-apikey-id.js";
 import m006 from "./006-drop-plan-model-limits.js";
 import m007 from "./007-skills-all-agents.js";
+import m008 from "./008-admin-accounts.js";
 
-export const MIGRATIONS = [m001, m002, m003, m004, m005, m006, m007].sort((a, b) => a.version - b.version);
+export const MIGRATIONS = [m001, m002, m003, m004, m005, m006, m007, m008].sort((a, b) => a.version - b.version);
 
 export function latestVersion() {
   return MIGRATIONS.length ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;

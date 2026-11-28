@@ -4,6 +4,7 @@ import { getUserById } from "@/lib/localDb";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { getQueueSync } from "@/lib/db/repos/accountPlansRepo.js";
 import { reorderSync } from "@/lib/billing/planQueue.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -19,6 +20,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * moves no money.
  */
 export async function PUT(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id } = await params;
   const user = await getUserById(id);
   if (!user) {

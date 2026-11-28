@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { Card, Button } from "@/shared/components";
+import { Card, Button, Badge, Table, SegmentedControl } from "@/shared/components";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`;
@@ -135,21 +135,12 @@ export default function PxpipeClient() {
       <Card className="p-4">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h3 className="font-medium">Token savings (estimated)</h3>
-          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1">
-            {WINDOW_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setWindowId(tab.id)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  windowId === tab.id
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-text-muted hover:text-text hover:bg-bg-hover"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={WINDOW_TABS.map((tab) => ({ value: tab.id, label: tab.label }))}
+            value={windowId}
+            onChange={setWindowId}
+            size="sm"
+          />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
           <div>
@@ -204,68 +195,57 @@ export default function PxpipeClient() {
 
       <Card className="p-4">
         <h3 className="font-medium mb-3">History</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-text-muted border-b border-border">
-                <th className="py-2 pr-3">Time</th>
-                <th className="py-2 pr-3">Model</th>
-                <th className="py-2 pr-3 text-right">Original</th>
-                <th className="py-2 pr-3 text-right">Compressed</th>
-                <th className="py-2 pr-3 text-right">Saved</th>
-                <th className="py-2 pr-3 text-right">%</th>
-                <th className="py-2 pr-3 text-right">Duration</th>
-                <th className="py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(stats?.recent || []).slice(0, 50).map((ev, i) => (
-                <tr key={`${ev.ts}-${i}`} className="border-b border-border/50">
-                  <td className="py-1.5 pr-3 whitespace-nowrap text-text-muted">
-                    {new Date(ev.ts).toLocaleString()}
-                  </td>
-                  <td className="py-1.5 pr-3 font-mono text-xs">{ev.provider ? `${ev.provider}/${ev.model}` : ev.model || "—"}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
-                    {ev.applied ? fmtTokens(ev.tokensBeforeEst) : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
-                    {ev.applied ? fmtTokens(ev.tokensAfterEst) : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs text-success">
-                    {ev.applied ? fmtTokens(ev.tokensSavedEst) : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
-                    {ev.applied ? `${ev.savedPct}%` : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
-                    {ev.durationMs != null ? `${ev.durationMs}ms` : "—"}
-                  </td>
-                  <td className="py-1.5">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        ev.applied
-                          ? "bg-success/15 text-success"
-                          : ev.reason === "transform_error" || ev.reason === "timeout"
-                            ? "bg-danger/15 text-danger"
-                            : "bg-warning/15 text-warning"
-                      }`}
-                      title={ev.detail || ""}
-                    >
-                      {ev.applied ? "Compressed" : REASON_LABELS[ev.reason] || ev.reason}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {(!stats?.recent || stats.recent.length === 0) && (
-                <tr>
-                  <td colSpan={8} className="py-6 text-center text-text-muted text-sm">
-                    No PXPIPE activity yet
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <Table bare>
+          <Table.Head>
+            <Table.Row>
+              <Table.HeaderCell>Time</Table.HeaderCell>
+              <Table.HeaderCell>Model</Table.HeaderCell>
+              <Table.HeaderCell align="right">Original</Table.HeaderCell>
+              <Table.HeaderCell align="right">Compressed</Table.HeaderCell>
+              <Table.HeaderCell align="right">Saved</Table.HeaderCell>
+              <Table.HeaderCell align="right">%</Table.HeaderCell>
+              <Table.HeaderCell align="right">Duration</Table.HeaderCell>
+              <Table.HeaderCell>Status</Table.HeaderCell>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {(stats?.recent || []).slice(0, 50).map((ev, i) => (
+              <Table.Row key={`${ev.ts}-${i}`}>
+                <Table.Cell className="whitespace-nowrap text-vx-text-muted text-xs">
+                  {new Date(ev.ts).toLocaleString()}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-xs">{ev.provider ? `${ev.provider}/${ev.model}` : ev.model || "—"}</Table.Cell>
+                <Table.Cell className="text-right font-mono text-xs">
+                  {ev.applied ? fmtTokens(ev.tokensBeforeEst) : "—"}
+                </Table.Cell>
+                <Table.Cell className="text-right font-mono text-xs">
+                  {ev.applied ? fmtTokens(ev.tokensAfterEst) : "—"}
+                </Table.Cell>
+                <Table.Cell className="text-right font-mono text-xs text-vx-success">
+                  {ev.applied ? fmtTokens(ev.tokensSavedEst) : "—"}
+                </Table.Cell>
+                <Table.Cell className="text-right font-mono text-xs">
+                  {ev.applied ? `${ev.savedPct}%` : "—"}
+                </Table.Cell>
+                <Table.Cell className="text-right font-mono text-xs">
+                  {ev.durationMs != null ? `${ev.durationMs}ms` : "—"}
+                </Table.Cell>
+                <Table.Cell>
+                  <Badge
+                    variant={ev.applied ? "success" : ev.reason === "transform_error" || ev.reason === "timeout" ? "error" : "warning"}
+                    size="sm"
+                    title={ev.detail || ""}
+                  >
+                    {ev.applied ? "Compressed" : REASON_LABELS[ev.reason] || ev.reason}
+                  </Badge>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+            {(!stats?.recent || stats.recent.length === 0) && (
+              <Table.Empty colSpan={8}>No PXPIPE activity yet</Table.Empty>
+            )}
+          </Table.Body>
+        </Table>
       </Card>
 
       <Card className="p-4" id="logs">

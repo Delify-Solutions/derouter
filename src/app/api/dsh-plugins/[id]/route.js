@@ -5,6 +5,7 @@ import {
   deletePlugin,
   pluginInputError,
 } from "@/lib/db/repos/dshPluginsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,8 @@ export async function GET(request, { params }) {
 
 // PATCH /api/dsh-plugins/{id} — change any subset of the fields.
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "dsh-plugins", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json().catch(() => null);
@@ -50,6 +53,8 @@ export async function PATCH(request, { params }) {
 
 // DELETE /api/dsh-plugins/{id}
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "dsh-plugins", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const removed = await deletePlugin(id);

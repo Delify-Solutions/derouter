@@ -15,11 +15,13 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "derouter-providers
 const { getAdapter } = await import("../src/lib/db/driver.js");
 const { createProviderConnection, getProviderConnectionById } = await import("../src/lib/db/repos/connectionsRepo.js");
 const { POST } = await import("../src/app/api/providers/[id]/clone/route.js");
+const { superAdminAuthHeaders } = await import("./helpers/adminSession.mjs");
 
 await getAdapter();
+const authHeaders = await superAdminAuthHeaders();
 
 const call = (id) =>
-  POST(new Request(`https://admin.example/api/providers/${id}/clone`, { method: "POST" }), {
+  POST(new Request(`https://admin.example/api/providers/${id}/clone`, { method: "POST", headers: authHeaders }), {
     params: Promise.resolve({ id }),
   });
 

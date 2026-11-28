@@ -3,8 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
+import Badge from "@/shared/components/Badge";
+import Select from "@/shared/components/Select";
+import Input from "@/shared/components/Input";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
+import Table from "@/shared/components/Table";
 import TableToolbar, { useTableQuery, SortableHeader } from "@/shared/components/TableToolbar";
 import { TableStateRow } from "@/shared/components/TableState";
 import { nextSortState, hasActiveQuery, clearQueryFilters, tableStateOf } from "@/shared/utils/tableQuery";
@@ -20,7 +24,7 @@ import { fmtUsdNano } from "@/shared/utils/money";
  * name and its masked value. Clicking the e-mail filters the table to that user.
  */
 function KeyOwner({ apiKey, info, onPickUser = null, compact = true }) {
-  if (!apiKey) return <span className="text-text-muted">—</span>;
+  if (!apiKey) return <span className="text-vx-text-muted">—</span>;
   const masked = maskKeyFull(apiKey);
   const owner = info?.kind === "user"
     ? (info.email || info.userId)
@@ -32,17 +36,17 @@ function KeyOwner({ apiKey, info, onPickUser = null, compact = true }) {
           type="button"
           onClick={(event) => { event.stopPropagation(); onPickUser(info); }}
           title={`Chỉ xem request của ${owner}`}
-          className="min-w-0 truncate text-left text-sm text-text-main hover:underline"
+          className="min-w-0 truncate text-left text-sm text-vx-text hover:underline"
         >
           {owner}
         </button>
       ) : (
-        <span className={`min-w-0 truncate text-sm ${info?.kind === "user" ? "text-text-main" : "text-text-muted"}`} title={owner}>{owner}</span>
+        <span className={`min-w-0 truncate text-sm ${info?.kind === "user" ? "text-vx-text" : "text-vx-text-muted"}`} title={owner}>{owner}</span>
       )}
       {/* First on its own line: appended to the name it was cut off by the truncation. */}
-      {info?.deleted ? <span className="font-mono text-xs text-text-subtle">key đã xóa</span> : null}
+      {info?.deleted ? <span className="font-mono text-xs text-vx-text-subtle">key đã xóa</span> : null}
       <span
-        className="min-w-0 truncate font-mono text-xs text-text-muted"
+        className="min-w-0 truncate font-mono text-xs text-vx-text-muted"
         title={`${info?.deleted ? "Key đã xóa — " : ""}${info?.name ? `${info.name} — ` : ""}${masked}`}
       >
         {info?.name ? `${info.name} · ` : ""}{masked}
@@ -80,9 +84,9 @@ function UserFilter({ value, onChange }) {
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <label htmlFor="user-filter" className="text-sm font-medium text-text-main">Người dùng</label>
-      <div className="flex min-w-0 gap-2">
-        <input
+      <label htmlFor="user-filter" className="text-sm font-medium text-vx-text">Người dùng</label>
+      <div className="flex min-w-0 items-start gap-2">
+        <Input
           id="user-filter"
           type="search"
           list="user-filter-options"
@@ -90,17 +94,19 @@ function UserFilter({ value, onChange }) {
           onChange={(event) => pick(event.target.value)}
           placeholder="Gõ email để lọc mọi key của user"
           autoComplete="off"
-          className="h-9 min-w-0 flex-1 rounded-lg border border-black/10 bg-surface px-3 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-white/10"
+          className="min-w-0 flex-1"
         />
         {value && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => { setQuery(""); onChange(null); }}
             aria-label="Bỏ lọc người dùng"
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-black/10 text-text-muted hover:text-text-main dark:border-white/10"
+            className="w-8 shrink-0 border border-vx-border px-0"
           >
             <span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>
-          </button>
+          </Button>
         )}
       </div>
       <datalist id="user-filter-options">
@@ -155,28 +161,28 @@ function getProviderName(providerId, cache) {
 
 function CollapsibleSection({ title, children, defaultOpen = false, icon = null }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  
+
   return (
-    <div className="border border-black/5 dark:border-white/5 rounded-lg overflow-hidden">
-      <button 
+    <div className="border border-vx-border rounded-vx-md overflow-hidden">
+      <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-3 bg-black/[0.02] dark:bg-white/[0.02] hover:bg-black/[0.04] dark:hover:bg-white/[0.04] transition-colors"
+        className="w-full flex items-center justify-between p-3 bg-vx-surface-2 hover:bg-vx-surface-3 transition-colors"
       >
         <div className="flex items-center gap-2">
-          {icon && <span className="material-symbols-outlined text-[18px] text-text-muted">{icon}</span>}
-          <span className="font-semibold text-sm text-text-main">{title}</span>
+          {icon && <span className="material-symbols-outlined text-[18px] text-vx-text-muted">{icon}</span>}
+          <span className="font-semibold text-sm text-vx-text">{title}</span>
         </div>
         <span className={cn(
-          "material-symbols-outlined text-[20px] text-text-muted transition-transform duration-200",
+          "material-symbols-outlined text-[20px] text-vx-text-muted transition-transform duration-200",
           isOpen ? "rotate-90" : ""
         )}>
           chevron_right
         </span>
       </button>
-      
+
       {isOpen && (
-        <div className="p-4 border-t border-black/5 dark:border-white/5">
+        <div className="p-4 border-t border-vx-border">
           {children}
         </div>
       )}
@@ -192,17 +198,15 @@ function getCacheCreationTokens(tokens) {
   return tokens?.cache_creation_input_tokens || 0;
 }
 
-// Status → color class. 2xx green, 4xx amber, 5xx red; "error"/unknown muted.
+// Status → badge variant. 2xx success, 4xx warning, 5xx error; "error"/unknown muted.
 // Mirrors the public /usage page's helper so both views color statuses the same.
-function statusColorClass(status) {
+function statusBadgeVariant(status) {
   const s = String(status || "");
-  if (!s || s === "—" || s === "null") return "text-text-muted";
-  if (s === "success") return "text-green-600 dark:text-green-400";
-  if (s === "error") return "text-red-600 dark:text-red-400";
-  if (s.startsWith("2")) return "text-green-600 dark:text-green-400";
-  if (s.startsWith("4")) return "text-amber-600 dark:text-amber-400";
-  if (s.startsWith("5")) return "text-red-600 dark:text-red-400";
-  return "text-text-muted";
+  if (!s || s === "—" || s === "null") return "default";
+  if (s === "success" || s.startsWith("2")) return "success";
+  if (s.startsWith("4")) return "warning";
+  if (s === "error" || s.startsWith("5")) return "error";
+  return "default";
 }
 
 // Render an error-source badge. "platform" = the proxy's OWN limit (RPM/TPM/
@@ -212,14 +216,14 @@ function statusColorClass(status) {
 function ErrorSourceBadge({ source }) {
   if (!source) return null;
   const isPlatform = source === "platform";
-  const label = isPlatform ? "Platform" : "Upstream";
-  const cls = isPlatform
-    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-    : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`} title={isPlatform ? "Rejected by the proxy's own limit" : "Returned by the upstream API"}>
-      {label}
-    </span>
+    <Badge
+      variant={isPlatform ? "warning" : "error"}
+      size="xs"
+      title={isPlatform ? "Rejected by the proxy's own limit" : "Returned by the upstream API"}
+    >
+      {isPlatform ? "Platform" : "Upstream"}
+    </Badge>
   );
 }
 
@@ -427,116 +431,75 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
           total={pagination.totalItems || 0}
         />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
-          <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
-            <select
-              id="provider-filter"
-              value={filters.provider}
-              onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
-              className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                "w-full min-w-0 cursor-pointer"
-              )}
-              style={{ colorScheme: 'auto' }}
-            >
-              <option value="">All Providers</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Select
+            label="Provider"
+            value={filters.provider}
+            onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
+            options={[
+              { value: "", label: "All Providers" },
+              ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
+            ]}
+          />
 
           <UserFilter
             value={filters.user}
             onChange={(user) => { setFilters((f) => ({ ...f, user })); setPagination((p) => ({ ...p, page: 1 })); }}
           />
 
-          <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="key-filter" className="text-sm font-medium text-text-main">Key admin</label>
-            <select
-              id="key-filter"
-              value={filters.apiKey}
-              onChange={(e) => setFilters({ ...filters, apiKey: e.target.value })}
-              className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                "w-full min-w-0 cursor-pointer"
-              )}
-              style={{ colorScheme: 'auto' }}
-            >
-              <option value="">All Keys</option>
-              {keys.map((k) => (
-                <option key={k.id || k.key} value={k.key}>
-                  {k.name ? `${k.name} — ${maskKeyFull(k.key)}` : maskKeyFull(k.key)}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Select
+            label="Key admin"
+            value={filters.apiKey}
+            onChange={(e) => setFilters({ ...filters, apiKey: e.target.value })}
+            options={[
+              { value: "", label: "All Keys" },
+              ...keys.map((k) => ({
+                value: k.key,
+                label: k.name ? `${k.name} — ${maskKeyFull(k.key)}` : maskKeyFull(k.key),
+              })),
+            ]}
+          />
 
-          <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="status-filter" className="text-sm font-medium text-text-main">Status</label>
-            <select
-              id="status-filter"
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                "w-full min-w-0 cursor-pointer"
-              )}
-              style={{ colorScheme: 'auto' }}
-            >
-              <option value="">All Statuses</option>
-              <option value="2">2xx (success)</option>
-              <option value="4">4xx (client / rate-limit)</option>
-              <option value="5">5xx (server / upstream)</option>
-              <option value="error">error</option>
-            </select>
-          </div>
+          <Select
+            label="Status"
+            value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+            options={[
+              { value: "", label: "All Statuses" },
+              { value: "2", label: "2xx (success)" },
+              { value: "4", label: "4xx (client / rate-limit)" },
+              { value: "5", label: "5xx (server / upstream)" },
+              { value: "error", label: "error" },
+            ]}
+          />
 
-          <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="start-date-filter" className="text-sm font-medium text-text-main">Start Date</label>
-            <input
-              id="start-date-filter"
-              type="datetime-local"
-              value={filters.startDate}
-              onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-              className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
-              )}
-            />
-          </div>
+          <Input
+            label="Start Date"
+            id="start-date-filter"
+            type="datetime-local"
+            value={filters.startDate}
+            onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+          />
 
-          <div className="flex min-w-0 flex-col gap-2">
-            <label htmlFor="end-date-filter" className="text-sm font-medium text-text-main">End Date</label>
-            <input
-              id="end-date-filter"
-              type="datetime-local"
-              value={filters.endDate}
-              onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-              className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
-              )}
-            />
-          </div>
+          <Input
+            label="End Date"
+            id="end-date-filter"
+            type="datetime-local"
+            value={filters.endDate}
+            onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+          />
 
-          <div className="flex min-w-0 flex-col gap-2">
-            <label className="text-sm font-medium text-text-main">Raw Responses</label>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs font-medium text-vx-text-muted">Raw Responses</span>
             <button
               type="button"
               role="switch"
               aria-checked={showRaw}
               onClick={() => setShowRaw((v) => !v)}
               className={cn(
-                "h-9 px-3 rounded-lg border flex items-center justify-between gap-2 text-sm w-full min-w-0 transition-colors",
+                "h-[42px] px-3 rounded-vx-md border flex items-center justify-between gap-2 text-sm w-full min-w-0 transition-colors",
                 showRaw
-                  ? "border-brand-500/40 bg-brand-500/10 text-brand-600 dark:text-brand-400"
-                  : "border-black/10 dark:border-white/10 bg-surface text-text-muted"
+                  ? "border-vx-primary/40 bg-vx-primary/10 text-vx-primary"
+                  : "border-vx-border bg-vx-surface text-vx-text-muted"
               )}
             >
               <span className="flex items-center gap-1.5">
@@ -545,7 +508,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               </span>
               <span className={cn(
                 "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
-                showRaw ? "bg-brand-500" : "bg-surface-3"
+                showRaw ? "bg-vx-primary" : "bg-vx-surface-3"
               )}>
                 <span className={cn(
                   "inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform",
@@ -561,12 +524,11 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               (log) table across all keys/providers. usageHistory is not touched. */}
           {confirmClear ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-text-muted">Delete ALL request logs?</span>
+              <span className="text-sm text-vx-text-muted">Delete ALL request logs?</span>
               <Button
-                variant="primary"
+                variant="danger"
                 onClick={handleClearAll}
                 disabled={clearing}
-                className="!bg-red-600 hover:!bg-red-700"
               >
                 {clearing ? "Clearing…" : "Delete all"}
               </Button>
@@ -580,10 +542,9 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
             </div>
           ) : (
             <Button
-              variant="ghost"
+              variant="danger-outline"
               onClick={() => setConfirmClear(true)}
               disabled={clearing || details.length === 0}
-              className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
             >
               <span className="material-symbols-outlined text-[18px] mr-1">delete_sweep</span>
               Clear all logs
@@ -603,42 +564,42 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
       <Card padding="none">
         <div className="overflow-x-auto" aria-busy={loading}>
           <table className="w-full min-w-[1000px]">
-            <thead>
-              <tr className="border-b border-black/5 dark:border-white/5">
-                <SortableHeader label="Timestamp" field="time" state={query} onSort={onHeaderSort} className="p-4 text-sm font-semibold text-text-main" />
-                <th className="text-left p-4 text-sm font-semibold text-text-main">{modelView === "requested" ? "Model (khách gọi)" : "Model (gốc)"}</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Người dùng / Key</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Status</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
+            <Table.Head>
+              <tr>
+                <SortableHeader label="Timestamp" field="time" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
+                <Table.HeaderCell>{modelView === "requested" ? "Model (khách gọi)" : "Model (gốc)"}</Table.HeaderCell>
+                <Table.HeaderCell>Provider</Table.HeaderCell>
+                <Table.HeaderCell>Người dùng / Key</Table.HeaderCell>
+                <Table.HeaderCell>Status</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Input Tokens</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Cached</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Cache Creation</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">Output Tokens</Table.HeaderCell>
                 <SortableHeader
                   label="Tok"
                   field="tokens"
                   state={query}
                   onSort={onHeaderSort}
                   align="right"
-                  className="p-4 text-sm font-semibold text-text-main"
+                  className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted"
                 />
-                <th
-                  className="text-right p-4 text-sm font-semibold text-text-main"
+                <Table.HeaderCell
+                  className="text-right"
                   title="Giá niêm yết của request này, theo bảng giá — không phân biệt gói unlimited hay credit thật"
                 >
                   Giá trị
-                </th>
-                <th
-                  className="text-right p-4 text-sm font-semibold text-text-main"
+                </Table.HeaderCell>
+                <Table.HeaderCell
+                  className="text-right"
                   title="Số tiền thực sự bị trừ khỏi credit thật — bằng 0 khi request được trả hoàn toàn bằng gói unlimited"
                 >
                   Đã trừ
-                </th>
-                <SortableHeader label="Latency" field="latency" state={query} onSort={onHeaderSort} className="p-4 text-sm font-semibold text-text-main" />
-                <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
+                </Table.HeaderCell>
+                <SortableHeader label="Latency" field="latency" state={query} onSort={onHeaderSort} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-vx-text-muted" />
+                <Table.HeaderCell className="text-center">Action</Table.HeaderCell>
               </tr>
-            </thead>
-            <tbody>
+            </Table.Head>
+            <Table.Body>
               {tableState !== "ready" ? (
                 <TableStateRow
                   state={tableState}
@@ -649,48 +610,45 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                 />
               ) : (
                 details.map((detail, index) => (
-                  <tr
-                    key={`${detail.id}-${index}`}
-                    className="border-b border-black/5 dark:border-white/5 last:border-b-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="whitespace-nowrap p-4 text-sm text-text-main">
+                  <Table.Row key={`${detail.id}-${index}`}>
+                    <Table.Cell className="whitespace-nowrap">
                       {new Date(detail.timestamp).toLocaleString()}
-                    </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main" title={shownModel(detail, modelView) || ""}>
+                    </Table.Cell>
+                    <Table.Cell className="max-w-[260px] truncate font-mono" title={shownModel(detail, modelView) || ""}>
                       {shownModel(detail, modelView)}
-                    </td>
-                    <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
+                    </Table.Cell>
+                    <Table.Cell className="max-w-[180px] truncate">
                        <span className="font-medium">
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
-                     </td>
-                    <td className="max-w-[240px] p-4">
+                     </Table.Cell>
+                    <Table.Cell className="max-w-[240px]">
                       <KeyOwner
                         apiKey={detail.apiKey}
                         info={detail.keyInfo}
                         onPickUser={(info) => { setFilters((f) => ({ ...f, user: { id: info.userId, email: info.email } })); setPagination((p) => ({ ...p, page: 1 })); }}
                       />
-                    </td>
-                    <td className="p-4 text-sm">
-                      <div className="flex flex-col gap-1">
-                        <span className={`font-medium ${statusColorClass(detail.status)}`}>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge variant={statusBadgeVariant(detail.status)} size="sm">
                           {detail.status || "—"}
-                        </span>
+                        </Badge>
                         <ErrorSourceBadge source={detail.errorSource} />
                       </div>
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
                       {getCachedTokens(detail.tokens) > 0 ? getCachedTokens(detail.tokens).toLocaleString() : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
                       {getCacheCreationTokens(detail.tokens) > 0 ? getCacheCreationTokens(detail.tokens).toLocaleString() : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
                       {detail.tokens?.completion_tokens?.toLocaleString() || 0}
-                    </td>
+                    </Table.Cell>
                     {(() => {
                       const tok = getInputTokens(detail.tokens) + (detail.tokens?.completion_tokens || 0);
                       const latTotal = detail.latency?.total || 0;
@@ -701,27 +659,27 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                       const output = detail.tokens?.completion_tokens || 0;
                       const tokS = latTotal > 0 ? Math.round((output / (latTotal / 1000)) * 10) / 10 : null;
                       return (
-                        <td className="p-4 text-sm text-text-main text-right font-mono">
+                        <Table.Cell className="text-right font-mono">
                           <div className="tabular-nums">{tok.toLocaleString()}</div>
                           {tokS != null && (
-                            <div className="text-text-muted text-[11px]">{tokS} t/s</div>
+                            <div className="text-vx-text-muted text-[11px]">{tokS} t/s</div>
                           )}
-                        </td>
+                        </Table.Cell>
                       );
                     })()}
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <Table.Cell className="text-right font-mono">
                       {Number.isFinite(detail.costNanoUsd) ? fmtUsdNano(detail.costNanoUsd) : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    </Table.Cell>
+                    <Table.Cell className="text-right font-mono">
                       {Number.isFinite(detail.chargedNanoUsd) ? fmtUsdNano(detail.chargedNanoUsd) : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-muted">
+                    </Table.Cell>
+                    <Table.Cell className="text-vx-text-muted">
                       <div className="flex flex-col gap-0.5">
                         <div>TTFT: <span className="font-mono">{detailTtft(detail.latency) != null ? `${detailTtft(detail.latency)}ms` : "—"}</span></div>
                         <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
                       </div>
-                    </td>
-                    <td className="p-4 text-center">
+                    </Table.Cell>
+                    <Table.Cell className="text-center">
                       <Button
                         variant="outline"
                         size="sm"
@@ -729,16 +687,16 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                       >
                         Detail
                       </Button>
-                    </td>
-                  </tr>
+                    </Table.Cell>
+                  </Table.Row>
                 ))
               )}
-            </tbody>
+            </Table.Body>
           </table>
         </div>
 
         {!loading && details.length > 0 && (
-          <div className="border-t border-black/5 dark:border-white/5">
+          <div className="border-t border-vx-border">
             <Pagination
               currentPage={pagination.page}
               pageSize={pagination.pageSize}
@@ -760,110 +718,105 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
           <div className="space-y-6">
             <div className="grid min-w-0 grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
-                <span className="text-text-muted">ID:</span>{" "}
-                <span className="break-all font-mono text-text-main">{selectedDetail.id}</span>
+                <span className="text-vx-text-muted">ID:</span>{" "}
+                <span className="break-all font-mono text-vx-text">{selectedDetail.id}</span>
               </div>
               <div>
-                <span className="text-text-muted">Timestamp:</span>{" "}
-                <span className="text-text-main">{new Date(selectedDetail.timestamp).toLocaleString()}</span>
+                <span className="text-vx-text-muted">Timestamp:</span>{" "}
+                <span className="text-vx-text">{new Date(selectedDetail.timestamp).toLocaleString()}</span>
               </div>
               <div>
-                 <span className="text-text-muted">Provider:</span>{" "}
-                 <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
+                 <span className="text-vx-text-muted">Provider:</span>{" "}
+                 <span className="text-vx-text font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
                </div>
               <div>
-                <span className="text-text-muted">Người dùng / Key:</span>{" "}
+                <span className="text-vx-text-muted">Người dùng / Key:</span>{" "}
                 <span className="inline-flex max-w-full align-top"><KeyOwner apiKey={selectedDetail.apiKey} info={selectedDetail.keyInfo} compact={false} /></span>
               </div>
               <div>
-                <span className="text-text-muted">Model khách gọi:</span>{" "}
-                <span className="text-text-main font-mono">{selectedDetail.requestedModel || selectedDetail.model}</span>
+                <span className="text-vx-text-muted">Model khách gọi:</span>{" "}
+                <span className="text-vx-text font-mono">{selectedDetail.requestedModel || selectedDetail.model}</span>
                 {!selectedDetail.requestedModel && (
-                  <span className="ml-1 text-xs text-text-muted">(không ghi nhận, tính theo model gốc)</span>
+                  <span className="ml-1 text-xs text-vx-text-muted">(không ghi nhận, tính theo model gốc)</span>
                 )}
               </div>
               <div>
-                <span className="text-text-muted">Model gốc:</span>{" "}
-                <span className="text-text-main font-mono">{selectedDetail.upstreamModel ?? selectedDetail.model}</span>
+                <span className="text-vx-text-muted">Model gốc:</span>{" "}
+                <span className="text-vx-text font-mono">{selectedDetail.upstreamModel ?? selectedDetail.model}</span>
               </div>
               <div>
-                <span className="text-text-muted">Status:</span>{" "}
-                <span className={cn("font-medium", statusColorClass(selectedDetail.status))}>
+                <span className="text-vx-text-muted">Status:</span>{" "}
+                <Badge variant={statusBadgeVariant(selectedDetail.status)} size="sm">
                   {selectedDetail.status}
-                </span>
+                </Badge>
                 <span className="ml-2"><ErrorSourceBadge source={selectedDetail.errorSource} /></span>
               </div>
               <div>
-                <span className="text-text-muted">Latency:</span>{" "}
-                <span className="text-text-main font-mono">
+                <span className="text-vx-text-muted">Latency:</span>{" "}
+                <span className="text-vx-text font-mono">
                   {formatLatency(selectedDetail.latency?.total, detailTtft(selectedDetail.latency))}
                 </span>
               </div>
               <div>
-                <span className="text-text-muted">Input Tokens:</span>{" "}
-                <span className="text-text-main font-mono">
+                <span className="text-vx-text-muted">Input Tokens:</span>{" "}
+                <span className="text-vx-text font-mono">
                   {getInputTokens(selectedDetail.tokens).toLocaleString()}
                 </span>
               </div>
               {getCachedTokens(selectedDetail.tokens) > 0 && (
                 <div>
-                  <span className="text-text-muted">Cached Tokens:</span>{" "}
-                  <span className="text-text-main font-mono">
+                  <span className="text-vx-text-muted">Cached Tokens:</span>{" "}
+                  <span className="text-vx-text font-mono">
                     {getCachedTokens(selectedDetail.tokens).toLocaleString()}
                   </span>
                 </div>
               )}
               {getCacheCreationTokens(selectedDetail.tokens) > 0 && (
                 <div>
-                  <span className="text-text-muted">Cache Creation:</span>{" "}
-                  <span className="text-text-main font-mono">
+                  <span className="text-vx-text-muted">Cache Creation:</span>{" "}
+                  <span className="text-vx-text font-mono">
                     {getCacheCreationTokens(selectedDetail.tokens).toLocaleString()}
                   </span>
                 </div>
               )}
               <div>
-                <span className="text-text-muted">Output Tokens:</span>{" "}
-                <span className="text-text-main font-mono">
+                <span className="text-vx-text-muted">Output Tokens:</span>{" "}
+                <span className="text-vx-text font-mono">
                   {selectedDetail.tokens?.completion_tokens?.toLocaleString() || 0}
                 </span>
               </div>
             </div>
 
             {selectedDetail.pxpipe && (
-              <div className="rounded-lg border border-black/5 dark:border-white/5 p-4">
+              <div className="rounded-vx-md border border-vx-border p-4">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="material-symbols-outlined text-[18px] text-text-muted">image</span>
-                  <span className="font-semibold text-sm text-text-main">PXPIPE</span>
-                  <span className={cn(
-                    "text-xs px-2 py-0.5 rounded",
-                    selectedDetail.pxpipe.applied
-                      ? "bg-green-500/15 text-green-600"
-                      : "bg-amber-500/15 text-amber-600"
-                  )}>
+                  <span className="material-symbols-outlined text-[18px] text-vx-text-muted">image</span>
+                  <span className="font-semibold text-sm text-vx-text">PXPIPE</span>
+                  <Badge variant={selectedDetail.pxpipe.applied ? "success" : "warning"} size="sm">
                     {selectedDetail.pxpipe.applied ? "Activated" : "Skipped"}
-                  </span>
+                  </Badge>
                 </div>
                 {selectedDetail.pxpipe.applied ? (
                   <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                     <div>
-                      <span className="text-text-muted block text-xs">Original (est.)</span>
+                      <span className="text-vx-text-muted block text-xs">Original (est.)</span>
                       <span className="font-mono">{(selectedDetail.pxpipe.tokensBeforeEst || 0).toLocaleString()} tokens</span>
                     </div>
                     <div>
-                      <span className="text-text-muted block text-xs">Compressed (est.)</span>
+                      <span className="text-vx-text-muted block text-xs">Compressed (est.)</span>
                       <span className="font-mono">{(selectedDetail.pxpipe.tokensAfterEst || 0).toLocaleString()} tokens</span>
                     </div>
                     <div>
-                      <span className="text-text-muted block text-xs">Saved</span>
-                      <span className="font-mono text-green-600">{selectedDetail.pxpipe.savedPct || 0}%</span>
+                      <span className="text-vx-text-muted block text-xs">Saved</span>
+                      <span className="font-mono text-vx-success">{selectedDetail.pxpipe.savedPct || 0}%</span>
                     </div>
                     <div>
-                      <span className="text-text-muted block text-xs">Images</span>
+                      <span className="text-vx-text-muted block text-xs">Images</span>
                       <span className="font-mono">{selectedDetail.pxpipe.imageCount || 0} ({selectedDetail.pxpipe.durationMs || 0}ms)</span>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-text-muted">
+                  <p className="text-sm text-vx-text-muted">
                     Reason: <span className="font-mono">{selectedDetail.pxpipe.reason}</span>
                     {selectedDetail.pxpipe.detail ? ` — ${selectedDetail.pxpipe.detail}` : ""}
                   </p>
@@ -873,14 +826,14 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
 
             <div className="space-y-4">
               {!showRaw && (
-                <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                <div className="flex items-center gap-2 rounded-vx-md border border-vx-warning/30 bg-vx-warning/10 p-3 text-xs text-vx-warning">
                   <span className="material-symbols-outlined text-[16px]">visibility_off</span>
                   Request & response payloads are redacted. Enable <span className="font-medium">Raw Responses</span> in the filter bar to view them.
                 </div>
               )}
               <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
                 {showRaw ? (
-                  <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                  <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-vx-md border border-vx-border bg-vx-surface-2 p-3 font-mono text-xs text-vx-text sm:p-4">
                     {JSON.stringify(selectedDetail.request, null, 2)}
                   </pre>
                 ) : (
@@ -891,7 +844,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               {selectedDetail.providerRequest && (
                 <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
                   {showRaw ? (
-                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-vx-md border border-vx-border bg-vx-surface-2 p-3 font-mono text-xs text-vx-text sm:p-4">
                       {JSON.stringify(selectedDetail.providerRequest, null, 2)}
                     </pre>
                   ) : (
@@ -903,7 +856,7 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
               {selectedDetail.providerResponse && (
                 <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
                   {showRaw ? (
-                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-vx-md border border-vx-border bg-vx-surface-2 p-3 font-mono text-xs text-vx-text sm:p-4">
                       {typeof selectedDetail.providerResponse === 'object'
                         ? JSON.stringify(selectedDetail.providerResponse, null, 2)
                         : selectedDetail.providerResponse
@@ -920,20 +873,20 @@ export default function RequestDetailsTab({ modelView: modelViewProp } = {}) {
                   <>
                     {selectedDetail.response?.thinking && (
                       <div className="mb-4">
-                        <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
+                        <h4 className="font-semibold text-vx-text mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
                           <span className="material-symbols-outlined text-[16px]">psychology</span>
                           Thinking Process
                         </h4>
-                        <pre className="max-h-[200px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                        <pre className="max-h-[200px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-vx-md border border-vx-warning/30 bg-vx-warning/10 p-3 font-mono text-xs text-vx-warning sm:p-4">
                           {selectedDetail.response.thinking}
                         </pre>
                       </div>
                     )}
 
-                    <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
+                    <h4 className="font-semibold text-vx-text mb-2 text-xs uppercase tracking-wide opacity-70">
                       Content
                     </h4>
-                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    <pre className="max-h-[300px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-vx-md border border-vx-border bg-vx-surface-2 p-3 font-mono text-xs text-vx-text sm:p-4">
                       {selectedDetail.response?.content || "[No content]"}
                     </pre>
                   </>
@@ -959,7 +912,7 @@ function RedactedBody({ value }) {
     (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) ||
     (typeof value === "object" && value.redacted === true);
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-black/5 bg-black/[0.02] p-3 text-xs text-text-muted dark:border-white/5 dark:bg-white/[0.02]">
+    <div className="flex items-center gap-2 rounded-vx-md border border-vx-border bg-vx-surface-2 p-3 text-xs text-vx-text-muted">
       <span className="material-symbols-outlined text-[16px]">visibility_off</span>
       {isRedacted ? "Redacted — enable Raw Responses to view." : "(redacted)"}
     </div>

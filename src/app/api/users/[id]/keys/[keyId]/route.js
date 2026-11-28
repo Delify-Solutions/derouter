@@ -5,6 +5,7 @@ import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { insertAuditSync } from "@/lib/billing/audit.js";
 import { validateReason } from "@/lib/billing/adminActions.js";
 import { deleteApiKeyInTransactionSync } from "@/lib/db/repos/apiKeysRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -21,6 +22,8 @@ function loadKey(db, userId, keyId) {
  * `isActive` on every call, so nothing has to be invalidated.
  */
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   const { id, keyId } = await params;
   const user = await getUserById(id);
   if (!user) {
@@ -76,6 +79,8 @@ export async function PATCH(request, { params }) {
 
 /** DELETE — remove the key. The secret stops working immediately. */
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "users", "delete");
+  if (denied) return denied;
   const { id, keyId } = await params;
   const user = await getUserById(id);
   if (!user) {

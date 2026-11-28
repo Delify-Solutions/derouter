@@ -7,7 +7,12 @@
 // nullable skills.bundleId link to it. Purely additive.
 // v49: skillBundles.version (admin-set label) and .importedSha (the commit this
 // bundle's content was imported at, for the "source has moved" check). Additive.
-export const SCHEMA_VERSION = 51;
+// v52: adminUsers (named admin accounts, bcrypt password, replacing the single
+// shared settings.password) and adminPermissions (per-account, per-page
+// view/edit/delete matrix). Additive — migration 008 creates both tables itself
+// (new tables, needed before the row it inserts) and backfills a `super_admin`
+// account from settings.password.
+export const SCHEMA_VERSION = 52;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1368,6 +1373,60 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_dsh_plugins_slug ON dshPlugins(slug)",
       "CREATE INDEX IF NOT EXISTS idx_dsh_plugins_listed ON dshPlugins(isPublished, audience, sortOrder)",
+    ],
+  },
+  // Named admin dashboard accounts (spec admin-accounts), replacing the single
+  // shared `settings.password`. Exactly one `super_admin` row always exists
+  // (migration 008 backfills it from settings.password); it is never deleted,
+  // disabled or permission-checked — isSuperAdmin() short-circuits every gate.
+  adminUsers: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      // Case-insensitive uniqueness is enforced by the expression index below,
+      // not by an inline UNIQUE (which would be byte-exact, not case-insensitive).
+      username: "TEXT NOT NULL",
+      // bcrypt hash. NULL only for the fresh-install Super Admin before any
+      // password has ever been set — same "no settings.password yet" state the
+      // single-password flow already had, read the same way (env INITIAL_PASSWORD
+      // or the "123456" default).
+      passwordHash: "TEXT",
+      displayName: "TEXT",
+      // 'super_admin' | 'member'.
+      role: "TEXT NOT NULL DEFAULT 'member'",
+      // 'active' | 'disabled'.
+      status: "TEXT NOT NULL DEFAULT 'active'",
+      mustChangePassword: "INTEGER DEFAULT 0",
+      // Unix seconds (mirrors settings.dashboardSessionsValidAfter, but per
+      // account): a dashboard JWT issued before this is rejected, so disabling or
+      // deleting one account revokes only its own sessions immediately.
+      sessionsValidAfter: "INTEGER DEFAULT 0",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_username_ci ON adminUsers(LOWER(username))",
+      "CREATE INDEX IF NOT EXISTS idx_admin_users_role ON adminUsers(role)",
+    ],
+  },
+  // Per-account, per-page permission matrix (spec admin-accounts "Admin page
+  // permission matrix"). One row per (account, page); a page key with no row is
+  // all-false for that account. `super_admin` never has rows here — it bypasses
+  // this table entirely (design "Super Admin bypass is unconditional code").
+  adminPermissions: {
+    columns: {
+      adminUserId: "TEXT NOT NULL",
+      pageKey: "TEXT NOT NULL",
+      view: "INTEGER DEFAULT 0",
+      edit: "INTEGER DEFAULT 0",
+      // Named deletePermission, not `delete`: SQLite reserves DELETE as a
+      // statement keyword and a bare column of that name is a foot-gun in
+      // hand-written SQL (UPDATE ... SET delete = ...). The admin-accounts API's
+      // JSON shape still calls this field `delete`.
+      deletePermission: "INTEGER DEFAULT 0",
+    },
+    primaryKey: "PRIMARY KEY (adminUserId, pageKey)",
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_admin_perms_user ON adminPermissions(adminUserId)",
     ],
   },
 };

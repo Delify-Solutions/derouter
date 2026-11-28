@@ -1,7 +1,7 @@
 "use client";
 
 import PropTypes from "prop-types";
-import { Button } from "@/shared/components";
+import { Button, Input } from "@/shared/components";
 import { fmtUsdNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import {
@@ -79,28 +79,24 @@ export default function TermsEditor({ rows, onChange, priceUsd, priceVnd, durati
                 key={index}
                 className={`flex flex-wrap items-end gap-3 px-3 py-3 ${index > 0 ? "border-t border-border" : ""}`}
               >
-                <label className="flex w-24 flex-col gap-1 text-xs text-text-muted">
-                  Số kỳ
-                  <input
-                    value={row.periods}
-                    onChange={(event) => update(index, "periods", event.target.value)}
-                    inputMode="numeric"
-                    placeholder="3"
-                    aria-label={`Số kỳ của kỳ hạn ${index + 1}`}
-                    className="h-9 w-full border border-border bg-surface px-2 font-mono text-sm text-text-main focus:border-text-main focus:outline-none"
-                  />
-                </label>
-                <label className="flex w-24 flex-col gap-1 text-xs text-text-muted">
-                  % giảm
-                  <input
-                    value={row.discountPercent}
-                    onChange={(event) => update(index, "discountPercent", event.target.value)}
-                    inputMode="numeric"
-                    placeholder="0"
-                    aria-label={`Phần trăm giảm của kỳ hạn ${index + 1}`}
-                    className="h-9 w-full border border-border bg-surface px-2 font-mono text-sm text-text-main focus:border-text-main focus:outline-none"
-                  />
-                </label>
+                <Input
+                  label="Số kỳ"
+                  value={row.periods}
+                  onChange={(event) => update(index, "periods", event.target.value)}
+                  inputMode="numeric"
+                  placeholder="3"
+                  aria-label={`Số kỳ của kỳ hạn ${index + 1}`}
+                  className="w-24"
+                />
+                <Input
+                  label="% giảm"
+                  value={row.discountPercent}
+                  onChange={(event) => update(index, "discountPercent", event.target.value)}
+                  inputMode="numeric"
+                  placeholder="0"
+                  aria-label={`Phần trăm giảm của kỳ hạn ${index + 1}`}
+                  className="w-24"
+                />
                 <p className="min-w-0 flex-1 basis-40 pb-2 font-mono text-xs text-text-muted tabular-nums">
                   {price
                     ? `${termLabel(days, periods)} · ${[

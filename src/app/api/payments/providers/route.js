@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { createProvider, listProviders } from "@/lib/db/repos/paymentProvidersRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -41,6 +42,8 @@ export async function GET() {
  * "Secret not echoed").
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "payments", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

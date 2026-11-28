@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { stopHeadroomProxy } from "@/lib/headroom/process";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "token-saver", "edit");
+  if (denied) return denied;
   try {
     const result = stopHeadroomProxy();
     const status = result.stopped ? 200 : 409;

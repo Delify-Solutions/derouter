@@ -117,6 +117,133 @@
 }
 
 /* ============================================================
+   Vuexy design tokens (change admin-accounts-rbac-vuexy, group 7)
+   Powers ONLY the rebuilt admin-dashboard primitives in
+   src/shared/components/* (Button, Card, Input, Table, Modal, Badge,
+   Pagination, Toast, Sidebar, Header) via the vx-* utilities generated
+   below. The --color-* / --shadow-* / --radius-brand-* tokens above are left
+   untouched on purpose: every dashboard page not yet migrated (OpenSpec
+   tasks groups 8-10) and the whole customer account area
+   (src/app/account/**, out of scope per that change's proposal) keep
+   using them, so this block never changes how those screens look.
+   Values read from (local reference only, not shipped — see
+   openspec/changes/admin-accounts-rbac-vuexy/design.md Decision 6):
+     vuexy-html-admin-template/full-version/scss/_bootstrap-extended/_variables.scss
+     vuexy-html-admin-template/full-version/scss/_bootstrap-extended/_variables-dark.scss
+     vuexy-html-admin-template/full-version/scss/_components/_variables.scss
+   ============================================================ */
+:root {
+  --vx-primary: #7367f0;
+  --vx-primary-hover: #675dd8;
+  --vx-secondary: #808390;
+  --vx-success: #28c76f;
+  --vx-danger: #ff4c51;
+  --vx-warning: #ff9f43;
+  --vx-info: #00bad1;
+  --vx-light: #dfdfe3;
+  --vx-dark: #2f3349;
+
+  --vx-page: #f8f7fa;
+  --vx-surface: #ffffff;
+  --vx-surface-2: #f3f2f3;
+  --vx-surface-3: #eaeaec;
+  --vx-border: #e6e6e8;
+
+  --vx-text: #2f2b3d;
+  --vx-text-muted: #6d6b77;
+  --vx-text-subtle: #97959e;
+  --vx-heading: #2f2b3d;
+
+  --vx-radius-xs: 0.125rem;
+  --vx-radius-sm: 0.25rem;
+  --vx-radius-md: 0.375rem;
+  --vx-radius-lg: 0.5rem;
+  --vx-radius-xl: 0.625rem;
+  --vx-radius-2xl: 1rem;
+  --vx-radius-pill: 50rem;
+
+  --vx-shadow-xs: 0 1px 6px 0 rgba(47, 43, 61, 0.1);
+  --vx-shadow-sm: 0 2px 8px 0 rgba(47, 43, 61, 0.12);
+  --vx-shadow-md: 0 3px 12px 0 rgba(47, 43, 61, 0.14);
+  --vx-shadow-lg: 0 4px 18px 0 rgba(47, 43, 61, 0.16);
+  --vx-shadow-xl: 0 5px 30px 0 rgba(47, 43, 61, 0.18);
+
+  --vx-navbar-height: 3.5rem;
+  --vx-menu-width: 16.25rem;
+  --vx-menu-collapsed-width: 4.375rem;
+}
+
+.dark {
+  --vx-primary: #7367f0;
+  --vx-primary-hover: #8277f2;
+  --vx-secondary: #808390;
+  --vx-success: #28c76f;
+  --vx-danger: #ff4c51;
+  --vx-warning: #ff9f43;
+  --vx-info: #00bad1;
+  --vx-light: #494a5d;
+  --vx-dark: #6b6c9d;
+
+  --vx-page: #25293c;
+  --vx-surface: #2f3349;
+  --vx-surface-2: #3a3d53;
+  --vx-surface-3: #44485e;
+  --vx-border: #44485e;
+
+  --vx-text: #e1def5;
+  --vx-text-muted: #9a9ab0;
+  --vx-text-subtle: #76778e;
+  --vx-heading: #cfcde4;
+
+  --vx-shadow-xs: 0 1px 6px 0 rgba(19, 17, 32, 0.16);
+  --vx-shadow-sm: 0 2px 8px 0 rgba(19, 17, 32, 0.18);
+  --vx-shadow-md: 0 3px 12px 0 rgba(19, 17, 32, 0.2);
+  --vx-shadow-lg: 0 4px 18px 0 rgba(19, 17, 32, 0.22);
+  --vx-shadow-xl: 0 5px 30px 0 rgba(19, 17, 32, 0.24);
+}
+
+@theme inline {
+  --color-vx-primary: var(--vx-primary);
+  --color-vx-primary-hover: var(--vx-primary-hover);
+  --color-vx-secondary: var(--vx-secondary);
+  --color-vx-success: var(--vx-success);
+  --color-vx-danger: var(--vx-danger);
+  --color-vx-warning: var(--vx-warning);
+  --color-vx-info: var(--vx-info);
+  --color-vx-light: var(--vx-light);
+  --color-vx-dark: var(--vx-dark);
+
+  --color-vx-page: var(--vx-page);
+  --color-vx-surface: var(--vx-surface);
+  --color-vx-surface-2: var(--vx-surface-2);
+  --color-vx-surface-3: var(--vx-surface-3);
+  --color-vx-border: var(--vx-border);
+
+  --color-vx-text: var(--vx-text);
+  --color-vx-text-muted: var(--vx-text-muted);
+  --color-vx-text-subtle: var(--vx-text-subtle);
+  --color-vx-heading: var(--vx-heading);
+
+  --radius-vx-xs: var(--vx-radius-xs);
+  --radius-vx-sm: var(--vx-radius-sm);
+  --radius-vx-md: var(--vx-radius-md);
+  --radius-vx-lg: var(--vx-radius-lg);
+  --radius-vx-xl: var(--vx-radius-xl);
+  --radius-vx-2xl: var(--vx-radius-2xl);
+  --radius-vx-pill: var(--vx-radius-pill);
+
+  --shadow-vx-xs: var(--vx-shadow-xs);
+  --shadow-vx-sm: var(--vx-shadow-sm);
+  --shadow-vx-md: var(--vx-shadow-md);
+  --shadow-vx-lg: var(--vx-shadow-lg);
+  --shadow-vx-xl: var(--vx-shadow-xl);
+
+  --height-vx-navbar: var(--vx-navbar-height);
+  --width-vx-menu: var(--vx-menu-width);
+  --width-vx-menu-collapsed: var(--vx-menu-collapsed-width);
+}
+
+/* ============================================================
    Fix native select dropdowns in dark mode
    ============================================================ */
 select {

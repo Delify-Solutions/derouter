@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { adjustWallet } from "@/lib/db/repos/affiliateRepo.js";
 import { WalletError } from "@/lib/affiliate/wallet.js";
 
@@ -11,6 +12,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * `{ currency, delta, reason }`; the reason is required and `delta` ≠ 0 (design D8).
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "affiliates", "edit");
+  if (denied) return denied;
   const { userId } = await params;
   const actor = await getAdminActor(request);
 

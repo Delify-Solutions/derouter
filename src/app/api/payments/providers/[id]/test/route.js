@@ -9,6 +9,7 @@ import { fetchBinanceTransactions } from "@/lib/payments/providers/binance.js";
 import { fetchAcbTransactions } from "@/lib/payments/providers/acb.js";
 import { createAcbTokenStore, acbFingerprintFor } from "@/lib/payments/poller.js";
 import { formatVnd, formatUsdt } from "@/lib/payments/amounts.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -22,6 +23,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * `ingestTransactionSync`, which is what makes its answer trustworthy.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "payments", "edit");
+  if (denied) return denied;
   const { id } = await params;
 
   let provider;

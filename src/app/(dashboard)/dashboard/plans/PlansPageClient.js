@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal, AllowedModelsPicker } from "@/shared/components";
+import { Button, Input, Modal, ConfirmModal, CardSkeleton, Toggle, DiscountsModal, AllowedModelsPicker, Card, Badge } from "@/shared/components";
 import { fmtUsdNano, fmtCreditNano, usdToNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import { describeLimit } from "@/lib/billing/limits.js";
@@ -415,42 +415,32 @@ export default function PlansPageClient() {
       )}
 
       {plans.length === 0 ? (
-        <div className="border border-border px-6 py-16 flex flex-col items-center text-center gap-3">
+        <Card className="flex flex-col items-center text-center gap-3 py-16">
           <span className="material-symbols-outlined text-[32px] text-text-subtle">sell</span>
           <p className="text-text-main font-medium">No plans yet</p>
           <p className="text-sm text-text-muted max-w-sm">
             Plans appear on the customer shop once created. Nothing is purchasable until there is at least one.
           </p>
           <Button icon="add" onClick={openCreate}>New plan</Button>
-        </div>
+        </Card>
       ) : (
         <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {plans.map((plan) => (
-            <li
-              key={plan.id}
-              className={`flex min-w-0 flex-col border border-border bg-surface ${plan.isActive ? "" : "opacity-60"}`}
-            >
+            <li key={plan.id} className={`min-w-0 ${plan.isActive ? "" : "opacity-60"}`}>
+            <Card padding="none" className="flex h-full min-w-0 flex-col">
               <div className="flex items-start justify-between gap-3 px-6 pt-6">
                 <div className="flex flex-col gap-1 min-w-0">
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-text-subtle truncate" title={plan.code}>
                       {plan.code}
                     </span>
-                    <span className="border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-                      {planKindLabel(plan.kind)}
-                    </span>
+                    <Badge size="sm">{planKindLabel(plan.kind)}</Badge>
                   </span>
                   <h2 className="text-base font-semibold text-text-main truncate" title={plan.name}>{plan.name}</h2>
                 </div>
-                <span
-                  className={`font-mono text-[10px] uppercase tracking-wider border px-2 py-0.5 shrink-0 ${
-                    plan.isActive
-                      ? "border-brand-500/30 bg-brand-500/10 text-brand-700 dark:text-brand-400"
-                      : "border-border bg-surface-2 text-text-muted"
-                  }`}
-                >
+                <Badge variant={plan.isActive ? "success" : "default"} size="sm" className="shrink-0">
                   {!plan.isActive ? "Ẩn" : plan.isPurchasable === false ? "Chưa mở bán" : "Đang bán"}
-                </span>
+                </Badge>
               </div>
 
               {plan.description && (
@@ -597,35 +587,39 @@ export default function PlansPageClient() {
                   }
                 />
                 <div className="flex items-center gap-1">
-                  <button
+                  <Button
                     type="button"
+                    variant="light-outline"
+                    size="sm"
+                    icon="sell"
                     onClick={() => setDiscountPlan(plan)}
                     aria-label={`Giảm giá của gói ${plan.name || plan.code}`}
                     title="Giảm giá theo thời gian"
-                    className="h-8 px-2 flex items-center gap-1 border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
-                    <span className="font-mono text-[11px] uppercase tracking-wider">Giảm giá</span>
-                  </button>
-                  <button
+                    Giảm giá
+                  </Button>
+                  <Button
                     type="button"
+                    variant="light-outline"
+                    size="sm"
+                    icon="edit"
                     onClick={() => openEdit(plan)}
                     aria-label={`Edit ${plan.name || plan.code}`}
-                    className="size-8 flex items-center justify-center border border-border text-text-muted hover:text-text-main hover:border-text-muted transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">edit</span>
-                  </button>
-                  <button
+                    className="size-8 px-0"
+                  />
+                  <Button
                     type="button"
+                    variant="danger-outline"
+                    size="sm"
+                    icon="block"
                     onClick={() => handleDelete(plan)}
                     disabled={busyId === plan.id || !plan.isActive}
                     aria-label={`Deactivate ${plan.name || plan.code}`}
-                    className="size-8 flex items-center justify-center border border-border text-danger hover:border-danger transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">block</span>
-                  </button>
+                    className="size-8 px-0"
+                  />
                 </div>
               </div>
+            </Card>
             </li>
           ))}
         </ul>

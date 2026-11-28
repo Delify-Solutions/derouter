@@ -5,6 +5,7 @@ import {
   getProxyPoolById,
   updateProxyPool,
 } from "@/models";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 function normalizeProxyPoolUpdate(body = {}) {
   const updates = {};
@@ -67,6 +68,8 @@ export async function GET(request, { params }) {
 
 // PUT /api/proxy-pools/[id] - Update proxy pool
 export async function PUT(request, { params }) {
+  const denied = await requirePagePermission(request, "proxy-pools", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const existing = await getProxyPoolById(id);
@@ -91,6 +94,8 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/proxy-pools/[id] - Delete proxy pool
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "proxy-pools", "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const existing = await getProxyPoolById(id);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiKeys, createApiKey, ensureDefaultAdminKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,8 @@ export async function GET() {
 // POST /api/keys - Create an admin API key (optionally with limits). Admin keys
 // carry no group: a group is a customer concept.
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "endpoint", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { name } = body;

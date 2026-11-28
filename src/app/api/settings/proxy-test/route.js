@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { testProxyUrl } from "@/lib/network/proxyTest";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "profile", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const result = await testProxyUrl({

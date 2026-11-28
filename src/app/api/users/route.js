@@ -5,6 +5,7 @@ import { createUser, deleteUser, normalizeEmail, getUserByEmail } from "@/lib/db
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { listUsersAdmin } from "@/lib/db/repos/adminUsersRepo.js";
 import { validatePassword } from "@/lib/users/register";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +72,8 @@ export async function GET(request) {
  * customer out until mail is set up.
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "users", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();
@@ -154,6 +157,8 @@ export const BULK_DELETE_MAX = 50;
  * rather than pretend nothing happened.
  */
 export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "users", "delete");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

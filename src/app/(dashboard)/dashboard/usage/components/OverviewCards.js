@@ -15,15 +15,15 @@ const fmtCost = (n) => fmtUsd(n || 0);
 // off with an ellipsis: "4,103,705,034" stays readable in a 5-column row.
 function OverviewCard({ label, value, tone, note }) {
   return (
-    <Card className="@container flex min-w-0 flex-col gap-1 px-4 py-3">
-      <span className="text-text-muted text-sm uppercase font-semibold">{label}</span>
+    <Card padding="sm" className="@container flex min-w-0 flex-col gap-1">
+      <span className="text-vx-text-muted text-sm uppercase font-semibold">{label}</span>
       <span
         className={cn("text-2xl font-bold tabular-nums leading-tight [overflow-wrap:anywhere]", tone)}
         style={fitFigureStyle(value, { maxRem: 1.5, minRem: 0.875 })}
       >
         {value}
       </span>
-      {note ? <span className="text-[10px] text-text-muted">{note}</span> : null}
+      {note ? <span className="text-[10px] text-vx-text-muted">{note}</span> : null}
     </Card>
   );
 }
@@ -39,13 +39,13 @@ export default function OverviewCards({ stats }) {
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 sm:gap-4">
       <OverviewCard label="Total Requests" value={fmt(stats.totalRequests)} />
-      <OverviewCard label="Total Input Tokens" value={fmt(stats.totalPromptTokens)} tone="text-primary" />
-      <OverviewCard label="Cached Tokens" value={fmt(stats.totalCachedTokens)} tone="text-info" />
-      <OverviewCard label="Output Tokens" value={fmt(stats.totalCompletionTokens)} tone="text-success" />
+      <OverviewCard label="Total Input Tokens" value={fmt(stats.totalPromptTokens)} tone="text-vx-primary" />
+      <OverviewCard label="Cached Tokens" value={fmt(stats.totalCachedTokens)} tone="text-vx-info" />
+      <OverviewCard label="Output Tokens" value={fmt(stats.totalCompletionTokens)} tone="text-vx-success" />
       <OverviewCard
         label="Est. Cost"
         value={`~${fmtCost(stats.totalCost)}`}
-        tone="text-warning"
+        tone="text-vx-warning"
         note="Estimated, not actual billing"
       />
     </div>

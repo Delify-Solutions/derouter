@@ -5,6 +5,7 @@ import {
   getGroupMemberCounts,
   toBool,
 } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -31,6 +32,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "groups", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     if (!body.name) return NextResponse.json({ error: "name is required" }, { status: 400 });

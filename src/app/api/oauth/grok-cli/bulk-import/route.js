@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
 import { decodeXaiIdTokenEmail, extractEmailFromAccessToken } from "@/lib/oauth/providerHelpers";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 /**
  * POST /api/oauth/grok-cli/bulk-import
@@ -19,6 +20,8 @@ import { decodeXaiIdTokenEmail, extractEmailFromAccessToken } from "@/lib/oauth/
  *   expires_in / expiresIn / expires_at / expiresAt
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

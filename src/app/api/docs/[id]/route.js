@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDocById, updateDoc, deleteDoc } from "@/lib/localDb";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -14,6 +15,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
+  const denied = await requirePagePermission(request, "content", "edit");
+  if (denied) return denied;
   const { id } = await params;
   let body;
   try {
@@ -37,6 +40,8 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "content", "delete");
+  if (denied) return denied;
   const { id } = await params;
   const removed = await deleteDoc(id);
   if (!removed) {

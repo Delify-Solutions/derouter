@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getMitmAlias, setMitmAliasAll } from "@/models";
 import { getMitmStatus } from "@/mitm/manager";
 import { writeAliasForTool } from "@/lib/mitmAliasCache";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // GET - Get MITM aliases for a tool
 export async function GET(request) {
@@ -19,6 +20,8 @@ export async function GET(request) {
 
 // PUT - Save MITM aliases for a specific tool
 export async function PUT(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { tool, mappings } = await request.json();
 

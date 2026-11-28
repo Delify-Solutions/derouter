@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 /**
  * POST /api/oauth/codex/bulk-import
@@ -17,6 +18,8 @@ import { extractCodexAccountInfo } from "@/lib/oauth/providers";
  * Tokens are NEVER echoed back in the response.
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   let body;
   try {
     body = await request.json();

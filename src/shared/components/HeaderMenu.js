@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { useTheme } from "@/shared/hooks/useTheme";
 import ChangelogModal from "./ChangelogModal";
+import ChangePasswordModal from "./ChangePasswordModal";
 import { ConfirmModal } from "./Modal";
 
 function MenuItem({ icon, label, onClick, trailing, danger }) {
@@ -36,6 +37,7 @@ MenuItem.propTypes = {
 export default function HeaderMenu({ onLogout }) {
   const [isOpen, setIsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [isShuttingDown, setIsShuttingDown] = useState(false);
   const { toggleTheme, isDark } = useTheme();
@@ -90,6 +92,11 @@ export default function HeaderMenu({ onLogout }) {
               onClick={() => { toggleTheme(); close(); }}
             />
             <MenuItem
+              icon="password"
+              label="Đổi mật khẩu"
+              onClick={() => { close(); setChangePasswordOpen(true); }}
+            />
+            <MenuItem
               icon="power_settings_new"
               label="Shutdown"
               danger
@@ -106,6 +113,7 @@ export default function HeaderMenu({ onLogout }) {
       </div>
 
       <ChangelogModal isOpen={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <ChangePasswordModal isOpen={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
       <ConfirmModal
         isOpen={shutdownOpen}
         onClose={() => setShutdownOpen(false)}

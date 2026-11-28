@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
 import { setUserReferrer } from "@/lib/db/repos/affiliateRepo.js";
 import { validateReason } from "@/lib/billing/adminActions.js";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -20,6 +21,9 @@ const ERROR_TEXT = {
  * it. It never creates commission retroactively.
  */
 export async function PATCH(request, { params }) {
+  // Also called from the Affiliate page's referrer editor.
+  const denied = await requireAnyPagePermission(request, ["users", "affiliates"], "edit");
+  if (denied) return denied;
   const { id } = await params;
   const actor = await getAdminActor(request);
 

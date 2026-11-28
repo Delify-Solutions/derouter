@@ -2,6 +2,10 @@
 
 import { cn } from "@/shared/utils/cn";
 
+// Vuexy toggle shape (change admin-accounts-rbac-vuexy, group 10 — missed in
+// group 7's original primitive list alongside Select; same vx-* tokens as
+// every other reskinned primitive, retrofitted here so every call site picks
+// it up without further edits).
 export default function Toggle({
   checked = false,
   onChange,
@@ -44,8 +48,8 @@ export default function Toggle({
         className={cn(
           "relative inline-flex shrink-0 cursor-pointer rounded-full",
           "transition-colors duration-200 ease-in-out",
-          "focus:outline-none focus:ring-2 focus:ring-brand-500/30",
-          checked ? "bg-brand-500" : "bg-surface-3",
+          "focus:outline-none focus:ring-2 focus:ring-vx-primary/30",
+          checked ? "bg-vx-primary" : "bg-vx-surface-3",
           sizes[size].track,
           disabled && "cursor-not-allowed"
         )}
@@ -63,10 +67,10 @@ export default function Toggle({
       {(label || description) && (
         <div className="flex flex-col">
           {label && (
-            <span className="text-sm font-medium text-text-main">{label}</span>
+            <span className="text-sm font-medium text-vx-text">{label}</span>
           )}
           {description && (
-            <span className="text-xs text-text-muted">{description}</span>
+            <span className="text-xs text-vx-text-muted">{description}</span>
           )}
         </div>
       )}

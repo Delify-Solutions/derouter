@@ -9,6 +9,7 @@ import {
 import { APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import { normalizeProviderId, normalizeProviderSpecificData } from "@/lib/providerNormalization";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +112,8 @@ export async function GET() {
 
 // POST /api/providers - Create new connection (API Key only, OAuth via separate flow)
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const provider = normalizeProviderId(body.provider);

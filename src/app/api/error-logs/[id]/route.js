@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getErrorLog, deleteErrorLog } from "../../../../lib/db/repos/errorLogsRepo.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,9 @@ export async function GET(_request, { params }) {
   return NextResponse.json(row);
 }
 
-export async function DELETE(_request, { params }) {
+export async function DELETE(request, { params }) {
+  const denied = await requirePagePermission(request, "errors", "delete");
+  if (denied) return denied;
   const { id } = await params;
   const removed = await deleteErrorLog(id);
   if (!removed) return NextResponse.json({ error: "Error log entry not found" }, { status: 404 });

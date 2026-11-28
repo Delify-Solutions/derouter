@@ -585,12 +585,10 @@ export default function ProxyPoolsPage() {
               size="sm"
               variant="secondary"
               icon="rocket_launch"
+              iconRight={showRelayMenu ? "expand_less" : "expand_more"}
               onClick={() => setShowRelayMenu(!showRelayMenu)}
             >
               Deploy Relay
-              <span className="material-symbols-outlined ml-1 text-[18px]">
-                {showRelayMenu ? "expand_less" : "expand_more"}
-              </span>
             </Button>
 
             {showRelayMenu && (
@@ -744,33 +742,34 @@ export default function ProxyPoolsPage() {
                     onChange={() => handleToggleActive(pool)}
                     title={pool.isActive ? "Disable" : "Enable"}
                   />
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="science"
+                    loading={testingId === pool.id}
                     onClick={() => handleTest(pool.id)}
-                    className="p-2 rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary"
                     title="Test proxy"
-                    disabled={testingId === pool.id}
-                  >
-                    <span
-                      className="material-symbols-outlined text-[18px]"
-                      style={testingId === pool.id ? { animation: "spin 1s linear infinite" } : undefined}
-                    >
-                      {testingId === pool.id ? "progress_activity" : "science"}
-                    </span>
-                  </button>
-                  <button
+                    aria-label={`Test proxy ${pool.name}`}
+                    className="size-9 px-0"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="edit"
                     onClick={() => openEditModal(pool)}
-                    className="p-2 rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary"
                     title="Edit"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">edit</span>
-                  </button>
-                  <button
+                    aria-label={`Edit proxy pool ${pool.name}`}
+                    className="size-9 px-0"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="delete"
                     onClick={() => handleDelete(pool)}
-                    className="p-2 rounded hover:bg-red-500/10 text-red-500"
                     title="Delete"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
+                    aria-label={`Delete proxy pool ${pool.name}`}
+                    className="size-9 px-0 text-vx-danger hover:bg-vx-danger/10"
+                  />
                 </div>
               </div>
             ))}

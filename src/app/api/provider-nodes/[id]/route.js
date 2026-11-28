@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { requireAnyPagePermission } from "@/lib/auth/adminAccess";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
+  const denied = await requireAnyPagePermission(request, ["providers", "media-providers"], "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json();
@@ -81,6 +84,8 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/provider-nodes/[id] - Delete provider node and its connections
 export async function DELETE(request, { params }) {
+  const denied = await requireAnyPagePermission(request, ["providers", "media-providers"], "delete");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const node = await getProviderNodeById(id);

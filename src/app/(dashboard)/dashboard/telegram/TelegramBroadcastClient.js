@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Card, Button, ConfirmModal, Badge, CardSkeleton } from "@/shared/components";
+import { Card, Button, ConfirmModal, Badge, CardSkeleton, Table } from "@/shared/components";
 import SupportInbox from "./SupportInbox";
 
 const POLL_MS = 3000;
@@ -18,11 +18,11 @@ const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "
 
 function Stat({ label, value, hint }) {
   return (
-    <div className="flex flex-col gap-1 border border-border p-4">
+    <Card padding="sm" className="flex flex-col gap-1">
       <span className="meta text-text-muted">{label}</span>
       <span className="font-mono text-2xl text-text-main">{value}</span>
       {hint && <span className="text-xs text-text-muted">{hint}</span>}
-    </div>
+    </Card>
   );
 }
 
@@ -154,42 +154,40 @@ export default function TelegramBroadcastClient() {
               {data.broadcasts.length === 0 ? (
                 <p className="text-sm text-text-muted">Chưa gửi thông báo nào.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left">
-                        <th className="meta py-2 pr-4 font-normal text-text-muted">Lúc</th>
-                        <th className="meta py-2 pr-4 font-normal text-text-muted">Nội dung</th>
-                        <th className="meta py-2 pr-4 font-normal text-text-muted">Trạng thái</th>
-                        <th className="meta py-2 text-right font-normal text-text-muted">Gửi được / lỗi / bỏ qua / tổng</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.broadcasts.map((b) => {
-                        const status = STATUS[b.status] || STATUS.failed;
-                        return (
-                          <tr key={b.id} className="border-b border-border align-top last:border-b-0">
-                            <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-text-muted">
-                              {DATE.format(new Date(b.createdAt))}
-                            </td>
-                            <td className="max-w-md py-2 pr-4 text-text-main">
-                              <p className="line-clamp-3 whitespace-pre-line break-words">{b.text}</p>
-                              {Number(b.hasPhoto) === 1 ? (
-                                <span className="mt-1 inline-block font-mono text-[11px] text-text-muted">+ kèm ảnh</span>
-                              ) : null}
-                            </td>
-                            <td className="py-2 pr-4">
-                              <Badge variant={status.variant} size="sm">{status.label}</Badge>
-                            </td>
-                            <td className="whitespace-nowrap py-2 text-right font-mono text-xs text-text-main">
-                              {b.sent} / {b.failed} / {b.skipped ?? 0} / {b.total}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <Table bare className="min-w-[640px]">
+                  <Table.Head>
+                    <Table.Row>
+                      <Table.HeaderCell>Lúc</Table.HeaderCell>
+                      <Table.HeaderCell>Nội dung</Table.HeaderCell>
+                      <Table.HeaderCell>Trạng thái</Table.HeaderCell>
+                      <Table.HeaderCell align="right">Gửi được / lỗi / bỏ qua / tổng</Table.HeaderCell>
+                    </Table.Row>
+                  </Table.Head>
+                  <Table.Body>
+                    {data.broadcasts.map((b) => {
+                      const status = STATUS[b.status] || STATUS.failed;
+                      return (
+                        <Table.Row key={b.id} className="align-top">
+                          <Table.Cell className="whitespace-nowrap font-mono text-xs text-text-muted">
+                            {DATE.format(new Date(b.createdAt))}
+                          </Table.Cell>
+                          <Table.Cell className="max-w-md text-text-main">
+                            <p className="line-clamp-3 whitespace-pre-line break-words">{b.text}</p>
+                            {Number(b.hasPhoto) === 1 ? (
+                              <span className="mt-1 inline-block font-mono text-[11px] text-text-muted">+ kèm ảnh</span>
+                            ) : null}
+                          </Table.Cell>
+                          <Table.Cell>
+                            <Badge variant={status.variant} size="sm">{status.label}</Badge>
+                          </Table.Cell>
+                          <Table.Cell className="whitespace-nowrap text-right font-mono text-xs text-text-main">
+                            {b.sent} / {b.failed} / {b.skipped ?? 0} / {b.total}
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })}
+                  </Table.Body>
+                </Table>
               )}
               {data.broadcasts.some((b) => (b.skipped ?? 0) > 0) && (
                 <p className="text-xs text-text-muted">

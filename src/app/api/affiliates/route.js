@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { inviteAffiliate, listAffiliates } from "@/lib/db/repos/affiliateRepo.js";
 
 // Admin surface: not in PUBLIC_API_PATHS, so dashboardGuard requires the admin JWT
@@ -56,6 +57,8 @@ export async function GET(request) {
  * Creates its code when missing; audited as `affiliate_invited`.
  */
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "affiliates", "edit");
+  if (denied) return denied;
   const actor = await getAdminActor(request);
   let body;
   try {

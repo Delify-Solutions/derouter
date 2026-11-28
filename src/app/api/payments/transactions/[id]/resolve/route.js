@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/db/driver.js";
 import { resolveTransactionSync } from "@/lib/payments/reconcile.js";
 import { getTransaction } from "@/lib/db/repos/paymentTransactionsRepo.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { fireAndForget, notifyOrderApproved } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * behind the shared dashboard password, and the reason is required and bounded.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "payments", "edit");
+  if (denied) return denied;
   const { id } = await params;
 
   let body;

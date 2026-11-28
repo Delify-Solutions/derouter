@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/localDb";
 import { startHeadroomProxy } from "@/lib/headroom/process";
 import { DEFAULT_HEADROOM_URL, isLoopbackHeadroomUrl } from "@/lib/headroom/detect";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,9 @@ function parsePortFromUrl(url) {
   return null;
 }
 
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "token-saver", "edit");
+  if (denied) return denied;
   try {
     const settings = await getSettings();
     const url = settings.headroomUrl || DEFAULT_HEADROOM_URL;

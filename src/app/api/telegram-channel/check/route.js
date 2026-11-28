@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/localDb";
 import { botTokenOf, channelChatIdOf, checkBotCanReadChannel } from "@/lib/telegram/channelMember.js";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,9 @@ const REASON_TEXT = {
 
 // POST /api/telegram-channel/check (admin) — can the bot verify channel members
 // for channel-join gift codes (change channel-gift)?
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "telegram", "edit");
+  if (denied) return denied;
   try {
     const settings = (await getSettings()) || {};
     const chatId = channelChatIdOf(settings);

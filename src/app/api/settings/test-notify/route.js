@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { notifyAdmin } from "@/lib/notify/telegram";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -10,7 +11,9 @@ const REASON_MESSAGES = {
   network_error: "Could not reach Telegram — check this server's network access",
 };
 
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "profile", "edit");
+  if (denied) return denied;
   const result = await notifyAdmin("Test from derouter");
   if (result.ok) {
     return NextResponse.json({ ok: true, message: "Test message sent" }, { headers: NO_STORE });

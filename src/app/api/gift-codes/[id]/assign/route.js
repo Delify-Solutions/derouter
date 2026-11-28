@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assignGiftCode, getGiftCodeById } from "@/lib/db/repos/giftRepo.js";
 import { getAdminIdentity } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 import { fireAndForget, notifyGiftAssignments } from "@/lib/notify/customerTelegram.js";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ function listOf(value) {
  * one result per account (each may succeed or fail on its own).
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "gift-codes", "edit");
+  if (denied) return denied;
   const { id } = await params;
   let body;
   try {

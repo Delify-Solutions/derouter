@@ -18,11 +18,14 @@ const { createKeyGroup } = await import("../src/lib/db/repos/keyGroupsRepo.js");
 const combos = await import("../src/lib/db/repos/combosRepo.js");
 const { customerMayCallSync } = await import("../src/lib/models/customerModels.js");
 const { matchesAllowed } = await import("../src/lib/auth/modelMatching.js");
+const { superAdminAuthHeaders } = await import("./helpers/adminSession.mjs");
 
 let db;
 let customerKey;
+let authHeaders;
 before(async () => {
   db = await getAdapter();
+  authHeaders = await superAdminAuthHeaders();
   const now = new Date().toISOString();
   const group = await createKeyGroup({ name: "g", allowedModels: ["DeepSeek-V4.1-Flash"] });
   db.run(`INSERT INTO users(id, email, passwordHash, status, groupId, createdAt) VALUES('u1', 'u1@t.io', 'x', 'active', ?, ?)`, [group.id, now]);
@@ -121,7 +124,7 @@ test("re-sending a combo's own name is not a collision, even beside a legacy cas
   db.run(`INSERT INTO combos(id, name, models, createdAt, updatedAt) VALUES('t2', 'legacy', ?, ?, ?)`, [JSON.stringify(["a/b"]), now, now]);
   const route = await import("../src/app/api/combos/[id]/route.js");
   const put = (id, name) => route.PUT(
-    new Request(`http://x/api/combos/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, models: ["a/b"] }) }),
+    new Request(`http://x/api/combos/${id}`, { method: "PUT", headers: { "content-type": "application/json", ...authHeaders }, body: JSON.stringify({ name, models: ["a/b"] }) }),
     { params: Promise.resolve({ id }) }
   );
   assert.equal((await put("t1", "Legacy")).status, 200); // its own name: no rename

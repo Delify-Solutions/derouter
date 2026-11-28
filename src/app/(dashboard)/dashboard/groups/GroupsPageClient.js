@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, Button, Input, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker, DiscountsModal } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, ConfirmModal, AllowedModelsPicker, DiscountsModal, Badge, Toggle } from "@/shared/components";
 import Link from "next/link";
 
 /**
@@ -34,14 +34,15 @@ function GuardNotice({ notice, onDismiss }) {
           </div>
         </div>
       </div>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={onDismiss}
         aria-label="Đóng thông báo"
-        className="p-1 text-text-muted hover:text-primary"
-      >
-        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
-      </button>
+        className="size-8 px-0"
+        icon="close"
+      />
     </div>
   );
 }
@@ -201,22 +202,20 @@ export default function GroupsPageClient() {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium truncate" title={group.name}>{group.name}</p>
                     {group.isDefault && (
-                      <span className="text-[10px] font-mono uppercase tracking-[0.14em] px-1.5 py-0.5 border border-primary/30 bg-primary/10 text-primary">
-                        Mặc định
-                      </span>
+                      <Badge variant="primary" size="sm">Mặc định</Badge>
                     )}
                     {group.isActive === false && (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">paused</span>
+                      <Badge variant="default" size="sm">paused</Badge>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted font-mono">
+                    <Badge variant="default" size="sm" className="font-mono">
                       {group.memberCount ?? 0} người dùng
-                    </span>
+                    </Badge>
                     {group.allowedModels && group.allowedModels.length > 0 && (
-                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted" title={group.allowedModels.join(", ")}>
+                      <Badge variant="default" size="sm" title={group.allowedModels.join(", ")}>
                         {group.allowedModels.length} model{group.allowedModels.length > 1 ? "s" : ""}
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   <p className="text-xs text-text-muted mt-1">
@@ -224,29 +223,34 @@ export default function GroupsPageClient() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="sell"
                     onClick={() => setDiscountGroup(group)}
-                    className="flex items-center gap-1 px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
                     title="Giảm giá theo thời gian"
                     aria-label={`Giảm giá của nhóm ${group.name}`}
                   >
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">sell</span>
-                    <span className="text-[11px] font-mono uppercase tracking-[0.14em]">Giảm giá</span>
-                  </button>
-                  <button
+                    Giảm giá
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="edit"
                     onClick={() => openEdit(group)}
-                    className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
                     title="Edit"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">edit</span>
-                  </button>
-                  <button
+                    aria-label={`Sửa nhóm ${group.name}`}
+                    className="size-9 px-0"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="delete"
                     onClick={() => handleDelete(group)}
-                    className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-all"
                     title="Delete"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
+                    aria-label={`Xóa nhóm ${group.name}`}
+                    className="size-9 px-0 text-vx-danger hover:bg-vx-danger/10"
+                  />
                 </div>
               </div>
             ))}
@@ -277,15 +281,7 @@ export default function GroupsPageClient() {
             onChange={setAllowedModels}
           />
 
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="w-4 h-4"
-            />
-            Active
-          </label>
+          <Toggle checked={isActive} onChange={setIsActive} label="Active" />
 
           {formError && (
             <p className="text-sm text-red-500 flex items-center gap-1">

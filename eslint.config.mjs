@@ -66,6 +66,9 @@ const eslintConfig = defineConfig([
     // Tests and one-off fixture scripts are not part of the app lint surface.
     "open-sse/test/**",
     "test/**",
+    // Licensed third-party design reference (Vuexy), local-only (see .gitignore) —
+    // not part of this app's source, never parsed for lint.
+    "vuexy-html-admin-template/**",
   ]),
 ]);
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Button, Input } from "@/shared/components";
+import { Button, Card, Input } from "@/shared/components";
 import { fmtUsdNano } from "@/shared/utils/money";
 import { formatVnd } from "@/lib/payments/amounts.js";
 import ReasonModal from "./ReasonModal";
@@ -113,7 +113,7 @@ export default function ReferrerPanel({ user, onChanged }) {
   };
 
   return (
-    <section className="flex flex-col gap-4 border border-border bg-surface p-5">
+    <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="meta text-text-muted">Người giới thiệu</h2>
@@ -224,6 +224,6 @@ export default function ReferrerPanel({ user, onChanged }) {
         onConfirm={submit}
         values={{}}
       />
-    </section>
+    </Card>
   );
 }

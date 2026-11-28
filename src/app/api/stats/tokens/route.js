@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
-import { parseStatsQuery, tokenStatsCached, statsFilterOptionsCachedSync } from "@/lib/stats/tokenStats.js";
+import { parseStatsQuery, tokenStatsCached, statsFilterOptionsCached } from "@/lib/stats/tokenStats.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -14,7 +14,7 @@ export async function GET(request) {
   try {
     const db = await getAdapter();
     const stats = await tokenStatsCached(db, parsed.value);
-    const options = statsFilterOptionsCachedSync(db, parsed.value);
+    const options = await statsFilterOptionsCached(db, parsed.value);
     return NextResponse.json({ ...stats, options }, { headers: NO_STORE });
   } catch (error) {
     console.error(`[stats] token stats failed: ${String(error?.message || "error").slice(0, 200)}`);

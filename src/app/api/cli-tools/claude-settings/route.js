@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { DEFAULT_PLUGINS } from "@/shared/constants/coworkPlugins";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const execAsync = promisify(exec);
 
@@ -121,6 +122,8 @@ export async function GET() {
 
 // POST - Backup old fields and write new settings
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { env, exaMcpEnabled, maxContextTokens } = await request.json();
     
@@ -205,7 +208,9 @@ const RESET_ENV_KEYS = [
 ];
 
 // DELETE - Reset settings (remove env fields)
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const settingsPath = getClaudeSettingsPath();
 

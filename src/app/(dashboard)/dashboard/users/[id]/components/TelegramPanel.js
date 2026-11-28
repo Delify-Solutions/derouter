@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button } from "@/shared/components";
+import { Badge, Button, Card } from "@/shared/components";
 import ReasonModal from "./ReasonModal";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
@@ -28,7 +28,7 @@ export default function TelegramPanel({ user, onChanged }) {
   };
 
   return (
-    <section className="flex flex-col gap-4 border border-border bg-surface p-5">
+    <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="meta text-text-muted">Telegram</h2>
@@ -58,6 +58,6 @@ export default function TelegramPanel({ user, onChanged }) {
         onClose={() => setOpen(false)}
         onConfirm={unlink}
       />
-    </section>
+    </Card>
   );
 }

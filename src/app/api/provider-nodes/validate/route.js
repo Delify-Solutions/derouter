@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 // Fetch with timeout wrapper
 const fetchWithTimeout = (url, options, timeout = 10000) => {
@@ -53,6 +54,8 @@ const getChatErrorMessage = (status) => {
 
 // POST /api/provider-nodes/validate - Validate API key against base URL
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { baseUrl, apiKey, type, modelId } = body;

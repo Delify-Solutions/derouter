@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { enableTunnel } from "@/lib/tunnel";
 import { getSettings } from "@/lib/localDb";
 import { configureTunnelMonitoring } from "@/shared/services/initializeApp";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const DNS_WARMUP_DELAY_MS = 8000;
 
-export async function POST() {
+export async function POST(request) {
+  const denied = await requirePagePermission(request, "endpoint", "edit");
+  if (denied) return denied;
   try {
     const result = await enableTunnel();
     getSettings()

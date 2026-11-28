@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/shared/components";
+import { Button, Card, Table } from "@/shared/components";
 import { dateOf, timeOf } from "@/shared/components/billing";
 import ReasonModal from "./ReasonModal";
 
@@ -71,42 +71,40 @@ export default function SessionsTab({ userId }) {
       )}
 
       {sessions.length === 0 ? (
-        <div className="border border-border bg-surface px-6 py-10">
+        <Card padding="lg">
           <p className="font-medium text-text-main">Không có phiên nào đang mở</p>
-        </div>
+        </Card>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[720px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Tạo</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Hết hạn</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">IP</th>
-                <th scope="col" className="meta px-4 py-2 font-medium text-text-muted">Thiết bị</th>
-                <th scope="col" className="meta px-4 py-2 text-right font-medium text-text-muted">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((session) => (
-                <tr key={session.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">
-                    {dateOf(session.createdAt)} {timeOf(session.createdAt)}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[12px] whitespace-nowrap text-text-muted">{dateOf(session.expiresAt)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-text-muted">{session.ip || "—"}</td>
-                  <td className="max-w-[320px] truncate px-4 py-2 font-mono text-[11px] text-text-muted" title={session.userAgent || ""}>
-                    {session.userAgent || "—"}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button size="sm" variant="ghost" className="text-danger hover:bg-red-500/10" onClick={() => setAction({ type: "one", session })}>
-                      Thu hồi
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[720px] text-left">
+          <Table.Head>
+            <tr>
+              <Table.HeaderCell>Tạo</Table.HeaderCell>
+              <Table.HeaderCell>Hết hạn</Table.HeaderCell>
+              <Table.HeaderCell>IP</Table.HeaderCell>
+              <Table.HeaderCell>Thiết bị</Table.HeaderCell>
+              <Table.HeaderCell className="text-right">Thao tác</Table.HeaderCell>
+            </tr>
+          </Table.Head>
+          <Table.Body>
+            {sessions.map((session) => (
+              <Table.Row key={session.id}>
+                <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">
+                  {dateOf(session.createdAt)} {timeOf(session.createdAt)}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] whitespace-nowrap text-text-muted">{dateOf(session.expiresAt)}</Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted">{session.ip || "—"}</Table.Cell>
+                <Table.Cell className="max-w-[320px] truncate font-mono text-[11px] text-text-muted" title={session.userAgent || ""}>
+                  {session.userAgent || "—"}
+                </Table.Cell>
+                <Table.Cell className="text-right">
+                  <Button size="sm" variant="ghost" className="text-danger hover:bg-red-500/10" onClick={() => setAction({ type: "one", session })}>
+                    Thu hồi
+                  </Button>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       <ReasonModal

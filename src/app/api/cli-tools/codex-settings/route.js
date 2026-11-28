@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { parseTOML, stringifyTOML } from "confbox";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 const execAsync = promisify(exec);
 
@@ -107,6 +108,8 @@ export async function GET() {
 
 // POST - Update derouter settings (merge with existing config)
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "edit");
+  if (denied) return denied;
   try {
     const { baseUrl, apiKey, model, subagentModel } = await request.json();
     
@@ -161,7 +164,9 @@ export async function POST(request) {
 }
 
 // DELETE - Remove derouter settings only (keep other settings)
-export async function DELETE() {
+export async function DELETE(request) {
+  const denied = await requirePagePermission(request, "cli-tools", "delete");
+  if (denied) return denied;
   try {
     const configPath = getCodexConfigPath();
 

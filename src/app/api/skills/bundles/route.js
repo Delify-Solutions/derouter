@@ -6,6 +6,7 @@ import {
 } from "@/lib/db/repos/skillBundlesRepo.js";
 import { checkBundleUpdate } from "@/lib/skills/bundleUpdateCheck.js";
 import { getAdminActor } from "@/lib/auth/adminIdentity";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export async function GET(request) {
 // POST /api/skills/bundles — create one bundle, normally right before importing
 // the skill files it groups (see RepoImportModal.js's bundle mode).
 export async function POST(request) {
+  const denied = await requirePagePermission(request, "customer-skills", "edit");
+  if (denied) return denied;
   try {
     let body = null;
     try {

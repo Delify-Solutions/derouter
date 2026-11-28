@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Badge, Button, CardSkeleton, Input } from "@/shared/components";
+import { Badge, Button, CardSkeleton, Input, Pagination, Table } from "@/shared/components";
 import ReasonModal from "../users/[id]/components/ReasonModal";
 
 const PAGE_SIZE = 25;
@@ -84,8 +84,6 @@ export default function TelegramLinksClient() {
     return { ok: true };
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
@@ -119,52 +117,44 @@ export default function TelegramLinksClient() {
           {query ? "Không có tài khoản nào khớp." : "Chưa có tài khoản nào liên kết Telegram."}
         </p>
       ) : (
-        <div className="overflow-x-auto border border-border bg-surface">
-          <table className="w-full min-w-[760px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-border bg-surface-2">
-                {["Tài khoản", "Telegram", "Liên kết lúc", "Trạng thái", ""].map((label) => (
-                  <th key={label} scope="col" className="meta px-4 py-2.5 font-medium text-text-muted whitespace-nowrap">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.userId} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2.5">
-                    <Link href={`/dashboard/users/${row.userId}`} className="font-mono text-[12px] text-text-main underline-offset-4 hover:underline">
-                      {row.email}
-                    </Link>
-                    {row.displayName ? <p className="text-xs text-text-muted">{row.displayName}</p> : null}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-main">
-                    {row.telegramUsername ? `@${row.telegramUsername}` : "—"}
-                    <p className="text-xs text-text-muted">ID {row.telegramUserId}</p>
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-text-muted whitespace-nowrap">{fmt(row.linkedAt)}</td>
-                  <td className="px-4 py-2.5">
-                    {row.dmBlockedAt
-                      ? <Badge variant="warning" dot>Bot bị chặn</Badge>
-                      : <Badge dot>Chưa ghi nhận lỗi</Badge>}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => { setNotice(""); setUnlinking(row); }}>Gỡ liên kết</Button>
-                  </td>
-                </tr>
+        <Table className="min-w-[760px]">
+          <Table.Head>
+            <Table.Row>
+              {["Tài khoản", "Telegram", "Liên kết lúc", "Trạng thái", ""].map((label) => (
+                <Table.HeaderCell key={label}>{label}</Table.HeaderCell>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((row) => (
+              <Table.Row key={row.userId}>
+                <Table.Cell>
+                  <Link href={`/dashboard/users/${row.userId}`} className="font-mono text-[12px] text-text-main underline-offset-4 hover:underline">
+                    {row.email}
+                  </Link>
+                  {row.displayName ? <p className="text-xs text-text-muted">{row.displayName}</p> : null}
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-main">
+                  {row.telegramUsername ? `@${row.telegramUsername}` : "—"}
+                  <p className="text-xs text-text-muted">ID {row.telegramUserId}</p>
+                </Table.Cell>
+                <Table.Cell className="font-mono text-[12px] text-text-muted whitespace-nowrap">{fmt(row.linkedAt)}</Table.Cell>
+                <Table.Cell>
+                  {row.dmBlockedAt
+                    ? <Badge variant="warning" dot>Bot bị chặn</Badge>
+                    : <Badge dot>Chưa ghi nhận lỗi</Badge>}
+                </Table.Cell>
+                <Table.Cell className="text-right">
+                  <Button size="sm" variant="secondary" onClick={() => { setNotice(""); setUnlinking(row); }}>Gỡ liên kết</Button>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
 
       {total > PAGE_SIZE ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] text-text-muted">{total} tài khoản · trang {page}/{totalPages}</p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Trước</Button>
-            <Button size="sm" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Sau</Button>
-          </div>
-        </div>
+        <Pagination currentPage={page} pageSize={PAGE_SIZE} totalItems={total} onPageChange={setPage} />
       ) : null}
 
       <ReasonModal

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderConnectionById, getProviderConnections, createProviderConnection } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { requirePagePermission } from "@/lib/auth/adminAccess";
 
 /**
  * A name that does not already belong to another connection under this provider.
@@ -33,6 +34,8 @@ function uniqueCloneName(baseName, existingNames) {
  * provider endpoint.
  */
 export async function POST(request, { params }) {
+  const denied = await requirePagePermission(request, "providers", "edit");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const source = await getProviderConnectionById(id);
