@@ -6,6 +6,7 @@ import { useState } from "react";
 import MobileMenu from "./MobileMenu";
 import { cn } from "@/shared/utils/cn";
 import ThemeToggle from "@/shared/components/ThemeToggle";
+import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import { USAGE_KEY_STORAGE } from "@/shared/constants/usageKeyStorage";
 
 // Order is the spec's (customer-portal "Navigation and language"): the questions a
@@ -154,6 +155,7 @@ export default function AccountShell({
           </div>
 
           <div className="flex items-center gap-3">
+            <HeaderLanguage variant="square" />
             <ThemeToggle variant="square" className="size-8" />
             <span className="hidden max-w-[240px] truncate font-mono text-xs text-text-muted sm:inline" title={email}>
               {email}
